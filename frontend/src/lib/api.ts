@@ -1,22 +1,22 @@
-// All API calls now use Next.js API routes (relative paths)
-// No external backend server needed
+// All API calls use Next.js API routes (relative paths)
 
-export async function uploadPdfForExtraction(file: File): Promise<string> {
-    const formData = new FormData();
-    formData.append('file', file);
+export async function parsePdfWithAI(file: File, type: 'cv' | 'jd') {
+    const arrayBuffer = await file.arrayBuffer();
+    const base64 = btoa(
+        new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
+    );
 
-    const res = await fetch('/api/extract/pdf', {
+    const res = await fetch('/api/parse-pdf', {
         method: 'POST',
-        body: formData,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pdf_base64: base64, type }),
     });
 
     if (!res.ok) {
         const err = await res.json();
-        throw new Error(err.detail || 'Failed to extract PDF');
+        throw new Error(err.detail || 'Failed to parse PDF');
     }
-
-    const data = await res.json();
-    return data.extracted_text;
+    return res.json();
 }
 
 export async function extractCvStructured(rawText: string) {

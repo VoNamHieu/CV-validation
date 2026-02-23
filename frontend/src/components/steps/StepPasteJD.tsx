@@ -3,14 +3,12 @@
 import { useState, useRef, useCallback } from 'react';
 import { FileText, ArrowLeft, Upload } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
-import { extractJdStructured } from '@/lib/api';
-import { extractTextFromPdf } from '@/lib/pdfClient';
+import { extractJdStructured, parsePdfWithAI } from '@/lib/api';
 
 export default function StepPasteJD() {
     const { setStep, jdRawText, setJdRawText, setJdData, setLoading } = useAppStore();
     const [text, setText] = useState(jdRawText);
     const [error, setError] = useState('');
-    const [parsed, setParsed] = useState(!!jdRawText);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const handleAnalyze = async (rawText: string) => {
@@ -24,7 +22,6 @@ export default function StepPasteJD() {
             setJdRawText(rawText);
             const structured = await extractJdStructured(rawText);
             setJdData(structured);
-            setParsed(true);
             setLoading(false);
             setStep(3);
         } catch (e: unknown) {
@@ -39,17 +36,18 @@ export default function StepPasteJD() {
             return;
         }
         setError('');
-        setLoading(true, 'Extracting text from JD PDF...');
+        setLoading(true, 'Analyzing JD PDF with AI...');
         try {
-            const raw = await extractTextFromPdf(file);
-            setText(raw);
-            setJdRawText(raw);
+            const structured = await parsePdfWithAI(file, 'jd');
+            setJdData(structured);
+            setJdRawText('(parsed from PDF)');
             setLoading(false);
+            setStep(3);
         } catch (e: unknown) {
             setError(e instanceof Error ? e.message : 'Upload failed');
             setLoading(false);
         }
-    }, [setJdRawText, setLoading]);
+    }, [setJdRawText, setJdData, setLoading, setStep]);
 
     const onFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];

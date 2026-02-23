@@ -3,8 +3,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { Upload, FileText, X } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
-import { extractCvStructured } from '@/lib/api';
-import { extractTextFromPdf } from '@/lib/pdfClient';
+import { parsePdfWithAI } from '@/lib/api';
 
 export default function StepUploadCV() {
     const { setCvRawText, setCvData, setStep, setLoading, cvFileName } = useAppStore();
@@ -19,12 +18,10 @@ export default function StepUploadCV() {
             return;
         }
         setError('');
-        setLoading(true, 'Extracting text from CV...');
+        setLoading(true, 'Analyzing CV with AI...');
         try {
-            const rawText = await extractTextFromPdf(file);
-            setCvRawText(rawText, file.name);
-            setLoading(true, 'Analyzing CV with AI...');
-            const structured = await extractCvStructured(rawText);
+            const structured = await parsePdfWithAI(file, 'cv');
+            setCvRawText('(parsed from PDF)', file.name);
             setCvData(structured);
             setUploaded(true);
             setLoading(false);

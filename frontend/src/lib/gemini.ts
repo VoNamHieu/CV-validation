@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Part } from "@google/genai";
 
 let _client: GoogleGenAI | null = null;
 
@@ -19,6 +19,35 @@ export async function callGemini(systemPrompt: string, userPrompt: string): Prom
     const response = await client.models.generateContent({
         model: "gemini-2.5-pro-exp-03-25",
         contents: userPrompt,
+        config: {
+            systemInstruction: systemPrompt,
+            responseMimeType: "application/json",
+            thinkingConfig: { thinkingBudget: 2048 },
+        },
+    });
+
+    return response?.text ?? "";
+}
+
+export async function callGeminiWithPdf(
+    systemPrompt: string,
+    userPrompt: string,
+    pdfBase64: string
+): Promise<string> {
+    const client = getClient();
+
+    const pdfPart: Part = {
+        inlineData: {
+            mimeType: "application/pdf",
+            data: pdfBase64,
+        },
+    };
+
+    const textPart: Part = { text: userPrompt };
+
+    const response = await client.models.generateContent({
+        model: "gemini-2.5-pro-exp-03-25",
+        contents: [{ role: "user", parts: [pdfPart, textPart] }],
         config: {
             systemInstruction: systemPrompt,
             responseMimeType: "application/json",
