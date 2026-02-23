@@ -107,6 +107,44 @@ function AlignmentPanel({ entry, cvSkills }: { entry: JDEntry; cvSkills: string[
                 </div>
             </div>
 
+            {/* JD Summary */}
+            <div style={{
+                marginBottom: 20, padding: '14px 16px',
+                background: 'var(--bg-secondary)', borderRadius: 10,
+                borderLeft: '3px solid var(--accent-blue)',
+            }}>
+                <h4 style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    JD Summary
+                </h4>
+                <div style={{ display: 'flex', gap: 12, marginBottom: 8, flexWrap: 'wrap' }}>
+                    {jd.domain && (
+                        <span style={{ fontSize: '0.78rem', padding: '3px 10px', borderRadius: 6, background: 'rgba(59, 130, 246, 0.1)', color: 'var(--accent-blue)' }}>
+                            {jd.domain}
+                        </span>
+                    )}
+                    {jd.seniority_expected && (
+                        <span style={{ fontSize: '0.78rem', padding: '3px 10px', borderRadius: 6, background: 'rgba(139, 92, 246, 0.1)', color: 'var(--accent-purple)' }}>
+                            {jd.seniority_expected}
+                        </span>
+                    )}
+                </div>
+                {jd.responsibilities.length > 0 && (
+                    <div>
+                        <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 500, marginBottom: 6 }}>Key Responsibilities:</p>
+                        <ul style={{ margin: 0, paddingLeft: 18 }}>
+                            {jd.responsibilities.slice(0, 6).map((r, i) => (
+                                <li key={i} style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>{r}</li>
+                            ))}
+                            {jd.responsibilities.length > 6 && (
+                                <li style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                                    +{jd.responsibilities.length - 6} more
+                                </li>
+                            )}
+                        </ul>
+                    </div>
+                )}
+            </div>
+
             {/* Skills Alignment */}
             <div style={{ marginBottom: 20 }}>
                 <h4 style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
