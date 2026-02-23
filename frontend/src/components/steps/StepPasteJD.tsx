@@ -40,7 +40,7 @@ export default function StepPasteJD() {
         setError('');
         setLoading(true, 'Extracting text from JD PDF...');
         try {
-            const raw = await uploadPdfForExtraction(file, 'jd');
+            const raw = await uploadPdfForExtraction(file);
             setText(raw);
             setJdRawText(raw);
             setLoading(false);

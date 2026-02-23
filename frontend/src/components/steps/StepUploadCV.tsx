@@ -20,7 +20,7 @@ export default function StepUploadCV() {
         setError('');
         setLoading(true, 'Extracting text from CV...');
         try {
-            const rawText = await uploadPdfForExtraction(file, 'cv');
+            const rawText = await uploadPdfForExtraction(file);
             setCvRawText(rawText, file.name);
             setLoading(true, 'Analyzing CV with AI...');
             const structured = await extractCvStructured(rawText);
