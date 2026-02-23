@@ -1,12 +1,19 @@
 'use client';
 
 export async function extractTextFromPdf(file: File): Promise<string> {
-    // Dynamically import pdfjs-dist only in the browser to avoid SSR DOMMatrix errors
+    // Dynamically import pdfjs-dist only in the browser
     const pdfjsLib = await import('pdfjs-dist');
-    pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+
+    // Disable worker to avoid CDN version mismatch issues
+    pdfjsLib.GlobalWorkerOptions.workerSrc = '';
 
     const arrayBuffer = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    const pdf = await pdfjsLib.getDocument({
+        data: arrayBuffer,
+        useWorkerFetch: false,
+        isEvalSupported: false,
+        useSystemFonts: true,
+    }).promise;
 
     const textParts: string[] = [];
 
