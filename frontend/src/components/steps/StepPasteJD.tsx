@@ -3,7 +3,8 @@
 import { useState, useRef, useCallback } from 'react';
 import { FileText, ArrowLeft, Upload } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
-import { uploadPdfForExtraction, extractJdStructured } from '@/lib/api';
+import { extractJdStructured } from '@/lib/api';
+import { extractTextFromPdf } from '@/lib/pdfClient';
 
 export default function StepPasteJD() {
     const { setStep, jdRawText, setJdRawText, setJdData, setLoading } = useAppStore();
@@ -40,7 +41,7 @@ export default function StepPasteJD() {
         setError('');
         setLoading(true, 'Extracting text from JD PDF...');
         try {
-            const raw = await uploadPdfForExtraction(file);
+            const raw = await extractTextFromPdf(file);
             setText(raw);
             setJdRawText(raw);
             setLoading(false);
