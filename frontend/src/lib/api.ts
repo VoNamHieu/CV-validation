@@ -70,3 +70,17 @@ export async function optimizeCv(cv: unknown, jd: unknown, match: unknown) {
     }
     return res.json();
 }
+
+export async function crawlUrl(url: string): Promise<string> {
+    const res = await fetch('/api/crawl-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+    });
+    if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || 'Failed to crawl URL');
+    }
+    const data = await res.json();
+    return data.text;
+}

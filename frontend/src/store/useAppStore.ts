@@ -54,6 +54,19 @@ export interface MatchResult {
   risk_flags: string[];
 }
 
+// ── Multi-JD Ranking ──
+export type JDEntryStatus = 'pending' | 'crawling' | 'parsing' | 'scoring' | 'done' | 'error';
+
+export interface JDEntry {
+  id: string;
+  source: string; // URL or "text" or "pdf"
+  label: string;  // display name (URL hostname or filename)
+  status: JDEntryStatus;
+  error?: string;
+  jdData?: JDData;
+  matchResult?: MatchResult;
+}
+
 type Step = 1 | 2 | 3 | 4 | 5;
 
 interface AppState {
@@ -68,7 +81,7 @@ interface AppState {
   setCvRawText: (text: string, fileName: string) => void;
   setCvData: (data: CVData) => void;
 
-  // JD
+  // Single JD (legacy, still used for text/pdf input)
   jdRawText: string;
   jdData: JDData | null;
   setJdRawText: (text: string) => void;
@@ -80,7 +93,16 @@ interface AppState {
 
   // Optimized CV
   optimizedCv: CVData | null;
-  setOptimizedCv: (data: CVData) => void;
+  setOptimizedCv: (data: CVData | null) => void;
+
+  // Multi-JD Ranking
+  jdEntries: JDEntry[];
+  addJdEntry: (entry: JDEntry) => void;
+  updateJdEntry: (id: string, updates: Partial<JDEntry>) => void;
+  removeJdEntry: (id: string) => void;
+  clearJdEntries: () => void;
+  selectedJdId: string | null;
+  setSelectedJdId: (id: string | null) => void;
 
   // Loading states
   isLoading: boolean;
@@ -100,6 +122,8 @@ const initialState = {
   jdData: null,
   matchResult: null,
   optimizedCv: null,
+  jdEntries: [] as JDEntry[],
+  selectedJdId: null as string | null,
   isLoading: false,
   loadingMessage: '',
 };
@@ -119,6 +143,17 @@ export const useAppStore = create<AppState>()(
 
       setMatchResult: (result) => set({ matchResult: result }),
       setOptimizedCv: (data) => set({ optimizedCv: data }),
+
+      // Multi-JD
+      addJdEntry: (entry) => set((s) => ({ jdEntries: [...s.jdEntries, entry] })),
+      updateJdEntry: (id, updates) =>
+        set((s) => ({
+          jdEntries: s.jdEntries.map((e) => (e.id === id ? { ...e, ...updates } : e)),
+        })),
+      removeJdEntry: (id) =>
+        set((s) => ({ jdEntries: s.jdEntries.filter((e) => e.id !== id) })),
+      clearJdEntries: () => set({ jdEntries: [] }),
+      setSelectedJdId: (id) => set({ selectedJdId: id }),
 
       setLoading: (loading, message = '') => set({ isLoading: loading, loadingMessage: message }),
 
