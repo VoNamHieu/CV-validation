@@ -6,12 +6,21 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Initialize the Gemini client wrapped with instructor
-client = instructor.from_gemini(
-    genai.Client(api_key=os.getenv("GEMINI_API_KEY")),
-    mode=instructor.Mode.GEMINI_JSON,
-)
+# Lazy-init: only create client when actually needed
 MODEL = "gemini-3.0-pro"
+_client = None
+
+def _get_client():
+    global _client
+    if _client is None:
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise ValueError("GEMINI_API_KEY is not set in .env")
+        _client = instructor.from_genai(
+            genai.Client(api_key=api_key),
+            mode=instructor.Mode.GEMINI_JSON,
+        )
+    return _client
 
 async def extract_cv_structured(raw_text: str) -> CVSchema:
     """
@@ -26,7 +35,7 @@ async def extract_cv_structured(raw_text: str) -> CVSchema:
     {raw_text}
     """
     
-    cv_data = await client.chat.completions.create(
+    cv_data = await _get_client().chat.completions.create(
         model=MODEL,
         response_model=CVSchema,
         messages=[
@@ -48,7 +57,7 @@ async def extract_jd_structured(raw_text: str) -> JDSchema:
     {raw_text}
     """
     
-    jd_data = await client.chat.completions.create(
+    jd_data = await _get_client().chat.completions.create(
         model=MODEL,
         response_model=JDSchema,
         messages=[
