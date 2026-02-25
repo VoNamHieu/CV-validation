@@ -43,7 +43,7 @@ async def test_crawl(req: CrawlRequest):
         url = url.strip()
         if not url:
             continue
-        result = crawl_url(url)
+        result = await crawl_url(url)
         results.append(result.to_dict())
 
     total = len(results)

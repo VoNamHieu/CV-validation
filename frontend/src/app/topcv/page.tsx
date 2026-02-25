@@ -62,7 +62,7 @@ export default function TopCVPage() {
         setResults(null);
 
         try {
-            const res = await fetch('http://localhost:8000/topcv/search', {
+            const res = await fetch('/api/topcv', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({

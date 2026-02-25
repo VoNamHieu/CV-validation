@@ -42,7 +42,7 @@ async def search_jobs(req: TopCVSearchRequest):
     if req.max_pages < 1 or req.max_pages > 5:
         raise HTTPException(status_code=400, detail="max_pages must be 1-5.")
 
-    result = search_topcv(
+    result = await search_topcv(
         keyword=req.keyword.strip(),
         location=req.location.strip(),
         max_pages=req.max_pages,

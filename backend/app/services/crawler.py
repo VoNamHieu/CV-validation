@@ -131,26 +131,24 @@ def detect_needs_playwright(html: str) -> bool:
 
 # ── PLAYWRIGHT FETCH ──────────────────────────────────────────────────────────
 
-def try_playwright_fetch(url: str) -> tuple[bool, str]:
+async def try_playwright_fetch(url: str) -> tuple[bool, str]:
     """Fetch with headless Chromium — used when HTTP isn't enough."""
     try:
-        from playwright.sync_api import sync_playwright
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            # Tạo context giả lập browser thật — tránh bị detect automation
-            context = browser.new_context(
+        from playwright.async_api import async_playwright
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            context = await browser.new_context(
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                 viewport={"width": 1280, "height": 720},
                 locale="vi-VN",
             )
-            page = context.new_page()
-            # Ẩn dấu hiệu automation
-            page.add_init_script("delete Object.getPrototypeOf(navigator).webdriver")
-            page.goto(url, timeout=20000)
-            page.wait_for_load_state("networkidle", timeout=15000)
-            html = page.content()
-            context.close()
-            browser.close()
+            page = await context.new_page()
+            await page.add_init_script("delete Object.getPrototypeOf(navigator).webdriver")
+            await page.goto(url, timeout=20000)
+            await page.wait_for_load_state("networkidle", timeout=15000)
+            html = await page.content()
+            await context.close()
+            await browser.close()
             return True, html
     except ImportError:
         return False, "Playwright not installed"
@@ -179,7 +177,7 @@ def clean_html(html: str) -> str:
 
 # ── ORCHESTRATOR ──────────────────────────────────────────────────────────────
 
-def crawl_url(url: str) -> CrawlResult:
+async def crawl_url(url: str) -> CrawlResult:
     """Run the full crawl pipeline on a single URL."""
     result = CrawlResult(url=url)
     start = time.time()
@@ -196,7 +194,7 @@ def crawl_url(url: str) -> CrawlResult:
         # Check if Playwright is needed
         if detect_needs_playwright(http_data):
             result.needs_playwright = True
-            pw_ok, pw_data = try_playwright_fetch(url)
+            pw_ok, pw_data = await try_playwright_fetch(url)
             if pw_ok:
                 raw_html = pw_data
             # If Playwright fails, continue with HTTP data
@@ -205,7 +203,7 @@ def crawl_url(url: str) -> CrawlResult:
         result.needs_playwright = True
 
         # Try Playwright as fallback
-        pw_ok, pw_data = try_playwright_fetch(url)
+        pw_ok, pw_data = await try_playwright_fetch(url)
         if pw_ok:
             raw_html = pw_data
         else:

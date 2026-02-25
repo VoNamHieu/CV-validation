@@ -6,11 +6,20 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-client = instructor.from_gemini(
-    genai.Client(api_key=os.getenv("GEMINI_API_KEY")),
-    mode=instructor.Mode.GEMINI_JSON,
-)
 MODEL = "gemini-3.0-pro"
+_client = None
+
+def _get_client():
+    global _client
+    if _client is None:
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise ValueError("GEMINI_API_KEY is not set in .env")
+        _client = instructor.from_genai(
+            genai.Client(api_key=api_key),
+            mode=instructor.Mode.GEMINI_JSON,
+        )
+    return _client
 
 async def optimize_cv(cv: CVSchema, jd: JDSchema, match: MatchResultSchema) -> CVSchema:
     """
@@ -39,7 +48,7 @@ async def optimize_cv(cv: CVSchema, jd: JDSchema, match: MatchResultSchema) -> C
     Return the fully optimized CV following the CVSchema.
     """
     
-    result = await client.chat.completions.create(
+    result = await _get_client().chat.completions.create(
         model=MODEL,
         response_model=CVSchema,
         messages=[

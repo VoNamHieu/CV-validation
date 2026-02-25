@@ -4,10 +4,10 @@ from app.routers import extract, process, crawl, topcv
 
 app = FastAPI(title="AI Job Fit Optimizer API", version="1.0.0")
 
-# Configure CORS for local development
+# Configure CORS — allow Vercel, ngrok, and local dev
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

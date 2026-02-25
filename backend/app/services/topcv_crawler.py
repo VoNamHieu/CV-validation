@@ -142,29 +142,33 @@ def _create_playwright_context(browser):
     return context
 
 
-def search_topcv(keyword: str, location: str = "", max_pages: int = 1) -> TopCVSearchResult:
+async def search_topcv(keyword: str, location: str = "", max_pages: int = 1) -> TopCVSearchResult:
     """
-    Search TopCV for jobs using Playwright.
+    Search TopCV for jobs using Playwright (async).
     Returns structured job data extracted from JSON-LD + HTML fallback.
     """
     result = TopCVSearchResult(keyword=keyword, location=location)
     start = time.time()
 
     try:
-        from playwright.sync_api import sync_playwright
+        from playwright.async_api import async_playwright
     except ImportError:
         result.error = "Playwright not installed. Run: pip install playwright && playwright install chromium"
         result.latency_ms = int((time.time() - start) * 1000)
         return result
 
     try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            context = _create_playwright_context(browser)
-            page = context.new_page()
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            context = await browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                viewport={"width": 1280, "height": 720},
+                locale="vi-VN",
+            )
+            page = await context.new_page()
 
             # Hide automation signals
-            page.add_init_script("delete Object.getPrototypeOf(navigator).webdriver")
+            await page.add_init_script("delete Object.getPrototypeOf(navigator).webdriver")
 
             all_jobs = []
 
@@ -172,13 +176,13 @@ def search_topcv(keyword: str, location: str = "", max_pages: int = 1) -> TopCVS
                 url = _build_search_url(keyword, location, page_num)
 
                 try:
-                    page.goto(url, timeout=25000)
-                    page.wait_for_load_state("networkidle", timeout=15000)
+                    await page.goto(url, timeout=25000)
+                    await page.wait_for_load_state("networkidle", timeout=15000)
 
                     # Extra wait for Cloudflare challenge
-                    page.wait_for_timeout(2000)
+                    await page.wait_for_timeout(2000)
 
-                    html = page.content()
+                    html = await page.content()
 
                     # Get total jobs count (first page only)
                     if page_num == 1:
@@ -228,11 +232,11 @@ def search_topcv(keyword: str, location: str = "", max_pages: int = 1) -> TopCVS
 
                 # Polite delay between pages
                 if page_num < max_pages:
-                    page.wait_for_timeout(1500)
+                    await page.wait_for_timeout(1500)
 
             result.jobs = all_jobs
-            context.close()
-            browser.close()
+            await context.close()
+            await browser.close()
 
     except Exception as e:
         result.error = str(e)[:300]
