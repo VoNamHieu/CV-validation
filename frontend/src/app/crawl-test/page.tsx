@@ -19,6 +19,8 @@ import {
     ChevronDown,
     ChevronUp,
     BarChart3,
+    Monitor,
+    Cloud,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -63,12 +65,15 @@ const PRESET_URLS = [
 
 // ── Component ────────────────────────────────────────────────────────────────
 
+type CrawlMode = 'vercel' | 'local';
+
 export default function CrawlTestPage() {
     const [urls, setUrls] = useState<string[]>(['']);
     const [results, setResults] = useState<CrawlResponse | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState('');
     const [expandedCards, setExpandedCards] = useState<Set<number>>(new Set());
+    const [mode, setMode] = useState<CrawlMode>('vercel');
 
     const addUrl = () => {
         if (urls.length < 10) setUrls([...urls, '']);
@@ -114,8 +119,12 @@ export default function CrawlTestPage() {
         setResults(null);
         setExpandedCards(new Set());
 
+        const endpoint = mode === 'local'
+            ? 'http://localhost:8000/crawl/test'
+            : '/api/crawl-test';
+
         try {
-            const res = await fetch('/api/crawl-test', {
+            const res = await fetch(endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ urls: validUrls }),
@@ -213,6 +222,82 @@ export default function CrawlTestPage() {
 
             {/* Main content */}
             <main style={{ maxWidth: 900, margin: '0 auto', padding: '32px 24px 80px' }}>
+                {/* ── Mode Toggle ──────────────────────────────────────── */}
+                <div
+                    className="glass-card animate-fade-in"
+                    style={{
+                        padding: '16px 20px',
+                        marginBottom: 16,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 16,
+                    }}
+                >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Mode:</span>
+                        <div
+                            style={{
+                                display: 'flex',
+                                background: 'var(--bg-secondary)',
+                                borderRadius: 10,
+                                padding: 3,
+                                border: '1px solid var(--border-subtle)',
+                            }}
+                        >
+                            <button
+                                onClick={() => setMode('vercel')}
+                                style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 6,
+                                    padding: '7px 16px',
+                                    borderRadius: 8,
+                                    border: 'none',
+                                    fontSize: '0.8rem',
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                    transition: 'all 0.2s ease',
+                                    background: mode === 'vercel' ? 'var(--accent-blue)' : 'transparent',
+                                    color: mode === 'vercel' ? 'white' : 'var(--text-muted)',
+                                    boxShadow: mode === 'vercel' ? '0 2px 8px var(--accent-blue-glow)' : 'none',
+                                }}
+                                id="mode-vercel"
+                            >
+                                <Cloud size={14} /> Vercel
+                            </button>
+                            <button
+                                onClick={() => setMode('local')}
+                                style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 6,
+                                    padding: '7px 16px',
+                                    borderRadius: 8,
+                                    border: 'none',
+                                    fontSize: '0.8rem',
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                    transition: 'all 0.2s ease',
+                                    background: mode === 'local' ? 'var(--accent-purple)' : 'transparent',
+                                    color: mode === 'local' ? 'white' : 'var(--text-muted)',
+                                    boxShadow: mode === 'local' ? '0 2px 8px rgba(139, 92, 246, 0.3)' : 'none',
+                                }}
+                                id="mode-local"
+                            >
+                                <Monitor size={14} /> Local
+                            </button>
+                        </div>
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'right' }}>
+                        {mode === 'vercel' ? (
+                            <span>HTTP fetch only · <span style={{ color: 'var(--accent-blue)' }}>Works on Vercel</span></span>
+                        ) : (
+                            <span>HTTP + Playwright · <span style={{ color: 'var(--accent-purple)' }}>Requires local backend at :8000</span></span>
+                        )}
+                    </div>
+                </div>
+
                 {/* ── URL Input Section ────────────────────────────────── */}
                 <section className="glass-card animate-fade-in" style={{ padding: '28px 28px 20px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
