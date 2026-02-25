@@ -6,3 +6,5 @@ python-dotenv
 pdfplumber
 PyMuPDF
 google-genai
+requests
+beautifulsoup4
