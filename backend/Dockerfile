@@ -28,16 +28,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Install Python dependencies
-COPY requirements.txt .
+# Install Python dependencies (context is repo root)
+COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Install Playwright Chromium browser
 RUN playwright install chromium
 RUN playwright install-deps chromium
 
-# Copy application code
-COPY . .
+# Copy backend application code
+COPY backend/app ./app
 
 # Expose port
 EXPOSE 8000
