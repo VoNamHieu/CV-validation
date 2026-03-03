@@ -32,12 +32,14 @@ WORKDIR /app
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Force install python-multipart (in case cache skipped it)
+RUN pip install --no-cache-dir python-multipart
+
 # Install Playwright Chromium browser
 RUN playwright install chromium
 RUN playwright install-deps chromium
 
-# Cache bust — forces COPY to re-run
-ARG CACHEBUST=3
+# Copy backend application code
 COPY backend/app ./app
 
 # Railway provides PORT env var dynamically
