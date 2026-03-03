@@ -12,45 +12,68 @@ export default function Home() {
 
   return (
     <div style={{ minHeight: '100vh', position: 'relative' }}>
+      {/* Ambient background */}
+      <div style={{
+        position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none',
+        background: 'var(--gradient-mesh)',
+      }} />
+
       {/* Header */}
       <header style={{
-        padding: '20px 32px',
+        padding: '16px 32px',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
         borderBottom: '1px solid var(--border-subtle)',
-        background: 'var(--bg-glass)',
-        backdropFilter: 'blur(12px)',
+        background: 'rgba(6, 8, 15, 0.8)',
+        backdropFilter: 'blur(16px)',
+        WebkitBackdropFilter: 'blur(16px)',
         position: 'sticky',
         top: 0,
         zIndex: 50,
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={{
-            width: 36,
-            height: 36,
+            width: 34,
+            height: 34,
             borderRadius: 10,
             background: 'var(--gradient-hero)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
+            boxShadow: '0 2px 10px rgba(79, 143, 247, 0.3)',
           }}>
-            <Sparkles size={20} style={{ color: 'white' }} />
+            <Sparkles size={17} style={{ color: 'white' }} />
           </div>
-          <span style={{ fontWeight: 700, fontSize: '1.1rem', letterSpacing: '-0.02em' }}>
-            AI Job Fit Optimizer
-          </span>
+          <div>
+            <span style={{
+              fontWeight: 700,
+              fontSize: '0.95rem',
+              letterSpacing: '-0.02em',
+              background: 'var(--gradient-hero)',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+            }}>
+              JobFit AI
+            </span>
+          </div>
         </div>
-        <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-          Career Intelligence Tool
-        </span>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          padding: '5px 12px', borderRadius: 20,
+          background: 'var(--bg-card)', border: '1px solid var(--border-subtle)',
+          fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 500,
+        }}>
+          <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent-green)' }} />
+          AI Online
+        </div>
       </header>
 
       {/* Stepper */}
       <Stepper currentStep={currentStep} />
 
       {/* Step Content */}
-      <main style={{ paddingBottom: 60 }}>
+      <main style={{ paddingBottom: 80, position: 'relative', zIndex: 1 }}>
         {currentStep === 1 && <StepUploadCV />}
         {currentStep === 2 && <StepInputUrl />}
         {currentStep === 3 && <StepReport />}
@@ -59,12 +82,15 @@ export default function Home() {
       {/* Footer */}
       <footer style={{
         textAlign: 'center',
-        padding: '16px',
-        fontSize: '0.75rem',
+        padding: '20px',
+        fontSize: '0.72rem',
         color: 'var(--text-muted)',
         borderTop: '1px solid var(--border-subtle)',
+        background: 'rgba(6, 8, 15, 0.6)',
+        position: 'relative',
+        zIndex: 1,
       }}>
-        AI Job Fit Optimizer · Powered by Gemini AI · No hallucination policy
+        <span style={{ opacity: 0.7 }}>JobFit AI · Powered by Gemini · No hallucination policy</span>
       </footer>
     </div>
   );

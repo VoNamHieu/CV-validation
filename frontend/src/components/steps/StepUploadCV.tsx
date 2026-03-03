@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useRef, useState } from 'react';
-import { Upload, FileText, X, Loader2, Brain, CheckCircle2 } from 'lucide-react';
+import { Upload, FileText, X, Loader2, Brain, CheckCircle2, Sparkles, ArrowRight } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
 import { parsePdfWithAI } from '@/lib/api';
 
@@ -48,64 +48,79 @@ export default function StepUploadCV() {
     };
 
     return (
-        <div className="animate-fade-in" style={{ maxWidth: 600, margin: '0 auto', padding: '40px 20px' }}>
-            <h2 style={{ fontSize: '1.6rem', fontWeight: 700, marginBottom: 8 }}>
-                Upload Your CV
-            </h2>
-            <p style={{ color: 'var(--text-secondary)', marginBottom: 32, fontSize: '0.95rem' }}>
-                Upload your resume as a PDF file. Our AI will extract and structure the content automatically.
-            </p>
+        <div className="animate-fade-in" style={{ maxWidth: 580, margin: '0 auto', padding: '48px 20px' }}>
+            {/* Hero */}
+            <div style={{ textAlign: 'center', marginBottom: 40 }}>
+                <div style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    padding: '5px 14px', borderRadius: 20,
+                    background: 'var(--gradient-hero-subtle)',
+                    border: '1px solid var(--border-subtle)',
+                    fontSize: '0.72rem', fontWeight: 500, color: 'var(--accent-purple)',
+                    marginBottom: 16,
+                }}>
+                    <Sparkles size={11} /> Step 1 of 3
+                </div>
+                <h2 style={{
+                    fontSize: '1.8rem', fontWeight: 800, marginBottom: 10,
+                    letterSpacing: '-0.03em', lineHeight: 1.2,
+                }}>
+                    Upload Your CV
+                </h2>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.92rem', lineHeight: 1.6, maxWidth: 420, margin: '0 auto' }}>
+                    Drop your resume as PDF. Our AI will extract skills, experience, and education to match against jobs.
+                </p>
+            </div>
 
-            {/* ── Processing State ── */}
+            {/* Processing State */}
             {processing && (
                 <div className="glass-card" style={{
-                    padding: '32px 28px',
+                    padding: '40px 32px',
                     textAlign: 'center',
-                    background: 'linear-gradient(135deg, rgba(59,130,246,0.06), rgba(139,92,246,0.04))',
+                    background: 'var(--gradient-hero-subtle)',
                 }}>
-                    {/* Animated brain icon */}
-                    <div style={{
-                        width: 64, height: 64, borderRadius: '50%',
+                    <div className="animate-float" style={{
+                        width: 72, height: 72, borderRadius: 20,
                         background: 'var(--gradient-hero)',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        margin: '0 auto 20px',
-                        animation: 'pulse-glow 2s infinite',
+                        margin: '0 auto 24px',
+                        boxShadow: '0 8px 32px rgba(79, 143, 247, 0.25)',
                     }}>
-                        <Brain size={28} style={{ color: 'white' }} />
+                        <Brain size={32} style={{ color: 'white' }} />
                     </div>
 
-                    <p style={{ fontWeight: 700, fontSize: '1.05rem', marginBottom: 6 }}>
+                    <p style={{ fontWeight: 700, fontSize: '1.1rem', marginBottom: 6, letterSpacing: '-0.02em' }}>
                         AI is analyzing your CV
                     </p>
-                    <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: 20 }}>
-                        Extracting skills, experience, education, and projects...
+                    <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: 28 }}>
+                        Extracting skills, experience, education & projects...
                     </p>
 
-                    {/* File info */}
+                    {/* File badge */}
                     <div style={{
                         display: 'inline-flex', alignItems: 'center', gap: 8,
                         padding: '8px 16px', borderRadius: 8,
-                        background: 'var(--bg-secondary)',
+                        background: 'var(--bg-secondary)', border: '1px solid var(--border-subtle)',
                         fontSize: '0.82rem',
                     }}>
                         <FileText size={14} style={{ color: 'var(--accent-blue)' }} />
                         <span style={{ color: 'var(--text-secondary)' }}>{processingFile}</span>
                     </div>
 
-                    {/* Progress steps */}
+                    {/* Progress */}
                     <div style={{
-                        display: 'flex', flexDirection: 'column', gap: 10,
-                        marginTop: 24, textAlign: 'left',
-                        maxWidth: 300, margin: '24px auto 0',
+                        display: 'flex', flexDirection: 'column', gap: 12,
+                        marginTop: 28, maxWidth: 260, margin: '28px auto 0',
                     }}>
                         {[
-                            { label: 'Uploading PDF', done: true },
-                            { label: 'AI reading document', done: false, active: true },
+                            { label: 'PDF uploaded', done: true },
+                            { label: 'AI parsing document', done: false, active: true },
                             { label: 'Structuring data', done: false },
                         ].map((step, i) => (
                             <div key={i} style={{
-                                display: 'flex', alignItems: 'center', gap: 10,
-                                opacity: step.done || step.active ? 1 : 0.4,
+                                display: 'flex', alignItems: 'center', gap: 12,
+                                opacity: step.done || step.active ? 1 : 0.35,
+                                transition: 'opacity 0.3s ease',
                             }}>
                                 {step.done ? (
                                     <CheckCircle2 size={18} style={{ color: 'var(--accent-green)', flexShrink: 0 }} />
@@ -117,7 +132,7 @@ export default function StepUploadCV() {
                                 ) : (
                                     <div style={{
                                         width: 18, height: 18, borderRadius: '50%',
-                                        border: '2px solid var(--border-subtle)', flexShrink: 0,
+                                        border: '2px solid var(--border-default)', flexShrink: 0,
                                     }} />
                                 )}
                                 <span style={{
@@ -130,88 +145,122 @@ export default function StepUploadCV() {
                             </div>
                         ))}
                     </div>
-                    <style>{`@keyframes spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }`}</style>
                 </div>
-            )}
+            )
+            }
 
-            {/* ── Upload Zone ── */}
-            {!uploaded && !processing && (
-                <div
-                    className={`upload-zone ${dragOver ? 'drag-over' : ''}`}
-                    onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-                    onDragLeave={() => setDragOver(false)}
-                    onDrop={onDrop}
-                    onClick={() => fileInputRef.current?.click()}
-                >
-                    <Upload size={48} style={{ color: 'var(--accent-blue)', marginBottom: 16 }} />
-                    <p style={{ fontSize: '1.05rem', fontWeight: 600, marginBottom: 8 }}>
-                        Drag & drop your CV here
-                    </p>
-                    <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                        or click to browse ·  PDF only
-                    </p>
-                    <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept=".pdf"
-                        style={{ display: 'none' }}
-                        onChange={onFileSelect}
-                    />
-                </div>
-            )}
-
-            {/* ── Success State ── */}
-            {uploaded && !processing && (
-                <div className="glass-card" style={{ padding: 24, display: 'flex', alignItems: 'center', gap: 16 }}>
-                    <div style={{
-                        width: 44, height: 44, borderRadius: 10,
-                        background: 'rgba(16,185,129,0.12)', display: 'flex',
-                        alignItems: 'center', justifyContent: 'center',
-                    }}>
-                        <FileText size={22} style={{ color: 'var(--accent-green)' }} />
-                    </div>
-                    <div style={{ flex: 1 }}>
-                        <p style={{ fontWeight: 600 }}>{cvFileName}</p>
-                        <p style={{ color: 'var(--accent-green)', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: 4 }}>
-                            <CheckCircle2 size={13} /> Parsed successfully
-                        </p>
-                    </div>
-                    <button
-                        onClick={() => { setUploaded(false); setCvRawText('', ''); }}
-                        style={{
-                            background: 'var(--bg-secondary)', border: '1px solid var(--border-subtle)',
-                            color: 'var(--text-muted)', cursor: 'pointer', borderRadius: 8,
-                            width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        }}
+            {/* Upload Zone */}
+            {
+                !uploaded && !processing && (
+                    <div
+                        className={`upload-zone ${dragOver ? 'drag-over' : ''}`}
+                        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                        onDragLeave={() => setDragOver(false)}
+                        onDrop={onDrop}
+                        onClick={() => fileInputRef.current?.click()}
+                        style={{ position: 'relative' }}
                     >
-                        <X size={16} />
-                    </button>
-                </div>
-            )}
+                        <div style={{
+                            width: 64, height: 64, borderRadius: 16,
+                            background: 'var(--gradient-hero-subtle)',
+                            border: '1px solid var(--border-subtle)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            margin: '0 auto 20px',
+                        }}>
+                            <Upload size={26} style={{ color: 'var(--accent-blue)' }} />
+                        </div>
+                        <p style={{
+                            fontSize: '1rem', fontWeight: 600, marginBottom: 6,
+                            letterSpacing: '-0.01em', position: 'relative',
+                        }}>
+                            Drag & drop your CV here
+                        </p>
+                        <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', position: 'relative' }}>
+                            or click to browse · <span style={{ color: 'var(--text-secondary)' }}>PDF only</span>
+                        </p>
+                        <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept=".pdf"
+                            style={{ display: 'none' }}
+                            onChange={onFileSelect}
+                        />
+                    </div>
+                )
+            }
 
-            {error && (
-                <div style={{
-                    background: 'rgba(239,68,68,0.08)',
-                    border: '1px solid rgba(239,68,68,0.25)',
-                    borderRadius: 'var(--radius-md)',
-                    padding: '12px 16px',
-                    marginTop: 16,
-                    fontSize: '0.85rem',
-                    color: 'var(--accent-red)',
-                }}>
-                    {error}
-                </div>
-            )}
+            {/* Success State */}
+            {
+                uploaded && !processing && (
+                    <div className="glass-card" style={{
+                        padding: '20px 24px',
+                        display: 'flex', alignItems: 'center', gap: 16,
+                        background: 'rgba(52, 211, 153, 0.04)',
+                        borderColor: 'rgba(52, 211, 153, 0.15)',
+                    }}>
+                        <div style={{
+                            width: 44, height: 44, borderRadius: 12,
+                            background: 'rgba(52, 211, 153, 0.1)',
+                            border: '1px solid rgba(52, 211, 153, 0.2)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        }}>
+                            <FileText size={20} style={{ color: 'var(--accent-green)' }} />
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                            <p style={{ fontWeight: 600, fontSize: '0.9rem', letterSpacing: '-0.01em' }}>{cvFileName}</p>
+                            <p style={{
+                                color: 'var(--accent-green)', fontSize: '0.8rem',
+                                display: 'flex', alignItems: 'center', gap: 4, marginTop: 2,
+                            }}>
+                                <CheckCircle2 size={12} /> Parsed & structured
+                            </p>
+                        </div>
+                        <button
+                            onClick={() => { setUploaded(false); setCvRawText('', ''); }}
+                            style={{
+                                background: 'var(--bg-secondary)', border: '1px solid var(--border-default)',
+                                color: 'var(--text-muted)', cursor: 'pointer', borderRadius: 10,
+                                width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                transition: 'all 0.2s ease',
+                            }}
+                            onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--accent-red)'; e.currentTarget.style.color = 'var(--accent-red)'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border-default)'; e.currentTarget.style.color = 'var(--text-muted)'; }}
+                        >
+                            <X size={15} />
+                        </button>
+                    </div>
+                )
+            }
 
+            {/* Error */}
+            {
+                error && (
+                    <div style={{
+                        background: 'rgba(248, 113, 113, 0.06)',
+                        border: '1px solid rgba(248, 113, 113, 0.2)',
+                        borderRadius: 'var(--radius-md)',
+                        padding: '12px 16px',
+                        marginTop: 16,
+                        fontSize: '0.85rem',
+                        color: 'var(--accent-red)',
+                        display: 'flex', alignItems: 'center', gap: 8,
+                    }}>
+                        <span>⚠</span> {error}
+                    </div>
+                )
+            }
+
+            {/* Action */}
             <div style={{ marginTop: 40, display: 'flex', justifyContent: 'flex-end' }}>
                 <button
                     className="btn-primary"
                     disabled={!uploaded || processing}
                     onClick={() => setStep(2)}
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '13px 28px' }}
                 >
-                    Next: Input Job URL →
+                    Find Matching Jobs <ArrowRight size={16} />
                 </button>
             </div>
-        </div>
+        </div >
     );
 }
