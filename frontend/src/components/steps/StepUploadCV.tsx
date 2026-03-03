@@ -101,7 +101,7 @@ export default function StepUploadCV() {
                     disabled={!uploaded}
                     onClick={() => setStep(2)}
                 >
-                    Next: Paste Job Description →
+                    Next: Input Job URL →
                 </button>
             </div>
         </div>

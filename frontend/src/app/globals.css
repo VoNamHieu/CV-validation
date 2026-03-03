@@ -286,3 +286,10 @@ body {
   margin: 4px 0;
   border-radius: 4px;
 }
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+  .report-grid-2col {
+    grid-template-columns: 1fr !important;
+  }
+}

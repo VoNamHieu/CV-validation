@@ -4,10 +4,8 @@ import { Check } from 'lucide-react';
 
 const steps = [
     { num: 1, label: 'Upload CV' },
-    { num: 2, label: 'Paste JD' },
-    { num: 3, label: 'Match Score' },
-    { num: 4, label: 'Optimize' },
-    { num: 5, label: 'Download' },
+    { num: 2, label: 'Input URL' },
+    { num: 3, label: 'Report' },
 ];
 
 interface StepperProps {
@@ -16,7 +14,7 @@ interface StepperProps {
 
 export default function Stepper({ currentStep }: StepperProps) {
     return (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '28px 0', maxWidth: 650, margin: '0 auto' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '28px 0', maxWidth: 500, margin: '0 auto' }}>
             {steps.map((step, i) => (
                 <div key={step.num} style={{ display: 'contents' }}>
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>

@@ -67,7 +67,7 @@ export interface JDEntry {
   matchResult?: MatchResult;
 }
 
-type Step = 1 | 2 | 3 | 4 | 5;
+type Step = 1 | 2 | 3;
 
 interface AppState {
   // Navigation
