@@ -1,21 +1,41 @@
 """
-Smart Search Router
-Uses Playwright to crawl SPA job sites, extract job links, and return job page content.
+Smart Search Router — LLM-powered job link extraction
+Uses Playwright to crawl SPA job sites, then Gemini Pro to identify job posting URLs.
 """
 
-import re
+import os
+import json
 import random
 import logging
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from bs4 import BeautifulSoup
+from urllib.parse import urlparse
+from google import genai
+from dotenv import load_dotenv
 from app.services.crawler import try_http_fetch, try_playwright_fetch, clean_html, detect_needs_playwright
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 router = APIRouter(prefix="/crawl", tags=["Smart Crawl"])
 
+# ── Gemini client (lazy init) ──
+_gemini_client = None
 
+def _get_gemini():
+    global _gemini_client
+    if _gemini_client is None:
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise ValueError("GEMINI_API_KEY not set")
+        _gemini_client = genai.Client(api_key=api_key)
+    return _gemini_client
+
+
+# ── Models ──
 class SmartCrawlRequest(BaseModel):
     url: str
     search_keyword: str = ""
@@ -31,13 +51,11 @@ class SmartCrawlResponse(BaseModel):
     debug: dict = {}
 
 
-# URLs to skip — navigation, auth, static pages
+# ── Step 1: Extract all candidate links from HTML ──
 SKIP_PATTERNS = [
     "/login", "/register", "/sign", "/auth", "/account",
     "/about", "/contact", "/faq", "/help", "/terms", "/privacy",
     "/employer", "/nha-tuyen-dung", "/blog", "/news",
-    "/cong-ty/", "/company/", "/companies/",
-    "/tim-viec-lam-", "/search?",  # search result pages, not individual jobs
     "/cart", "/checkout", "/pricing",
     ".css", ".js", ".png", ".jpg", ".svg", ".ico",
     "facebook.com", "google.com", "linkedin.com/share",
@@ -46,23 +64,21 @@ SKIP_PATTERNS = [
 ]
 
 
-def extract_job_links_from_html(html: str, target_hostname: str) -> list[str]:
-    """Extract job posting URLs from rendered HTML."""
-    from bs4 import BeautifulSoup
-    from urllib.parse import urlparse
-
+def extract_candidate_links(html: str, target_hostname: str) -> list[dict]:
+    """
+    Extract all links from HTML that belong to the target domain.
+    Returns list of {url, text} for LLM analysis.
+    """
     soup = BeautifulSoup(html, "html.parser")
     clean_target = target_hostname.replace("www.", "")
-
-    all_links = []
-    job_links = []
+    seen = set()
+    candidates = []
 
     for a_tag in soup.find_all("a", href=True):
         href = a_tag["href"].strip()
         if not href:
             continue
 
-        # Skip obvious non-job links
         href_lower = href.lower()
         if any(skip in href_lower for skip in SKIP_PATTERNS):
             continue
@@ -71,100 +87,128 @@ def extract_job_links_from_html(html: str, target_hostname: str) -> list[str]:
         if href.startswith("/"):
             href = f"https://{target_hostname}{href}"
 
-        # Skip non-http links
         if not href.startswith("http"):
             continue
 
         try:
             parsed = urlparse(href)
             link_host = parsed.hostname or ""
-
-            # Must be from target domain
             if clean_target not in link_host:
                 continue
 
-            path = parsed.path.lower().rstrip("/")
-            link_text = a_tag.get_text(strip=True)
-
-            all_links.append({"href": href, "path": path, "text": link_text[:80]})
-
-            # Skip very short paths (homepage, category pages)
-            if len(path) < 5:
+            path = parsed.path.rstrip("/")
+            if len(path) < 3:
                 continue
 
-            # Skip known non-job paths
-            if path in ["/viec-lam", "/jobs", "/job", "/en", "/vi"]:
+            # Deduplicate
+            if href in seen:
                 continue
+            seen.add(href)
 
-            # ── Job detection heuristics ──
-
-            # Pattern 1: Explicit job path patterns
-            job_path_patterns = [
-                "/job/", "/jobs/", "/viec-lam/", "/work/",
-                "/career/", "/position/", "/tin-tuyen-dung/",
-                "/recruitment/", "/opening/", "/vacancy/",
-            ]
-            has_job_path = any(p in path for p in job_path_patterns)
-
-            # Pattern 2: VietnamWorks style — ends with -jv (job view)
-            ends_with_jv = path.endswith("-jv")
-
-            # Pattern 3: Path has numeric ID (common for job detail pages)
-            has_numeric_id = bool(re.search(r'[\-/]\d{3,}', path))
-
-            # Pattern 4: URLs with descriptive slugs + ID suffixes
-            # e.g. /software-engineer-12345 or /viec-lam/frontend-developer-kw
-            slug_with_id = bool(re.search(r'/[a-z][\w-]{10,}-\d+', path))
-
-            # Pattern 5: Link text looks like a job title (has reasonable length)
-            text_looks_like_job = 10 < len(link_text) < 150
-
-            # Score the link
-            score = 0
-            if has_job_path:
-                score += 3
-            if ends_with_jv:
-                score += 3
-            if has_numeric_id:
-                score += 2
-            if slug_with_id:
-                score += 2
-            if text_looks_like_job:
-                score += 1
-
-            if score >= 2 and href not in job_links:
-                job_links.append(href)
+            link_text = a_tag.get_text(strip=True)[:100]
+            candidates.append({"url": href, "text": link_text})
 
         except Exception:
             continue
 
-    logger.info(f"[extract_job_links] Total links on page: {len(all_links)}")
-    logger.info(f"[extract_job_links] Job links found: {len(job_links)}")
-    if all_links:
-        logger.info(f"[extract_job_links] Sample links: {all_links[:10]}")
-
-    return job_links[:20]
+    logger.info(f"[extract_candidates] Found {len(candidates)} candidate links on {target_hostname}")
+    return candidates[:100]  # Cap at 100 for LLM context
 
 
+# ── Step 2: Ask Gemini to identify job posting URLs ──
+async def llm_identify_job_links(
+    candidates: list[dict],
+    search_keyword: str,
+    target_hostname: str,
+) -> list[str]:
+    """
+    Use Gemini Pro to identify which URLs are individual job posting pages.
+    Returns list of job posting URLs.
+    """
+    if not candidates:
+        return []
+
+    # Build compact link list for LLM
+    link_list = "\n".join(
+        f"{i+1}. URL: {c['url']}  |  Text: {c['text']}"
+        for i, c in enumerate(candidates[:60])  # Max 60 links to keep prompt small
+    )
+
+    prompt = f"""You are analyzing a job search results page from {target_hostname}.
+The user searched for: "{search_keyword}"
+
+Below is a list of links found on the page. Your task is to identify which URLs are links to INDIVIDUAL JOB POSTING pages (where you can read a single job description).
+
+RULES:
+- ONLY select URLs that lead to a SINGLE job posting detail page
+- DO NOT select: search result pages, category pages, company profile pages, blog posts, login pages, homepage
+- Look at both the URL pattern and the link text to determine if it's a job posting
+- A job posting URL typically contains: a job title slug, a numeric ID, or a path like /job/, /viec-lam/, etc.
+- Company pages (e.g. /cong-ty/, /company/) are NOT job postings
+- Search pages (e.g. /tim-viec-lam-*, /search?) are NOT job postings
+
+LINKS:
+{link_list}
+
+Return a JSON array of the URLs that are individual job postings. Return ONLY the JSON array, nothing else.
+Example: ["https://example.com/job/123", "https://example.com/viec-lam/title-456"]
+If no job posting URLs found, return: []"""
+
+    try:
+        client = _get_gemini()
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=prompt,
+        )
+
+        text = response.text.strip()
+        logger.info(f"[llm_identify_jobs] Raw LLM response: {text[:500]}")
+
+        # Parse JSON from response (handle markdown code blocks)
+        if text.startswith("```"):
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+            text = text.strip()
+
+        job_urls = json.loads(text)
+
+        if not isinstance(job_urls, list):
+            logger.warning(f"[llm_identify_jobs] LLM returned non-list: {type(job_urls)}")
+            return []
+
+        # Validate URLs exist in candidates
+        candidate_urls = {c["url"] for c in candidates}
+        validated = [u for u in job_urls if isinstance(u, str) and u in candidate_urls]
+
+        logger.info(f"[llm_identify_jobs] LLM identified {len(validated)} job URLs from {len(candidates)} candidates")
+        return validated[:20]
+
+    except Exception as e:
+        logger.error(f"[llm_identify_jobs] LLM error: {e}")
+        return []
+
+
+# ── Main endpoint ──
 @router.post("/smart-search", response_model=SmartCrawlResponse)
 async def smart_crawl(req: SmartCrawlRequest):
     """
-    Crawl a job search results page (with Playwright fallback) and extract job links.
-    Then crawl a random job page and return its content.
+    1. Crawl search page (HTTP → Playwright fallback)
+    2. Extract candidate links
+    3. Ask Gemini to identify job posting URLs
+    4. Pick random job, crawl it, return cleaned text
     """
     search_url = req.search_url or req.url
     if not search_url:
         raise HTTPException(status_code=400, detail="url or search_url is required")
 
-    from urllib.parse import urlparse
     target_hostname = urlparse(req.url).hostname or ""
-
     debug_info = {
         "search_url": search_url,
         "target_hostname": target_hostname,
     }
 
-    # Step 1: Crawl the search results page
+    # ── Step 1: Crawl the search results page ──
     method = "http"
     http_ok, http_data = try_http_fetch(search_url)
     raw_html = ""
@@ -189,28 +233,40 @@ async def smart_crawl(req: SmartCrawlRequest):
 
     debug_info["search_page_html_length"] = len(raw_html)
     debug_info["method"] = method
-    debug_info["html_sample"] = raw_html[:2000]  # First 2000 chars for debug
-
     logger.info(f"[smart_crawl] Crawled {search_url} with {method}, got {len(raw_html)} chars")
 
-    # Step 2: Extract job links from the HTML
-    job_links = extract_job_links_from_html(raw_html, target_hostname)
+    # ── Step 2: Extract candidate links ──
+    candidates = extract_candidate_links(raw_html, target_hostname)
+    debug_info["candidate_links_count"] = len(candidates)
+    debug_info["candidate_sample"] = candidates[:5]
+
+    if not candidates:
+        return SmartCrawlResponse(
+            success=False,
+            method=method,
+            debug={**debug_info, "error": "No links found on search page"}
+        )
+
+    # ── Step 3: LLM identifies job posting URLs ──
+    job_links = await llm_identify_job_links(candidates, req.search_keyword, target_hostname)
     debug_info["job_links_found"] = len(job_links)
     debug_info["job_links"] = job_links[:10]
 
     if not job_links:
+        # Fallback: if LLM finds nothing, return candidates for debugging
+        debug_info["fallback"] = "LLM found no jobs, returning candidate sample"
         return SmartCrawlResponse(
             success=False,
             all_job_urls=[],
             method=method,
-            debug={**debug_info, "error": "No job links found on search page"}
+            debug=debug_info,
         )
 
-    # Step 3: Pick a random job
+    # ── Step 4: Pick a random job ──
     selected_url = random.choice(job_links[:10])
     debug_info["selected_job_url"] = selected_url
 
-    # Step 4: Crawl the selected job page
+    # ── Step 5: Crawl the selected job page ──
     job_html = ""
     http_ok2, http_data2 = try_http_fetch(selected_url)
     if http_ok2:
@@ -233,7 +289,7 @@ async def smart_crawl(req: SmartCrawlRequest):
             debug={**debug_info, "error": "Could not fetch the selected job page"}
         )
 
-    # Step 5: Clean the job page HTML
+    # ── Step 6: Clean and return ──
     cleaned_text = clean_html(job_html)
     debug_info["job_page_text_length"] = len(cleaned_text)
 
