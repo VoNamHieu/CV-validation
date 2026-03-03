@@ -9,3 +9,4 @@ google-genai
 requests
 beautifulsoup4
 playwright
+python-multipart
