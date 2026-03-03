@@ -65,26 +65,57 @@ export default function StepInputUrl() {
 
             // ─── Phase 2: Crawl the search results page ───
             setPhase('searching');
-            setPhaseDetail(`Searching on ${getHostname(trimmed)}...`);
+            const hostname = getHostname(trimmed);
+            setPhaseDetail(`Searching on ${hostname}...`);
             console.log('[StepInputUrl] Phase 2: crawling search URL:', searchResult.search_url);
-            const searchPage = await crawlUrl(searchResult.search_url, true);
+            let searchPage = await crawlUrl(searchResult.search_url, true);
             console.log('[StepInputUrl] Phase 2 result: text length=', searchPage.text?.length, 'textWithLinks length=', searchPage.textWithLinks?.length);
 
-            if (!searchPage.textWithLinks || searchPage.textWithLinks.length < 100) {
-                console.log('[StepInputUrl] Phase 2 FAILED: textWithLinks too short');
-                throw new Error(`Could not load search results from ${getHostname(trimmed)}. The site may block automated access.`);
+            // ─── SPA Fallback: If too little content, use Google Search as proxy ───
+            const MIN_CONTENT_LENGTH = 2000;
+            const isSPA = !searchPage.textWithLinks || searchPage.textWithLinks.length < MIN_CONTENT_LENGTH;
+
+            if (isSPA) {
+                console.log('[StepInputUrl] Phase 2: SPA detected! textWithLinks only', searchPage.textWithLinks?.length, 'chars. Falling back to Google Search...');
+                setPhaseDetail(`Site uses JavaScript rendering — switching to Google Search...`);
+
+                // Build a Google search query to find job pages on the target site
+                const googleQuery = encodeURIComponent(
+                    `site:${hostname} ${searchResult.inferred_job_title} job`
+                );
+                const googleUrl = `https://www.google.com/search?q=${googleQuery}&num=15`;
+                console.log('[StepInputUrl] Phase 2 fallback: Google URL:', googleUrl);
+
+                searchPage = await crawlUrl(googleUrl, true);
+                console.log('[StepInputUrl] Phase 2 fallback result: text length=', searchPage.text?.length, 'textWithLinks length=', searchPage.textWithLinks?.length);
+
+                if (!searchPage.textWithLinks || searchPage.textWithLinks.length < 200) {
+                    throw new Error(`Could not find jobs on ${hostname}. Google search also returned no results. Try a different keyword or site.`);
+                }
             }
 
             // ─── Phase 3: AI Extract job links from search results ───
             setPhase('extracting_links');
-            setPhaseDetail('AI is finding job listings on the page...');
-            console.log('[StepInputUrl] Phase 3: extractJobLinks, textWithLinks sample:', searchPage.textWithLinks.slice(0, 500));
-            const linksResult = await extractJobLinks(searchPage.textWithLinks, trimmed);
+            setPhaseDetail(isSPA ? 'Extracting job links from Google results...' : 'AI is finding job listings on the page...');
+            console.log('[StepInputUrl] Phase 3: extractJobLinks, textWithLinks sample:', searchPage.textWithLinks!.slice(0, 500));
+            const linksResult = await extractJobLinks(searchPage.textWithLinks!, isSPA ? `google.com (target: ${hostname})` : trimmed);
             console.log('[StepInputUrl] Phase 3 result:', linksResult);
+
+            // If we used Google fallback, filter links to only include the target hostname
+            if (isSPA && linksResult.job_urls) {
+                linksResult.job_urls = linksResult.job_urls.filter((u: string) => {
+                    try {
+                        return new URL(u).hostname.includes(hostname.replace('www.', ''));
+                    } catch { return false; }
+                });
+                linksResult.found = linksResult.job_urls.length > 0;
+                linksResult.total_found = linksResult.job_urls.length;
+                console.log('[StepInputUrl] Phase 3: after filtering for', hostname, '→', linksResult.job_urls.length, 'links');
+            }
 
             if (!linksResult.found || !linksResult.job_urls || linksResult.job_urls.length === 0) {
                 console.log('[StepInputUrl] Phase 3 FAILED: no job links found');
-                throw new Error(`No job listings found on ${getHostname(trimmed)}. Try a different job site.`);
+                throw new Error(`No job listings found on ${hostname}. Try a different job site or keyword.`);
             }
 
             // Pick a random job
