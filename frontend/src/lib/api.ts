@@ -71,16 +71,43 @@ export async function optimizeCv(cv: unknown, jd: unknown, match: unknown) {
     return res.json();
 }
 
-export async function crawlUrl(url: string): Promise<string> {
+export async function crawlUrl(url: string, keepLinks = false): Promise<{ text: string; textWithLinks?: string }> {
     const res = await fetch('/api/crawl-url', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({ url, keepLinks }),
     });
     if (!res.ok) {
         const err = await res.json();
         throw new Error(err.detail || 'Failed to crawl URL');
     }
-    const data = await res.json();
-    return data.text;
+    return res.json();
+}
+
+// ── Smart Search: AI infers job title from CV + generates search URL ──
+export async function smartSearch(cv: unknown, siteUrl: string) {
+    const res = await fetch('/api/ai/smart-search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cv, siteUrl }),
+    });
+    if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || 'Failed to generate search');
+    }
+    return res.json();
+}
+
+// ── Extract job links from search results page ──
+export async function extractJobLinks(htmlText: string, siteUrl: string) {
+    const res = await fetch('/api/ai/extract-job-links', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ html_text: htmlText, site_url: siteUrl }),
+    });
+    if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || 'Failed to extract job links');
+    }
+    return res.json();
 }

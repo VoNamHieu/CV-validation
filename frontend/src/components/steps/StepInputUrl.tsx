@@ -1,20 +1,36 @@
 'use client';
 
 import { useState } from 'react';
-import { ArrowLeft, Globe, Loader2, Search, AlertCircle, Sparkles } from 'lucide-react';
+import { ArrowLeft, Globe, Loader2, Search, Sparkles, Brain, Link2, Target, BarChart3, Wand2 } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
-import { crawlUrl, extractJdStructured, scoreFit } from '@/lib/api';
+import { smartSearch, crawlUrl, extractJobLinks, extractJdStructured, scoreFit } from '@/lib/api';
+
+type Phase = 'idle' | 'analyzing_cv' | 'searching' | 'extracting_links' | 'crawling_job' | 'detecting_jd' | 'scoring';
+
+const PHASE_CONFIG: Record<Exclude<Phase, 'idle'>, { label: string; icon: typeof Brain }> = {
+    analyzing_cv: { label: 'AI analyzing your CV...', icon: Brain },
+    searching: { label: 'Searching jobs on the site...', icon: Search },
+    extracting_links: { label: 'Finding job listings...', icon: Link2 },
+    crawling_job: { label: 'Fetching job page...', icon: Globe },
+    detecting_jd: { label: 'AI extracting job description...', icon: Target },
+    scoring: { label: 'Calculating match score...', icon: BarChart3 },
+};
+
+const PHASE_ORDER: Exclude<Phase, 'idle'>[] = [
+    'analyzing_cv', 'searching', 'extracting_links', 'crawling_job', 'detecting_jd', 'scoring',
+];
 
 export default function StepInputUrl() {
     const {
-        setStep, cvData, setJdData, setMatchResult, setLoading,
+        setStep, cvData, setJdData, setMatchResult,
         clearJdEntries, addJdEntry, setOptimizedCv,
     } = useAppStore();
 
     const [url, setUrl] = useState('');
     const [error, setError] = useState('');
-    const [status, setStatus] = useState<'idle' | 'crawling' | 'detecting' | 'scoring'>('idle');
-    const [statusMessage, setStatusMessage] = useState('');
+    const [phase, setPhase] = useState<Phase>('idle');
+    const [phaseDetail, setPhaseDetail] = useState('');
+    const [inferredTitle, setInferredTitle] = useState('');
 
     const isValidUrl = (u: string) => {
         try {
@@ -27,85 +43,125 @@ export default function StepInputUrl() {
         try { return new URL(u).hostname; } catch { return u; }
     };
 
-    const handleAnalyze = async () => {
+    const handleSmartAnalyze = async () => {
         const trimmed = url.trim();
-        if (!trimmed) { setError('Please enter a URL.'); return; }
-        if (!isValidUrl(trimmed)) { setError('Please enter a valid URL starting with http:// or https://'); return; }
+        if (!trimmed) { setError('Please enter a job site URL.'); return; }
+        if (!isValidUrl(trimmed)) { setError('Please enter a valid URL (http:// or https://)'); return; }
         if (!cvData) { setError('Please upload your CV first.'); return; }
 
         setError('');
         setOptimizedCv(null);
+        setInferredTitle('');
 
         try {
-            // Step 1: Crawl
-            setStatus('crawling');
-            setStatusMessage('Fetching website content...');
-            const rawText = await crawlUrl(trimmed);
+            // ─── Phase 1: AI Analyze CV → infer job title + search URL ───
+            setPhase('analyzing_cv');
+            setPhaseDetail('Reading your CV to understand what job you want...');
+            const searchResult = await smartSearch(cvData, trimmed);
+            setInferredTitle(searchResult.inferred_job_title);
+            setPhaseDetail(`Looking for: "${searchResult.inferred_job_title}"`);
 
-            if (!rawText || rawText.length < 50) {
-                throw new Error('Could not extract enough content from this URL. Try a different page.');
+            // ─── Phase 2: Crawl the search results page ───
+            setPhase('searching');
+            setPhaseDetail(`Searching on ${getHostname(trimmed)}...`);
+            const searchPage = await crawlUrl(searchResult.search_url, true);
+
+            if (!searchPage.textWithLinks || searchPage.textWithLinks.length < 100) {
+                throw new Error(`Could not load search results from ${getHostname(trimmed)}. The site may block automated access.`);
             }
 
-            // Step 2: AI Detect JD
-            setStatus('detecting');
-            setStatusMessage('AI is detecting job description...');
-            const jdData = await extractJdStructured(rawText);
+            // ─── Phase 3: AI Extract job links from search results ───
+            setPhase('extracting_links');
+            setPhaseDetail('AI is finding job listings on the page...');
+            const linksResult = await extractJobLinks(searchPage.textWithLinks, trimmed);
+
+            if (!linksResult.found || !linksResult.job_urls || linksResult.job_urls.length === 0) {
+                throw new Error(`No job listings found on ${getHostname(trimmed)}. Try a different job site.`);
+            }
+
+            // Pick a random job
+            const randomIdx = Math.floor(Math.random() * Math.min(linksResult.job_urls.length, 10));
+            const selectedJobUrl = linksResult.job_urls[randomIdx];
+            setPhaseDetail(`Found ${linksResult.total_found} jobs → selected #${randomIdx + 1}`);
+
+            // ─── Phase 4: Crawl the selected job page ───
+            setPhase('crawling_job');
+            setPhaseDetail(`Fetching: ${selectedJobUrl.slice(0, 60)}...`);
+            const jobPage = await crawlUrl(selectedJobUrl);
+
+            if (!jobPage.text || jobPage.text.length < 100) {
+                throw new Error('Could not load the job page. Try again.');
+            }
+
+            // ─── Phase 5: AI extract JD from the job page ───
+            setPhase('detecting_jd');
+            setPhaseDetail('AI is analyzing the job description...');
+            const jdData = await extractJdStructured(jobPage.text);
             setJdData(jdData);
 
-            // Step 3: Score Match
-            setStatus('scoring');
-            setStatusMessage('Calculating match score...');
+            // ─── Phase 6: Score match ───
+            setPhase('scoring');
+            setPhaseDetail('Calculating how well your CV matches...');
             const matchResult = await scoreFit(cvData, jdData);
             setMatchResult(matchResult);
 
-            // Store as entry for report
+            // Store entry for report
             clearJdEntries();
             addJdEntry({
-                id: `jd-url-${Date.now()}`,
-                source: trimmed,
-                label: getHostname(trimmed),
+                id: `jd-smart-${Date.now()}`,
+                source: selectedJobUrl,
+                label: getHostname(selectedJobUrl),
                 status: 'done',
                 jdData,
                 matchResult,
             });
 
-            setStatus('idle');
+            setPhase('idle');
             setStep(3);
         } catch (e: unknown) {
             const msg = e instanceof Error ? e.message : 'Analysis failed';
             setError(msg);
-            setStatus('idle');
-            setStatusMessage('');
+            setPhase('idle');
+            setPhaseDetail('');
         }
     };
 
-    const isProcessing = status !== 'idle';
+    const isProcessing = phase !== 'idle';
+    const currentPhaseIdx = PHASE_ORDER.indexOf(phase as Exclude<Phase, 'idle'>);
 
     return (
-        <div className="animate-fade-in" style={{ maxWidth: 640, margin: '0 auto', padding: '40px 20px' }}>
+        <div className="animate-fade-in" style={{ maxWidth: 660, margin: '0 auto', padding: '40px 20px' }}>
             <h2 style={{ fontSize: '1.6rem', fontWeight: 700, marginBottom: 8 }}>
-                <Globe size={22} style={{ display: 'inline', marginRight: 8, color: 'var(--accent-cyan)' }} />
-                Input Job Page URL
+                <Wand2 size={22} style={{ display: 'inline', marginRight: 8, color: 'var(--accent-purple)' }} />
+                Smart Job Finder
             </h2>
-            <p style={{ color: 'var(--text-secondary)', marginBottom: 32, fontSize: '0.95rem' }}>
-                Paste a link to any job posting page. Our AI will automatically crawl the page, detect the job description, and analyze the match with your CV.
+            <p style={{ color: 'var(--text-secondary)', marginBottom: 32, fontSize: '0.95rem', lineHeight: 1.6 }}>
+                Paste any job site URL (e.g. <span style={{ color: 'var(--accent-cyan)' }}>vietnamworks.com</span>,{' '}
+                <span style={{ color: 'var(--accent-cyan)' }}>topcv.vn</span>,{' '}
+                <span style={{ color: 'var(--accent-cyan)' }}>indeed.com</span>).
+                AI will read your CV, search for matching jobs, pick one, and analyze the fit.
             </p>
 
-            {/* Info note */}
-            <div style={{
-                background: 'rgba(59, 130, 246, 0.06)',
-                border: '1px solid rgba(59, 130, 246, 0.2)',
-                borderRadius: 'var(--radius-md)',
-                padding: '12px 16px',
-                marginBottom: 24,
-                fontSize: '0.82rem',
-                color: 'var(--accent-blue)',
-                display: 'flex',
-                alignItems: 'flex-start',
-                gap: 8,
+            {/* How it works */}
+            <div className="glass-card" style={{
+                padding: '16px 20px', marginBottom: 24,
+                background: 'linear-gradient(135deg, rgba(139,92,246,0.05), rgba(59,130,246,0.04))',
             }}>
-                <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
-                <span>Works best with static job pages (LinkedIn, Indeed, Glassdoor, company career pages). One URL per analysis.</span>
+                <p style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    How it works
+                </p>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {['CV → AI infers role', 'Search jobs on site', 'Pick a random job', 'Extract JD', 'Score match'].map((step, i) => (
+                        <span key={i} style={{
+                            fontSize: '0.75rem', padding: '3px 10px', borderRadius: 20,
+                            background: 'var(--bg-secondary)', color: 'var(--text-secondary)',
+                            display: 'flex', alignItems: 'center', gap: 4,
+                        }}>
+                            {i > 0 && <span style={{ color: 'var(--accent-blue)' }}>→</span>}
+                            {step}
+                        </span>
+                    ))}
+                </div>
             </div>
 
             {/* URL Input */}
@@ -114,15 +170,15 @@ export default function StepInputUrl() {
                     position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)',
                     color: 'var(--text-muted)', pointerEvents: 'none',
                 }}>
-                    <Search size={18} />
+                    <Globe size={18} />
                 </div>
                 <input
                     className="input-field"
                     type="url"
-                    placeholder="https://example.com/jobs/software-engineer"
+                    placeholder="https://www.vietnamworks.com/"
                     value={url}
                     onChange={(e) => { setUrl(e.target.value); setError(''); }}
-                    onKeyDown={(e) => { if (e.key === 'Enter' && !isProcessing) handleAnalyze(); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && !isProcessing) handleSmartAnalyze(); }}
                     disabled={isProcessing}
                     style={{
                         paddingLeft: 42,
@@ -133,65 +189,77 @@ export default function StepInputUrl() {
                 />
             </div>
 
-            {/* Processing Status */}
+            {/* Inferred title badge */}
+            {inferredTitle && isProcessing && (
+                <div style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    padding: '6px 14px', borderRadius: 20, marginBottom: 12,
+                    background: 'rgba(139,92,246,0.1)', border: '1px solid rgba(139,92,246,0.25)',
+                    fontSize: '0.82rem', color: 'var(--accent-purple)', fontWeight: 500,
+                }}>
+                    <Brain size={13} /> AI detected: {inferredTitle}
+                </div>
+            )}
+
+            {/* Processing Pipeline */}
             {isProcessing && (
                 <div className="glass-card" style={{
-                    padding: '20px 24px',
-                    marginBottom: 16,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 16,
+                    padding: '20px 24px', marginBottom: 16,
+                    display: 'flex', flexDirection: 'column', gap: 14,
                 }}>
-                    {/* Progress Steps */}
-                    {(['crawling', 'detecting', 'scoring'] as const).map((step, i) => {
-                        const labels = {
-                            crawling: 'Fetching website content',
-                            detecting: 'AI detecting job description',
-                            scoring: 'Calculating match score',
-                        };
-                        const stepOrder = ['crawling', 'detecting', 'scoring'];
-                        const currentIdx = stepOrder.indexOf(status);
-                        const stepIdx = i;
-                        const isDone = stepIdx < currentIdx;
-                        const isActive = stepIdx === currentIdx;
+                    {PHASE_ORDER.map((p, i) => {
+                        const config = PHASE_CONFIG[p];
+                        const isDone = i < currentPhaseIdx;
+                        const isActive = i === currentPhaseIdx;
+                        const Icon = config.icon;
 
                         return (
-                            <div key={step} style={{
+                            <div key={p} style={{
                                 display: 'flex', alignItems: 'center', gap: 12,
-                                opacity: stepIdx > currentIdx ? 0.35 : 1,
+                                opacity: i > currentPhaseIdx ? 0.3 : 1,
+                                transition: 'opacity 0.3s',
                             }}>
                                 {isDone ? (
                                     <div style={{
-                                        width: 28, height: 28, borderRadius: '50%',
+                                        width: 30, height: 30, borderRadius: '50%',
                                         background: 'var(--accent-green)', display: 'flex',
                                         alignItems: 'center', justifyContent: 'center',
+                                        transition: 'all 0.3s',
                                     }}>
-                                        <span style={{ color: 'white', fontSize: '0.75rem', fontWeight: 700 }}>✓</span>
+                                        <span style={{ color: 'white', fontSize: '0.8rem', fontWeight: 700 }}>✓</span>
                                     </div>
                                 ) : isActive ? (
                                     <div style={{
-                                        width: 28, height: 28, borderRadius: '50%',
+                                        width: 30, height: 30, borderRadius: '50%',
                                         background: 'var(--accent-blue)', display: 'flex',
                                         alignItems: 'center', justifyContent: 'center',
+                                        boxShadow: '0 0 12px var(--accent-blue-glow)',
                                     }}>
                                         <Loader2 size={14} style={{ color: 'white', animation: 'spin 1s linear infinite' }} />
                                     </div>
                                 ) : (
                                     <div style={{
-                                        width: 28, height: 28, borderRadius: '50%',
+                                        width: 30, height: 30, borderRadius: '50%',
                                         background: 'var(--bg-secondary)', border: '2px solid var(--border-subtle)',
                                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                                     }}>
-                                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{i + 1}</span>
+                                        <Icon size={13} style={{ color: 'var(--text-muted)' }} />
                                     </div>
                                 )}
-                                <span style={{
-                                    fontSize: '0.88rem',
-                                    fontWeight: isActive ? 600 : 400,
-                                    color: isActive ? 'var(--text-primary)' : isDone ? 'var(--accent-green)' : 'var(--text-muted)',
-                                }}>
-                                    {labels[step]}
-                                </span>
+                                <div style={{ flex: 1 }}>
+                                    <span style={{
+                                        fontSize: '0.85rem',
+                                        fontWeight: isActive ? 600 : 400,
+                                        color: isActive ? 'var(--text-primary)' : isDone ? 'var(--accent-green)' : 'var(--text-muted)',
+                                    }}>
+                                        {config.label}
+                                    </span>
+                                    {isActive && phaseDetail && (
+                                        <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>
+                                            {phaseDetail}
+                                        </p>
+                                    )}
+                                </div>
                             </div>
                         );
                     })}
@@ -209,6 +277,7 @@ export default function StepInputUrl() {
                     marginBottom: 16,
                     fontSize: '0.85rem',
                     color: 'var(--accent-red)',
+                    lineHeight: 1.5,
                 }}>
                     {error}
                 </div>
@@ -222,18 +291,18 @@ export default function StepInputUrl() {
                 </button>
                 <button
                     className="btn-primary"
-                    onClick={handleAnalyze}
+                    onClick={handleSmartAnalyze}
                     disabled={isProcessing || !url.trim()}
-                    style={{ display: 'flex', alignItems: 'center', gap: 8 }}
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.95rem' }}
                 >
                     {isProcessing ? (
                         <>
                             <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
-                            {statusMessage}
+                            Processing...
                         </>
                     ) : (
                         <>
-                            <Sparkles size={16} /> Analyze Match
+                            <Sparkles size={16} /> Find & Analyze Job
                         </>
                     )}
                 </button>
