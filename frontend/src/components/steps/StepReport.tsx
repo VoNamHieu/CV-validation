@@ -4,7 +4,8 @@ import { useState } from 'react';
 import {
     ArrowLeft, Sparkles, ExternalLink, Trophy, AlertTriangle,
     CheckCircle2, XCircle, ChevronDown, ChevronUp, Download,
-    RotateCcw, Loader2, Zap,
+    RotateCcw, Loader2, Zap, Crosshair, TrendingUp, ThumbsUp,
+    XOctagon, ShieldAlert, BarChart3,
 } from 'lucide-react';
 import { useAppStore, MatchResult, CategoryScore, CVData, JDData } from '@/store/useAppStore';
 import ScoreRing from '@/components/ScoreRing';
@@ -72,11 +73,11 @@ function CategorySection({ title, data, accentColor }: { title: string; data: Ca
 
 /* ─── Score verdict label ─── */
 function getVerdict(score: number) {
-    if (score >= 85) return { text: 'Excellent Match', emoji: '🎯', color: 'var(--accent-green)' };
-    if (score >= 70) return { text: 'Strong Match', emoji: '💪', color: 'var(--accent-green)' };
-    if (score >= 55) return { text: 'Moderate Match', emoji: '👍', color: 'var(--accent-cyan)' };
-    if (score >= 40) return { text: 'Weak Match', emoji: '⚠️', color: 'var(--accent-amber)' };
-    return { text: 'Poor Match', emoji: '❌', color: 'var(--accent-red)' };
+    if (score >= 85) return { text: 'Excellent Match', icon: Crosshair, color: 'var(--accent-green)' };
+    if (score >= 70) return { text: 'Strong Match', icon: TrendingUp, color: 'var(--accent-green)' };
+    if (score >= 55) return { text: 'Moderate Match', icon: ThumbsUp, color: 'var(--accent-cyan)' };
+    if (score >= 40) return { text: 'Weak Match', icon: AlertTriangle, color: 'var(--accent-amber)' };
+    return { text: 'Poor Match', icon: XOctagon, color: 'var(--accent-red)' };
 }
 
 function getColor(score: number) {
@@ -269,12 +270,17 @@ export default function StepReport() {
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 32, flexWrap: 'wrap' }}>
                     <ScoreRing score={m.overall_score} size={140} label="Overall Fit" />
                     <div style={{ textAlign: 'left', maxWidth: 500 }}>
-                        <p style={{
-                            fontSize: '1.8rem', fontWeight: 800, marginBottom: 4,
-                            background: 'var(--gradient-hero)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+                        <div style={{
+                            display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4,
                         }}>
-                            {verdict.emoji} {verdict.text}
-                        </p>
+                            <verdict.icon size={24} style={{ color: verdict.color, flexShrink: 0 }} />
+                            <span style={{
+                                fontSize: '1.8rem', fontWeight: 800,
+                                background: 'var(--gradient-hero)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+                            }}>
+                                {verdict.text}
+                            </span>
+                        </div>
                         {entry?.source.startsWith('http') && (
                             <a href={entry.source} target="_blank" rel="noopener noreferrer"
                                 style={{ fontSize: '0.82rem', color: 'var(--accent-blue)', display: 'flex', alignItems: 'center', gap: 4, marginBottom: 8 }}>
@@ -403,8 +409,8 @@ export default function StepReport() {
                     {/* Risk Flags */}
                     {(m.risk_flags || []).length > 0 && (
                         <div>
-                            <p style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--accent-red)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                                ⚠️ Risk Flags
+                            <p style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--accent-red)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <ShieldAlert size={14} /> Risk Flags
                             </p>
                             {(m.risk_flags || []).map((flag, i) => (
                                 <div key={i} style={{
@@ -425,7 +431,7 @@ export default function StepReport() {
             {/* ── DETAILED BREAKDOWN ── */}
             <div className="glass-card" style={{ padding: '24px', marginBottom: 28 }}>
                 <h3 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-                    📊 Detailed Scoring Breakdown
+                    <BarChart3 size={16} style={{ color: 'var(--accent-blue)' }} /> Detailed Scoring Breakdown
                 </h3>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                     <CategorySection title="Must-Have Skills (40%)" data={m.must_have_match} accentColor={getColor(m.must_have_match.score)} />
@@ -496,8 +502,9 @@ export default function StepReport() {
                         fontSize: '0.82rem',
                         color: 'var(--accent-amber)',
                         textAlign: 'center',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
                     }}>
-                        ⚠️ AI-assisted optimization · Only information from the original CV was used
+                        <AlertTriangle size={14} /> AI-assisted optimization · Only information from the original CV was used
                     </div>
 
                     {optimizedCv ? (

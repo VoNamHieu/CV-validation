@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useAppStore, JobRecord } from '@/store/useAppStore';
 import {
     Table2, ExternalLink, Trash2, ChevronDown, ChevronUp,
-    Trophy, Target, TrendingUp, AlertTriangle, Clock, Globe
+    Trophy, Target, TrendingUp, AlertTriangle, Clock, Globe, Sparkles
 } from 'lucide-react';
 
 function ScoreBadge({ score }: { score: number }) {
@@ -76,8 +76,8 @@ function ExpandedRow({ record }: { record: JobRecord }) {
 
             {/* Strengths */}
             {match.strength_summary && (
-                <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0 }}>
-                    <strong style={{ color: 'var(--accent-green)' }}>✦ </strong>
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0, display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+                    <Sparkles size={13} style={{ color: 'var(--accent-green)', marginTop: 3, flexShrink: 0 }} />
                     {match.strength_summary}
                 </p>
             )}

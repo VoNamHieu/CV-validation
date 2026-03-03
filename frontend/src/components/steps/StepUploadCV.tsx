@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useRef, useState } from 'react';
-import { Upload, FileText, X, Loader2, Brain, CheckCircle2, Sparkles, ArrowRight } from 'lucide-react';
+import { Upload, FileText, X, Loader2, Brain, CheckCircle2, Sparkles, ArrowRight, AlertTriangle } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
 import { parsePdfWithAI } from '@/lib/api';
 
@@ -216,6 +216,7 @@ export default function StepUploadCV() {
                             </p>
                         </div>
                         <button
+                            aria-label="Remove uploaded CV"
                             onClick={() => { setUploaded(false); setCvRawText('', ''); }}
                             style={{
                                 background: 'var(--bg-secondary)', border: '1px solid var(--border-default)',
@@ -245,7 +246,7 @@ export default function StepUploadCV() {
                         color: 'var(--accent-red)',
                         display: 'flex', alignItems: 'center', gap: 8,
                     }}>
-                        <span>⚠</span> {error}
+                        <AlertTriangle size={14} style={{ flexShrink: 0 }} /> {error}
                     </div>
                 )
             }
