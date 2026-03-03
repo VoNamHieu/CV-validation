@@ -54,6 +54,19 @@ export interface MatchResult {
   risk_flags: string[];
 }
 
+// ── Job History Board ──
+export interface JobRecord {
+  id: string;
+  jobTitle: string;
+  company: string;
+  jobUrl: string;
+  siteName: string;
+  overallScore: number;
+  timestamp: number;
+  jdData?: JDData;
+  matchResult?: MatchResult;
+}
+
 // ── Multi-JD Ranking ──
 export type JDEntryStatus = 'pending' | 'crawling' | 'parsing' | 'scoring' | 'done' | 'error';
 
@@ -95,6 +108,11 @@ interface AppState {
   optimizedCv: CVData | null;
   setOptimizedCv: (data: CVData | null) => void;
 
+  // Job History Board
+  jobHistory: JobRecord[];
+  addJobRecord: (record: JobRecord) => void;
+  clearJobHistory: () => void;
+
   // Multi-JD Ranking
   jdEntries: JDEntry[];
   addJdEntry: (entry: JDEntry) => void;
@@ -122,6 +140,7 @@ const initialState = {
   jdData: null,
   matchResult: null,
   optimizedCv: null,
+  jobHistory: [] as JobRecord[],
   jdEntries: [] as JDEntry[],
   selectedJdId: null as string | null,
   isLoading: false,
@@ -143,6 +162,10 @@ export const useAppStore = create<AppState>()(
 
       setMatchResult: (result) => set({ matchResult: result }),
       setOptimizedCv: (data) => set({ optimizedCv: data }),
+
+      // Job History
+      addJobRecord: (record) => set((s) => ({ jobHistory: [record, ...s.jobHistory] })),
+      clearJobHistory: () => set({ jobHistory: [] }),
 
       // Multi-JD
       addJdEntry: (entry) => set((s) => ({ jdEntries: [...s.jdEntries, entry] })),

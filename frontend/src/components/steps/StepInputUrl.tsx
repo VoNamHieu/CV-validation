@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { ArrowLeft, Globe, Loader2, Search, Sparkles, Brain, Link2, Target, BarChart3, Wand2 } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
 import { smartSearch, crawlUrl, extractJdStructured, scoreFit, smartCrawl } from '@/lib/api';
+import JobBoard from '@/components/JobBoard';
 
 type Phase = 'idle' | 'analyzing_cv' | 'searching' | 'extracting_links' | 'crawling_job' | 'detecting_jd' | 'scoring';
 
@@ -23,7 +24,7 @@ const PHASE_ORDER: Exclude<Phase, 'idle'>[] = [
 export default function StepInputUrl() {
     const {
         setStep, cvData, setJdData, setMatchResult,
-        clearJdEntries, addJdEntry, setOptimizedCv,
+        clearJdEntries, addJdEntry, setOptimizedCv, addJobRecord,
     } = useAppStore();
 
     const [url, setUrl] = useState('');
@@ -150,6 +151,19 @@ export default function StepInputUrl() {
                 source: selectedJobUrl,
                 label: getHostname(selectedJobUrl),
                 status: 'done',
+                jdData,
+                matchResult,
+            });
+
+            // Save to job history board
+            addJobRecord({
+                id: `job-${Date.now()}`,
+                jobTitle: jdData?.domain ? `${searchResult.inferred_job_title}` : searchResult.inferred_job_title,
+                company: '',
+                jobUrl: selectedJobUrl,
+                siteName: getHostname(trimmed),
+                overallScore: matchResult.overall_score,
+                timestamp: Date.now(),
                 jdData,
                 matchResult,
             });
@@ -345,6 +359,9 @@ export default function StepInputUrl() {
                     )}
                 </button>
             </div>
+
+            {/* Job History Board */}
+            <JobBoard />
         </div>
     );
 }
