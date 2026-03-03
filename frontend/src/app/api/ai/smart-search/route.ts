@@ -51,8 +51,11 @@ TARGET JOB SITE URL: ${siteUrl}
 
 Generate the most relevant job search URL for this candidate on this site.`;
 
+        console.log('[smart-search] Site URL:', siteUrl);
         const result = await callGemini(systemPrompt, userPrompt);
+        console.log('[smart-search] Raw AI response:', result);
         const parsed = JSON.parse(result);
+        console.log('[smart-search] Parsed result:', JSON.stringify(parsed, null, 2));
 
         return NextResponse.json(parsed);
     } catch (e: unknown) {

@@ -40,8 +40,13 @@ SITE: ${site_url || "unknown"}
 PAGE CONTENT:
 ${html_text.slice(0, 20000)}`;
 
+        console.log('[extract-job-links] Input text length:', html_text.length, '| Site:', site_url);
+        console.log('[extract-job-links] Input sample (first 1000 chars):', html_text.slice(0, 1000));
+
         const result = await callGemini(systemPrompt, userPrompt);
+        console.log('[extract-job-links] Raw AI response:', result);
         const parsed = JSON.parse(result);
+        console.log('[extract-job-links] Parsed:', JSON.stringify(parsed, null, 2));
 
         return NextResponse.json(parsed);
     } catch (e: unknown) {

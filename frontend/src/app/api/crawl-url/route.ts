@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from "next/server";
 export async function POST(request: NextRequest) {
     try {
         const { url, keepLinks } = await request.json();
+        console.log('[crawl-url] Fetching:', url, '| keepLinks:', keepLinks);
 
         if (!url) {
             return NextResponse.json(
@@ -25,7 +26,9 @@ export async function POST(request: NextRequest) {
             signal: AbortSignal.timeout(15000),
         });
 
+        console.log('[crawl-url] HTTP status:', response.status, '| Content-Type:', response.headers.get('content-type'));
         if (!response.ok) {
+            console.log('[crawl-url] FAILED with status:', response.status);
             return NextResponse.json(
                 { detail: `Failed to fetch URL: ${response.status}` },
                 { status: 400 }
@@ -33,6 +36,7 @@ export async function POST(request: NextRequest) {
         }
 
         const html = await response.text();
+        console.log('[crawl-url] Raw HTML length:', html.length);
 
         // Standard text extraction (no links)
         const text = html
@@ -72,7 +76,14 @@ export async function POST(request: NextRequest) {
                 .replace(/\s+/g, " ")
                 .trim()
                 .slice(0, 25000); // Larger limit for link extraction
+
+            // Count extracted links
+            const linkCount = (textWithLinks.match(/\[LINK:/g) || []).length;
+            console.log('[crawl-url] textWithLinks length:', textWithLinks.length, '| Links found:', linkCount);
+            console.log('[crawl-url] textWithLinks sample (first 2000 chars):', textWithLinks.slice(0, 2000));
         }
+
+        console.log('[crawl-url] Cleaned text length:', text.length);
 
         return NextResponse.json({
             text,

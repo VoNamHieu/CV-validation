@@ -57,37 +57,48 @@ export default function StepInputUrl() {
             // ─── Phase 1: AI Analyze CV → infer job title + search URL ───
             setPhase('analyzing_cv');
             setPhaseDetail('Reading your CV to understand what job you want...');
+            console.log('[StepInputUrl] Phase 1: smartSearch with site:', trimmed);
             const searchResult = await smartSearch(cvData, trimmed);
+            console.log('[StepInputUrl] Phase 1 result:', searchResult);
             setInferredTitle(searchResult.inferred_job_title);
             setPhaseDetail(`Looking for: "${searchResult.inferred_job_title}"`);
 
             // ─── Phase 2: Crawl the search results page ───
             setPhase('searching');
             setPhaseDetail(`Searching on ${getHostname(trimmed)}...`);
+            console.log('[StepInputUrl] Phase 2: crawling search URL:', searchResult.search_url);
             const searchPage = await crawlUrl(searchResult.search_url, true);
+            console.log('[StepInputUrl] Phase 2 result: text length=', searchPage.text?.length, 'textWithLinks length=', searchPage.textWithLinks?.length);
 
             if (!searchPage.textWithLinks || searchPage.textWithLinks.length < 100) {
+                console.log('[StepInputUrl] Phase 2 FAILED: textWithLinks too short');
                 throw new Error(`Could not load search results from ${getHostname(trimmed)}. The site may block automated access.`);
             }
 
             // ─── Phase 3: AI Extract job links from search results ───
             setPhase('extracting_links');
             setPhaseDetail('AI is finding job listings on the page...');
+            console.log('[StepInputUrl] Phase 3: extractJobLinks, textWithLinks sample:', searchPage.textWithLinks.slice(0, 500));
             const linksResult = await extractJobLinks(searchPage.textWithLinks, trimmed);
+            console.log('[StepInputUrl] Phase 3 result:', linksResult);
 
             if (!linksResult.found || !linksResult.job_urls || linksResult.job_urls.length === 0) {
+                console.log('[StepInputUrl] Phase 3 FAILED: no job links found');
                 throw new Error(`No job listings found on ${getHostname(trimmed)}. Try a different job site.`);
             }
 
             // Pick a random job
             const randomIdx = Math.floor(Math.random() * Math.min(linksResult.job_urls.length, 10));
             const selectedJobUrl = linksResult.job_urls[randomIdx];
+            console.log('[StepInputUrl] Phase 3: selected job URL:', selectedJobUrl, `(#${randomIdx + 1} of ${linksResult.job_urls.length})`);
             setPhaseDetail(`Found ${linksResult.total_found} jobs → selected #${randomIdx + 1}`);
 
             // ─── Phase 4: Crawl the selected job page ───
             setPhase('crawling_job');
             setPhaseDetail(`Fetching: ${selectedJobUrl.slice(0, 60)}...`);
+            console.log('[StepInputUrl] Phase 4: crawling job page:', selectedJobUrl);
             const jobPage = await crawlUrl(selectedJobUrl);
+            console.log('[StepInputUrl] Phase 4 result: text length=', jobPage.text?.length);
 
             if (!jobPage.text || jobPage.text.length < 100) {
                 throw new Error('Could not load the job page. Try again.');
@@ -96,13 +107,17 @@ export default function StepInputUrl() {
             // ─── Phase 5: AI extract JD from the job page ───
             setPhase('detecting_jd');
             setPhaseDetail('AI is analyzing the job description...');
+            console.log('[StepInputUrl] Phase 5: extracting JD from text of length', jobPage.text.length);
             const jdData = await extractJdStructured(jobPage.text);
+            console.log('[StepInputUrl] Phase 5 result:', jdData);
             setJdData(jdData);
 
             // ─── Phase 6: Score match ───
             setPhase('scoring');
             setPhaseDetail('Calculating how well your CV matches...');
+            console.log('[StepInputUrl] Phase 6: scoring match...');
             const matchResult = await scoreFit(cvData, jdData);
+            console.log('[StepInputUrl] Phase 6 result:', matchResult);
             setMatchResult(matchResult);
 
             // Store entry for report
