@@ -17,7 +17,7 @@ export async function callGemini(systemPrompt: string, userPrompt: string): Prom
     const client = getClient();
 
     const response = await client.models.generateContent({
-        model: "gemini-3-pro-preview",
+        model: "gemini-3-flash-preview",
         contents: userPrompt,
         config: {
             systemInstruction: systemPrompt,
@@ -46,7 +46,7 @@ export async function callGeminiWithPdf(
     const textPart: Part = { text: userPrompt };
 
     const response = await client.models.generateContent({
-        model: "gemini-3-pro-preview",
+        model: "gemini-3-flash-preview",
         contents: [{ role: "user", parts: [pdfPart, textPart] }],
         config: {
             systemInstruction: systemPrompt,
