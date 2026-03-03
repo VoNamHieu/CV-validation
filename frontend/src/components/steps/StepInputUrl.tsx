@@ -77,28 +77,52 @@ export default function StepInputUrl() {
 
             if (isSPA) {
                 console.log('[StepInputUrl] Phase 2: SPA detected! textWithLinks only', searchPage.textWithLinks?.length, 'chars. Trying search engine fallbacks...');
-                setPhaseDetail(`Site uses JavaScript rendering — searching via DuckDuckGo...`);
 
                 const searchQuery = `site:${hostname} ${searchResult.inferred_job_title} job`;
+                let fallbackWorked = false;
 
-                // Fallback 1: DuckDuckGo HTML (pure HTML, no JS, no CAPTCHA)
-                const ddgUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(searchQuery)}`;
-                console.log('[StepInputUrl] Phase 2 fallback DDG:', ddgUrl);
-                searchPage = await crawlUrl(ddgUrl, true);
-                console.log('[StepInputUrl] Phase 2 DDG result: text length=', searchPage.text?.length, 'textWithLinks length=', searchPage.textWithLinks?.length);
-
-                // Fallback 2: If DDG fails, try Bing
-                if (!searchPage.textWithLinks || searchPage.textWithLinks.length < 500) {
-                    console.log('[StepInputUrl] Phase 2: DDG failed, trying Bing...');
-                    setPhaseDetail(`DuckDuckGo blocked — trying Bing...`);
-                    const bingUrl = `https://www.bing.com/search?q=${encodeURIComponent(searchQuery)}&count=15`;
-                    console.log('[StepInputUrl] Phase 2 fallback Bing:', bingUrl);
-                    searchPage = await crawlUrl(bingUrl, true);
-                    console.log('[StepInputUrl] Phase 2 Bing result: text length=', searchPage.text?.length, 'textWithLinks length=', searchPage.textWithLinks?.length);
+                // Fallback 1: DuckDuckGo HTML
+                try {
+                    setPhaseDetail(`SPA detected — trying DuckDuckGo...`);
+                    const ddgUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(searchQuery)}`;
+                    console.log('[StepInputUrl] Fallback DDG:', ddgUrl);
+                    searchPage = await crawlUrl(ddgUrl, true);
+                    console.log('[StepInputUrl] DDG result: text=', searchPage.text?.length, 'links=', searchPage.textWithLinks?.length);
+                    if (searchPage.textWithLinks && searchPage.textWithLinks.length >= 500) fallbackWorked = true;
+                } catch (e) {
+                    console.log('[StepInputUrl] DDG failed:', e);
                 }
 
-                if (!searchPage.textWithLinks || searchPage.textWithLinks.length < 200) {
-                    throw new Error(`Could not find jobs on ${hostname}. Search engines returned no results. Try a different site.`);
+                // Fallback 2: Bing
+                if (!fallbackWorked) {
+                    try {
+                        setPhaseDetail(`Trying Bing Search...`);
+                        const bingUrl = `https://www.bing.com/search?q=${encodeURIComponent(searchQuery)}&count=15`;
+                        console.log('[StepInputUrl] Fallback Bing:', bingUrl);
+                        searchPage = await crawlUrl(bingUrl, true);
+                        console.log('[StepInputUrl] Bing result: text=', searchPage.text?.length, 'links=', searchPage.textWithLinks?.length);
+                        if (searchPage.textWithLinks && searchPage.textWithLinks.length >= 500) fallbackWorked = true;
+                    } catch (e) {
+                        console.log('[StepInputUrl] Bing failed:', e);
+                    }
+                }
+
+                // Fallback 3: Google (last resort)
+                if (!fallbackWorked) {
+                    try {
+                        setPhaseDetail(`Trying Google Search...`);
+                        const googleUrl = `https://www.google.com/search?q=${encodeURIComponent(searchQuery)}&num=15`;
+                        console.log('[StepInputUrl] Fallback Google:', googleUrl);
+                        searchPage = await crawlUrl(googleUrl, true);
+                        console.log('[StepInputUrl] Google result: text=', searchPage.text?.length, 'links=', searchPage.textWithLinks?.length);
+                        if (searchPage.textWithLinks && searchPage.textWithLinks.length >= 300) fallbackWorked = true;
+                    } catch (e) {
+                        console.log('[StepInputUrl] Google failed:', e);
+                    }
+                }
+
+                if (!fallbackWorked) {
+                    throw new Error(`Could not search for jobs on ${hostname}. All search engines blocked or returned no results. Try pasting a direct job page URL instead.`);
                 }
             }
 
