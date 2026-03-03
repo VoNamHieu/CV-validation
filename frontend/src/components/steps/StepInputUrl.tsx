@@ -76,29 +76,37 @@ export default function StepInputUrl() {
             const isSPA = !searchPage.textWithLinks || searchPage.textWithLinks.length < MIN_CONTENT_LENGTH;
 
             if (isSPA) {
-                console.log('[StepInputUrl] Phase 2: SPA detected! textWithLinks only', searchPage.textWithLinks?.length, 'chars. Falling back to Google Search...');
-                setPhaseDetail(`Site uses JavaScript rendering — switching to Google Search...`);
+                console.log('[StepInputUrl] Phase 2: SPA detected! textWithLinks only', searchPage.textWithLinks?.length, 'chars. Trying search engine fallbacks...');
+                setPhaseDetail(`Site uses JavaScript rendering — searching via DuckDuckGo...`);
 
-                // Build a Google search query to find job pages on the target site
-                const googleQuery = encodeURIComponent(
-                    `site:${hostname} ${searchResult.inferred_job_title} job`
-                );
-                const googleUrl = `https://www.google.com/search?q=${googleQuery}&num=15`;
-                console.log('[StepInputUrl] Phase 2 fallback: Google URL:', googleUrl);
+                const searchQuery = `site:${hostname} ${searchResult.inferred_job_title} job`;
 
-                searchPage = await crawlUrl(googleUrl, true);
-                console.log('[StepInputUrl] Phase 2 fallback result: text length=', searchPage.text?.length, 'textWithLinks length=', searchPage.textWithLinks?.length);
+                // Fallback 1: DuckDuckGo HTML (pure HTML, no JS, no CAPTCHA)
+                const ddgUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(searchQuery)}`;
+                console.log('[StepInputUrl] Phase 2 fallback DDG:', ddgUrl);
+                searchPage = await crawlUrl(ddgUrl, true);
+                console.log('[StepInputUrl] Phase 2 DDG result: text length=', searchPage.text?.length, 'textWithLinks length=', searchPage.textWithLinks?.length);
+
+                // Fallback 2: If DDG fails, try Bing
+                if (!searchPage.textWithLinks || searchPage.textWithLinks.length < 500) {
+                    console.log('[StepInputUrl] Phase 2: DDG failed, trying Bing...');
+                    setPhaseDetail(`DuckDuckGo blocked — trying Bing...`);
+                    const bingUrl = `https://www.bing.com/search?q=${encodeURIComponent(searchQuery)}&count=15`;
+                    console.log('[StepInputUrl] Phase 2 fallback Bing:', bingUrl);
+                    searchPage = await crawlUrl(bingUrl, true);
+                    console.log('[StepInputUrl] Phase 2 Bing result: text length=', searchPage.text?.length, 'textWithLinks length=', searchPage.textWithLinks?.length);
+                }
 
                 if (!searchPage.textWithLinks || searchPage.textWithLinks.length < 200) {
-                    throw new Error(`Could not find jobs on ${hostname}. Google search also returned no results. Try a different keyword or site.`);
+                    throw new Error(`Could not find jobs on ${hostname}. Search engines returned no results. Try a different site.`);
                 }
             }
 
             // ─── Phase 3: AI Extract job links from search results ───
             setPhase('extracting_links');
-            setPhaseDetail(isSPA ? 'Extracting job links from Google results...' : 'AI is finding job listings on the page...');
+            setPhaseDetail(isSPA ? 'Extracting job links from search results...' : 'AI is finding job listings on the page...');
             console.log('[StepInputUrl] Phase 3: extractJobLinks, textWithLinks sample:', searchPage.textWithLinks!.slice(0, 500));
-            const linksResult = await extractJobLinks(searchPage.textWithLinks!, isSPA ? `google.com (target: ${hostname})` : trimmed);
+            const linksResult = await extractJobLinks(searchPage.textWithLinks!, isSPA ? `search engine (target: ${hostname})` : trimmed);
             console.log('[StepInputUrl] Phase 3 result:', linksResult);
 
             // If we used Google fallback, filter links to only include the target hostname
