@@ -2,30 +2,30 @@
 @import "tailwindcss";
 
 :root {
-  /* ── Background System ── */
-  --bg-primary: #06080f;
-  --bg-secondary: #0d1117;
-  --bg-card: #161b26;
-  --bg-card-hover: #1c2333;
-  --bg-elevated: #1f2937;
-  --bg-glass: rgba(22, 27, 38, 0.75);
-  --bg-glass-light: rgba(30, 38, 55, 0.5);
+  /* ── Background System — neutral grey ── */
+  --bg-primary: #111111;
+  --bg-secondary: #191919;
+  --bg-card: #1e1e1e;
+  --bg-card-hover: #262626;
+  --bg-elevated: #2a2a2a;
+  --bg-glass: rgba(28, 28, 28, 0.8);
+  --bg-glass-light: rgba(38, 38, 38, 0.5);
 
   /* ── Border System ── */
-  --border-subtle: rgba(99, 119, 171, 0.12);
-  --border-default: rgba(99, 119, 171, 0.2);
-  --border-accent: rgba(99, 179, 237, 0.35);
-  --border-focus: rgba(59, 130, 246, 0.5);
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-default: rgba(255, 255, 255, 0.1);
+  --border-accent: rgba(255, 255, 255, 0.18);
+  --border-focus: rgba(99, 102, 241, 0.5);
 
   /* ── Text Hierarchy ── */
-  --text-primary: #f0f4fc;
-  --text-secondary: #8b9dc3;
-  --text-muted: #5b6b8a;
-  --text-inverse: #06080f;
+  --text-primary: #ececec;
+  --text-secondary: #a0a0a0;
+  --text-muted: #666666;
+  --text-inverse: #111111;
 
   /* ── Accent Colors ── */
-  --accent-blue: #4f8ff7;
-  --accent-blue-glow: rgba(79, 143, 247, 0.25);
+  --accent-blue: #6366f1;
+  --accent-blue-glow: rgba(99, 102, 241, 0.25);
   --accent-cyan: #22d3ee;
   --accent-purple: #a78bfa;
   --accent-green: #34d399;
@@ -34,21 +34,21 @@
   --accent-pink: #f472b6;
 
   /* ── Gradients ── */
-  --gradient-hero: linear-gradient(135deg, #4f8ff7 0%, #a78bfa 50%, #22d3ee 100%);
-  --gradient-hero-subtle: linear-gradient(135deg, rgba(79, 143, 247, 0.08), rgba(167, 139, 250, 0.06), rgba(34, 211, 238, 0.04));
-  --gradient-card: linear-gradient(145deg, rgba(79, 143, 247, 0.05), rgba(167, 139, 250, 0.03));
-  --gradient-score: linear-gradient(135deg, #4f8ff7, #22d3ee);
+  --gradient-hero: linear-gradient(135deg, #6366f1 0%, #a78bfa 50%, #818cf8 100%);
+  --gradient-hero-subtle: linear-gradient(135deg, rgba(99, 102, 241, 0.06), rgba(167, 139, 250, 0.04), rgba(129, 140, 248, 0.03));
+  --gradient-card: linear-gradient(145deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.01));
+  --gradient-score: linear-gradient(135deg, #6366f1, #818cf8);
   --gradient-success: linear-gradient(135deg, #34d399, #22d3ee);
-  --gradient-mesh: radial-gradient(ellipse at 20% 50%, rgba(79, 143, 247, 0.08) 0%, transparent 50%),
-    radial-gradient(ellipse at 80% 20%, rgba(167, 139, 250, 0.06) 0%, transparent 50%),
-    radial-gradient(ellipse at 50% 80%, rgba(34, 211, 238, 0.04) 0%, transparent 50%);
+  --gradient-mesh: radial-gradient(ellipse at 20% 50%, rgba(99, 102, 241, 0.04) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 20%, rgba(167, 139, 250, 0.03) 0%, transparent 50%),
+    radial-gradient(ellipse at 50% 80%, rgba(129, 140, 248, 0.02) 0%, transparent 50%);
 
   /* ── Shadows ── */
-  --shadow-glow: 0 0 40px rgba(79, 143, 247, 0.12);
-  --shadow-card: 0 2px 16px rgba(0, 0, 0, 0.2), 0 0 1px rgba(0, 0, 0, 0.4);
-  --shadow-card-hover: 0 8px 32px rgba(0, 0, 0, 0.3), 0 0 1px rgba(79, 143, 247, 0.2);
-  --shadow-button: 0 2px 12px rgba(79, 143, 247, 0.3);
-  --shadow-button-hover: 0 4px 20px rgba(79, 143, 247, 0.4);
+  --shadow-glow: 0 0 40px rgba(99, 102, 241, 0.08);
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.3), 0 0 1px rgba(0, 0, 0, 0.5);
+  --shadow-card-hover: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 1px rgba(255, 255, 255, 0.05);
+  --shadow-button: 0 2px 8px rgba(99, 102, 241, 0.3);
+  --shadow-button-hover: 0 4px 16px rgba(99, 102, 241, 0.4);
 
   /* ── Radius ── */
   --radius-xs: 6px;

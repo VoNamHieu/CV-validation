@@ -25,7 +25,7 @@ export default function Home() {
         alignItems: 'center',
         justifyContent: 'space-between',
         borderBottom: '1px solid var(--border-subtle)',
-        background: 'rgba(6, 8, 15, 0.8)',
+        background: 'rgba(17, 17, 17, 0.85)',
         backdropFilter: 'blur(16px)',
         WebkitBackdropFilter: 'blur(16px)',
         position: 'sticky',
@@ -86,7 +86,7 @@ export default function Home() {
         fontSize: '0.72rem',
         color: 'var(--text-muted)',
         borderTop: '1px solid var(--border-subtle)',
-        background: 'rgba(6, 8, 15, 0.6)',
+        background: 'rgba(17, 17, 17, 0.6)',
         position: 'relative',
         zIndex: 1,
       }}>
