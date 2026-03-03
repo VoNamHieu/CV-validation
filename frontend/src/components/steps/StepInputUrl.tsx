@@ -138,16 +138,28 @@ export default function StepInputUrl() {
             setPhase('detecting_jd');
             setPhaseDetail('AI is analyzing the job description...');
             console.log('[StepInputUrl] Phase 5: extracting JD from text of length', jobPageText.length);
-            const jdData = await extractJdStructured(jobPageText);
+            let jdData = await extractJdStructured(jobPageText);
             console.log('[StepInputUrl] Phase 5 result:', jdData);
+            // AI may return array if page has multiple jobs — use first
+            if (Array.isArray(jdData)) {
+                console.log('[StepInputUrl] Phase 5: got array, using first element');
+                jdData = jdData[0];
+            }
+            if (!jdData) throw new Error('Could not extract job description from page.');
             setJdData(jdData);
 
             // ─── Phase 6: Score match ───
             setPhase('scoring');
             setPhaseDetail('Calculating how well your CV matches...');
             console.log('[StepInputUrl] Phase 6: scoring match...');
-            const matchResult = await scoreFit(cvData, jdData);
+            let matchResult = await scoreFit(cvData, jdData);
             console.log('[StepInputUrl] Phase 6 result:', matchResult);
+            // AI may return array — use first
+            if (Array.isArray(matchResult)) {
+                console.log('[StepInputUrl] Phase 6: got array, using first element');
+                matchResult = matchResult[0];
+            }
+            if (!matchResult?.overall_score) throw new Error('Could not score match.');
             setMatchResult(matchResult);
 
             // Store entry for report

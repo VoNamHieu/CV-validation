@@ -36,7 +36,8 @@ SKIP_PATTERNS = [
     "/login", "/register", "/sign", "/auth", "/account",
     "/about", "/contact", "/faq", "/help", "/terms", "/privacy",
     "/employer", "/nha-tuyen-dung", "/blog", "/news",
-    "/cong-ty/", "/company/", "/companies/",  # company pages, not job pages
+    "/cong-ty/", "/company/", "/companies/",
+    "/tim-viec-lam-", "/search?",  # search result pages, not individual jobs
     "/cart", "/checkout", "/pricing",
     ".css", ".js", ".png", ".jpg", ".svg", ".ico",
     "facebook.com", "google.com", "linkedin.com/share",
