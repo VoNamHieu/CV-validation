@@ -69,8 +69,14 @@ export default function StepInputUrl() {
             const hostname = getHostname(trimmed);
             setPhaseDetail(`Searching on ${hostname}...`);
             console.log('[StepInputUrl] Phase 2: crawling search URL:', searchResult.search_url);
-            let searchPage = await crawlUrl(searchResult.search_url, true);
-            console.log('[StepInputUrl] Phase 2 result: text length=', searchPage.text?.length, 'textWithLinks length=', searchPage.textWithLinks?.length);
+
+            let searchPage: { text: string; textWithLinks?: string } = { text: '', textWithLinks: '' };
+            try {
+                searchPage = await crawlUrl(searchResult.search_url, true);
+                console.log('[StepInputUrl] Phase 2 result: text length=', searchPage.text?.length, 'textWithLinks length=', searchPage.textWithLinks?.length);
+            } catch (crawlErr) {
+                console.log('[StepInputUrl] Phase 2 crawl failed, treating as SPA:', crawlErr);
+            }
 
             // ─── SPA Detection ───
             const MIN_CONTENT_LENGTH = 2000;

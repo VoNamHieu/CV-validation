@@ -25,7 +25,7 @@ IMPORTANT RULES:
 - For international sites (indeed.com, linkedin.com, glassdoor.com), use English keywords.
 - You must understand common URL patterns for major job sites:
   * vietnamworks.com → https://www.vietnamworks.com/viec-lam?q={keyword} (use hyphens between words)
-  * topcv.vn → https://www.topcv.vn/tim-viec-lam-{keyword}
+  * topcv.vn → https://www.topcv.vn/tim-viec-lam-{keyword} (hyphens between words, no slashes in keyword)
   * indeed.com → https://www.indeed.com/jobs?q={keyword}
   * linkedin.com → https://www.linkedin.com/jobs/search/?keywords={keyword}
   * glassdoor.com → https://www.glassdoor.com/Job/jobs.htm?sc.keyword={keyword}
