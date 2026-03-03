@@ -39,8 +39,9 @@ RUN playwright install-deps chromium
 # Copy backend application code
 COPY backend/app ./app
 
-# Expose port
-EXPOSE 8000
+# Railway provides PORT env var
+ENV PORT=8000
+EXPOSE ${PORT}
 
-# Run with uvicorn
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run with uvicorn — use shell form so $PORT is expanded
+CMD uvicorn app.main:app --host 0.0.0.0 --port $PORT
