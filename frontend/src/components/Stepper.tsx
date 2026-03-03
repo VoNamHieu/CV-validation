@@ -1,11 +1,11 @@
 'use client';
 
-import { Check, Upload, Globe, BarChart3 } from 'lucide-react';
+import { Check, Upload, Globe, ChartBar } from '@phosphor-icons/react';
 
 const steps = [
     { num: 1, label: 'Upload CV', icon: Upload },
     { num: 2, label: 'Find Jobs', icon: Globe },
-    { num: 3, label: 'Report', icon: BarChart3 },
+    { num: 3, label: 'Report', icon: ChartBar },
 ];
 
 interface StepperProps {
@@ -32,7 +32,10 @@ export default function Stepper({ currentStep }: StepperProps) {
                             <div
                                 className={`stepper-dot ${isCompleted ? 'completed' : isActive ? 'active' : ''}`}
                             >
-                                {isCompleted ? <Check size={16} strokeWidth={2.5} /> : <Icon size={16} />}
+                                {isCompleted
+                                    ? <Check size={16} weight="bold" />
+                                    : <Icon size={16} weight={isActive ? 'fill' : 'regular'} />
+                                }
                             </div>
                             <span style={{
                                 fontSize: '0.72rem',

@@ -2,11 +2,11 @@
 
 import { useState } from 'react';
 import {
-    ArrowLeft, Sparkles, ExternalLink, Trophy, AlertTriangle,
-    CheckCircle2, XCircle, ChevronDown, ChevronUp, Download,
-    RotateCcw, Loader2, Zap, Crosshair, TrendingUp, ThumbsUp,
-    XOctagon, ShieldAlert, BarChart3,
-} from 'lucide-react';
+    ArrowLeft, Sparkle, ArrowSquareOut, Trophy, Warning,
+    CheckCircle, XCircle, CaretDown, CaretUp, DownloadSimple,
+    ArrowCounterClockwise, SpinnerGap, Lightning, Crosshair,
+    TrendUp, ThumbsUp, XSquare, ShieldWarning, ChartBar,
+} from '@phosphor-icons/react';
 import { useAppStore, MatchResult, CategoryScore, CVData, JDData } from '@/store/useAppStore';
 import ScoreRing from '@/components/ScoreRing';
 import { optimizeCv } from '@/lib/api';
@@ -43,7 +43,7 @@ function CategorySection({ title, data, accentColor }: { title: string; data: Ca
                             background: accentColor, transition: 'width 0.8s ease',
                         }} />
                     </div>
-                    {open ? <ChevronUp size={16} style={{ color: 'var(--text-muted)' }} /> : <ChevronDown size={16} style={{ color: 'var(--text-muted)' }} />}
+                    {open ? <CaretUp size={16} style={{ color: 'var(--text-muted)' }} /> : <CaretDown size={16} style={{ color: 'var(--text-muted)' }} />}
                 </div>
             </button>
             {open && (
@@ -74,10 +74,10 @@ function CategorySection({ title, data, accentColor }: { title: string; data: Ca
 /* ─── Score verdict label ─── */
 function getVerdict(score: number) {
     if (score >= 85) return { text: 'Excellent Match', icon: Crosshair, color: 'var(--accent-green)' };
-    if (score >= 70) return { text: 'Strong Match', icon: TrendingUp, color: 'var(--accent-green)' };
+    if (score >= 70) return { text: 'Strong Match', icon: TrendUp, color: 'var(--accent-green)' };
     if (score >= 55) return { text: 'Moderate Match', icon: ThumbsUp, color: 'var(--accent-cyan)' };
-    if (score >= 40) return { text: 'Weak Match', icon: AlertTriangle, color: 'var(--accent-amber)' };
-    return { text: 'Poor Match', icon: XOctagon, color: 'var(--accent-red)' };
+    if (score >= 40) return { text: 'Weak Match', icon: Warning, color: 'var(--accent-amber)' };
+    return { text: 'Poor Match', icon: XSquare, color: 'var(--accent-red)' };
 }
 
 function getColor(score: number) {
@@ -284,7 +284,7 @@ export default function StepReport() {
                         {entry?.source.startsWith('http') && (
                             <a href={entry.source} target="_blank" rel="noopener noreferrer"
                                 style={{ fontSize: '0.82rem', color: 'var(--accent-blue)', display: 'flex', alignItems: 'center', gap: 4, marginBottom: 8 }}>
-                                <ExternalLink size={12} /> {entry.label}
+                                <ArrowSquareOut size={12} /> {entry.label}
                             </a>
                         )}
                         <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', lineHeight: 1.6 }}>
@@ -334,7 +334,7 @@ export default function StepReport() {
                                     padding: '4px 10px', borderRadius: 6, fontSize: '0.78rem',
                                     background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.3)', color: 'var(--accent-green)',
                                 }}>
-                                    <CheckCircle2 size={11} /> {s}
+                                    <CheckCircle size={11} /> {s}
                                 </span>
                             ))}
                             {missingSkills.map((s, i) => (
@@ -365,7 +365,7 @@ export default function StepReport() {
                                         padding: '4px 10px', borderRadius: 6, fontSize: '0.78rem',
                                         background: 'rgba(6,182,212,0.1)', border: '1px solid rgba(6,182,212,0.25)', color: 'var(--accent-cyan)',
                                     }}>
-                                        <CheckCircle2 size={11} /> {s}
+                                        <CheckCircle size={11} /> {s}
                                     </span>
                                 ))}
                                 {niceMissing.map((s, i) => (
@@ -385,7 +385,7 @@ export default function StepReport() {
                 {/* RIGHT: JD Summary */}
                 <div className="glass-card" style={{ padding: '24px' }}>
                     <h3 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <Sparkles size={16} style={{ color: 'var(--accent-blue)' }} />
+                        <Sparkle size={16} style={{ color: 'var(--accent-blue)' }} />
                         JD Summary
                     </h3>
                     {(jd.responsibilities || []).length > 0 && (
@@ -410,7 +410,7 @@ export default function StepReport() {
                     {(m.risk_flags || []).length > 0 && (
                         <div>
                             <p style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--accent-red)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: 6 }}>
-                                <ShieldAlert size={14} /> Risk Flags
+                                <ShieldWarning size={14} /> Risk Flags
                             </p>
                             {(m.risk_flags || []).map((flag, i) => (
                                 <div key={i} style={{
@@ -419,7 +419,7 @@ export default function StepReport() {
                                     background: 'rgba(239,68,68,0.06)', borderRadius: 8,
                                     fontSize: '0.82rem', color: 'var(--text-secondary)',
                                 }}>
-                                    <AlertTriangle size={13} style={{ color: 'var(--accent-amber)', marginTop: 2, flexShrink: 0 }} />
+                                    <Warning size={13} style={{ color: 'var(--accent-amber)', marginTop: 2, flexShrink: 0 }} />
                                     {flag}
                                 </div>
                             ))}
@@ -431,7 +431,7 @@ export default function StepReport() {
             {/* ── DETAILED BREAKDOWN ── */}
             <div className="glass-card" style={{ padding: '24px', marginBottom: 28 }}>
                 <h3 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <BarChart3 size={16} style={{ color: 'var(--accent-blue)' }} /> Detailed Scoring Breakdown
+                    <ChartBar size={16} style={{ color: 'var(--accent-blue)' }} /> Detailed Scoring Breakdown
                 </h3>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                     <CategorySection title="Must-Have Skills (40%)" data={m.must_have_match} accentColor={getColor(m.must_have_match.score)} />
@@ -450,7 +450,7 @@ export default function StepReport() {
                     textAlign: 'center',
                     background: 'linear-gradient(135deg, rgba(139,92,246,0.06), rgba(59,130,246,0.04))',
                 }}>
-                    <Zap size={40} style={{ color: 'var(--accent-purple)', marginBottom: 12 }} />
+                    <Lightning size={40} weight="duotone" style={{ color: 'var(--accent-purple)', marginBottom: 12 }} />
                     <h3 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: 8 }}>
                         Optimize Your CV for This Job
                     </h3>
@@ -468,12 +468,12 @@ export default function StepReport() {
                     >
                         {optimizing ? (
                             <>
-                                <Loader2 size={18} style={{ animation: 'spin 1s linear infinite' }} />
+                                <SpinnerGap size={18} style={{ animation: 'spin 1s linear infinite' }} />
                                 Optimizing with AI...
                             </>
                         ) : (
                             <>
-                                <Sparkles size={18} /> Optimize CV
+                                <Sparkle size={18} /> Optimize CV
                             </>
                         )}
                     </button>
@@ -484,7 +484,7 @@ export default function StepReport() {
                 <div style={{ marginBottom: 28 }}>
                     <div style={{ textAlign: 'center', marginBottom: 20 }}>
                         <h3 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: 4 }}>
-                            <Sparkles size={18} style={{ display: 'inline', marginRight: 8, color: 'var(--accent-green)' }} />
+                            <Sparkle size={18} style={{ display: 'inline', marginRight: 8, color: 'var(--accent-green)' }} />
                             CV Optimization Complete
                         </h3>
                         <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
@@ -504,7 +504,7 @@ export default function StepReport() {
                         textAlign: 'center',
                         display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
                     }}>
-                        <AlertTriangle size={14} /> AI-assisted optimization · Only information from the original CV was used
+                        <Warning size={14} /> AI-assisted optimization · Only information from the original CV was used
                     </div>
 
                     {optimizedCv ? (
@@ -524,7 +524,7 @@ export default function StepReport() {
                         <div style={{ display: 'flex', justifyContent: 'center', gap: 12, marginTop: 24 }}>
                             <button className="btn-primary" onClick={handleDownload}
                                 style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.95rem', padding: '12px 32px' }}>
-                                <Download size={18} /> Download Optimized CV
+                                <DownloadSimple size={18} /> Download Optimized CV
                             </button>
                         </div>
                     )}
@@ -538,7 +538,7 @@ export default function StepReport() {
                 </button>
                 <button className="btn-secondary" onClick={() => { resetAll(); setStep(1); }}
                     style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <RotateCcw size={16} /> Start Over
+                    <ArrowCounterClockwise size={16} /> Start Over
                 </button>
             </div>
         </div>

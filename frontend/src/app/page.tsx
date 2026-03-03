@@ -5,7 +5,7 @@ import Stepper from '@/components/Stepper';
 import StepUploadCV from '@/components/steps/StepUploadCV';
 import StepInputUrl from '@/components/steps/StepInputUrl';
 import StepReport from '@/components/steps/StepReport';
-import { Sparkles } from 'lucide-react';
+import { Sparkle } from '@phosphor-icons/react';
 
 export default function Home() {
   const { currentStep } = useAppStore();
@@ -43,7 +43,7 @@ export default function Home() {
             justifyContent: 'center',
             boxShadow: '0 2px 10px rgba(79, 143, 247, 0.3)',
           }}>
-            <Sparkles size={17} style={{ color: 'white' }} />
+            <Sparkle size={17} weight="fill" color="white" />
           </div>
           <div>
             <span style={{

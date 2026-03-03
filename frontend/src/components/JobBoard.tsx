@@ -3,16 +3,16 @@
 import { useState } from 'react';
 import { useAppStore, JobRecord } from '@/store/useAppStore';
 import {
-    Table2, ExternalLink, Trash2, ChevronDown, ChevronUp,
-    Trophy, Target, TrendingUp, AlertTriangle, Clock, Globe, Sparkles
-} from 'lucide-react';
+    Table, ArrowSquareOut, Trash, CaretDown, CaretUp,
+    Trophy, Crosshair, TrendUp, Warning, Clock, Globe, Sparkle,
+} from '@phosphor-icons/react';
 
 function ScoreBadge({ score }: { score: number }) {
     let color = 'var(--accent-red)';
-    let bg = 'rgba(239, 68, 68, 0.15)';
-    if (score >= 80) { color = 'var(--accent-green)'; bg = 'rgba(16, 185, 129, 0.15)'; }
-    else if (score >= 60) { color = 'var(--accent-blue)'; bg = 'rgba(59, 130, 246, 0.15)'; }
-    else if (score >= 40) { color = 'var(--accent-amber)'; bg = 'rgba(245, 158, 11, 0.15)'; }
+    let bg = 'rgba(248, 113, 113, 0.12)';
+    if (score >= 80) { color = 'var(--accent-green)'; bg = 'rgba(52, 211, 153, 0.12)'; }
+    else if (score >= 60) { color = 'var(--accent-blue)'; bg = 'rgba(99, 102, 241, 0.12)'; }
+    else if (score >= 40) { color = 'var(--accent-amber)'; bg = 'rgba(251, 191, 36, 0.12)'; }
 
     return (
         <span style={{
@@ -20,7 +20,7 @@ function ScoreBadge({ score }: { score: number }) {
             padding: '4px 10px', borderRadius: 20,
             background: bg, color, fontWeight: 700, fontSize: '0.85rem',
         }}>
-            <Trophy size={13} />
+            <Trophy size={13} weight="fill" />
             {score}%
         </span>
     );
@@ -36,8 +36,8 @@ function ExpandedRow({ record }: { record: JobRecord }) {
     if (!match) return null;
 
     const categories = [
-        { label: 'Must-Have Skills', data: match.must_have_match, icon: Target },
-        { label: 'Experience', data: match.experience_match, icon: TrendingUp },
+        { label: 'Must-Have Skills', data: match.must_have_match, icon: Crosshair },
+        { label: 'Experience', data: match.experience_match, icon: TrendUp },
         { label: 'Domain Fit', data: match.domain_match, icon: Globe },
         { label: 'Seniority', data: match.seniority_match, icon: Trophy },
     ];
@@ -45,7 +45,7 @@ function ExpandedRow({ record }: { record: JobRecord }) {
     return (
         <div style={{
             padding: '16px 20px',
-            background: 'rgba(59, 130, 246, 0.03)',
+            background: 'rgba(99, 102, 241, 0.03)',
             borderBottom: '1px solid var(--border-subtle)',
         }}>
             {/* Score breakdown */}
@@ -56,7 +56,7 @@ function ExpandedRow({ record }: { record: JobRecord }) {
                         background: 'var(--bg-card)', border: '1px solid var(--border-subtle)',
                     }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                            <Icon size={13} style={{ color: 'var(--accent-cyan)' }} />
+                            <Icon size={13} weight="duotone" style={{ color: 'var(--accent-cyan)' }} />
                             <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{label}</span>
                             <span style={{ marginLeft: 'auto', fontWeight: 700, fontSize: '0.85rem' }}>{data.score}%</span>
                         </div>
@@ -77,7 +77,7 @@ function ExpandedRow({ record }: { record: JobRecord }) {
             {/* Strengths */}
             {match.strength_summary && (
                 <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0, display: 'flex', alignItems: 'flex-start', gap: 6 }}>
-                    <Sparkles size={13} style={{ color: 'var(--accent-green)', marginTop: 3, flexShrink: 0 }} />
+                    <Sparkle size={13} weight="fill" style={{ color: 'var(--accent-green)', marginTop: 3, flexShrink: 0 }} />
                     {match.strength_summary}
                 </p>
             )}
@@ -88,10 +88,10 @@ function ExpandedRow({ record }: { record: JobRecord }) {
                     {match.risk_flags.map((flag, i) => (
                         <span key={i} style={{
                             fontSize: '0.72rem', padding: '3px 8px', borderRadius: 12,
-                            background: 'rgba(239, 68, 68, 0.1)', color: 'var(--accent-red)',
+                            background: 'rgba(248, 113, 113, 0.08)', color: 'var(--accent-red)',
                             display: 'flex', alignItems: 'center', gap: 4,
                         }}>
-                            <AlertTriangle size={10} /> {flag}
+                            <Warning size={10} weight="fill" /> {flag}
                         </span>
                     ))}
                 </div>
@@ -119,7 +119,7 @@ export default function JobBoard() {
                 padding: '16px 20px',
                 display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                 borderBottom: '1px solid var(--border-subtle)',
-                background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.08), rgba(139, 92, 246, 0.05))',
+                background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.06), rgba(167, 139, 250, 0.04))',
             }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     <div style={{
@@ -127,7 +127,7 @@ export default function JobBoard() {
                         background: 'var(--gradient-hero)',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                     }}>
-                        <Table2 size={16} style={{ color: 'white' }} />
+                        <Table size={16} weight="bold" color="white" />
                     </div>
                     <div>
                         <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700 }}>Job Search History</h3>
@@ -138,6 +138,7 @@ export default function JobBoard() {
                 </div>
                 <button
                     onClick={clearJobHistory}
+                    aria-label="Clear all job history"
                     style={{
                         padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border-subtle)',
                         background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer',
@@ -147,7 +148,7 @@ export default function JobBoard() {
                     onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--accent-red)'; e.currentTarget.style.borderColor = 'var(--accent-red)'; }}
                     onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.borderColor = 'var(--border-subtle)'; }}
                 >
-                    <Trash2 size={12} /> Clear All
+                    <Trash size={12} weight="bold" /> Clear All
                 </button>
             </div>
 
@@ -202,7 +203,7 @@ export default function JobBoard() {
 
                         {/* Site */}
                         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                            <Globe size={12} style={{ color: 'var(--text-muted)' }} />
+                            <Globe size={12} weight="duotone" style={{ color: 'var(--text-muted)' }} />
                             <a
                                 href={record.jobUrl}
                                 target="_blank"
@@ -213,7 +214,7 @@ export default function JobBoard() {
                                     textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 3,
                                 }}
                             >
-                                {record.siteName} <ExternalLink size={10} />
+                                {record.siteName} <ArrowSquareOut size={10} />
                             </a>
                         </div>
 
@@ -222,14 +223,14 @@ export default function JobBoard() {
 
                         {/* Date */}
                         <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
-                            <Clock size={11} />
+                            <Clock size={11} weight="regular" />
                             {formatDate(record.timestamp)}
                         </span>
 
                         {/* Expand */}
                         {expandedId === record.id
-                            ? <ChevronUp size={16} style={{ color: 'var(--text-muted)' }} />
-                            : <ChevronDown size={16} style={{ color: 'var(--text-muted)' }} />
+                            ? <CaretUp size={16} weight="bold" style={{ color: 'var(--text-muted)' }} />
+                            : <CaretDown size={16} weight="bold" style={{ color: 'var(--text-muted)' }} />
                         }
                     </div>
 

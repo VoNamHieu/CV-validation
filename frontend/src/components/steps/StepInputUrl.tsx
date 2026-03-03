@@ -1,20 +1,24 @@
 'use client';
 
 import { useState } from 'react';
-import { ArrowLeft, Globe, Loader2, Search, Sparkles, Brain, Link2, Target, BarChart3, Wand2 } from 'lucide-react';
+import {
+    ArrowLeft, Globe, SpinnerGap, MagnifyingGlass, Sparkle,
+    Brain, LinkSimple, Crosshair, ChartBar, MagicWand, CheckCircle,
+} from '@phosphor-icons/react';
+import type { Icon } from '@phosphor-icons/react';
 import { useAppStore } from '@/store/useAppStore';
 import { smartSearch, crawlUrl, extractJdStructured, scoreFit, smartCrawl } from '@/lib/api';
 import JobBoard from '@/components/JobBoard';
 
 type Phase = 'idle' | 'analyzing_cv' | 'searching' | 'extracting_links' | 'crawling_job' | 'detecting_jd' | 'scoring';
 
-const PHASE_CONFIG: Record<Exclude<Phase, 'idle'>, { label: string; icon: typeof Brain }> = {
+const PHASE_CONFIG: Record<Exclude<Phase, 'idle'>, { label: string; icon: Icon }> = {
     analyzing_cv: { label: 'AI analyzing your CV...', icon: Brain },
-    searching: { label: 'Searching jobs on the site...', icon: Search },
-    extracting_links: { label: 'Finding job listings...', icon: Link2 },
+    searching: { label: 'Searching jobs on the site...', icon: MagnifyingGlass },
+    extracting_links: { label: 'Finding job listings...', icon: LinkSimple },
     crawling_job: { label: 'Fetching job page...', icon: Globe },
-    detecting_jd: { label: 'AI extracting job description...', icon: Target },
-    scoring: { label: 'Calculating match score...', icon: BarChart3 },
+    detecting_jd: { label: 'AI extracting job description...', icon: Crosshair },
+    scoring: { label: 'Calculating match score...', icon: ChartBar },
 };
 
 const PHASE_ORDER: Exclude<Phase, 'idle'>[] = [
@@ -202,7 +206,7 @@ export default function StepInputUrl() {
     return (
         <div className="animate-fade-in" style={{ maxWidth: 660, margin: '0 auto', padding: '40px 20px' }}>
             <h2 style={{ fontSize: '1.6rem', fontWeight: 700, marginBottom: 8 }}>
-                <Wand2 size={22} style={{ display: 'inline', marginRight: 8, color: 'var(--accent-purple)' }} />
+                <MagicWand size={22} weight="duotone" style={{ display: 'inline', marginRight: 8, color: 'var(--accent-purple)' }} />
                 Smart Job Finder
             </h2>
             <p style={{ color: 'var(--text-secondary)', marginBottom: 32, fontSize: '0.95rem', lineHeight: 1.6 }}>
@@ -240,7 +244,7 @@ export default function StepInputUrl() {
                     position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)',
                     color: 'var(--text-muted)', pointerEvents: 'none',
                 }}>
-                    <Globe size={18} />
+                    <Globe size={18} weight="duotone" />
                 </div>
                 <input
                     className="input-field"
@@ -267,7 +271,7 @@ export default function StepInputUrl() {
                     background: 'rgba(139,92,246,0.1)', border: '1px solid rgba(139,92,246,0.25)',
                     fontSize: '0.82rem', color: 'var(--accent-purple)', fontWeight: 500,
                 }}>
-                    <Brain size={13} /> AI detected: {inferredTitle}
+                    <Brain size={13} weight="duotone" /> AI detected: {inferredTitle}
                 </div>
             )}
 
@@ -296,7 +300,7 @@ export default function StepInputUrl() {
                                         alignItems: 'center', justifyContent: 'center',
                                         transition: 'all 0.3s',
                                     }}>
-                                        <span style={{ color: 'white', fontSize: '0.8rem', fontWeight: 700 }}>✓</span>
+                                        <CheckCircle size={16} weight="fill" color="white" />
                                     </div>
                                 ) : isActive ? (
                                     <div style={{
@@ -305,7 +309,7 @@ export default function StepInputUrl() {
                                         alignItems: 'center', justifyContent: 'center',
                                         boxShadow: '0 0 12px var(--accent-blue-glow)',
                                     }}>
-                                        <Loader2 size={14} style={{ color: 'white', animation: 'spin 1s linear infinite' }} />
+                                        <SpinnerGap size={14} style={{ color: 'white', animation: 'spin 1s linear infinite' }} />
                                     </div>
                                 ) : (
                                     <div style={{
@@ -313,7 +317,7 @@ export default function StepInputUrl() {
                                         background: 'var(--bg-secondary)', border: '2px solid var(--border-subtle)',
                                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                                     }}>
-                                        <Icon size={13} style={{ color: 'var(--text-muted)' }} />
+                                        <Icon size={13} weight="duotone" style={{ color: 'var(--text-muted)' }} />
                                     </div>
                                 )}
                                 <div style={{ flex: 1 }}>
@@ -357,7 +361,7 @@ export default function StepInputUrl() {
             <div style={{ marginTop: 24, display: 'flex', justifyContent: 'space-between' }}>
                 <button className="btn-secondary" onClick={() => setStep(1)} disabled={isProcessing}
                     style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <ArrowLeft size={16} /> Back
+                    <ArrowLeft size={16} weight="bold" /> Back
                 </button>
                 <button
                     className="btn-primary"
@@ -367,12 +371,12 @@ export default function StepInputUrl() {
                 >
                     {isProcessing ? (
                         <>
-                            <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
+                            <SpinnerGap size={16} style={{ animation: 'spin 1s linear infinite' }} />
                             Processing...
                         </>
                     ) : (
                         <>
-                            <Sparkles size={16} /> Find & Analyze Job
+                            <Sparkle size={16} weight="fill" /> Find & Analyze Job
                         </>
                     )}
                 </button>
