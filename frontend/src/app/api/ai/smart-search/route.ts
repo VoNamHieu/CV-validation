@@ -24,7 +24,7 @@ IMPORTANT RULES:
 - For Vietnamese job sites (vietnamworks.com, topcv.vn, careerbuilder.vn, timviecnhanh.com), use Vietnamese keywords if the CV suggests a Vietnamese-speaking candidate, otherwise use English.
 - For international sites (indeed.com, linkedin.com, glassdoor.com), use English keywords.
 - You must understand common URL patterns for major job sites:
-  * vietnamworks.com → https://www.vietnamworks.com/viec-lam/{keyword}-kw
+  * vietnamworks.com → https://www.vietnamworks.com/viec-lam?q={keyword} (use hyphens between words)
   * topcv.vn → https://www.topcv.vn/tim-viec-lam-{keyword}
   * indeed.com → https://www.indeed.com/jobs?q={keyword}
   * linkedin.com → https://www.linkedin.com/jobs/search/?keywords={keyword}
