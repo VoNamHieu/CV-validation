@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import extract, process, crawl, topcv
+from app.routers import extract, process, crawl, topcv, smart_crawl
 
 app = FastAPI(title="AI Job Fit Optimizer API", version="1.0.0")
 
@@ -21,3 +21,4 @@ app.include_router(extract.router)
 app.include_router(process.router)
 app.include_router(crawl.router)
 app.include_router(topcv.router)
+app.include_router(smart_crawl.router)

@@ -8,3 +8,4 @@ PyMuPDF
 google-genai
 requests
 beautifulsoup4
+playwright

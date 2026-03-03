@@ -111,3 +111,17 @@ export async function extractJobLinks(htmlText: string, siteUrl: string) {
     }
     return res.json();
 }
+
+// ── Smart Crawl: uses Railway backend with Playwright for SPA sites ──
+export async function smartCrawl(url: string, searchUrl: string, searchKeyword: string) {
+    const res = await fetch('/api/smart-crawl', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, search_url: searchUrl, search_keyword: searchKeyword }),
+    });
+    if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || 'Smart crawl failed');
+    }
+    return res.json();
+}

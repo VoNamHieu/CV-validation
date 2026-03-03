@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { ArrowLeft, Globe, Loader2, Search, Sparkles, Brain, Link2, Target, BarChart3, Wand2 } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
-import { smartSearch, crawlUrl, extractJobLinks, extractJdStructured, scoreFit } from '@/lib/api';
+import { smartSearch, crawlUrl, extractJdStructured, scoreFit, smartCrawl } from '@/lib/api';
 
 type Phase = 'idle' | 'analyzing_cv' | 'searching' | 'extracting_links' | 'crawling_job' | 'detecting_jd' | 'scoring';
 
@@ -71,107 +71,67 @@ export default function StepInputUrl() {
             let searchPage = await crawlUrl(searchResult.search_url, true);
             console.log('[StepInputUrl] Phase 2 result: text length=', searchPage.text?.length, 'textWithLinks length=', searchPage.textWithLinks?.length);
 
-            // ─── SPA Fallback: If too little content, use Google Search as proxy ───
+            // ─── SPA Detection ───
             const MIN_CONTENT_LENGTH = 2000;
             const isSPA = !searchPage.textWithLinks || searchPage.textWithLinks.length < MIN_CONTENT_LENGTH;
 
+            let jobPageText = '';
+            let selectedJobUrl = '';
+
             if (isSPA) {
-                console.log('[StepInputUrl] Phase 2: SPA detected! textWithLinks only', searchPage.textWithLinks?.length, 'chars. Trying search engine fallbacks...');
+                // ─── SPA Path: Use Railway backend with Playwright ───
+                console.log('[StepInputUrl] SPA detected! textWithLinks only', searchPage.textWithLinks?.length, 'chars. Using Playwright backend...');
+                setPhase('extracting_links');
+                setPhaseDetail('SPA detected — using Playwright to render page...');
 
-                const searchQuery = `site:${hostname} ${searchResult.inferred_job_title} job`;
-                let fallbackWorked = false;
+                const crawlResult = await smartCrawl(trimmed, searchResult.search_url, searchResult.search_keyword);
+                console.log('[StepInputUrl] smartCrawl result:', crawlResult);
 
-                // Fallback 1: DuckDuckGo HTML
-                try {
-                    setPhaseDetail(`SPA detected — trying DuckDuckGo...`);
-                    const ddgUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(searchQuery)}`;
-                    console.log('[StepInputUrl] Fallback DDG:', ddgUrl);
-                    searchPage = await crawlUrl(ddgUrl, true);
-                    console.log('[StepInputUrl] DDG result: text=', searchPage.text?.length, 'links=', searchPage.textWithLinks?.length);
-                    if (searchPage.textWithLinks && searchPage.textWithLinks.length >= 500) fallbackWorked = true;
-                } catch (e) {
-                    console.log('[StepInputUrl] DDG failed:', e);
+                if (!crawlResult.success || !crawlResult.job_page_text) {
+                    const debugMsg = crawlResult.debug?.error || 'Playwright crawl failed';
+                    console.log('[StepInputUrl] smartCrawl FAILED:', debugMsg);
+                    throw new Error(`Could not find jobs on ${hostname}. ${debugMsg}`);
                 }
 
-                // Fallback 2: Bing
-                if (!fallbackWorked) {
-                    try {
-                        setPhaseDetail(`Trying Bing Search...`);
-                        const bingUrl = `https://www.bing.com/search?q=${encodeURIComponent(searchQuery)}&count=15`;
-                        console.log('[StepInputUrl] Fallback Bing:', bingUrl);
-                        searchPage = await crawlUrl(bingUrl, true);
-                        console.log('[StepInputUrl] Bing result: text=', searchPage.text?.length, 'links=', searchPage.textWithLinks?.length);
-                        if (searchPage.textWithLinks && searchPage.textWithLinks.length >= 500) fallbackWorked = true;
-                    } catch (e) {
-                        console.log('[StepInputUrl] Bing failed:', e);
-                    }
+                selectedJobUrl = crawlResult.selected_job_url;
+                jobPageText = crawlResult.job_page_text;
+                setPhaseDetail(`Found ${crawlResult.all_job_urls?.length || 0} jobs → crawled via Playwright`);
+                console.log('[StepInputUrl] Playwright found', crawlResult.all_job_urls?.length, 'jobs, selected:', selectedJobUrl);
+
+            } else {
+                // ─── Non-SPA Path: Direct crawl ───
+                setPhase('extracting_links');
+                setPhaseDetail('AI is finding job listings on the page...');
+
+                // Use AI to extract job links from the crawled text
+                const { extractJobLinks } = await import('@/lib/api');
+                const linksResult = await extractJobLinks(searchPage.textWithLinks!, trimmed);
+                console.log('[StepInputUrl] extractJobLinks result:', linksResult);
+
+                if (!linksResult.found || !linksResult.job_urls || linksResult.job_urls.length === 0) {
+                    throw new Error(`No job listings found on ${hostname}. Try a different job site.`);
                 }
 
-                // Fallback 3: Google (last resort)
-                if (!fallbackWorked) {
-                    try {
-                        setPhaseDetail(`Trying Google Search...`);
-                        const googleUrl = `https://www.google.com/search?q=${encodeURIComponent(searchQuery)}&num=15`;
-                        console.log('[StepInputUrl] Fallback Google:', googleUrl);
-                        searchPage = await crawlUrl(googleUrl, true);
-                        console.log('[StepInputUrl] Google result: text=', searchPage.text?.length, 'links=', searchPage.textWithLinks?.length);
-                        if (searchPage.textWithLinks && searchPage.textWithLinks.length >= 300) fallbackWorked = true;
-                    } catch (e) {
-                        console.log('[StepInputUrl] Google failed:', e);
-                    }
+                const randomIdx = Math.floor(Math.random() * Math.min(linksResult.job_urls.length, 10));
+                selectedJobUrl = linksResult.job_urls[randomIdx];
+                setPhaseDetail(`Found ${linksResult.total_found} jobs → selected #${randomIdx + 1}`);
+
+                // Crawl the selected job page
+                setPhase('crawling_job');
+                setPhaseDetail(`Fetching: ${selectedJobUrl.slice(0, 60)}...`);
+                const jobPage = await crawlUrl(selectedJobUrl);
+
+                if (!jobPage.text || jobPage.text.length < 100) {
+                    throw new Error('Could not load the job page. Try again.');
                 }
-
-                if (!fallbackWorked) {
-                    throw new Error(`Could not search for jobs on ${hostname}. All search engines blocked or returned no results. Try pasting a direct job page URL instead.`);
-                }
-            }
-
-            // ─── Phase 3: AI Extract job links from search results ───
-            setPhase('extracting_links');
-            setPhaseDetail(isSPA ? 'Extracting job links from search results...' : 'AI is finding job listings on the page...');
-            console.log('[StepInputUrl] Phase 3: extractJobLinks, textWithLinks sample:', searchPage.textWithLinks!.slice(0, 500));
-            const linksResult = await extractJobLinks(searchPage.textWithLinks!, isSPA ? `search engine (target: ${hostname})` : trimmed);
-            console.log('[StepInputUrl] Phase 3 result:', linksResult);
-
-            // If we used Google fallback, filter links to only include the target hostname
-            if (isSPA && linksResult.job_urls) {
-                linksResult.job_urls = linksResult.job_urls.filter((u: string) => {
-                    try {
-                        return new URL(u).hostname.includes(hostname.replace('www.', ''));
-                    } catch { return false; }
-                });
-                linksResult.found = linksResult.job_urls.length > 0;
-                linksResult.total_found = linksResult.job_urls.length;
-                console.log('[StepInputUrl] Phase 3: after filtering for', hostname, '→', linksResult.job_urls.length, 'links');
-            }
-
-            if (!linksResult.found || !linksResult.job_urls || linksResult.job_urls.length === 0) {
-                console.log('[StepInputUrl] Phase 3 FAILED: no job links found');
-                throw new Error(`No job listings found on ${hostname}. Try a different job site or keyword.`);
-            }
-
-            // Pick a random job
-            const randomIdx = Math.floor(Math.random() * Math.min(linksResult.job_urls.length, 10));
-            const selectedJobUrl = linksResult.job_urls[randomIdx];
-            console.log('[StepInputUrl] Phase 3: selected job URL:', selectedJobUrl, `(#${randomIdx + 1} of ${linksResult.job_urls.length})`);
-            setPhaseDetail(`Found ${linksResult.total_found} jobs → selected #${randomIdx + 1}`);
-
-            // ─── Phase 4: Crawl the selected job page ───
-            setPhase('crawling_job');
-            setPhaseDetail(`Fetching: ${selectedJobUrl.slice(0, 60)}...`);
-            console.log('[StepInputUrl] Phase 4: crawling job page:', selectedJobUrl);
-            const jobPage = await crawlUrl(selectedJobUrl);
-            console.log('[StepInputUrl] Phase 4 result: text length=', jobPage.text?.length);
-
-            if (!jobPage.text || jobPage.text.length < 100) {
-                throw new Error('Could not load the job page. Try again.');
+                jobPageText = jobPage.text;
             }
 
             // ─── Phase 5: AI extract JD from the job page ───
             setPhase('detecting_jd');
             setPhaseDetail('AI is analyzing the job description...');
-            console.log('[StepInputUrl] Phase 5: extracting JD from text of length', jobPage.text.length);
-            const jdData = await extractJdStructured(jobPage.text);
+            console.log('[StepInputUrl] Phase 5: extracting JD from text of length', jobPageText.length);
+            const jdData = await extractJdStructured(jobPageText);
             console.log('[StepInputUrl] Phase 5 result:', jdData);
             setJdData(jdData);
 
