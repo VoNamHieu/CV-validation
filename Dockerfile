@@ -36,12 +36,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN playwright install chromium
 RUN playwright install-deps chromium
 
-# Copy backend application code
+# Cache bust — forces COPY to re-run
+ARG CACHEBUST=3
 COPY backend/app ./app
 
-# Railway provides PORT env var
+# Railway provides PORT env var dynamically
 ENV PORT=8000
-EXPOSE ${PORT}
 
-# Run with uvicorn — use shell form so $PORT is expanded
-CMD uvicorn app.main:app --host 0.0.0.0 --port $PORT
+CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT}
