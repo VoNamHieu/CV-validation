@@ -53,10 +53,10 @@ function CategorySection({ title, data, accentColor }: { title: string; data: Ca
                     <p style={{ fontSize: '0.83rem', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 10 }}>
                         {data.reasoning}
                     </p>
-                    {data.gaps.length > 0 && (
+                    {(data.gaps?.length || 0) > 0 && (
                         <div>
                             <p style={{ fontSize: '0.75rem', color: 'var(--accent-red)', fontWeight: 600, marginBottom: 6 }}>Gaps:</p>
-                            {data.gaps.map((gap, i) => (
+                            {(data.gaps || []).map((gap, i) => (
                                 <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginBottom: 4 }}>
                                     <XCircle size={13} style={{ color: 'var(--accent-red)', marginTop: 2, flexShrink: 0 }} />
                                     <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{gap}</span>
@@ -102,7 +102,7 @@ function CvPanel({ data, title, accent }: { data: CVData; title: string; accent:
             <div style={{ marginBottom: 20 }}>
                 <p style={{ fontWeight: 500, fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Skills</p>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                    {data.skills.map((s, i) => (
+                    {(data.skills || []).map((s, i) => (
                         <span key={i} style={{
                             background: 'var(--bg-secondary)',
                             border: '1px solid var(--border-subtle)',
@@ -118,7 +118,7 @@ function CvPanel({ data, title, accent }: { data: CVData; title: string; accent:
             {/* Experience */}
             <div>
                 <p style={{ fontWeight: 500, fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Experience</p>
-                {data.experience.map((exp, i) => (
+                {(data.experience || []).map((exp, i) => (
                     <div key={i} style={{ marginBottom: 14, paddingLeft: 12, borderLeft: `2px solid ${accent}` }}>
                         <p style={{ fontWeight: 600, fontSize: '0.88rem' }}>{exp.title} @ {exp.company}</p>
                         <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 4 }}>{exp.duration_months} months</p>
@@ -157,9 +157,9 @@ function generateHtml(cv: CVData): string {
   <h2>Summary</h2>
   <p class="summary">${cv.summary}</p>
   <h2>Skills</h2>
-  <div class="skills">${cv.skills.map(s => `<span class="skill">${s}</span>`).join('')}</div>
+  <div class="skills">${(cv.skills || []).map(s => `<span class="skill">${s}</span>`).join('')}</div>
   <h2>Experience</h2>
-  ${cv.experience.map(e => `
+  ${(cv.experience || []).map(e => `
     <div class="exp-item">
       <div class="exp-title">${e.title} — ${e.company}</div>
       <div class="exp-meta">${e.duration_months} months</div>
@@ -167,12 +167,12 @@ function generateHtml(cv: CVData): string {
     </div>
   `).join('')}
   <h2>Education</h2>
-  ${cv.education.map(e => `
+  ${(cv.education || []).map(e => `
     <div class="edu-item">
       <strong>${e.degree}</strong> — ${e.institution} (${e.year})
     </div>
   `).join('')}
-  ${cv.projects.length > 0 ? `
+  ${(cv.projects || []).length > 0 ? `
     <h2>Projects</h2>
     ${cv.projects.map(p => `
       <div class="exp-item">
@@ -216,17 +216,17 @@ export default function StepReport() {
     }
 
     const verdict = getVerdict(m.overall_score);
-    const cvSkillsLower = cvData.skills.map(s => s.toLowerCase());
-    const alignedSkills = jd.must_have.filter(skill =>
+    const cvSkillsLower = (cvData.skills || []).map(s => s.toLowerCase());
+    const alignedSkills = (jd.must_have || []).filter(skill =>
         cvSkillsLower.some(cs => cs.includes(skill.toLowerCase()) || skill.toLowerCase().includes(cs))
     );
-    const missingSkills = jd.must_have.filter(skill =>
+    const missingSkills = (jd.must_have || []).filter(skill =>
         !cvSkillsLower.some(cs => cs.includes(skill.toLowerCase()) || skill.toLowerCase().includes(cs))
     );
-    const niceAligned = jd.nice_to_have.filter(skill =>
+    const niceAligned = (jd.nice_to_have || []).filter(skill =>
         cvSkillsLower.some(cs => cs.includes(skill.toLowerCase()) || skill.toLowerCase().includes(cs))
     );
-    const niceMissing = jd.nice_to_have.filter(skill =>
+    const niceMissing = (jd.nice_to_have || []).filter(skill =>
         !cvSkillsLower.some(cs => cs.includes(skill.toLowerCase()) || skill.toLowerCase().includes(cs))
     );
 
@@ -319,7 +319,7 @@ export default function StepReport() {
                             fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8,
                             textTransform: 'uppercase', letterSpacing: '0.05em',
                         }}>
-                            Must-Have ({alignedSkills.length}/{jd.must_have.length} matched)
+                            Must-Have ({alignedSkills.length}/{(jd.must_have || []).length} matched)
                         </p>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                             {alignedSkills.map((s, i) => (
@@ -344,7 +344,7 @@ export default function StepReport() {
                     </div>
 
                     {/* Nice-to-have */}
-                    {jd.nice_to_have.length > 0 && (
+                    {(jd.nice_to_have || []).length > 0 && (
                         <div>
                             <p style={{
                                 fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8,
@@ -382,18 +382,18 @@ export default function StepReport() {
                         <Sparkles size={16} style={{ color: 'var(--accent-blue)' }} />
                         JD Summary
                     </h3>
-                    {jd.responsibilities.length > 0 && (
+                    {(jd.responsibilities || []).length > 0 && (
                         <div style={{ marginBottom: 16 }}>
                             <p style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                                 Key Responsibilities
                             </p>
                             <ul style={{ margin: 0, paddingLeft: 18 }}>
-                                {jd.responsibilities.slice(0, 6).map((r, i) => (
+                                {(jd.responsibilities || []).slice(0, 6).map((r, i) => (
                                     <li key={i} style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>{r}</li>
                                 ))}
-                                {jd.responsibilities.length > 6 && (
+                                {(jd.responsibilities || []).length > 6 && (
                                     <li style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
-                                        +{jd.responsibilities.length - 6} more
+                                        +{(jd.responsibilities || []).length - 6} more
                                     </li>
                                 )}
                             </ul>
@@ -401,12 +401,12 @@ export default function StepReport() {
                     )}
 
                     {/* Risk Flags */}
-                    {m.risk_flags.length > 0 && (
+                    {(m.risk_flags || []).length > 0 && (
                         <div>
                             <p style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--accent-red)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                                 ⚠️ Risk Flags
                             </p>
-                            {m.risk_flags.map((flag, i) => (
+                            {(m.risk_flags || []).map((flag, i) => (
                                 <div key={i} style={{
                                     display: 'flex', alignItems: 'flex-start', gap: 6,
                                     padding: '8px 12px', marginBottom: 4,
