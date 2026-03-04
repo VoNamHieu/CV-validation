@@ -7,7 +7,7 @@ import {
 } from '@phosphor-icons/react';
 import type { Icon } from '@phosphor-icons/react';
 import { useAppStore } from '@/store/useAppStore';
-import { smartSearch, crawlUrl, extractJdStructured, scoreFit, smartCrawl } from '@/lib/api';
+import { smartSearch, crawlUrl, extractJdStructured, scoreFit, smartCrawl, fetchPage } from '@/lib/api';
 import JobBoard from '@/components/JobBoard';
 
 type Phase = 'idle' | 'analyzing_cv' | 'searching' | 'extracting_links' | 'crawling_job' | 'detecting_jd' | 'scoring';
@@ -144,9 +144,23 @@ export default function StepInputUrl() {
                 const jobPage = await crawlUrl(selectedJobUrl);
 
                 if (!jobPage.text || jobPage.text.length < 100) {
-                    throw new Error('Could not load the job page. Try again.');
+                    // Job detail page is a SPA — fallback to Railway Playwright
+                    console.log('[StepInputUrl] Job page too thin, trying Playwright fallback...');
+                    setPhaseDetail('Page needs JS — using Playwright...');
+                    try {
+                        const playwrightPage = await fetchPage(selectedJobUrl);
+                        if (playwrightPage.success && playwrightPage.text.length >= 100) {
+                            jobPageText = playwrightPage.text;
+                            console.log('[StepInputUrl] Playwright fallback success, text length:', jobPageText.length);
+                        } else {
+                            throw new Error('Could not load the job page. Try again.');
+                        }
+                    } catch {
+                        throw new Error('Could not load the job page. Try again.');
+                    }
+                } else {
+                    jobPageText = jobPage.text;
                 }
-                jobPageText = jobPage.text;
             }
 
             // ─── Phase 5: AI extract JD from the job page ───

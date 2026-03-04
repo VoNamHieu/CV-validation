@@ -125,3 +125,17 @@ export async function smartCrawl(url: string, searchUrl: string, searchKeyword: 
     }
     return res.json();
 }
+
+// ── Fetch a single page with Playwright via Railway backend ──
+export async function fetchPage(url: string): Promise<{ success: boolean; text: string; method: string }> {
+    const res = await fetch('/api/fetch-page', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || 'Failed to fetch page');
+    }
+    return res.json();
+}

@@ -354,3 +354,45 @@ async def smart_crawl(req: SmartCrawlRequest):
         method=method,
         debug=debug_info,
     )
+
+
+# ── Single-page fetch endpoint (Playwright fallback for job detail pages) ──
+class FetchPageRequest(BaseModel):
+    url: str
+
+
+class FetchPageResponse(BaseModel):
+    success: bool
+    text: str = ""
+    method: str = ""
+    error: str = ""
+
+
+@router.post("/fetch-page", response_model=FetchPageResponse)
+async def fetch_page(req: FetchPageRequest):
+    """
+    Fetch a single URL with HTTP → Playwright fallback.
+    Used when the frontend's basic HTTP crawl returns too little content (SPA job detail pages).
+    """
+    if not req.url:
+        raise HTTPException(status_code=400, detail="url is required")
+
+    # Try HTTP first
+    http_ok, http_data = try_http_fetch(req.url)
+    if http_ok and not detect_needs_playwright(http_data):
+        cleaned = clean_html(http_data)
+        if len(cleaned) >= 200:
+            return FetchPageResponse(success=True, text=cleaned[:15000], method="http")
+
+    # Playwright fallback
+    logger.info(f"[fetch_page] Using Playwright for: {req.url}")
+    pw_ok, pw_data = await try_playwright_fetch(req.url)
+    if pw_ok:
+        cleaned = clean_html(pw_data)
+        return FetchPageResponse(success=True, text=cleaned[:15000], method="playwright")
+
+    return FetchPageResponse(
+        success=False,
+        error=f"HTTP: {http_data if not http_ok else 'thin content'} | Playwright: {pw_data if not pw_ok else 'failed'}"
+    )
+
