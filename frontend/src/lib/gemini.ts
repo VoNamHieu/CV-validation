@@ -13,20 +13,40 @@ function getClient(): GoogleGenAI {
     return _client;
 }
 
+const PRIMARY_MODEL = "gemini-3-flash-preview";
+const FALLBACK_MODEL = "gemini-2.0-flash";
+
+function isOverloaded(err: unknown): boolean {
+    const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+    return msg.includes("503") || msg.includes("unavailable") || msg.includes("overloaded") || msg.includes("resource_exhausted");
+}
+
 export async function callGemini(systemPrompt: string, userPrompt: string): Promise<string> {
     const client = getClient();
 
-    const response = await client.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: userPrompt,
-        config: {
-            systemInstruction: systemPrompt,
-            responseMimeType: "application/json",
-            thinkingConfig: { thinkingBudget: 2048 },
-        },
-    });
+    const callModel = async (model: string) => {
+        const response = await client.models.generateContent({
+            model,
+            contents: userPrompt,
+            config: {
+                systemInstruction: systemPrompt,
+                responseMimeType: "application/json",
+                thinkingConfig: { thinkingBudget: 2048 },
+            },
+        });
+        return response?.text ?? "";
+    };
 
-    return response?.text ?? "";
+    // Try primary model, fallback on 503/overload
+    try {
+        return await callModel(PRIMARY_MODEL);
+    } catch (e) {
+        if (isOverloaded(e)) {
+            console.warn(`[gemini] ${PRIMARY_MODEL} overloaded, falling back to ${FALLBACK_MODEL}`);
+            return await callModel(FALLBACK_MODEL);
+        }
+        throw e;
+    }
 }
 
 export async function callGeminiWithPdf(
