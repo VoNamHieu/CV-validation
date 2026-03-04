@@ -6,7 +6,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-MODEL = "gemini-3.0-pro"
+PRIMARY_MODEL = "gemini-3.0-pro"
+FALLBACK_MODEL = "gemini-3-flash-preview"
 _client = None
 
 def _get_client():
@@ -20,6 +21,29 @@ def _get_client():
             mode=instructor.Mode.GEMINI_JSON,
         )
     return _client
+
+async def _call_with_fallback(response_model, messages):
+    """Call PRIMARY_MODEL, fall back to FALLBACK_MODEL on 503/overload."""
+    client = _get_client()
+    try:
+        return await client.chat.completions.create(
+            model=PRIMARY_MODEL,
+            response_model=response_model,
+            messages=messages,
+        )
+    except Exception as e:
+        err = str(e).lower()
+        if any(k in err for k in ["503", "unavailable", "overloaded", "resource_exhausted", "quota"]):
+            import logging
+            logging.getLogger(__name__).warning(
+                f"[optimization_engine] {PRIMARY_MODEL} unavailable, falling back to {FALLBACK_MODEL}: {e}"
+            )
+            return await client.chat.completions.create(
+                model=FALLBACK_MODEL,
+                response_model=response_model,
+                messages=messages,
+            )
+        raise
 
 async def optimize_cv(cv: CVSchema, jd: JDSchema, match: MatchResultSchema) -> CVSchema:
     """
@@ -48,13 +72,11 @@ async def optimize_cv(cv: CVSchema, jd: JDSchema, match: MatchResultSchema) -> C
     Return the fully optimized CV following the CVSchema.
     """
     
-    result = await _get_client().chat.completions.create(
-        model=MODEL,
+    result = await _call_with_fallback(
         response_model=CVSchema,
         messages=[
             {"role": "system", "content": "You are a CV optimizer that strictly follows anti-hallucination rules."},
             {"role": "user", "content": prompt}
         ],
     )
-    
     return result

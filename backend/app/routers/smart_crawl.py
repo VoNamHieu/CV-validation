@@ -167,7 +167,7 @@ If no job posting URLs found, return: []"""
     try:
         client = _get_gemini()
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-3-flash-preview",
             contents=prompt,
         )
 

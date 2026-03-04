@@ -6,8 +6,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Lazy-init: only create client when actually needed
-MODEL = "gemini-3.0-pro"
+PRIMARY_MODEL = "gemini-3.0-pro"
+FALLBACK_MODEL = "gemini-3-flash-preview"
 _client = None
 
 def _get_client():
@@ -22,6 +22,29 @@ def _get_client():
         )
     return _client
 
+async def _call_with_fallback(response_model, messages):
+    """Call PRIMARY_MODEL, fall back to FALLBACK_MODEL on 503/overload."""
+    client = _get_client()
+    try:
+        return await client.chat.completions.create(
+            model=PRIMARY_MODEL,
+            response_model=response_model,
+            messages=messages,
+        )
+    except Exception as e:
+        err = str(e).lower()
+        if any(k in err for k in ["503", "unavailable", "overloaded", "resource_exhausted", "quota"]):
+            import logging
+            logging.getLogger(__name__).warning(
+                f"[ai_extractor] {PRIMARY_MODEL} unavailable, falling back to {FALLBACK_MODEL}: {e}"
+            )
+            return await client.chat.completions.create(
+                model=FALLBACK_MODEL,
+                response_model=response_model,
+                messages=messages,
+            )
+        raise
+
 async def extract_cv_structured(raw_text: str) -> CVSchema:
     """
     Given raw text extracted from a CV PDF, use an LLM to map it into a structured CVSchema.
@@ -35,8 +58,7 @@ async def extract_cv_structured(raw_text: str) -> CVSchema:
     {raw_text}
     """
     
-    cv_data = await _get_client().chat.completions.create(
-        model=MODEL,
+    cv_data = await _call_with_fallback(
         response_model=CVSchema,
         messages=[
             {"role": "system", "content": "You are an intelligent CV parser. Extract accurate and structured data."},
@@ -57,8 +79,7 @@ async def extract_jd_structured(raw_text: str) -> JDSchema:
     {raw_text}
     """
     
-    jd_data = await _get_client().chat.completions.create(
-        model=MODEL,
+    jd_data = await _call_with_fallback(
         response_model=JDSchema,
         messages=[
             {"role": "system", "content": "You are an intelligent Job Description parser. Extract strict and accurate requirements."},
