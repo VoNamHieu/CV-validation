@@ -127,7 +127,7 @@ export async function smartCrawl(url: string, searchUrl: string, searchKeyword: 
 }
 
 // ── Fetch a single page with Playwright via Railway backend ──
-export async function fetchPage(url: string): Promise<{ success: boolean; text: string; method: string }> {
+export async function fetchPage(url: string): Promise<{ success: boolean; text: string; method: string; error?: string }> {
     const res = await fetch('/api/fetch-page', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

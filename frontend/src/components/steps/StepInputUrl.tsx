@@ -138,28 +138,48 @@ export default function StepInputUrl() {
                 selectedJobUrl = linksResult.job_urls[randomIdx];
                 setPhaseDetail(`Found ${linksResult.total_found} jobs → selected #${randomIdx + 1}`);
 
-                // Crawl the selected job page
+                // Crawl the selected job page — try multiple URLs if first fails
                 setPhase('crawling_job');
-                setPhaseDetail(`Fetching: ${selectedJobUrl.slice(0, 60)}...`);
-                const jobPage = await crawlUrl(selectedJobUrl);
+                const maxTries = Math.min(linksResult.job_urls.length, 3);
+                for (let attempt = 0; attempt < maxTries; attempt++) {
+                    const idx = (randomIdx + attempt) % linksResult.job_urls.length;
+                    selectedJobUrl = linksResult.job_urls[idx];
+                    setPhaseDetail(`Fetching job #${idx + 1}: ${selectedJobUrl.slice(0, 50)}...`);
+                    console.log(`[StepInputUrl] Crawl attempt ${attempt + 1}/${maxTries}: ${selectedJobUrl}`);
 
-                if (!jobPage.text || jobPage.text.length < 500) {
-                    // Job detail page is a SPA — fallback to Railway Playwright
-                    console.log('[StepInputUrl] Job page too thin (' + (jobPage.text?.length ?? 0) + ' chars), trying Playwright fallback...');
+                    // Try HTTP first
+                    let httpTextLen = 0;
+                    try {
+                        const jobPage = await crawlUrl(selectedJobUrl);
+                        httpTextLen = jobPage.text?.length ?? 0;
+                        if (httpTextLen >= 500) {
+                            jobPageText = jobPage.text;
+                            console.log('[StepInputUrl] HTTP crawl success, text length:', httpTextLen);
+                            break;
+                        }
+                    } catch (httpErr) {
+                        console.log('[StepInputUrl] HTTP crawl failed:', httpErr);
+                    }
+
+                    // HTTP returned thin content or failed — try Playwright
+                    console.log(`[StepInputUrl] HTTP thin (${httpTextLen} chars), trying Playwright...`);
                     setPhaseDetail('Page needs JS — using Playwright...');
                     try {
                         const playwrightPage = await fetchPage(selectedJobUrl);
                         if (playwrightPage.success && playwrightPage.text.length >= 200) {
                             jobPageText = playwrightPage.text;
-                            console.log('[StepInputUrl] Playwright fallback success, text length:', jobPageText.length);
-                        } else {
-                            throw new Error('Could not load the job page. Try again.');
+                            console.log('[StepInputUrl] Playwright success, text length:', jobPageText.length);
+                            break;
                         }
-                    } catch {
-                        throw new Error('Could not load the job page. Try again.');
+                        console.log('[StepInputUrl] Playwright returned thin:', playwrightPage.text?.length, playwrightPage.error);
+                    } catch (pwErr) {
+                        console.log('[StepInputUrl] Playwright failed:', pwErr);
                     }
-                } else {
-                    jobPageText = jobPage.text;
+
+                    // If last attempt, throw
+                    if (attempt === maxTries - 1) {
+                        throw new Error('Could not load any job page. The site may be blocking requests. Try again.');
+                    }
                 }
             }
 

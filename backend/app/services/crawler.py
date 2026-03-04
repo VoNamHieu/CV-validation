@@ -144,8 +144,14 @@ async def try_playwright_fetch(url: str) -> tuple[bool, str]:
             )
             page = await context.new_page()
             await page.add_init_script("delete Object.getPrototypeOf(navigator).webdriver")
-            await page.goto(url, timeout=20000)
-            await page.wait_for_load_state("networkidle", timeout=15000)
+            await page.goto(url, timeout=30000, wait_until="domcontentloaded")
+            # Wait for SPA frameworks to render content
+            await page.wait_for_timeout(4000)
+            # Try to wait for network to settle, but don't fail if it doesn't
+            try:
+                await page.wait_for_load_state("networkidle", timeout=8000)
+            except Exception:
+                pass  # SPA may never reach networkidle — that's OK
             html = await page.content()
             await context.close()
             await browser.close()
