@@ -14,7 +14,7 @@ function getClient(): GoogleGenAI {
 }
 
 const PRIMARY_MODEL = "gemini-3-flash-preview";
-const FALLBACK_MODEL = "gemini-2.0-flash-001";
+const FALLBACK_MODEL = "gemini-2.5-pro-preview-03-25";
 
 function isOverloaded(err: unknown): boolean {
     const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
