@@ -5,6 +5,7 @@ Uses Playwright to crawl SPA job sites, then Gemini Pro to identify job posting 
 
 import os
 import json
+import re
 import random
 import logging
 from fastapi import APIRouter, HTTPException
@@ -100,13 +101,22 @@ def extract_candidate_links(html: str, target_hostname: str) -> list[dict]:
             if len(path) < 3:
                 continue
 
-            # Deduplicate
-            if href in seen:
+            # Deduplicate — use path without query params for dedup
+            clean_url = f"{parsed.scheme}://{parsed.hostname}{path}"
+            if clean_url in seen:
                 continue
-            seen.add(href)
+            seen.add(clean_url)
 
             link_text = a_tag.get_text(strip=True)[:100]
-            candidates.append({"url": href, "text": link_text})
+
+            # If link text is empty (SPA rendering), derive from URL slug
+            if not link_text:
+                slug = path.rsplit("/", 1)[-1]
+                # Remove common suffixes like -jv, -jd, numeric IDs
+                slug_clean = re.sub(r'-\d+(-jv|-jd)?$', '', slug)
+                link_text = slug_clean.replace("-", " ").strip().title()
+
+            candidates.append({"url": clean_url, "text": link_text})
 
         except Exception:
             continue
@@ -189,6 +199,43 @@ If no job posting URLs found, return: []"""
         return []
 
 
+# ── Step 2b: Heuristic fallback — pattern-based job URL detection ──
+# Common job URL patterns by site
+JOB_URL_PATTERNS = [
+    # VietnamWorks: slug-ending-in-<id>-jv
+    re.compile(r'/[a-z0-9-]+-\d+-jv$', re.I),
+    # TopCV: /viec-lam/<slug>
+    re.compile(r'/viec-lam/[a-z0-9-]+-\d+', re.I),
+    # Generic: /job/<id>, /jobs/<slug>
+    re.compile(r'/jobs?/[a-z0-9-]*\d{4,}', re.I),
+    # CareerBuilder VN: /viec-lam/<slug>.html
+    re.compile(r'/viec-lam/[a-z0-9-]+\.html$', re.I),
+    # Indeed: /viewjob or /rc/clk
+    re.compile(r'/(viewjob|rc/clk)\?', re.I),
+    # LinkedIn: /jobs/view/<id>
+    re.compile(r'/jobs/view/\d+', re.I),
+]
+
+
+def _heuristic_job_links(candidates: list[dict], target_hostname: str) -> list[str]:
+    """
+    Fallback: identify job URLs using URL patterns when LLM fails.
+    Useful when link text is empty (SPA sites).
+    """
+    job_urls = []
+    for c in candidates:
+        url = c["url"]
+        parsed = urlparse(url)
+        path = parsed.path + ("?" + parsed.query if parsed.query else "")
+
+        for pattern in JOB_URL_PATTERNS:
+            if pattern.search(path):
+                job_urls.append(url)
+                break
+
+    logger.info(f"[heuristic_job_links] Found {len(job_urls)} job URLs from {len(candidates)} candidates")
+    return job_urls[:20]
+
 # ── Main endpoint ──
 @router.post("/smart-search", response_model=SmartCrawlResponse)
 async def smart_crawl(req: SmartCrawlRequest):
@@ -253,8 +300,14 @@ async def smart_crawl(req: SmartCrawlRequest):
     debug_info["job_links"] = job_links[:10]
 
     if not job_links:
-        # Fallback: if LLM finds nothing, return candidates for debugging
-        debug_info["fallback"] = "LLM found no jobs, returning candidate sample"
+        # Fallback: heuristic pattern matching for common job URL patterns
+        logger.info("[smart_crawl] LLM found nothing, trying heuristic fallback...")
+        job_links = _heuristic_job_links(candidates, target_hostname)
+        debug_info["heuristic_job_links"] = len(job_links)
+        debug_info["fallback"] = "heuristic"
+
+    if not job_links:
+        debug_info["fallback"] = "No jobs found by LLM or heuristic"
         return SmartCrawlResponse(
             success=False,
             all_job_urls=[],
