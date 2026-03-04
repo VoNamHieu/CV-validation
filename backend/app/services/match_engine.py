@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 PRIMARY_MODEL = "gemini-3.0-pro"
-FALLBACK_MODEL = "gemini-3-flash-preview"
+FALLBACK_MODEL = "gemini-2.0-flash-001"
 _client = None
 
 def _get_client():
