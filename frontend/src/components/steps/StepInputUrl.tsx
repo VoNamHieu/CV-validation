@@ -63,8 +63,19 @@ export default function StepInputUrl() {
             setPhase('analyzing_cv');
             setPhaseDetail('Reading your CV to understand what job you want...');
             console.log('[StepInputUrl] Phase 1: smartSearch with site:', trimmed);
-            const searchResult = await smartSearch(cvData, trimmed);
+            let searchResult = await smartSearch(cvData, trimmed);
             console.log('[StepInputUrl] Phase 1 result:', searchResult);
+
+            // Defensive: AI may return array instead of object
+            if (Array.isArray(searchResult)) {
+                console.log('[StepInputUrl] Phase 1: got array, using first element');
+                searchResult = searchResult[0];
+            }
+
+            if (!searchResult?.search_url) {
+                throw new Error('AI could not generate a search URL. Please try again.');
+            }
+
             setInferredTitle(searchResult.inferred_job_title);
             setPhaseDetail(`Looking for: "${searchResult.inferred_job_title}"`);
 

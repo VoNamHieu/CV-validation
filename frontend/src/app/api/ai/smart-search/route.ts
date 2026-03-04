@@ -54,7 +54,23 @@ Generate the most relevant job search URL for this candidate on this site.`;
         console.log('[smart-search] Site URL:', siteUrl);
         const result = await callGemini(systemPrompt, userPrompt);
         console.log('[smart-search] Raw AI response:', result);
-        const parsed = JSON.parse(result);
+        let parsed = JSON.parse(result);
+
+        // Gemini sometimes returns an array instead of an object — unwrap it
+        if (Array.isArray(parsed)) {
+            console.log('[smart-search] Got array with', parsed.length, 'items, using first element');
+            parsed = parsed[0];
+        }
+
+        // Validate required fields
+        if (!parsed?.search_url || !parsed?.inferred_job_title) {
+            console.log('[smart-search] Missing required fields in:', JSON.stringify(parsed));
+            return NextResponse.json(
+                { detail: "AI failed to generate a valid search URL. Please try again." },
+                { status: 500 }
+            );
+        }
+
         console.log('[smart-search] Parsed result:', JSON.stringify(parsed, null, 2));
 
         return NextResponse.json(parsed);
