@@ -143,13 +143,13 @@ export default function StepInputUrl() {
                 setPhaseDetail(`Fetching: ${selectedJobUrl.slice(0, 60)}...`);
                 const jobPage = await crawlUrl(selectedJobUrl);
 
-                if (!jobPage.text || jobPage.text.length < 100) {
+                if (!jobPage.text || jobPage.text.length < 500) {
                     // Job detail page is a SPA — fallback to Railway Playwright
-                    console.log('[StepInputUrl] Job page too thin, trying Playwright fallback...');
+                    console.log('[StepInputUrl] Job page too thin (' + (jobPage.text?.length ?? 0) + ' chars), trying Playwright fallback...');
                     setPhaseDetail('Page needs JS — using Playwright...');
                     try {
                         const playwrightPage = await fetchPage(selectedJobUrl);
-                        if (playwrightPage.success && playwrightPage.text.length >= 100) {
+                        if (playwrightPage.success && playwrightPage.text.length >= 200) {
                             jobPageText = playwrightPage.text;
                             console.log('[StepInputUrl] Playwright fallback success, text length:', jobPageText.length);
                         } else {
@@ -175,6 +175,9 @@ export default function StepInputUrl() {
                 jdData = jdData[0];
             }
             if (!jdData) throw new Error('Could not extract job description from page.');
+            // If JD has no useful data (empty arrays), page was likely not a real job
+            const hasContent = jdData.must_have?.length > 0 || jdData.responsibilities?.length > 0;
+            if (!hasContent) throw new Error('Could not find a job description on this page. Try again.');
             setJdData(jdData);
 
             // ─── Phase 6: Score match ───
@@ -188,7 +191,7 @@ export default function StepInputUrl() {
                 console.log('[StepInputUrl] Phase 6: got array, using first element');
                 matchResult = matchResult[0];
             }
-            if (!matchResult?.overall_score) throw new Error('Could not score match.');
+            if (!matchResult || matchResult.overall_score == null) throw new Error('Could not score match.');
             setMatchResult(matchResult);
 
             // Store entry for report
