@@ -15,7 +15,7 @@ function getClient(): GoogleGenAI {
 
 // ── Model chains ──
 // Complex tasks (CV/JD extraction, scoring, optimization): need thinking
-const MODELS_PRO = ["gemini-3.0-pro", "gemini-3-flash-preview", "gemini-2.5-pro"];
+const MODELS_PRO = ["gemini-3-pro-preview", "gemini-3-flash-preview", "gemini-2.5-pro"];
 // Simple tasks (search URL, link extraction): no thinking needed
 const MODELS_FLASH = ["gemini-3-flash-preview", "gemini-2.5-pro"];
 

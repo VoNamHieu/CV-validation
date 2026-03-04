@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 import logging
 
 # Complex tasks: 3.0-pro → 3-flash → 2.5-pro
-MODELS = ["gemini-3.0-pro", "gemini-3-flash-preview", "gemini-2.5-pro"]
+MODELS = ["gemini-3-pro-preview", "gemini-3-flash-preview", "gemini-2.5-pro"]
 _client = None
 _logger = logging.getLogger(__name__)
 

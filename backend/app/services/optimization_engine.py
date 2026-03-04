@@ -8,7 +8,7 @@ load_dotenv()
 
 import logging
 
-MODELS = ["gemini-3.0-pro", "gemini-3-flash-preview", "gemini-2.5-pro"]
+MODELS = ["gemini-3-pro-preview", "gemini-3-flash-preview", "gemini-2.5-pro"]
 _client = None
 _logger = logging.getLogger(__name__)
 
