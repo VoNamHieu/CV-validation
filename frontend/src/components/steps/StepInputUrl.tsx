@@ -7,7 +7,7 @@ import {
 } from '@phosphor-icons/react';
 import type { Icon } from '@phosphor-icons/react';
 import { useAppStore } from '@/store/useAppStore';
-import { smartSearch, crawlUrl, extractJdStructured, scoreFit, smartCrawl, fetchPage } from '@/lib/api';
+import { smartSearch, crawlUrl, extractJdStructured, scoreFit, fetchPage } from '@/lib/api';
 import JobBoard from '@/components/JobBoard';
 
 type Phase = 'idle' | 'analyzing_cv' | 'searching' | 'extracting_links' | 'crawling_job' | 'detecting_jd' | 'scoring';
@@ -93,127 +93,92 @@ export default function StepInputUrl() {
                 console.log('[StepInputUrl] Phase 2 crawl failed, treating as SPA:', crawlErr);
             }
 
-            // ─── SPA Detection ───
-            const MIN_CONTENT_LENGTH = 2000;
-            const isSPA = !searchPage.textWithLinks || searchPage.textWithLinks.length < MIN_CONTENT_LENGTH;
-
             let jobPageText = '';
             let selectedJobUrl = '';
 
-            if (isSPA) {
-                // ─── SPA Path: Use Railway backend with Playwright ───
-                console.log('[StepInputUrl] SPA detected! textWithLinks only', searchPage.textWithLinks?.length, 'chars. Using Playwright backend...');
-                setPhase('extracting_links');
-                setPhaseDetail('SPA detected — using Playwright to render page...');
+            // ─── Phase 3: Extract job links from search results ───
+            setPhase('extracting_links');
+            setPhaseDetail('AI is finding job listings on the page...');
 
-                const crawlResult = await smartCrawl(trimmed, searchResult.search_url, searchResult.search_keyword);
-                console.log('[StepInputUrl] smartCrawl result:', crawlResult);
+            const { extractJobLinks } = await import('@/lib/api');
+            const linksResult = await extractJobLinks(searchPage.textWithLinks || searchPage.text, trimmed);
+            console.log('[StepInputUrl] extractJobLinks result:', linksResult);
 
-                if (!crawlResult.success || !crawlResult.job_page_text) {
-                    const debugMsg = crawlResult.debug?.error || 'Playwright crawl failed';
-                    console.log('[StepInputUrl] smartCrawl FAILED:', debugMsg);
-                    throw new Error(`Could not find jobs on ${hostname}. ${debugMsg}`);
+            if (!linksResult.found || !linksResult.job_urls?.length) {
+                throw new Error(`No job listings found on ${hostname}. Try a different job site.`);
+            }
+
+            const randomIdx = Math.floor(Math.random() * Math.min(linksResult.job_urls.length, 10));
+            selectedJobUrl = linksResult.job_urls[randomIdx];
+            setPhaseDetail(`Found ${linksResult.total_found} jobs → selected #${randomIdx + 1}`);
+
+            // ─── Phase 4: Crawl job detail page (HTTP → JSON-LD → Playwright) ───
+            setPhase('crawling_job');
+            const maxTries = Math.min(linksResult.job_urls.length, 3);
+
+            // Helper: build JD text from JSON-LD
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const buildJdFromLd = (ld: any): string => [
+                ld.title && `Job Title: ${ld.title}`,
+                ld.hiringOrganization?.name && `Company: ${ld.hiringOrganization.name}`,
+                ld.jobLocation?.address?.addressLocality && `Location: ${ld.jobLocation.address.addressLocality}`,
+                ld.description && `\nJob Description:\n${ld.description}`,
+                ld.qualifications && `\nQualifications:\n${ld.qualifications}`,
+                ld.jobBenefits && `\nBenefits:\n${ld.jobBenefits}`,
+            ].filter(Boolean).join('\n');
+
+            for (let attempt = 0; attempt < maxTries; attempt++) {
+                const idx = (randomIdx + attempt) % linksResult.job_urls.length;
+                selectedJobUrl = linksResult.job_urls[idx];
+                setPhaseDetail(`Fetching job #${idx + 1}: ${selectedJobUrl.slice(0, 50)}...`);
+                console.log(`[StepInputUrl] Crawl attempt ${attempt + 1}/${maxTries}: ${selectedJobUrl}`);
+
+                // Try HTTP first
+                let httpTextLen = 0;
+                try {
+                    const jobPage = await crawlUrl(selectedJobUrl);
+                    httpTextLen = jobPage.text?.length ?? 0;
+
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    const ld = (jobPage as any).jsonLd;
+                    if (ld?.description) {
+                        jobPageText = buildJdFromLd(ld);
+                        console.log('[StepInputUrl] JSON-LD found! text length:', jobPageText.length);
+                        break;
+                    }
+                    if (httpTextLen >= 500) {
+                        jobPageText = jobPage.text;
+                        console.log('[StepInputUrl] HTTP crawl success, text length:', httpTextLen);
+                        break;
+                    }
+                } catch (httpErr) {
+                    console.log('[StepInputUrl] HTTP crawl failed:', httpErr);
                 }
 
-                selectedJobUrl = crawlResult.selected_job_url;
-                jobPageText = crawlResult.job_page_text;
-                setPhaseDetail(`Found ${crawlResult.all_job_urls?.length || 0} jobs → crawled via Playwright`);
-                console.log('[StepInputUrl] Playwright found', crawlResult.all_job_urls?.length, 'jobs, selected:', selectedJobUrl);
-
-            } else {
-                // ─── Non-SPA Path: Direct crawl ───
-                setPhase('extracting_links');
-                setPhaseDetail('AI is finding job listings on the page...');
-
-                // Use AI to extract job links from the crawled text
-                const { extractJobLinks } = await import('@/lib/api');
-                const linksResult = await extractJobLinks(searchPage.textWithLinks!, trimmed);
-                console.log('[StepInputUrl] extractJobLinks result:', linksResult);
-
-                if (!linksResult.found || !linksResult.job_urls || linksResult.job_urls.length === 0) {
-                    throw new Error(`No job listings found on ${hostname}. Try a different job site.`);
+                // Playwright fallback
+                console.log(`[StepInputUrl] HTTP thin (${httpTextLen} chars), trying Playwright...`);
+                setPhaseDetail('Page needs JS — using Playwright...');
+                try {
+                    const pw = await fetchPage(selectedJobUrl);
+                    if (pw.success) {
+                        if (pw.jsonLd?.description) {
+                            jobPageText = buildJdFromLd(pw.jsonLd);
+                            console.log('[StepInputUrl] Playwright JSON-LD found! text length:', jobPageText.length);
+                            break;
+                        }
+                        if (pw.text.length >= 200) {
+                            jobPageText = pw.text;
+                            console.log('[StepInputUrl] Playwright success, text length:', jobPageText.length);
+                            break;
+                        }
+                    }
+                    console.log('[StepInputUrl] Playwright thin:', pw.text?.length, pw.error);
+                } catch (pwErr) {
+                    console.log('[StepInputUrl] Playwright failed:', pwErr);
                 }
 
-                const randomIdx = Math.floor(Math.random() * Math.min(linksResult.job_urls.length, 10));
-                selectedJobUrl = linksResult.job_urls[randomIdx];
-                setPhaseDetail(`Found ${linksResult.total_found} jobs → selected #${randomIdx + 1}`);
-
-                // Crawl the selected job page — try multiple URLs if first fails
-                setPhase('crawling_job');
-                const maxTries = Math.min(linksResult.job_urls.length, 3);
-                for (let attempt = 0; attempt < maxTries; attempt++) {
-                    const idx = (randomIdx + attempt) % linksResult.job_urls.length;
-                    selectedJobUrl = linksResult.job_urls[idx];
-                    setPhaseDetail(`Fetching job #${idx + 1}: ${selectedJobUrl.slice(0, 50)}...`);
-                    console.log(`[StepInputUrl] Crawl attempt ${attempt + 1}/${maxTries}: ${selectedJobUrl}`);
-
-                    // Try HTTP first
-                    let httpTextLen = 0;
-                    try {
-                        const jobPage = await crawlUrl(selectedJobUrl);
-                        httpTextLen = jobPage.text?.length ?? 0;
-
-                        // Check for JSON-LD JobPosting — best case: structured data!
-                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                        const ld = (jobPage as any).jsonLd;
-                        if (ld?.description) {
-                            const ldText = [
-                                ld.title && `Job Title: ${ld.title}`,
-                                ld.hiringOrganization?.name && `Company: ${ld.hiringOrganization.name}`,
-                                ld.jobLocation?.address?.addressLocality && `Location: ${ld.jobLocation.address.addressLocality}`,
-                                ld.description && `\nJob Description:\n${ld.description}`,
-                                ld.qualifications && `\nQualifications:\n${ld.qualifications}`,
-                                ld.jobBenefits && `\nBenefits:\n${ld.jobBenefits}`,
-                            ].filter(Boolean).join('\n');
-                            jobPageText = ldText;
-                            console.log('[StepInputUrl] JSON-LD found! text length:', ldText.length);
-                            break;
-                        }
-
-                        if (httpTextLen >= 500) {
-                            jobPageText = jobPage.text;
-                            console.log('[StepInputUrl] HTTP crawl success, text length:', httpTextLen);
-                            break;
-                        }
-                    } catch (httpErr) {
-                        console.log('[StepInputUrl] HTTP crawl failed:', httpErr);
-                    }
-
-                    // HTTP returned thin content or failed — try Playwright
-                    console.log(`[StepInputUrl] HTTP thin (${httpTextLen} chars), trying Playwright...`);
-                    setPhaseDetail('Page needs JS — using Playwright...');
-                    try {
-                        const playwrightPage = await fetchPage(selectedJobUrl);
-                        if (playwrightPage.success) {
-                            // Check Playwright response for JSON-LD
-                            const pwLd = playwrightPage.jsonLd;
-                            if (pwLd?.description) {
-                                const ldText = [
-                                    pwLd.title && `Job Title: ${pwLd.title}`,
-                                    (pwLd.hiringOrganization as Record<string, unknown>)?.name && `Company: ${(pwLd.hiringOrganization as Record<string, unknown>).name}`,
-                                    pwLd.description && `\nJob Description:\n${pwLd.description}`,
-                                    pwLd.qualifications && `\nQualifications:\n${pwLd.qualifications}`,
-                                    pwLd.jobBenefits && `\nBenefits:\n${pwLd.jobBenefits}`,
-                                ].filter(Boolean).join('\n');
-                                jobPageText = ldText;
-                                console.log('[StepInputUrl] Playwright JSON-LD found! text length:', ldText.length);
-                                break;
-                            }
-                            if (playwrightPage.text.length >= 200) {
-                                jobPageText = playwrightPage.text;
-                                console.log('[StepInputUrl] Playwright success, text length:', jobPageText.length);
-                                break;
-                            }
-                        }
-                        console.log('[StepInputUrl] Playwright returned thin:', playwrightPage.text?.length, playwrightPage.error);
-                    } catch (pwErr) {
-                        console.log('[StepInputUrl] Playwright failed:', pwErr);
-                    }
-
-                    // If last attempt, throw
-                    if (attempt === maxTries - 1) {
-                        throw new Error('Could not load any job page. The site may be blocking requests. Try again.');
-                    }
+                if (attempt === maxTries - 1) {
+                    throw new Error('Could not load any job page. The site may be blocking requests. Try again.');
                 }
             }
 

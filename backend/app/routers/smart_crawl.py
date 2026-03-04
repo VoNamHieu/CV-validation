@@ -383,23 +383,9 @@ class FetchPageResponse(BaseModel):
     jsonLd: dict | None = None
 
 
-def _extract_jsonld_job(html: str) -> dict | None:
-    """Extract first JobPosting JSON-LD from HTML."""
-    import json as json_mod
-    from bs4 import BeautifulSoup
-    try:
-        soup = BeautifulSoup(html, "html.parser")
-        for script in soup.find_all("script", type="application/ld+json"):
-            try:
-                data = json_mod.loads(script.string or "")
-                if isinstance(data, dict) and data.get("@type") == "JobPosting":
-                    logger.info(f"[jsonld] Found JobPosting: {data.get('title', 'N/A')}")
-                    return data
-            except Exception:
-                continue
-    except Exception as e:
-        logger.warning(f"[jsonld] Parse error: {e}")
-    return None
+# Reuse the more robust JSON-LD extractor from crawler service
+from app.services.crawler import extract_json_ld as _extract_jsonld_job
+
 
 
 @router.post("/fetch-page", response_model=FetchPageResponse)
