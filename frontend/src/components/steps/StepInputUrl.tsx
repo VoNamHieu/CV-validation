@@ -184,10 +184,26 @@ export default function StepInputUrl() {
                     setPhaseDetail('Page needs JS — using Playwright...');
                     try {
                         const playwrightPage = await fetchPage(selectedJobUrl);
-                        if (playwrightPage.success && playwrightPage.text.length >= 200) {
-                            jobPageText = playwrightPage.text;
-                            console.log('[StepInputUrl] Playwright success, text length:', jobPageText.length);
-                            break;
+                        if (playwrightPage.success) {
+                            // Check Playwright response for JSON-LD
+                            const pwLd = playwrightPage.jsonLd;
+                            if (pwLd?.description) {
+                                const ldText = [
+                                    pwLd.title && `Job Title: ${pwLd.title}`,
+                                    (pwLd.hiringOrganization as Record<string, unknown>)?.name && `Company: ${(pwLd.hiringOrganization as Record<string, unknown>).name}`,
+                                    pwLd.description && `\nJob Description:\n${pwLd.description}`,
+                                    pwLd.qualifications && `\nQualifications:\n${pwLd.qualifications}`,
+                                    pwLd.jobBenefits && `\nBenefits:\n${pwLd.jobBenefits}`,
+                                ].filter(Boolean).join('\n');
+                                jobPageText = ldText;
+                                console.log('[StepInputUrl] Playwright JSON-LD found! text length:', ldText.length);
+                                break;
+                            }
+                            if (playwrightPage.text.length >= 200) {
+                                jobPageText = playwrightPage.text;
+                                console.log('[StepInputUrl] Playwright success, text length:', jobPageText.length);
+                                break;
+                            }
                         }
                         console.log('[StepInputUrl] Playwright returned thin:', playwrightPage.text?.length, playwrightPage.error);
                     } catch (pwErr) {

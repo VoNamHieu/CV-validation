@@ -380,13 +380,33 @@ class FetchPageResponse(BaseModel):
     text: str = ""
     method: str = ""
     error: str = ""
+    jsonLd: dict | None = None
+
+
+def _extract_jsonld_job(html: str) -> dict | None:
+    """Extract first JobPosting JSON-LD from HTML."""
+    import json as json_mod
+    from bs4 import BeautifulSoup
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+        for script in soup.find_all("script", type="application/ld+json"):
+            try:
+                data = json_mod.loads(script.string or "")
+                if isinstance(data, dict) and data.get("@type") == "JobPosting":
+                    logger.info(f"[jsonld] Found JobPosting: {data.get('title', 'N/A')}")
+                    return data
+            except Exception:
+                continue
+    except Exception as e:
+        logger.warning(f"[jsonld] Parse error: {e}")
+    return None
 
 
 @router.post("/fetch-page", response_model=FetchPageResponse)
 async def fetch_page(req: FetchPageRequest):
     """
     Fetch a single URL with HTTP → Playwright fallback.
-    Used when the frontend's basic HTTP crawl returns too little content (SPA job detail pages).
+    Also extracts JSON-LD JobPosting data when available.
     """
     if not req.url:
         raise HTTPException(status_code=400, detail="url is required")
@@ -394,19 +414,20 @@ async def fetch_page(req: FetchPageRequest):
     # Try HTTP first
     http_ok, http_data = try_http_fetch(req.url)
     if http_ok and not detect_needs_playwright(http_data):
+        jsonld = _extract_jsonld_job(http_data)
         cleaned = clean_html(http_data)
-        if len(cleaned) >= 200:
-            return FetchPageResponse(success=True, text=cleaned[:15000], method="http")
+        if len(cleaned) >= 200 or jsonld:
+            return FetchPageResponse(success=True, text=cleaned[:15000], method="http", jsonLd=jsonld)
 
     # Playwright fallback
     logger.info(f"[fetch_page] Using Playwright for: {req.url}")
     pw_ok, pw_data = await try_playwright_fetch(req.url)
     if pw_ok:
+        jsonld = _extract_jsonld_job(pw_data)
         cleaned = clean_html(pw_data)
-        return FetchPageResponse(success=True, text=cleaned[:15000], method="playwright")
+        return FetchPageResponse(success=True, text=cleaned[:15000], method="playwright", jsonLd=jsonld)
 
     return FetchPageResponse(
         success=False,
         error=f"HTTP: {http_data if not http_ok else 'thin content'} | Playwright: {pw_data if not pw_ok else 'failed'}"
     )
-
