@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { callGemini } from "@/lib/gemini";
+import { callGeminiLight } from "@/lib/gemini";
 
 /**
  * AI reads the CV data and the target job site URL,
@@ -52,9 +52,9 @@ TARGET JOB SITE URL: ${siteUrl}
 Generate the most relevant job search URL for this candidate on this site.`;
 
         console.log('[smart-search] Site URL:', siteUrl);
-        const result = await callGemini(systemPrompt, userPrompt);
-        console.log('[smart-search] Raw AI response:', result);
-        let parsed = JSON.parse(result);
+        const raw = await callGeminiLight(systemPrompt, userPrompt);
+        console.log('[smart-search] Raw AI response:', raw);
+        let parsed = JSON.parse(raw);
 
         // Gemini sometimes returns an array instead of an object — unwrap it
         if (Array.isArray(parsed)) {

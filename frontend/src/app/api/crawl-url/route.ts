@@ -38,6 +38,20 @@ export async function POST(request: NextRequest) {
         const html = await response.text();
         console.log('[crawl-url] Raw HTML length:', html.length);
 
+        // ── Extract JSON-LD JobPosting (before stripping tags) ──
+        let jsonLd: Record<string, unknown> | null = null;
+        const ldMatches = html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi);
+        for (const m of ldMatches) {
+            try {
+                const data = JSON.parse(m[1]);
+                if (data?.['@type'] === 'JobPosting') {
+                    jsonLd = data;
+                    console.log('[crawl-url] Found JSON-LD JobPosting:', data.title, '| desc length:', data.description?.length);
+                    break;
+                }
+            } catch { /* ignore parse errors */ }
+        }
+
         // Standard text extraction (no links)
         const text = html
             .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
@@ -80,15 +94,15 @@ export async function POST(request: NextRequest) {
             // Count extracted links
             const linkCount = (textWithLinks.match(/\[LINK:/g) || []).length;
             console.log('[crawl-url] textWithLinks length:', textWithLinks.length, '| Links found:', linkCount);
-            console.log('[crawl-url] textWithLinks sample (first 2000 chars):', textWithLinks.slice(0, 2000));
         }
 
-        console.log('[crawl-url] Cleaned text length:', text.length);
+        console.log('[crawl-url] Cleaned text length:', text.length, '| JSON-LD:', jsonLd ? 'found' : 'none');
 
         return NextResponse.json({
             text,
             source_url: url,
             ...(keepLinks ? { textWithLinks } : {}),
+            ...(jsonLd ? { jsonLd } : {}),
         });
     } catch (e: unknown) {
         const message = e instanceof Error ? e.message : "Failed to crawl URL";

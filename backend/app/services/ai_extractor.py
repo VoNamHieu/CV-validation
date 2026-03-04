@@ -4,11 +4,12 @@ from google import genai
 from app.models.schemas import CVSchema, JDSchema
 from dotenv import load_dotenv
 
-load_dotenv()
+import logging
 
-PRIMARY_MODEL = "gemini-3.0-pro"
-FALLBACK_MODEL = "gemini-2.5-pro"
+# Complex tasks: 3.0-pro → 3-flash → 2.5-pro
+MODELS = ["gemini-3.0-pro", "gemini-3-flash-preview", "gemini-2.5-pro"]
 _client = None
+_logger = logging.getLogger(__name__)
 
 def _get_client():
     global _client
@@ -22,28 +23,27 @@ def _get_client():
         )
     return _client
 
+def _is_overloaded(e: Exception) -> bool:
+    err = str(e).lower()
+    return any(k in err for k in ["503", "unavailable", "overloaded", "resource_exhausted", "quota"])
+
 async def _call_with_fallback(response_model, messages):
-    """Call PRIMARY_MODEL, fall back to FALLBACK_MODEL on 503/overload."""
+    """Try each model in MODELS chain, falling back on 503/overload."""
     client = _get_client()
-    try:
-        return await client.chat.completions.create(
-            model=PRIMARY_MODEL,
-            response_model=response_model,
-            messages=messages,
-        )
-    except Exception as e:
-        err = str(e).lower()
-        if any(k in err for k in ["503", "unavailable", "overloaded", "resource_exhausted", "quota"]):
-            import logging
-            logging.getLogger(__name__).warning(
-                f"[ai_extractor] {PRIMARY_MODEL} unavailable, falling back to {FALLBACK_MODEL}: {e}"
-            )
+    for i, model in enumerate(MODELS):
+        try:
+            _logger.info(f"[ai_extractor] Trying {model}...")
             return await client.chat.completions.create(
-                model=FALLBACK_MODEL,
+                model=model,
                 response_model=response_model,
                 messages=messages,
             )
-        raise
+        except Exception as e:
+            if i < len(MODELS) - 1 and _is_overloaded(e):
+                _logger.warning(f"[ai_extractor] {model} unavailable, trying {MODELS[i+1]}: {e}")
+                continue
+            raise
+    raise RuntimeError("All models failed")
 
 async def extract_cv_structured(raw_text: str) -> CVSchema:
     """

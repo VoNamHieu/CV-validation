@@ -164,12 +164,26 @@ Return a JSON array of the URLs that are individual job postings. Return ONLY th
 Example: ["https://example.com/job/123", "https://example.com/viec-lam/title-456"]
 If no job posting URLs found, return: []"""
 
+    CRAWL_MODELS = ["gemini-3-flash-preview", "gemini-2.5-pro"]
     try:
         client = _get_gemini()
-        response = client.models.generate_content(
-            model="gemini-3-flash-preview",
-            contents=prompt,
-        )
+        response = None
+        for i, model in enumerate(CRAWL_MODELS):
+            try:
+                logger.info(f"[llm_identify_jobs] Trying {model}...")
+                response = client.models.generate_content(
+                    model=model,
+                    contents=prompt,
+                )
+                break
+            except Exception as e:
+                err = str(e).lower()
+                if i < len(CRAWL_MODELS) - 1 and any(k in err for k in ["503", "unavailable", "overloaded", "quota"]):
+                    logger.warning(f"[llm_identify_jobs] {model} unavailable, trying {CRAWL_MODELS[i+1]}")
+                    continue
+                raise
+        if response is None:
+            return []
 
         text = response.text.strip()
         logger.info(f"[llm_identify_jobs] Raw LLM response: {text[:500]}")

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { callGemini } from "@/lib/gemini";
+import { callGeminiLight } from "@/lib/gemini";
 
 /**
  * AI reads raw HTML text from a search results page
@@ -43,7 +43,7 @@ ${html_text.slice(0, 20000)}`;
         console.log('[extract-job-links] Input text length:', html_text.length, '| Site:', site_url);
         console.log('[extract-job-links] Input sample (first 1000 chars):', html_text.slice(0, 1000));
 
-        const result = await callGemini(systemPrompt, userPrompt);
+        const result = await callGeminiLight(systemPrompt, userPrompt);
         console.log('[extract-job-links] Raw AI response:', result);
         const parsed = JSON.parse(result);
         console.log('[extract-job-links] Parsed:', JSON.stringify(parsed, null, 2));

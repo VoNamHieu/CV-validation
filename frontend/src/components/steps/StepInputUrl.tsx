@@ -152,6 +152,24 @@ export default function StepInputUrl() {
                     try {
                         const jobPage = await crawlUrl(selectedJobUrl);
                         httpTextLen = jobPage.text?.length ?? 0;
+
+                        // Check for JSON-LD JobPosting — best case: structured data!
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        const ld = (jobPage as any).jsonLd;
+                        if (ld?.description) {
+                            const ldText = [
+                                ld.title && `Job Title: ${ld.title}`,
+                                ld.hiringOrganization?.name && `Company: ${ld.hiringOrganization.name}`,
+                                ld.jobLocation?.address?.addressLocality && `Location: ${ld.jobLocation.address.addressLocality}`,
+                                ld.description && `\nJob Description:\n${ld.description}`,
+                                ld.qualifications && `\nQualifications:\n${ld.qualifications}`,
+                                ld.jobBenefits && `\nBenefits:\n${ld.jobBenefits}`,
+                            ].filter(Boolean).join('\n');
+                            jobPageText = ldText;
+                            console.log('[StepInputUrl] JSON-LD found! text length:', ldText.length);
+                            break;
+                        }
+
                         if (httpTextLen >= 500) {
                             jobPageText = jobPage.text;
                             console.log('[StepInputUrl] HTTP crawl success, text length:', httpTextLen);
