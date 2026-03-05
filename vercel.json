@@ -1,6 +1,0 @@
-{
-    "buildCommand": "cd frontend && npm run build",
-    "outputDirectory": "frontend/.next",
-    "installCommand": "cd frontend && npm install",
-    "ignoreCommand": "git log -1 --stat | grep -q 'frontend/' || exit 0; exit 1"
-}
