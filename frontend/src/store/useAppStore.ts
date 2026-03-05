@@ -39,7 +39,7 @@ export interface JDEntry {
   company?: string;
 }
 
-type Step = 1 | 2 | 3;
+type Step = 1 | 2 | 3 | 4;
 
 interface AppState {
   // Navigation

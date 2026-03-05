@@ -307,7 +307,7 @@ function JobDetailPanel({
 
 export default function StepReport() {
     const {
-        cvData, jdEntries, updateJdEntry, setStep, resetAll,
+        cvData, jdEntries, updateJdEntry, setStep, setSelectedJdId, resetAll,
     } = useAppStore();
 
     const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -334,6 +334,9 @@ export default function StepReport() {
         try {
             const result = await optimizeCv(cvData, entry.jdData, entry.matchResult);
             updateJdEntry(entry.id, { optimizedCv: result });
+            // Navigate to Edit CV page
+            setSelectedJdId(entry.id);
+            setStep(4);
         } catch (e) {
             console.error('Optimization failed:', e);
         }
@@ -499,12 +502,24 @@ export default function StepReport() {
                                 {/* Optimize button */}
                                 <div style={{ display: 'flex', justifyContent: 'center' }}>
                                     {entry.optimizedCv ? (
-                                        <span style={{
-                                            display: 'flex', alignItems: 'center', gap: 4,
-                                            fontSize: '0.75rem', color: 'var(--accent-green)',
-                                        }}>
-                                            <CheckCircle size={14} weight="fill" /> Done
-                                        </span>
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                setSelectedJdId(entry.id);
+                                                setStep(4);
+                                            }}
+                                            style={{
+                                                display: 'flex', alignItems: 'center', gap: 4,
+                                                padding: '6px 14px', borderRadius: 'var(--radius-sm)',
+                                                fontSize: '0.75rem', fontWeight: 500,
+                                                background: 'rgba(16,185,129,0.1)',
+                                                border: '1px solid rgba(16,185,129,0.3)',
+                                                color: 'var(--accent-green)',
+                                                cursor: 'pointer',
+                                            }}
+                                        >
+                                            <DownloadSimple size={12} /> Edit CV
+                                        </button>
                                     ) : (
                                         <button
                                             className="btn-primary"

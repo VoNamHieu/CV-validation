@@ -5,6 +5,7 @@ import Stepper from '@/components/Stepper';
 import StepUploadCV from '@/components/steps/StepUploadCV';
 import StepInputUrl from '@/components/steps/StepInputUrl';
 import StepReport from '@/components/steps/StepReport';
+import StepEditCv from '@/components/steps/StepEditCv';
 import { Sparkle } from '@phosphor-icons/react';
 
 export default function Home() {
@@ -77,6 +78,7 @@ export default function Home() {
         {currentStep === 1 && <StepUploadCV />}
         {currentStep === 2 && <StepInputUrl />}
         {currentStep === 3 && <StepReport />}
+        {currentStep === 4 && <StepEditCv />}
       </main>
 
       {/* Footer */}
