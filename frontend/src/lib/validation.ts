@@ -11,7 +11,7 @@ export function isAllowedUrl(url: string): boolean {
         if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
 
         // Block localhost and loopback
-        if (["localhost", "127.0.0.1", "::1", "0.0.0.0"].includes(hostname)) return false;
+        if (["localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0"].includes(hostname)) return false;
 
         // Block private IP ranges (RFC 1918)
         if (hostname.startsWith("10.") || hostname.startsWith("192.168.")) return false;
