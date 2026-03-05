@@ -34,6 +34,9 @@ export interface JDEntry {
   error?: string;
   jdData?: JDData;
   matchResult?: MatchResult;
+  optimizedCv?: CVData;
+  jobTitle?: string;
+  company?: string;
 }
 
 type Step = 1 | 2 | 3;

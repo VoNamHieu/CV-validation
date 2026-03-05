@@ -2,84 +2,17 @@
 
 import { useState } from 'react';
 import {
-    ArrowLeft, Sparkle, ArrowSquareOut, Trophy, Warning,
+    ArrowLeft, Sparkle, ArrowSquareOut, Warning,
     CheckCircle, XCircle, CaretDown, CaretUp, DownloadSimple,
-    ArrowCounterClockwise, SpinnerGap, Lightning, Crosshair,
-    TrendUp, ThumbsUp, XSquare, ShieldWarning, ChartBar,
+    ArrowCounterClockwise, SpinnerGap, Lightning,
+    ShieldWarning, ChartBar, Eye,
 } from '@phosphor-icons/react';
-import { useAppStore, MatchResult, CategoryScore, CVData, JDData } from '@/store/useAppStore';
+import { useAppStore, JDEntry } from '@/store/useAppStore';
+import type { CVData, JDData, MatchResult, CategoryScore } from '@/lib/types';
 import ScoreRing from '@/components/ScoreRing';
 import { optimizeCv } from '@/lib/api';
 
-/* ─── Category collapsible section ─── */
-function CategorySection({ title, data, accentColor }: { title: string; data: CategoryScore; accentColor: string }) {
-    const [open, setOpen] = useState(false);
-    return (
-        <div style={{ marginBottom: 2 }}>
-            <button
-                onClick={() => setOpen(!open)}
-                style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%',
-                    padding: '12px 16px', background: 'var(--bg-secondary)', border: 'none',
-                    borderRadius: open ? '10px 10px 0 0' : 10, cursor: 'pointer', color: 'var(--text-primary)',
-                    transition: 'background 0.2s',
-                }}
-            >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <span style={{
-                        width: 36, height: 36, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontWeight: 700, fontSize: '0.85rem',
-                        background: `${accentColor}18`, color: accentColor,
-                    }}>
-                        {data.score}
-                    </span>
-                    <span style={{ fontWeight: 600, fontSize: '0.88rem' }}>{title}</span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    {/* Mini bar */}
-                    <div style={{ width: 60, height: 6, borderRadius: 3, background: 'var(--bg-card)', overflow: 'hidden' }}>
-                        <div style={{
-                            width: `${data.score}%`, height: '100%', borderRadius: 3,
-                            background: accentColor, transition: 'width 0.8s ease',
-                        }} />
-                    </div>
-                    {open ? <CaretUp size={16} style={{ color: 'var(--text-muted)' }} /> : <CaretDown size={16} style={{ color: 'var(--text-muted)' }} />}
-                </div>
-            </button>
-            {open && (
-                <div style={{
-                    padding: '14px 16px', background: 'var(--bg-secondary)', borderRadius: '0 0 10px 10px',
-                    borderTop: '1px solid var(--border-subtle)',
-                }}>
-                    <p style={{ fontSize: '0.83rem', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 10 }}>
-                        {data.reasoning}
-                    </p>
-                    {(data.gaps?.length || 0) > 0 && (
-                        <div>
-                            <p style={{ fontSize: '0.75rem', color: 'var(--accent-red)', fontWeight: 600, marginBottom: 6 }}>Gaps:</p>
-                            {(data.gaps || []).map((gap, i) => (
-                                <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginBottom: 4 }}>
-                                    <XCircle size={13} style={{ color: 'var(--accent-red)', marginTop: 2, flexShrink: 0 }} />
-                                    <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{gap}</span>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </div>
-            )}
-        </div>
-    );
-}
-
-/* ─── Score verdict label ─── */
-function getVerdict(score: number) {
-    if (score >= 85) return { text: 'Excellent Match', icon: Crosshair, color: 'var(--accent-green)' };
-    if (score >= 70) return { text: 'Strong Match', icon: TrendUp, color: 'var(--accent-green)' };
-    if (score >= 55) return { text: 'Moderate Match', icon: ThumbsUp, color: 'var(--accent-cyan)' };
-    if (score >= 40) return { text: 'Weak Match', icon: Warning, color: 'var(--accent-amber)' };
-    return { text: 'Poor Match', icon: XSquare, color: 'var(--accent-red)' };
-}
-
+/* ─── Score color helper ─── */
 function getColor(score: number) {
     if (score >= 80) return 'var(--accent-green)';
     if (score >= 60) return 'var(--accent-cyan)';
@@ -87,51 +20,15 @@ function getColor(score: number) {
     return 'var(--accent-red)';
 }
 
-/* ─── CV Panel for side-by-side ─── */
-function CvPanel({ data, title, accent }: { data: CVData; title: string; accent: string }) {
-    return (
-        <div className="glass-card" style={{ padding: '24px', flex: 1, minWidth: 0 }}>
-            <h4 style={{ fontWeight: 600, marginBottom: 16, color: accent, fontSize: '0.95rem' }}>{title}</h4>
-
-            {/* Summary */}
-            <div style={{ marginBottom: 20 }}>
-                <p style={{ fontWeight: 500, fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Summary</p>
-                <p style={{ fontSize: '0.88rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>{data.summary || 'N/A'}</p>
-            </div>
-
-            {/* Skills */}
-            <div style={{ marginBottom: 20 }}>
-                <p style={{ fontWeight: 500, fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Skills</p>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                    {(data.skills || []).map((s, i) => (
-                        <span key={i} style={{
-                            background: 'var(--bg-secondary)',
-                            border: '1px solid var(--border-subtle)',
-                            borderRadius: 6,
-                            padding: '3px 10px',
-                            fontSize: '0.78rem',
-                            color: 'var(--text-secondary)',
-                        }}>{s}</span>
-                    ))}
-                </div>
-            </div>
-
-            {/* Experience */}
-            <div>
-                <p style={{ fontWeight: 500, fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Experience</p>
-                {(data.experience || []).map((exp, i) => (
-                    <div key={i} style={{ marginBottom: 14, paddingLeft: 12, borderLeft: `2px solid ${accent}` }}>
-                        <p style={{ fontWeight: 600, fontSize: '0.88rem' }}>{exp.title} @ {exp.company}</p>
-                        <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 4 }}>{exp.duration_months} months</p>
-                        <p style={{ fontSize: '0.83rem', color: 'var(--text-secondary)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{exp.description}</p>
-                    </div>
-                ))}
-            </div>
-        </div>
-    );
+function getVerdict(score: number) {
+    if (score >= 85) return 'Excellent';
+    if (score >= 70) return 'Strong';
+    if (score >= 55) return 'Moderate';
+    if (score >= 40) return 'Weak';
+    return 'Poor';
 }
 
-/* ─── XSS-safe HTML escaping (M3) ─── */
+/* ─── XSS-safe HTML escaping ─── */
 function esc(str: string): string {
     return str
         .replace(/&/g, '&amp;')
@@ -197,25 +94,235 @@ function generateHtml(cv: CVData): string {
 </html>`;
 }
 
+/* ─── Category detail row ─── */
+function CategoryRow({ label, data }: { label: string; data: CategoryScore }) {
+    const [open, setOpen] = useState(false);
+    return (
+        <>
+            <button
+                onClick={() => setOpen(!open)}
+                style={{
+                    display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+                    padding: '6px 0', background: 'none', border: 'none',
+                    cursor: 'pointer', color: 'var(--text-primary)', fontSize: '0.8rem',
+                }}
+            >
+                <span style={{
+                    width: 28, height: 28, borderRadius: 6,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontWeight: 700, fontSize: '0.75rem',
+                    background: `${getColor(data.score)}18`, color: getColor(data.score),
+                }}>{data.score}</span>
+                <span style={{ flex: 1, textAlign: 'left', fontWeight: 500 }}>{label}</span>
+                {open ? <CaretUp size={12} /> : <CaretDown size={12} />}
+            </button>
+            {open && (
+                <div style={{ padding: '6px 0 10px 36px', fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                    <p>{data.reasoning}</p>
+                    {(data.gaps?.length || 0) > 0 && (
+                        <div style={{ marginTop: 6 }}>
+                            {data.gaps.map((g, i) => (
+                                <div key={i} style={{ display: 'flex', gap: 4, alignItems: 'flex-start', marginBottom: 2 }}>
+                                    <XCircle size={11} style={{ color: 'var(--accent-red)', marginTop: 2, flexShrink: 0 }} />
+                                    <span>{g}</span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            )}
+        </>
+    );
+}
+
+/* ─── CvPanel — side-by-side comparison ─── */
+function CvPanel({ data, title, accent }: { data: CVData; title: string; accent: string }) {
+    return (
+        <div className="glass-card" style={{ padding: '24px', flex: 1, minWidth: 0 }}>
+            <h4 style={{ fontWeight: 600, marginBottom: 16, color: accent, fontSize: '0.95rem' }}>{title}</h4>
+            <div style={{ marginBottom: 20 }}>
+                <p style={{ fontWeight: 500, fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Summary</p>
+                <p style={{ fontSize: '0.88rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>{data.summary || 'N/A'}</p>
+            </div>
+            <div style={{ marginBottom: 20 }}>
+                <p style={{ fontWeight: 500, fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Skills</p>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {(data.skills || []).map((s, i) => (
+                        <span key={i} style={{
+                            background: 'var(--bg-secondary)', border: '1px solid var(--border-subtle)',
+                            borderRadius: 6, padding: '3px 10px', fontSize: '0.78rem', color: 'var(--text-secondary)',
+                        }}>{s}</span>
+                    ))}
+                </div>
+            </div>
+            <div>
+                <p style={{ fontWeight: 500, fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Experience</p>
+                {(data.experience || []).map((exp, i) => (
+                    <div key={i} style={{ marginBottom: 14, paddingLeft: 12, borderLeft: `2px solid ${accent}` }}>
+                        <p style={{ fontWeight: 600, fontSize: '0.88rem' }}>{exp.title} @ {exp.company}</p>
+                        <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 4 }}>{exp.duration_months} months</p>
+                        <p style={{ fontSize: '0.83rem', color: 'var(--text-secondary)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{exp.description}</p>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+}
+
+/* ─── Expanded detail panel for a single job ─── */
+function JobDetailPanel({
+    entry, cvData, onOptimize, optimizing,
+}: {
+    entry: JDEntry;
+    cvData: CVData;
+    onOptimize: () => void;
+    optimizing: boolean;
+}) {
+    const jd = entry.jdData;
+    const m = entry.matchResult;
+    if (!jd || !m) return null;
+
+    const cvSkillsLower = (cvData.skills || []).map(s => s.toLowerCase());
+    const alignedSkills = (jd.must_have || []).filter(sk =>
+        cvSkillsLower.some(cs => cs.includes(sk.toLowerCase()) || sk.toLowerCase().includes(cs))
+    );
+    const missingSkills = (jd.must_have || []).filter(sk =>
+        !cvSkillsLower.some(cs => cs.includes(sk.toLowerCase()) || sk.toLowerCase().includes(cs))
+    );
+
+    return (
+        <div style={{
+            padding: '24px', background: 'var(--bg-card)',
+            borderTop: '1px solid var(--border-subtle)',
+            animation: 'fadeIn 0.2s ease',
+        }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginBottom: 20 }}>
+                {/* Skills */}
+                <div>
+                    <p style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase' }}>
+                        Must-Have ({alignedSkills.length}/{(jd.must_have || []).length} matched)
+                    </p>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                        {alignedSkills.map((s, i) => (
+                            <span key={`a-${i}`} style={{
+                                display: 'flex', alignItems: 'center', gap: 4,
+                                padding: '3px 8px', borderRadius: 6, fontSize: '0.75rem',
+                                background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.3)', color: 'var(--accent-green)',
+                            }}><CheckCircle size={10} /> {s}</span>
+                        ))}
+                        {missingSkills.map((s, i) => (
+                            <span key={`m-${i}`} style={{
+                                display: 'flex', alignItems: 'center', gap: 4,
+                                padding: '3px 8px', borderRadius: 6, fontSize: '0.75rem',
+                                background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', color: 'var(--accent-red)',
+                            }}><XCircle size={10} /> {s}</span>
+                        ))}
+                    </div>
+                </div>
+
+                {/* Scoring Breakdown */}
+                <div>
+                    <p style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase' }}>
+                        Scoring Breakdown
+                    </p>
+                    <CategoryRow label="Must-Have Skills (40%)" data={m.must_have_match} />
+                    <CategoryRow label="Experience (25%)" data={m.experience_match} />
+                    <CategoryRow label="Domain (15%)" data={m.domain_match} />
+                    <CategoryRow label="Seniority (10%)" data={m.seniority_match} />
+                    <CategoryRow label="Nice-to-Have (10%)" data={m.nice_to_have_match} />
+                </div>
+            </div>
+
+            {/* Risk Flags */}
+            {(m.risk_flags || []).length > 0 && (
+                <div style={{ marginBottom: 16 }}>
+                    <p style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--accent-red)', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <ShieldWarning size={13} /> Risk Flags
+                    </p>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                        {m.risk_flags.map((flag, i) => (
+                            <span key={i} style={{
+                                padding: '4px 10px', borderRadius: 6, fontSize: '0.75rem',
+                                background: 'rgba(239,68,68,0.06)', color: 'var(--text-secondary)',
+                                display: 'flex', alignItems: 'center', gap: 4,
+                            }}><Warning size={11} style={{ color: 'var(--accent-amber)' }} /> {flag}</span>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* Strength summary */}
+            <p style={{ fontSize: '0.83rem', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 16 }}>
+                {m.strength_summary}
+            </p>
+
+            {/* Optimize & Comparison */}
+            {!entry.optimizedCv ? (
+                <button
+                    className="btn-primary"
+                    onClick={onOptimize}
+                    disabled={optimizing}
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.88rem', padding: '10px 24px' }}
+                >
+                    {optimizing ? (
+                        <><SpinnerGap size={16} className="spin" /> Optimizing...</>
+                    ) : (
+                        <><Sparkle size={16} /> Optimize CV for this job</>
+                    )}
+                </button>
+            ) : (
+                <div>
+                    <div style={{
+                        background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)',
+                        borderRadius: 'var(--radius-md)', padding: '8px 14px', marginBottom: 16,
+                        fontSize: '0.78rem', color: 'var(--accent-amber)',
+                        display: 'flex', alignItems: 'center', gap: 6,
+                    }}>
+                        <Warning size={12} /> AI-assisted optimization · Only original CV info used
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 16 }}>
+                        <CvPanel data={cvData} title="Original CV" accent="var(--text-muted)" />
+                        <CvPanel data={entry.optimizedCv} title="Optimized CV" accent="var(--accent-green)" />
+                    </div>
+                    <button
+                        className="btn-primary"
+                        onClick={() => {
+                            const html = generateHtml(entry.optimizedCv!);
+                            const blob = new Blob([html], { type: 'text/html' });
+                            const urlObj = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = urlObj;
+                            a.download = `${entry.optimizedCv!.name.replace(/\s+/g, '_')}_optimized.html`;
+                            a.click();
+                            URL.revokeObjectURL(urlObj);
+                        }}
+                        style={{ display: 'flex', alignItems: 'center', gap: 8 }}
+                    >
+                        <DownloadSimple size={16} /> Download Optimized CV
+                    </button>
+                </div>
+            )}
+        </div>
+    );
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════════
-   MAIN REPORT BOARD
+   MAIN REPORT — Sheet/Table View
    ═══════════════════════════════════════════════════════════════════════════════ */
 
 export default function StepReport() {
     const {
-        cvData, jdData, matchResult, optimizedCv, setOptimizedCv,
-        setStep, jdEntries, resetAll,
+        cvData, jdEntries, updateJdEntry, setStep, resetAll,
     } = useAppStore();
 
-    const [optimizing, setOptimizing] = useState(false);
-    const [optimizeError, setOptimizeError] = useState('');
-    const [showComparison, setShowComparison] = useState(false);
+    const [expandedId, setExpandedId] = useState<string | null>(null);
+    const [optimizingId, setOptimizingId] = useState<string | null>(null);
 
-    const entry = jdEntries[0]; // We only handle 1 JD
-    const m = matchResult;
-    const jd = jdData;
+    const doneEntries = jdEntries.filter(e => e.status === 'done');
+    const errorEntries = jdEntries.filter(e => e.status === 'error');
+    const pendingEntries = jdEntries.filter(e => !['done', 'error'].includes(e.status));
 
-    if (!m || !jd || !cvData) {
+    if (!cvData || jdEntries.length === 0) {
         return (
             <div className="animate-fade-in" style={{ maxWidth: 600, margin: '0 auto', padding: '60px 20px', textAlign: 'center' }}>
                 <p style={{ color: 'var(--text-secondary)' }}>No analysis data found. Go back and analyze a URL.</p>
@@ -226,336 +333,288 @@ export default function StepReport() {
         );
     }
 
-    const verdict = getVerdict(m.overall_score);
-    const cvSkillsLower = (cvData.skills || []).map(s => s.toLowerCase());
-    const alignedSkills = (jd.must_have || []).filter(skill =>
-        cvSkillsLower.some(cs => cs.includes(skill.toLowerCase()) || skill.toLowerCase().includes(cs))
-    );
-    const missingSkills = (jd.must_have || []).filter(skill =>
-        !cvSkillsLower.some(cs => cs.includes(skill.toLowerCase()) || skill.toLowerCase().includes(cs))
-    );
-    const niceAligned = (jd.nice_to_have || []).filter(skill =>
-        cvSkillsLower.some(cs => cs.includes(skill.toLowerCase()) || skill.toLowerCase().includes(cs))
-    );
-    const niceMissing = (jd.nice_to_have || []).filter(skill =>
-        !cvSkillsLower.some(cs => cs.includes(skill.toLowerCase()) || skill.toLowerCase().includes(cs))
-    );
-
-    const handleOptimize = async () => {
-        console.log("[Client DBG] User clicked 'Optimize CV'");
-        console.time("[Client DBG] Total Optimization Time");
-        setOptimizing(true);
-        setOptimizeError('');
+    const handleOptimize = async (entry: JDEntry) => {
+        if (!cvData || !entry.jdData || !entry.matchResult) return;
+        setOptimizingId(entry.id);
         try {
-            const result = await optimizeCv(cvData, jd, m);
-            console.log("[Client DBG] Received optimized CV from API:", result);
-            setOptimizedCv(result);
-            setShowComparison(true);
-        } catch (e: unknown) {
-            console.error("[Client DBG] Error during optimization API call:", e);
-            setOptimizeError(e instanceof Error ? e.message : 'Optimization failed');
+            const result = await optimizeCv(cvData, entry.jdData, entry.matchResult);
+            updateJdEntry(entry.id, { optimizedCv: result });
+        } catch (e) {
+            console.error('Optimization failed:', e);
         }
-        setOptimizing(false);
-        console.timeEnd("[Client DBG] Total Optimization Time");
+        setOptimizingId(null);
     };
 
-    const handleDownload = () => {
-        const data = optimizedCv || cvData;
-        if (!data) return;
-        const html = generateHtml(data);
-        const blob = new Blob([html], { type: 'text/html' });
-        const urlObj = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = urlObj;
-        a.download = `${data.name.replace(/\s+/g, '_')}_optimized_cv.html`;
-        a.click();
-        URL.revokeObjectURL(urlObj);
-    };
+    // Sort by score descending
+    const sortedDone = [...doneEntries].sort((a, b) =>
+        (b.matchResult?.overall_score ?? 0) - (a.matchResult?.overall_score ?? 0)
+    );
 
     return (
-        <div className="animate-fade-in" style={{ maxWidth: 1100, margin: '0 auto', padding: '40px 20px' }}>
+        <div className="animate-fade-in" style={{ maxWidth: 1200, margin: '0 auto', padding: '40px 20px' }}>
 
-            {/* ── HERO: Score Overview ── */}
-            <div className="glass-card" style={{
-                padding: '36px 40px',
-                marginBottom: 28,
-                background: 'linear-gradient(135deg, rgba(59,130,246,0.06), rgba(139,92,246,0.04), rgba(6,182,212,0.04))',
-                textAlign: 'center',
-            }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 32, flexWrap: 'wrap' }}>
-                    <ScoreRing score={m.overall_score} size={140} label="Overall Fit" />
-                    <div style={{ textAlign: 'left', maxWidth: 500 }}>
-                        <div style={{
-                            display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4,
-                        }}>
-                            <verdict.icon size={24} style={{ color: verdict.color, flexShrink: 0 }} />
-                            <span style={{
-                                fontSize: '1.8rem', fontWeight: 800,
-                                background: 'var(--gradient-hero)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
-                            }}>
-                                {verdict.text}
-                            </span>
-                        </div>
-                        {entry?.source.startsWith('http') && (
-                            <a href={entry.source} target="_blank" rel="noopener noreferrer"
-                                style={{ fontSize: '0.82rem', color: 'var(--accent-blue)', display: 'flex', alignItems: 'center', gap: 4, marginBottom: 8 }}>
-                                <ArrowSquareOut size={12} /> {entry.label}
-                            </a>
-                        )}
-                        <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', lineHeight: 1.6 }}>
-                            {m.strength_summary}
-                        </p>
-                        {/* domain + seniority tags */}
-                        <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
-                            {jd.domain && (
-                                <span style={{
-                                    fontSize: '0.75rem', padding: '4px 12px', borderRadius: 20,
-                                    background: 'rgba(59,130,246,0.12)', color: 'var(--accent-blue)', fontWeight: 500,
-                                }}>{jd.domain}</span>
-                            )}
-                            {jd.seniority_expected && (
-                                <span style={{
-                                    fontSize: '0.75rem', padding: '4px 12px', borderRadius: 20,
-                                    background: 'rgba(139,92,246,0.12)', color: 'var(--accent-purple)', fontWeight: 500,
-                                }}>{jd.seniority_expected}</span>
-                            )}
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            {/* ── GRID: 2 columns ── */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginBottom: 28 }}>
-
-                {/* LEFT: Skills Alignment */}
-                <div className="glass-card" style={{ padding: '24px' }}>
-                    <h3 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <Trophy size={16} style={{ color: 'var(--accent-amber)' }} />
-                        Skills Alignment
-                    </h3>
-
-                    {/* Must-have */}
-                    <div style={{ marginBottom: 16 }}>
-                        <p style={{
-                            fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8,
-                            textTransform: 'uppercase', letterSpacing: '0.05em',
-                        }}>
-                            Must-Have ({alignedSkills.length}/{(jd.must_have || []).length} matched)
-                        </p>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                            {alignedSkills.map((s, i) => (
-                                <span key={`a-${i}`} style={{
-                                    display: 'flex', alignItems: 'center', gap: 4,
-                                    padding: '4px 10px', borderRadius: 6, fontSize: '0.78rem',
-                                    background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.3)', color: 'var(--accent-green)',
-                                }}>
-                                    <CheckCircle size={11} /> {s}
-                                </span>
-                            ))}
-                            {missingSkills.map((s, i) => (
-                                <span key={`m-${i}`} style={{
-                                    display: 'flex', alignItems: 'center', gap: 4,
-                                    padding: '4px 10px', borderRadius: 6, fontSize: '0.78rem',
-                                    background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', color: 'var(--accent-red)',
-                                }}>
-                                    <XCircle size={11} /> {s}
-                                </span>
-                            ))}
-                        </div>
-                    </div>
-
-                    {/* Nice-to-have */}
-                    {(jd.nice_to_have || []).length > 0 && (
-                        <div>
-                            <p style={{
-                                fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8,
-                                textTransform: 'uppercase', letterSpacing: '0.05em',
-                            }}>
-                                Nice-to-Have
-                            </p>
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                                {niceAligned.map((s, i) => (
-                                    <span key={`na-${i}`} style={{
-                                        display: 'flex', alignItems: 'center', gap: 4,
-                                        padding: '4px 10px', borderRadius: 6, fontSize: '0.78rem',
-                                        background: 'rgba(6,182,212,0.1)', border: '1px solid rgba(6,182,212,0.25)', color: 'var(--accent-cyan)',
-                                    }}>
-                                        <CheckCircle size={11} /> {s}
-                                    </span>
-                                ))}
-                                {niceMissing.map((s, i) => (
-                                    <span key={`nm-${i}`} style={{
-                                        display: 'flex', alignItems: 'center', gap: 4,
-                                        padding: '4px 10px', borderRadius: 6, fontSize: '0.78rem',
-                                        background: 'var(--bg-secondary)', border: '1px solid var(--border-subtle)', color: 'var(--text-muted)',
-                                    }}>
-                                        {s}
-                                    </span>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-                </div>
-
-                {/* RIGHT: JD Summary */}
-                <div className="glass-card" style={{ padding: '24px' }}>
-                    <h3 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <Sparkle size={16} style={{ color: 'var(--accent-blue)' }} />
-                        JD Summary
-                    </h3>
-                    {(jd.responsibilities || []).length > 0 && (
-                        <div style={{ marginBottom: 16 }}>
-                            <p style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                                Key Responsibilities
-                            </p>
-                            <ul style={{ margin: 0, paddingLeft: 18 }}>
-                                {(jd.responsibilities || []).slice(0, 6).map((r, i) => (
-                                    <li key={i} style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>{r}</li>
-                                ))}
-                                {(jd.responsibilities || []).length > 6 && (
-                                    <li style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
-                                        +{(jd.responsibilities || []).length - 6} more
-                                    </li>
-                                )}
-                            </ul>
-                        </div>
-                    )}
-
-                    {/* Risk Flags */}
-                    {(m.risk_flags || []).length > 0 && (
-                        <div>
-                            <p style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--accent-red)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: 6 }}>
-                                <ShieldWarning size={14} /> Risk Flags
-                            </p>
-                            {(m.risk_flags || []).map((flag, i) => (
-                                <div key={i} style={{
-                                    display: 'flex', alignItems: 'flex-start', gap: 6,
-                                    padding: '8px 12px', marginBottom: 4,
-                                    background: 'rgba(239,68,68,0.06)', borderRadius: 8,
-                                    fontSize: '0.82rem', color: 'var(--text-secondary)',
-                                }}>
-                                    <Warning size={13} style={{ color: 'var(--accent-amber)', marginTop: 2, flexShrink: 0 }} />
-                                    {flag}
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </div>
-            </div>
-
-            {/* ── DETAILED BREAKDOWN ── */}
-            <div className="glass-card" style={{ padding: '24px', marginBottom: 28 }}>
-                <h3 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <ChartBar size={16} style={{ color: 'var(--accent-blue)' }} /> Detailed Scoring Breakdown
-                </h3>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    <CategorySection title="Must-Have Skills (40%)" data={m.must_have_match} accentColor={getColor(m.must_have_match.score)} />
-                    <CategorySection title="Experience Depth (25%)" data={m.experience_match} accentColor={getColor(m.experience_match.score)} />
-                    <CategorySection title="Domain Alignment (15%)" data={m.domain_match} accentColor={getColor(m.domain_match.score)} />
-                    <CategorySection title="Seniority Fit (10%)" data={m.seniority_match} accentColor={getColor(m.seniority_match.score)} />
-                    <CategorySection title="Nice-to-Have (10%)" data={m.nice_to_have_match} accentColor={getColor(m.nice_to_have_match.score)} />
-                </div>
-            </div>
-
-            {/* ── OPTIMIZE CV SECTION ── */}
-            {!showComparison ? (
-                <div className="glass-card" style={{
-                    padding: '32px 40px',
-                    marginBottom: 28,
-                    textAlign: 'center',
-                    background: 'linear-gradient(135deg, rgba(139,92,246,0.06), rgba(59,130,246,0.04))',
-                }}>
-                    <Lightning size={40} weight="duotone" style={{ color: 'var(--accent-purple)', marginBottom: 12 }} />
-                    <h3 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: 8 }}>
-                        Optimize Your CV for This Job
-                    </h3>
-                    <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: 20, maxWidth: 500, margin: '0 auto 20px' }}>
-                        Let AI rewrite your CV to better align with this job description. Only uses information already in your CV — no fabrication.
+            {/* ── Header ── */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
+                <div>
+                    <h2 style={{ fontSize: '1.4rem', fontWeight: 700, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <ChartBar size={22} weight="duotone" style={{ color: 'var(--accent-blue)' }} />
+                        Job Match Results
+                    </h2>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>
+                        {doneEntries.length} jobs analyzed
+                        {errorEntries.length > 0 && ` · ${errorEntries.length} failed`}
+                        {pendingEntries.length > 0 && ` · ${pendingEntries.length} processing`}
                     </p>
-                    {optimizeError && (
-                        <p style={{ color: 'var(--accent-red)', fontSize: '0.85rem', marginBottom: 16 }}>{optimizeError}</p>
-                    )}
-                    <button
-                        className="btn-primary animate-pulse-glow"
-                        onClick={handleOptimize}
-                        disabled={optimizing}
-                        style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: '1rem', padding: '14px 36px' }}
-                    >
-                        {optimizing ? (
-                            <>
-                                <SpinnerGap size={18} style={{ animation: 'spin 1s linear infinite' }} />
-                                Optimizing with AI...
-                            </>
-                        ) : (
-                            <>
-                                <Sparkle size={18} /> Optimize CV
-                            </>
-                        )}
-                    </button>
-                    <style>{`@keyframes spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }`}</style>
                 </div>
-            ) : (
-                /* ── SIDE-BY-SIDE COMPARISON ── */
-                <div style={{ marginBottom: 28 }}>
-                    <div style={{ textAlign: 'center', marginBottom: 20 }}>
-                        <h3 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: 4 }}>
-                            <Sparkle size={18} style={{ display: 'inline', marginRight: 8, color: 'var(--accent-green)' }} />
-                            CV Optimization Complete
-                        </h3>
-                        <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-                            Compare your original CV with the AI-optimized version below.
-                        </p>
-                    </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                    <button className="btn-secondary" onClick={() => setStep(2)} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem' }}>
+                        <ArrowLeft size={14} /> Try Another
+                    </button>
+                    <button className="btn-secondary" onClick={() => { resetAll(); setStep(1); }}
+                        style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem' }}>
+                        <ArrowCounterClockwise size={14} /> Start Over
+                    </button>
+                </div>
+            </div>
 
-                    {/* Disclaimer */}
-                    <div style={{
-                        background: 'rgba(245,158,11,0.08)',
-                        border: '1px solid rgba(245,158,11,0.25)',
-                        borderRadius: 'var(--radius-md)',
-                        padding: '10px 16px',
-                        marginBottom: 20,
-                        fontSize: '0.82rem',
-                        color: 'var(--accent-amber)',
-                        textAlign: 'center',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                    }}>
-                        <Warning size={14} /> AI-assisted optimization · Only information from the original CV was used
-                    </div>
-
-                    {optimizedCv ? (
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
-                            <CvPanel data={cvData} title="Original CV" accent="var(--text-muted)" />
-                            <CvPanel data={optimizedCv} title="Optimized CV" accent="var(--accent-green)" />
+            {/* ── Summary Stats ── */}
+            {doneEntries.length > 0 && (
+                <div style={{
+                    display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 28,
+                }}>
+                    {[
+                        { label: 'Best Match', value: `${Math.max(...doneEntries.map(e => e.matchResult?.overall_score ?? 0))}%`, color: 'var(--accent-green)' },
+                        { label: 'Average', value: `${Math.round(doneEntries.reduce((s, e) => s + (e.matchResult?.overall_score ?? 0), 0) / doneEntries.length)}%`, color: 'var(--accent-cyan)' },
+                        { label: 'Jobs Found', value: `${doneEntries.length}`, color: 'var(--accent-blue)' },
+                        { label: 'Optimized', value: `${doneEntries.filter(e => e.optimizedCv).length}`, color: 'var(--accent-purple)' },
+                    ].map((stat, i) => (
+                        <div key={i} className="glass-card" style={{
+                            padding: '16px 20px', textAlign: 'center',
+                            background: `linear-gradient(135deg, ${stat.color}08, transparent)`,
+                        }}>
+                            <p style={{ fontSize: '1.5rem', fontWeight: 800, color: stat.color }}>{stat.value}</p>
+                            <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{stat.label}</p>
                         </div>
-                    ) : (
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
-                            <div className="shimmer-loading" style={{ height: 400, borderRadius: 'var(--radius-lg)' }} />
-                            <div className="shimmer-loading" style={{ height: 400, borderRadius: 'var(--radius-lg)' }} />
-                        </div>
-                    )}
-
-                    {/* Download */}
-                    {optimizedCv && (
-                        <div style={{ display: 'flex', justifyContent: 'center', gap: 12, marginTop: 24 }}>
-                            <button className="btn-primary" onClick={handleDownload}
-                                style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.95rem', padding: '12px 32px' }}>
-                                <DownloadSimple size={18} /> Download Optimized CV
-                            </button>
-                        </div>
-                    )}
+                    ))}
                 </div>
             )}
 
-            {/* ── BOTTOM ACTIONS ── */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <button className="btn-secondary" onClick={() => setStep(2)} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <ArrowLeft size={16} /> Try Another URL
-                </button>
-                <button className="btn-secondary" onClick={() => { resetAll(); setStep(1); }}
-                    style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <ArrowCounterClockwise size={16} /> Start Over
-                </button>
+            {/* ── Table ── */}
+            <div className="glass-card" style={{ overflow: 'hidden' }}>
+                {/* Table Header */}
+                <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: '52px 2fr 1fr 1fr 100px 120px 80px',
+                    padding: '12px 20px',
+                    background: 'var(--bg-secondary)',
+                    borderBottom: '1px solid var(--border-subtle)',
+                    fontSize: '0.72rem',
+                    fontWeight: 600,
+                    color: 'var(--text-muted)',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.06em',
+                }}>
+                    <span>#</span>
+                    <span>Job / Source</span>
+                    <span>Domain</span>
+                    <span>Top Gaps</span>
+                    <span style={{ textAlign: 'center' }}>Score</span>
+                    <span style={{ textAlign: 'center' }}>Optimize</span>
+                    <span style={{ textAlign: 'center' }}>Detail</span>
+                </div>
+
+                {/* Table Rows — Done */}
+                {sortedDone.map((entry, idx) => {
+                    const m = entry.matchResult!;
+                    const jd = entry.jdData!;
+                    const score = m.overall_score;
+                    const isExpanded = expandedId === entry.id;
+
+                    // Top 2 gaps
+                    const topGaps = [
+                        ...(m.must_have_match.gaps || []),
+                        ...(m.experience_match.gaps || []),
+                        ...(m.domain_match.gaps || []),
+                    ].slice(0, 2);
+
+                    return (
+                        <div key={entry.id}>
+                            <div
+                                style={{
+                                    display: 'grid',
+                                    gridTemplateColumns: '52px 2fr 1fr 1fr 100px 120px 80px',
+                                    padding: '14px 20px',
+                                    alignItems: 'center',
+                                    borderBottom: '1px solid var(--border-subtle)',
+                                    background: isExpanded ? 'rgba(59,130,246,0.04)' : 'transparent',
+                                    transition: 'background 0.15s',
+                                }}
+                            >
+                                {/* Rank */}
+                                <span style={{
+                                    width: 28, height: 28, borderRadius: '50%',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    fontSize: '0.78rem', fontWeight: 700,
+                                    background: idx === 0 ? 'rgba(245,158,11,0.15)' : 'var(--bg-secondary)',
+                                    color: idx === 0 ? 'var(--accent-amber)' : 'var(--text-muted)',
+                                }}>{idx + 1}</span>
+
+                                {/* Job Title + URL */}
+                                <div style={{ minWidth: 0 }}>
+                                    <p style={{ fontWeight: 600, fontSize: '0.88rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                        {entry.jobTitle || 'Unknown Position'}
+                                    </p>
+                                    <a href={entry.source} target="_blank" rel="noopener noreferrer"
+                                        style={{ fontSize: '0.72rem', color: 'var(--accent-blue)', display: 'flex', alignItems: 'center', gap: 3 }}>
+                                        <ArrowSquareOut size={10} />
+                                        {entry.company ? `${entry.company} · ` : ''}{entry.label}
+                                    </a>
+                                </div>
+
+                                {/* Domain + Seniority */}
+                                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                                    {jd.domain && (
+                                        <span style={{
+                                            fontSize: '0.7rem', padding: '2px 8px', borderRadius: 12,
+                                            background: 'rgba(59,130,246,0.1)', color: 'var(--accent-blue)',
+                                        }}>{jd.domain}</span>
+                                    )}
+                                    {jd.seniority_expected && (
+                                        <span style={{
+                                            fontSize: '0.7rem', padding: '2px 8px', borderRadius: 12,
+                                            background: 'rgba(139,92,246,0.1)', color: 'var(--accent-purple)',
+                                        }}>{jd.seniority_expected}</span>
+                                    )}
+                                </div>
+
+                                {/* Top Gaps */}
+                                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', overflow: 'hidden' }}>
+                                    {topGaps.length > 0 ? topGaps.map((g, i) => (
+                                        <div key={i} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                            {g}
+                                        </div>
+                                    )) : <span style={{ color: 'var(--accent-green)' }}>No major gaps</span>}
+                                </div>
+
+                                {/* Score */}
+                                <div style={{ display: 'flex', justifyContent: 'center' }}>
+                                    <ScoreRing score={score} size={48} label="" />
+                                </div>
+
+                                {/* Optimize button */}
+                                <div style={{ display: 'flex', justifyContent: 'center' }}>
+                                    {entry.optimizedCv ? (
+                                        <span style={{
+                                            display: 'flex', alignItems: 'center', gap: 4,
+                                            fontSize: '0.75rem', color: 'var(--accent-green)',
+                                        }}>
+                                            <CheckCircle size={14} weight="fill" /> Done
+                                        </span>
+                                    ) : (
+                                        <button
+                                            className="btn-primary"
+                                            onClick={(e) => { e.stopPropagation(); handleOptimize(entry); }}
+                                            disabled={optimizingId === entry.id}
+                                            style={{
+                                                padding: '6px 14px', fontSize: '0.75rem',
+                                                display: 'flex', alignItems: 'center', gap: 4,
+                                            }}
+                                        >
+                                            {optimizingId === entry.id ? (
+                                                <><SpinnerGap size={12} className="spin" /> ...</>
+                                            ) : (
+                                                <><Lightning size={12} weight="fill" /> Optimize</>
+                                            )}
+                                        </button>
+                                    )}
+                                </div>
+
+                                {/* View detail */}
+                                <div style={{ display: 'flex', justifyContent: 'center' }}>
+                                    <button
+                                        onClick={() => setExpandedId(isExpanded ? null : entry.id)}
+                                        style={{
+                                            width: 32, height: 32, borderRadius: 8,
+                                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                            background: isExpanded ? 'var(--accent-blue)' : 'var(--bg-secondary)',
+                                            border: 'none', cursor: 'pointer',
+                                            color: isExpanded ? 'white' : 'var(--text-muted)',
+                                            transition: 'all 0.15s',
+                                        }}
+                                    >
+                                        <Eye size={16} />
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Expanded Detail */}
+                            {isExpanded && (
+                                <JobDetailPanel
+                                    entry={entry}
+                                    cvData={cvData}
+                                    onOptimize={() => handleOptimize(entry)}
+                                    optimizing={optimizingId === entry.id}
+                                />
+                            )}
+                        </div>
+                    );
+                })}
+
+                {/* Error rows */}
+                {errorEntries.map((entry) => (
+                    <div key={entry.id} style={{
+                        display: 'grid',
+                        gridTemplateColumns: '52px 2fr 1fr 1fr 100px 120px 80px',
+                        padding: '14px 20px', alignItems: 'center',
+                        borderBottom: '1px solid var(--border-subtle)',
+                        opacity: 0.5,
+                    }}>
+                        <span style={{ color: 'var(--accent-red)' }}>✗</span>
+                        <div>
+                            <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {entry.source.slice(0, 60)}
+                            </p>
+                            <p style={{ fontSize: '0.72rem', color: 'var(--accent-red)' }}>{entry.error}</p>
+                        </div>
+                        <span>—</span>
+                        <span>—</span>
+                        <span style={{ textAlign: 'center', color: 'var(--text-muted)' }}>—</span>
+                        <span style={{ textAlign: 'center', color: 'var(--text-muted)' }}>—</span>
+                        <span style={{ textAlign: 'center', color: 'var(--text-muted)' }}>—</span>
+                    </div>
+                ))}
+
+                {/* Pending rows */}
+                {pendingEntries.map((entry) => (
+                    <div key={entry.id} style={{
+                        display: 'grid',
+                        gridTemplateColumns: '52px 2fr 1fr 1fr 100px 120px 80px',
+                        padding: '14px 20px', alignItems: 'center',
+                        borderBottom: '1px solid var(--border-subtle)',
+                    }}>
+                        <SpinnerGap size={16} className="spin" style={{ color: 'var(--accent-blue)' }} />
+                        <div>
+                            <p style={{ fontSize: '0.82rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {entry.source.slice(0, 60)}
+                            </p>
+                            <p style={{ fontSize: '0.72rem', color: 'var(--accent-blue)' }}>{entry.status}...</p>
+                        </div>
+                        <span>—</span>
+                        <span>—</span>
+                        <span style={{ textAlign: 'center' }}>
+                            <div className="shimmer-loading" style={{ width: 40, height: 40, borderRadius: '50%', margin: '0 auto' }} />
+                        </span>
+                        <span style={{ textAlign: 'center', color: 'var(--text-muted)' }}>—</span>
+                        <span style={{ textAlign: 'center', color: 'var(--text-muted)' }}>—</span>
+                    </div>
+                ))}
             </div>
+
+            <style>{`
+                @keyframes spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }
+                .spin { animation: spin 1s linear infinite; }
+                @keyframes fadeIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+            `}</style>
         </div>
     );
 }

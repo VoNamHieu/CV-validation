@@ -28,7 +28,7 @@ const PHASE_ORDER: Exclude<Phase, 'idle'>[] = [
 export default function StepInputUrl() {
     const {
         setStep, cvData, setJdData, setMatchResult,
-        clearJdEntries, addJdEntry, setOptimizedCv, addJobRecord,
+        clearJdEntries, addJdEntry, updateJdEntry, setOptimizedCv, addJobRecord,
     } = useAppStore();
 
     const [url, setUrl] = useState('');
@@ -57,25 +57,15 @@ export default function StepInputUrl() {
         setError('');
         setOptimizedCv(null);
         setInferredTitle('');
+        clearJdEntries();
 
         try {
             // ─── Phase 1: AI Analyze CV → infer job title + search URL ───
             setPhase('analyzing_cv');
             setPhaseDetail('Reading your CV to understand what job you want...');
-            console.log('[StepInputUrl] Phase 1: smartSearch with site:', trimmed);
             let searchResult = await smartSearch(cvData, trimmed);
-            console.log('[StepInputUrl] Phase 1 result:', searchResult);
-
-            // Defensive: AI may return array instead of object
-            if (Array.isArray(searchResult)) {
-                console.log('[StepInputUrl] Phase 1: got array, using first element');
-                searchResult = searchResult[0];
-            }
-
-            if (!searchResult?.search_url) {
-                throw new Error('AI could not generate a search URL. Please try again.');
-            }
-
+            if (Array.isArray(searchResult)) searchResult = searchResult[0];
+            if (!searchResult?.search_url) throw new Error('AI could not generate a search URL.');
             setInferredTitle(searchResult.inferred_job_title);
             setPhaseDetail(`Looking for: "${searchResult.inferred_job_title}"`);
 
@@ -83,39 +73,40 @@ export default function StepInputUrl() {
             setPhase('searching');
             const hostname = getHostname(trimmed);
             setPhaseDetail(`Searching on ${hostname}...`);
-            console.log('[StepInputUrl] Phase 2: crawling search URL:', searchResult.search_url);
 
             let searchPage: { text: string; textWithLinks?: string } = { text: '', textWithLinks: '' };
             try {
                 searchPage = await crawlUrl(searchResult.search_url, true);
-                console.log('[StepInputUrl] Phase 2 result: text length=', searchPage.text?.length, 'textWithLinks length=', searchPage.textWithLinks?.length);
             } catch (crawlErr) {
-                console.log('[StepInputUrl] Phase 2 crawl failed, treating as SPA:', crawlErr);
+                console.log('[StepInputUrl] Search page crawl failed:', crawlErr);
             }
 
-            let jobPageText = '';
-            let selectedJobUrl = '';
-
-            // ─── Phase 3: Extract job links from search results ───
+            // ─── Phase 3: Extract job links ───
             setPhase('extracting_links');
-            setPhaseDetail('AI is finding job listings on the page...');
-
+            setPhaseDetail('AI is finding job listings...');
             const linksResult = await extractJobLinks(searchPage.textWithLinks || searchPage.text, trimmed);
-            console.log('[StepInputUrl] extractJobLinks result:', linksResult);
-
             if (!linksResult.found || !linksResult.job_urls?.length) {
                 throw new Error(`No job listings found on ${hostname}. Try a different job site.`);
             }
 
-            const randomIdx = Math.floor(Math.random() * Math.min(linksResult.job_urls.length, 10));
-            selectedJobUrl = linksResult.job_urls[randomIdx];
-            setPhaseDetail(`Found ${linksResult.total_found} jobs → selected #${randomIdx + 1}`);
+            // Take up to 5 unique job URLs
+            const MAX_JOBS = 5;
+            const jobUrls: string[] = linksResult.job_urls.slice(0, MAX_JOBS);
+            setPhaseDetail(`Found ${linksResult.total_found} jobs → processing top ${jobUrls.length}`);
 
-            // ─── Phase 4: Crawl job detail page (HTTP → JSON-LD → Playwright) ───
+            // Create placeholder entries
+            for (const jobUrl of jobUrls) {
+                addJdEntry({
+                    id: `jd-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                    source: jobUrl,
+                    label: getHostname(jobUrl),
+                    status: 'crawling',
+                });
+            }
+
+            // ─── Phase 4-6: Crawl + Extract JD + Score for each job ───
             setPhase('crawling_job');
-            const maxTries = Math.min(linksResult.job_urls.length, 3);
 
-            // Helper: build JD text from JSON-LD
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const buildJdFromLd = (ld: any): string => [
                 ld.title && `Job Title: ${ld.title}`,
@@ -126,115 +117,119 @@ export default function StepInputUrl() {
                 ld.jobBenefits && `\nBenefits:\n${ld.jobBenefits}`,
             ].filter(Boolean).join('\n');
 
-            for (let attempt = 0; attempt < maxTries; attempt++) {
-                const idx = (randomIdx + attempt) % linksResult.job_urls.length;
-                selectedJobUrl = linksResult.job_urls[idx];
-                setPhaseDetail(`Fetching job #${idx + 1}: ${selectedJobUrl.slice(0, 50)}...`);
-                console.log(`[StepInputUrl] Crawl attempt ${attempt + 1}/${maxTries}: ${selectedJobUrl}`);
+            // Process all jobs (sequential to avoid rate limits)
+            const entries = useAppStore.getState().jdEntries;
+            let completedCount = 0;
 
-                // Try HTTP first
-                let httpTextLen = 0;
+            for (const entry of entries) {
+                const entryId = entry.id;
+                const jobUrl = entry.source;
+                setPhaseDetail(`Processing job ${completedCount + 1}/${jobUrls.length}: ${jobUrl.slice(0, 50)}...`);
+
                 try {
-                    const jobPage = await crawlUrl(selectedJobUrl);
-                    httpTextLen = jobPage.text?.length ?? 0;
+                    // Crawl
+                    updateJdEntry(entryId, { status: 'crawling' });
+                    let jobPageText = '';
+                    let jobTitle = '';
+                    let company = '';
 
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    const ld = (jobPage as any).jsonLd;
-                    if (ld?.description) {
-                        jobPageText = buildJdFromLd(ld);
-                        console.log('[StepInputUrl] JSON-LD found! text length:', jobPageText.length);
-                        break;
-                    }
-                    if (httpTextLen >= 500) {
-                        jobPageText = jobPage.text;
-                        console.log('[StepInputUrl] HTTP crawl success, text length:', httpTextLen);
-                        break;
-                    }
-                } catch (httpErr) {
-                    console.log('[StepInputUrl] HTTP crawl failed:', httpErr);
-                }
-
-                // Playwright fallback
-                console.log(`[StepInputUrl] HTTP thin (${httpTextLen} chars), trying Playwright...`);
-                setPhaseDetail('Page needs JS — using Playwright...');
-                try {
-                    const pw = await fetchPage(selectedJobUrl);
-                    if (pw.success) {
-                        if (pw.jsonLd?.description) {
-                            jobPageText = buildJdFromLd(pw.jsonLd);
-                            console.log('[StepInputUrl] Playwright JSON-LD found! text length:', jobPageText.length);
-                            break;
+                    // Try HTTP first
+                    try {
+                        const jobPage = await crawlUrl(jobUrl);
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        const ld = (jobPage as any).jsonLd;
+                        if (ld?.description) {
+                            jobPageText = buildJdFromLd(ld);
+                            jobTitle = ld.title || '';
+                            company = ld.hiringOrganization?.name || '';
+                        } else if ((jobPage.text?.length ?? 0) >= 500) {
+                            jobPageText = jobPage.text;
                         }
-                        if (pw.text.length >= 200) {
-                            jobPageText = pw.text;
-                            console.log('[StepInputUrl] Playwright success, text length:', jobPageText.length);
-                            break;
-                        }
+                    } catch { /* HTTP fail, try playwright */ }
+
+                    // Playwright fallback
+                    if (jobPageText.length < 200) {
+                        try {
+                            const pw = await fetchPage(jobUrl);
+                            if (pw.success) {
+                                if (pw.jsonLd?.description) {
+                                    jobPageText = buildJdFromLd(pw.jsonLd);
+                                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                                    jobTitle = (pw.jsonLd as any).title || '';
+                                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                                    company = (pw.jsonLd as any).hiringOrganization?.name || '';
+                                } else if (pw.text.length >= 200) {
+                                    jobPageText = pw.text;
+                                }
+                            }
+                        } catch { /* pw fail */ }
                     }
-                    console.log('[StepInputUrl] Playwright thin:', pw.text?.length, pw.error);
-                } catch (pwErr) {
-                    console.log('[StepInputUrl] Playwright failed:', pwErr);
+
+                    if (jobPageText.length < 100) {
+                        updateJdEntry(entryId, { status: 'error', error: 'Could not load job page' });
+                        completedCount++;
+                        continue;
+                    }
+
+                    // Extract JD
+                    updateJdEntry(entryId, { status: 'parsing' });
+                    let jdData = await extractJdStructured(jobPageText);
+                    if (Array.isArray(jdData)) jdData = jdData[0];
+                    if (!jdData || (!jdData.must_have?.length && !jdData.responsibilities?.length)) {
+                        updateJdEntry(entryId, { status: 'error', error: 'No JD found on page' });
+                        completedCount++;
+                        continue;
+                    }
+
+                    // Score
+                    updateJdEntry(entryId, { status: 'scoring' });
+                    let matchResult = await scoreFit(cvData, jdData);
+                    if (Array.isArray(matchResult)) matchResult = matchResult[0];
+                    if (!matchResult?.overall_score) {
+                        updateJdEntry(entryId, { status: 'error', error: 'Scoring failed' });
+                        completedCount++;
+                        continue;
+                    }
+
+                    // Detect job title from JD if not from JSON-LD
+                    if (!jobTitle && jdData.domain) {
+                        jobTitle = searchResult.inferred_job_title;
+                    }
+
+                    updateJdEntry(entryId, {
+                        status: 'done',
+                        jdData,
+                        matchResult,
+                        jobTitle: jobTitle || searchResult.inferred_job_title,
+                        company,
+                    });
+
+                    // Also save first successful to legacy fields for backward compat
+                    if (completedCount === 0 || !useAppStore.getState().matchResult) {
+                        setJdData(jdData);
+                        setMatchResult(matchResult);
+                    }
+
+                    addJobRecord({
+                        id: `job-${Date.now()}`,
+                        jobTitle: jobTitle || searchResult.inferred_job_title,
+                        company,
+                        jobUrl,
+                        siteName: hostname,
+                        overallScore: matchResult.overall_score,
+                        timestamp: Date.now(),
+                        jdData,
+                        matchResult,
+                    });
+
+                } catch (err) {
+                    updateJdEntry(entryId, {
+                        status: 'error',
+                        error: err instanceof Error ? err.message : 'Unknown error',
+                    });
                 }
-
-                if (attempt === maxTries - 1) {
-                    throw new Error('Could not load any job page. The site may be blocking requests. Try again.');
-                }
+                completedCount++;
             }
-
-            // ─── Phase 5: AI extract JD from the job page ───
-            setPhase('detecting_jd');
-            setPhaseDetail('AI is analyzing the job description...');
-            console.log('[StepInputUrl] Phase 5: extracting JD from text of length', jobPageText.length);
-            let jdData = await extractJdStructured(jobPageText);
-            console.log('[StepInputUrl] Phase 5 result:', jdData);
-            // AI may return array if page has multiple jobs — use first
-            if (Array.isArray(jdData)) {
-                console.log('[StepInputUrl] Phase 5: got array, using first element');
-                jdData = jdData[0];
-            }
-            if (!jdData) throw new Error('Could not extract job description from page.');
-            // If JD has no useful data (empty arrays), page was likely not a real job
-            const hasContent = jdData.must_have?.length > 0 || jdData.responsibilities?.length > 0;
-            if (!hasContent) throw new Error('Could not find a job description on this page. Try again.');
-            setJdData(jdData);
-
-            // ─── Phase 6: Score match ───
-            setPhase('scoring');
-            setPhaseDetail('Calculating how well your CV matches...');
-            console.log('[StepInputUrl] Phase 6: scoring match...');
-            let matchResult = await scoreFit(cvData, jdData);
-            console.log('[StepInputUrl] Phase 6 result:', matchResult);
-            // AI may return array — use first
-            if (Array.isArray(matchResult)) {
-                console.log('[StepInputUrl] Phase 6: got array, using first element');
-                matchResult = matchResult[0];
-            }
-            if (!matchResult || matchResult.overall_score == null) throw new Error('Could not score match.');
-            setMatchResult(matchResult);
-
-            // Store entry for report
-            clearJdEntries();
-            addJdEntry({
-                id: `jd-smart-${Date.now()}`,
-                source: selectedJobUrl,
-                label: getHostname(selectedJobUrl),
-                status: 'done',
-                jdData,
-                matchResult,
-            });
-
-            // Save to job history board
-            addJobRecord({
-                id: `job-${Date.now()}`,
-                jobTitle: jdData?.domain ? `${searchResult.inferred_job_title}` : searchResult.inferred_job_title,
-                company: '',
-                jobUrl: selectedJobUrl,
-                siteName: getHostname(trimmed),
-                overallScore: matchResult.overall_score,
-                timestamp: Date.now(),
-                jdData,
-                matchResult,
-            });
 
             setPhase('idle');
             setStep(3);
