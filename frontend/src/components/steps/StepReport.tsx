@@ -10,6 +10,7 @@ import {
 import { useAppStore, JDEntry } from '@/store/useAppStore';
 import type { CVData, JDData, MatchResult, CategoryScore } from '@/lib/types';
 import ScoreRing from '@/components/ScoreRing';
+import EditableCvPreview from '@/components/EditableCvPreview';
 import { optimizeCv } from '@/lib/api';
 
 /* ─── Score color helper ─── */
@@ -278,28 +279,22 @@ function JobDetailPanel({
                         fontSize: '0.78rem', color: 'var(--accent-amber)',
                         display: 'flex', alignItems: 'center', gap: 6,
                     }}>
-                        <Warning size={12} /> AI-assisted optimization · Only original CV info used
+                        <Warning size={12} /> AI-assisted optimization · Edit below then Save & Download
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 16 }}>
-                        <CvPanel data={cvData} title="Original CV" accent="var(--text-muted)" />
-                        <CvPanel data={entry.optimizedCv} title="Optimized CV" accent="var(--accent-green)" />
-                    </div>
-                    <button
-                        className="btn-primary"
-                        onClick={() => {
-                            const html = generateHtml(entry.optimizedCv!);
+                    <EditableCvPreview
+                        originalCv={cvData}
+                        optimizedCv={entry.optimizedCv}
+                        onSave={(editedCv) => {
+                            const html = generateHtml(editedCv);
                             const blob = new Blob([html], { type: 'text/html' });
                             const urlObj = URL.createObjectURL(blob);
                             const a = document.createElement('a');
                             a.href = urlObj;
-                            a.download = `${entry.optimizedCv!.name.replace(/\s+/g, '_')}_optimized.html`;
+                            a.download = `${editedCv.name.replace(/\s+/g, '_')}_optimized.html`;
                             a.click();
                             URL.revokeObjectURL(urlObj);
                         }}
-                        style={{ display: 'flex', alignItems: 'center', gap: 8 }}
-                    >
-                        <DownloadSimple size={16} /> Download Optimized CV
-                    </button>
+                    />
                 </div>
             )}
         </div>
