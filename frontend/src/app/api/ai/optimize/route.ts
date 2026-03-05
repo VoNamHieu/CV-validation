@@ -44,14 +44,27 @@ OPTIMIZATION INSTRUCTIONS:
 4. Keep the same structure, job titles, companies, and duration.
 5. NEVER fabricate new information.`;
 
+        console.log(`[Frontend DBG] Optimizing CV for ${cv.name || 'Unknown'}. JD role: ${jd.responsibilities?.[0]?.substring(0, 30)}...`);
+        console.time("[Frontend DBG] Gemini API Time (Optimize)");
+
         const result = await callGemini(systemPrompt, userPrompt);
 
+        console.timeEnd("[Frontend DBG] Gemini API Time (Optimize)");
+        console.log(`[Frontend DBG] Raw output from Gemini (length: ${result.length}):`, result.substring(0, 300) + "...\n[TRUNCATED]");
+
         let parsed;
-        try { parsed = JSON.parse(result); }
-        catch { return NextResponse.json({ detail: "AI returned invalid JSON. Please retry." }, { status: 502 }); }
+        try {
+            parsed = JSON.parse(result);
+            console.log(`[Frontend DBG] Successfully parsed JSON optimized CV for ${parsed.name}`);
+        }
+        catch (err) {
+            console.error("[Frontend DBG] Failed to parse JSON. Raw AI Output was:", result);
+            return NextResponse.json({ detail: "AI returned invalid JSON. Please retry." }, { status: 502 });
+        }
 
         return NextResponse.json(parsed);
     } catch (e: unknown) {
+        console.error("[Frontend DBG] Exception in /api/ai/optimize/route.ts:", e);
         const message = e instanceof Error ? e.message : "Failed to optimize CV";
         return NextResponse.json({ detail: message }, { status: 500 });
     }

@@ -1,5 +1,8 @@
+import logging
 from app.models.schemas import CVSchema, JDSchema, MatchResultSchema
 from app.services.gemini_client import call_with_fallback
+
+logger = logging.getLogger(__name__)
 
 
 async def optimize_cv(cv: CVSchema, jd: JDSchema, match: MatchResultSchema) -> CVSchema:
@@ -26,10 +29,21 @@ async def optimize_cv(cv: CVSchema, jd: JDSchema, match: MatchResultSchema) -> C
     
     Return the fully optimized CV following the CVSchema.
     """
-    return await call_with_fallback(
-        response_model=CVSchema,
-        messages=[
-            {"role": "system", "content": "You are a CV optimizer that strictly follows anti-hallucination rules."},
-            {"role": "user", "content": prompt}
-        ],
-    )
+    
+    logger.info("[Optimization] Starting CV optimization process...")
+    logger.debug(f"[Optimization] Generated Prompt for Gemini: {prompt[:500]}... [TRUNCATED]")
+    
+    try:
+        result = await call_with_fallback(
+            response_model=CVSchema,
+            messages=[
+                {"role": "system", "content": "You are a CV optimizer that strictly follows anti-hallucination rules."},
+                {"role": "user", "content": prompt}
+            ],
+        )
+        logger.info("[Optimization] CV optimization completed successfully.")
+        logger.debug(f"[Optimization] Optimized CV Result: {result.model_dump_json(indent=2)[:500]}... [TRUNCATED]")
+        return result
+    except Exception as e:
+        logger.error(f"[Optimization] Error during CV optimization: {str(e)}", exc_info=True)
+        raise

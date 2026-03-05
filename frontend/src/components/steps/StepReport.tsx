@@ -242,16 +242,21 @@ export default function StepReport() {
     );
 
     const handleOptimize = async () => {
+        console.log("[Client DBG] User clicked 'Optimize CV'");
+        console.time("[Client DBG] Total Optimization Time");
         setOptimizing(true);
         setOptimizeError('');
         try {
             const result = await optimizeCv(cvData, jd, m);
+            console.log("[Client DBG] Received optimized CV from API:", result);
             setOptimizedCv(result);
             setShowComparison(true);
         } catch (e: unknown) {
+            console.error("[Client DBG] Error during optimization API call:", e);
             setOptimizeError(e instanceof Error ? e.message : 'Optimization failed');
         }
         setOptimizing(false);
+        console.timeEnd("[Client DBG] Total Optimization Time");
     };
 
     const handleDownload = () => {
