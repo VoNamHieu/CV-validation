@@ -54,7 +54,9 @@ Generate the most relevant job search URL for this candidate on this site.`;
         console.log('[smart-search] Site URL:', siteUrl);
         const raw = await callGeminiLight(systemPrompt, userPrompt);
         console.log('[smart-search] Raw AI response:', raw);
-        let parsed = JSON.parse(raw);
+        let parsed;
+        try { parsed = JSON.parse(raw); }
+        catch { return NextResponse.json({ detail: "AI returned invalid JSON. Please retry." }, { status: 502 }); }
 
         // Gemini sometimes returns an array instead of an object — unwrap it
         if (Array.isArray(parsed)) {

@@ -40,7 +40,10 @@ ${JSON.stringify(jd, null, 2)}
 Determine a score from 0-100 for each dimension, explain the reasoning briefly, list the gaps, and calculate the weighted overall score. Be rigorous and identify any risk flags.`;
 
         const result = await callGemini(systemPrompt, userPrompt);
-        const parsed = JSON.parse(result);
+
+        let parsed;
+        try { parsed = JSON.parse(result); }
+        catch { return NextResponse.json({ detail: "AI returned invalid JSON. Please retry." }, { status: 502 }); }
 
         return NextResponse.json(parsed);
     } catch (e: unknown) {

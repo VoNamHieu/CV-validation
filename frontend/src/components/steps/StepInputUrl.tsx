@@ -7,7 +7,7 @@ import {
 } from '@phosphor-icons/react';
 import type { Icon } from '@phosphor-icons/react';
 import { useAppStore } from '@/store/useAppStore';
-import { smartSearch, crawlUrl, extractJdStructured, scoreFit, fetchPage } from '@/lib/api';
+import { smartSearch, crawlUrl, extractJdStructured, scoreFit, fetchPage, extractJobLinks } from '@/lib/api';
 import JobBoard from '@/components/JobBoard';
 
 type Phase = 'idle' | 'analyzing_cv' | 'searching' | 'extracting_links' | 'crawling_job' | 'detecting_jd' | 'scoring';
@@ -100,7 +100,6 @@ export default function StepInputUrl() {
             setPhase('extracting_links');
             setPhaseDetail('AI is finding job listings on the page...');
 
-            const { extractJobLinks } = await import('@/lib/api');
             const linksResult = await extractJobLinks(searchPage.textWithLinks || searchPage.text, trimmed);
             console.log('[StepInputUrl] extractJobLinks result:', linksResult);
 

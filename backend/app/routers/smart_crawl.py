@@ -3,7 +3,6 @@ Smart Search Router — LLM-powered job link extraction
 Uses Playwright to crawl SPA job sites, then Gemini Pro to identify job posting URLs.
 """
 
-import os
 import json
 import re
 import random
@@ -12,28 +11,15 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
-from google import genai
-from dotenv import load_dotenv
-from app.services.crawler import try_http_fetch, try_playwright_fetch, clean_html, detect_needs_playwright
-
-load_dotenv()
+from app.services.crawler import try_http_fetch, try_playwright_fetch, clean_html, detect_needs_playwright, extract_json_ld as _extract_jsonld_job
+from app.services.gemini_client import get_raw_client, MODELS_FLASH, is_overloaded
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 router = APIRouter(prefix="/crawl", tags=["Smart Crawl"])
 
-# ── Gemini client (lazy init) ──
-_gemini_client = None
 
-def _get_gemini():
-    global _gemini_client
-    if _gemini_client is None:
-        api_key = os.getenv("GEMINI_API_KEY")
-        if not api_key:
-            raise ValueError("GEMINI_API_KEY not set")
-        _gemini_client = genai.Client(api_key=api_key)
-    return _gemini_client
 
 
 # ── Models ──
@@ -164,9 +150,9 @@ Return a JSON array of the URLs that are individual job postings. Return ONLY th
 Example: ["https://example.com/job/123", "https://example.com/viec-lam/title-456"]
 If no job posting URLs found, return: []"""
 
-    CRAWL_MODELS = ["gemini-3-flash-preview", "gemini-2.5-pro"]
+    CRAWL_MODELS = MODELS_FLASH
     try:
-        client = _get_gemini()
+        client = get_raw_client()
         response = None
         for i, model in enumerate(CRAWL_MODELS):
             try:
@@ -383,8 +369,6 @@ class FetchPageResponse(BaseModel):
     jsonLd: dict | None = None
 
 
-# Reuse the more robust JSON-LD extractor from crawler service
-from app.services.crawler import extract_json_ld as _extract_jsonld_job
 
 
 

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isAllowedUrl } from "@/lib/validation";
 
 /**
  * Crawls a URL and returns cleaned text.
@@ -10,10 +11,12 @@ export async function POST(request: NextRequest) {
         console.log('[crawl-url] Fetching:', url, '| keepLinks:', keepLinks);
 
         if (!url) {
-            return NextResponse.json(
-                { detail: "url is required" },
-                { status: 400 }
-            );
+            return NextResponse.json({ detail: "url is required" }, { status: 400 });
+        }
+
+        // ── SSRF Protection (H1) ──
+        if (!isAllowedUrl(url)) {
+            return NextResponse.json({ detail: "URL not allowed" }, { status: 400 });
         }
 
         const response = await fetch(url, {

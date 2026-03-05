@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isAllowedUrl } from "@/lib/validation";
 
 /**
  * Proxy to Railway backend for Playwright-based single-page fetch.
@@ -10,6 +11,11 @@ export async function POST(request: NextRequest) {
 
         if (!url) {
             return NextResponse.json({ detail: "url is required" }, { status: 400 });
+        }
+
+        // ── SSRF Protection (H1) ──
+        if (!isAllowedUrl(url)) {
+            return NextResponse.json({ detail: "URL not allowed" }, { status: 400 });
         }
 
         const backendUrl = process.env.BACKEND_URL;

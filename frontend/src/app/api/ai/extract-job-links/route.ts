@@ -45,7 +45,9 @@ ${html_text.slice(0, 20000)}`;
 
         const result = await callGeminiLight(systemPrompt, userPrompt);
         console.log('[extract-job-links] Raw AI response:', result);
-        const parsed = JSON.parse(result);
+        let parsed;
+        try { parsed = JSON.parse(result); }
+        catch { return NextResponse.json({ detail: "AI returned invalid JSON. Please retry." }, { status: 502 }); }
         console.log('[extract-job-links] Parsed:', JSON.stringify(parsed, null, 2));
 
         return NextResponse.json(parsed);

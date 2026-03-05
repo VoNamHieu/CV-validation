@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { callGeminiWithPdf } from "@/lib/gemini";
+import { MAX_PDF_BASE64_LENGTH } from "@/lib/validation";
 
 export async function POST(request: NextRequest) {
     try {
@@ -7,6 +8,11 @@ export async function POST(request: NextRequest) {
 
         if (!pdf_base64) {
             return NextResponse.json({ detail: "pdf_base64 is required" }, { status: 400 });
+        }
+
+        // ── PDF size limit (H5) ──
+        if (pdf_base64.length > MAX_PDF_BASE64_LENGTH) {
+            return NextResponse.json({ detail: "PDF too large (max ~5MB)" }, { status: 413 });
         }
 
         const isCV = type === "cv";
@@ -38,7 +44,13 @@ Return ONLY valid JSON matching this exact schema:
             : "Extract the key requirements, nice-to-haves, responsibilities, seniority, and domain from this Job Description PDF.";
 
         const result = await callGeminiWithPdf(systemPrompt, userPrompt, pdf_base64);
-        const parsed = JSON.parse(result);
+
+        let parsed;
+        try {
+            parsed = JSON.parse(result);
+        } catch {
+            return NextResponse.json({ detail: "AI returned invalid JSON. Please retry." }, { status: 502 });
+        }
 
         return NextResponse.json(parsed);
     } catch (e: unknown) {

@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+/* Inter loaded via next/font in layout.tsx — no render-blocking @import needed */
 @import "tailwindcss";
 
 :root {
@@ -69,7 +69,7 @@
 @theme inline {
   --color-background: var(--bg-primary);
   --color-foreground: var(--text-primary);
-  --font-sans: 'Inter', sans-serif;
+  --font-sans: var(--font-inter), sans-serif;
 }
 
 * {
@@ -79,7 +79,7 @@
 body {
   background: var(--bg-primary);
   color: var(--text-primary);
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: var(--font-inter), -apple-system, BlinkMacSystemFont, sans-serif;
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -431,7 +431,7 @@ body {
   width: 100%;
   resize: vertical;
   transition: all var(--duration-normal) var(--ease-out-expo);
-  font-family: 'Inter', sans-serif;
+  font-family: var(--font-inter), sans-serif;
   letter-spacing: -0.01em;
 }
 

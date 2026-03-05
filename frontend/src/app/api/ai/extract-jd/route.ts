@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { callGemini } from "@/lib/gemini";
+import { MAX_INPUT_TEXT_LENGTH } from "@/lib/validation";
 
 export async function POST(request: NextRequest) {
     try {
@@ -8,6 +9,9 @@ export async function POST(request: NextRequest) {
         if (!raw_text) {
             return NextResponse.json({ detail: "raw_text is required" }, { status: 400 });
         }
+
+        // ── Input size guard (H4) ──
+        const text = typeof raw_text === "string" ? raw_text.slice(0, MAX_INPUT_TEXT_LENGTH) : "";
 
         const systemPrompt = `You are an intelligent Job Description parser. Extract strict and accurate requirements.
 Return ONLY valid JSON matching this exact schema:
@@ -19,10 +23,13 @@ Return ONLY valid JSON matching this exact schema:
   "domain": "string (e.g., Fintech, E-commerce, Healthcare)"
 }`;
 
-        const userPrompt = `Extract the key requirements, nice-to-haves, responsibilities, seniority, and domain from this Job Description:\n\n${raw_text}`;
+        const userPrompt = `Extract the key requirements, nice-to-haves, responsibilities, seniority, and domain from this Job Description:\n\n${text}`;
 
         const result = await callGemini(systemPrompt, userPrompt);
-        const parsed = JSON.parse(result);
+
+        let parsed;
+        try { parsed = JSON.parse(result); }
+        catch { return NextResponse.json({ detail: "AI returned invalid JSON. Please retry." }, { status: 502 }); }
 
         return NextResponse.json(parsed);
     } catch (e: unknown) {

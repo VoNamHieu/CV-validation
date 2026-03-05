@@ -131,6 +131,16 @@ function CvPanel({ data, title, accent }: { data: CVData; title: string; accent:
     );
 }
 
+/* ─── XSS-safe HTML escaping (M3) ─── */
+function esc(str: string): string {
+    return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
 /* ─── HTML generation for download ─── */
 function generateHtml(cv: CVData): string {
     return `<!DOCTYPE html>
@@ -154,31 +164,31 @@ function generateHtml(cv: CVData): string {
   </style>
 </head>
 <body>
-  <h1>${cv.name}</h1>
+  <h1>${esc(cv.name)}</h1>
   <h2>Summary</h2>
-  <p class="summary">${cv.summary}</p>
+  <p class="summary">${esc(cv.summary)}</p>
   <h2>Skills</h2>
-  <div class="skills">${(cv.skills || []).map(s => `<span class="skill">${s}</span>`).join('')}</div>
+  <div class="skills">${(cv.skills || []).map(s => `<span class="skill">${esc(s)}</span>`).join('')}</div>
   <h2>Experience</h2>
   ${(cv.experience || []).map(e => `
     <div class="exp-item">
-      <div class="exp-title">${e.title} — ${e.company}</div>
+      <div class="exp-title">${esc(e.title)} — ${esc(e.company)}</div>
       <div class="exp-meta">${e.duration_months} months</div>
-      <div class="exp-desc">${e.description}</div>
+      <div class="exp-desc">${esc(e.description)}</div>
     </div>
   `).join('')}
   <h2>Education</h2>
   ${(cv.education || []).map(e => `
     <div class="edu-item">
-      <strong>${e.degree}</strong> — ${e.institution} (${e.year})
+      <strong>${esc(e.degree)}</strong> — ${esc(e.institution)} (${esc(e.year)})
     </div>
   `).join('')}
   ${(cv.projects || []).length > 0 ? `
     <h2>Projects</h2>
     ${cv.projects.map(p => `
       <div class="exp-item">
-        <div class="exp-title">${p.name}</div>
-        <div class="exp-desc">${p.description}</div>
+        <div class="exp-title">${esc(p.name)}</div>
+        <div class="exp-desc">${esc(p.description)}</div>
       </div>
     `).join('')}
   ` : ''}

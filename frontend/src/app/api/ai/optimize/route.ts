@@ -45,7 +45,10 @@ OPTIMIZATION INSTRUCTIONS:
 5. NEVER fabricate new information.`;
 
         const result = await callGemini(systemPrompt, userPrompt);
-        const parsed = JSON.parse(result);
+
+        let parsed;
+        try { parsed = JSON.parse(result); }
+        catch { return NextResponse.json({ detail: "AI returned invalid JSON. Please retry." }, { status: 502 }); }
 
         return NextResponse.json(parsed);
     } catch (e: unknown) {
