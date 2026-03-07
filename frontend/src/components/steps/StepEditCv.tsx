@@ -1,14 +1,33 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import {
     ArrowLeft, Sparkle, Warning, Briefcase,
     CheckCircle, FilePdf, CaretLeft, CaretRight,
+    RocketLaunch, Lightning, CircleNotch,
 } from '@phosphor-icons/react';
 import { useAppStore } from '@/store/useAppStore';
 import CvDocumentPreview from '@/components/CvDocumentPreview';
 import ScoreRing from '@/components/ScoreRing';
 import type { CVData } from '@/lib/types';
+
+/**
+ * Extension ID — Replace with your actual extension ID after first install.
+ * Find it in chrome://extensions → Details → ID
+ * For development, also works with the extension's reload ID.
+ */
+const EXTENSION_ID = '';  // Will be set by user
+
+type AutoApplyStatus = 'idle' | 'checking' | 'sending' | 'opened' | 'error' | 'no-extension';
+
+/** Try to get extension ID from localStorage (set by user or auto-detected) */
+async function getStoredExtensionId(): Promise<string | null> {
+    try {
+        return localStorage.getItem('jobfit-extension-id');
+    } catch {
+        return null;
+    }
+}
 
 /* ─── XSS-safe HTML escaping ─── */
 function esc(str: string): string {
@@ -103,6 +122,8 @@ export default function StepEditCv() {
     }, [jdEntries]);
 
     const [selectedIdx, setSelectedIdx] = useState(0);
+    const [autoApplyStatus, setAutoApplyStatus] = useState<AutoApplyStatus>('idle');
+    const [autoApplyMessage, setAutoApplyMessage] = useState('');
 
     // Empty state
     if (!cvData || sortedEntries.length === 0) {
@@ -144,8 +165,118 @@ export default function StepEditCv() {
         URL.revokeObjectURL(urlObj);
     };
 
+    /* ─── Auto Apply: send profile + job URL to extension ─── */
+    const triggerAutoApply = async () => {
+        const cv = currentEntry?.optimizedCv;
+        const jobUrl = currentEntry?.source;
+        if (!cv || !jobUrl) {
+            setAutoApplyStatus('error');
+            setAutoApplyMessage('Thiếu dữ liệu CV hoặc Job URL.');
+            return;
+        }
+
+        // Check if this is a supported job URL
+        const isSupported = jobUrl.includes('vietnamworks.com') || jobUrl.includes('topcv.vn');
+        if (!isSupported) {
+            setAutoApplyStatus('error');
+            setAutoApplyMessage('Hiện chỉ hỗ trợ VietnamWorks và TopCV. URL này chưa được hỗ trợ.');
+            setTimeout(() => setAutoApplyStatus('idle'), 4000);
+            return;
+        }
+
+        // Build profile from optimized CV
+        const profile = {
+            fullName: cv.name || '',
+            firstName: cv.name?.split(' ').pop() || '',
+            lastName: cv.name?.split(' ').slice(0, -1).join(' ') || '',
+            currentTitle: cv.summary || '',
+            coverLetter: '',
+            // Add skills as fields for the extension
+            skills: cv.skills || [],
+        };
+
+        setAutoApplyStatus('checking');
+        setAutoApplyMessage('Đang kiểm tra Extension...');
+
+        try {
+            // Check if chrome.runtime is available and extension is installed
+            const chromeRuntime = (window as any).chrome?.runtime;
+            if (!chromeRuntime?.sendMessage) {
+                throw new Error('NO_EXTENSION');
+            }
+
+            // Determine extension ID — try stored or use constant
+            const extId = EXTENSION_ID || await getStoredExtensionId();
+            if (!extId) {
+                throw new Error('NO_EXTENSION_ID');
+            }
+
+            // Step 1: Ping extension to check it's alive
+            const pingResponse = await new Promise<any>((resolve, reject) => {
+                chromeRuntime.sendMessage(extId, { type: 'JOBFIT_PING' }, (response: any) => {
+                    if (chromeRuntime.lastError) {
+                        reject(new Error('NO_EXTENSION'));
+                    } else {
+                        resolve(response);
+                    }
+                });
+            });
+
+            if (!pingResponse?.success) {
+                throw new Error('NO_EXTENSION');
+            }
+
+            // Step 2: Send auto-apply command
+            setAutoApplyStatus('sending');
+            setAutoApplyMessage(`Đang gửi lệnh Auto Apply tới ${jobUrl.includes('topcv') ? 'TopCV' : 'VietnamWorks'}...`);
+
+            const applyResponse = await new Promise<any>((resolve, reject) => {
+                chromeRuntime.sendMessage(extId, {
+                    type: 'AUTO_APPLY_START',
+                    jobUrl: jobUrl,
+                    profile: profile,
+                }, (response: any) => {
+                    if (chromeRuntime.lastError) {
+                        reject(new Error(chromeRuntime.lastError.message));
+                    } else {
+                        resolve(response);
+                    }
+                });
+            });
+
+            if (applyResponse?.success) {
+                setAutoApplyStatus('opened');
+                setAutoApplyMessage('✅ Tab đã mở! Extension đang tự động điền form. Chuyển sang tab mới để kiểm tra.');
+                setTimeout(() => setAutoApplyStatus('idle'), 6000);
+            } else {
+                throw new Error(applyResponse?.error || 'Unknown error');
+            }
+        } catch (err: any) {
+            if (err.message === 'NO_EXTENSION' || err.message === 'NO_EXTENSION_ID') {
+                setAutoApplyStatus('no-extension');
+                setAutoApplyMessage('Extension chưa được cài đặt hoặc chưa cấu hình Extension ID.');
+                // Fallback: open URL in new tab
+                window.open(jobUrl, '_blank');
+            } else {
+                setAutoApplyStatus('error');
+                setAutoApplyMessage(`Lỗi: ${err.message}`);
+            }
+            setTimeout(() => setAutoApplyStatus('idle'), 5000);
+        }
+    };
+
     const goPrev = () => setSelectedIdx(i => Math.max(0, i - 1));
     const goNext = () => setSelectedIdx(i => Math.min(sortedEntries.length - 1, i + 1));
+
+    // Auto Apply button config based on status
+    const autoApplyBtn = {
+        idle: { label: 'Auto Apply', icon: <RocketLaunch size={14} weight="fill" />, disabled: false, bg: 'linear-gradient(135deg, #059669, #10B981)' },
+        checking: { label: 'Kiểm tra...', icon: <CircleNotch size={14} className="spin" />, disabled: true, bg: 'linear-gradient(135deg, #6366f1, #818cf8)' },
+        sending: { label: 'Đang gửi...', icon: <CircleNotch size={14} className="spin" />, disabled: true, bg: 'linear-gradient(135deg, #6366f1, #818cf8)' },
+        opened: { label: 'Đã mở tab!', icon: <CheckCircle size={14} weight="fill" />, disabled: true, bg: 'linear-gradient(135deg, #059669, #34d399)' },
+        error: { label: 'Lỗi', icon: <Warning size={14} />, disabled: true, bg: 'linear-gradient(135deg, #dc2626, #ef4444)' },
+        'no-extension': { label: 'Cần Extension', icon: <Lightning size={14} />, disabled: true, bg: 'linear-gradient(135deg, #d97706, #f59e0b)' },
+    }[autoApplyStatus];
 
     return (
         <div className="animate-fade-in" style={{ maxWidth: 1100, margin: '0 auto', padding: '40px 20px' }}>
@@ -153,7 +284,7 @@ export default function StepEditCv() {
             {/* ── Header ── */}
             <div style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                marginBottom: 20,
+                marginBottom: autoApplyStatus !== 'idle' ? 8 : 20,
             }}>
                 <div>
                     <h2 style={{
@@ -167,14 +298,112 @@ export default function StepEditCv() {
                         {sortedEntries.length} CV{sortedEntries.length !== 1 ? 's' : ''} optimized — switch between jobs to view each version
                     </p>
                 </div>
-                <button
-                    className="btn-secondary"
-                    onClick={() => setStep(3)}
-                    style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem' }}
-                >
-                    <ArrowLeft size={14} /> Back to Results
-                </button>
+                <div style={{ display: 'flex', gap: 8 }}>
+                    <button
+                        className="btn-secondary"
+                        onClick={() => setStep(3)}
+                        style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem' }}
+                    >
+                        <ArrowLeft size={14} /> Back to Results
+                    </button>
+                    <button
+                        className="btn-secondary"
+                        onClick={() => {
+                            const cv = currentEntry?.optimizedCv;
+                            if (!cv) return;
+                            const profileData = {
+                                type: 'JOBFIT_EXPORT_PROFILE',
+                                profile: {
+                                    fullName: cv.name || '',
+                                    currentTitle: cv.summary || '',
+                                    coverLetter: '',
+                                },
+                                cvData: cv,
+                            };
+                            // Try to send to extension via postMessage
+                            window.postMessage(profileData, '*');
+                            // Also copy to clipboard as fallback
+                            navigator.clipboard.writeText(JSON.stringify(profileData.profile, null, 2))
+                                .then(() => alert('✅ Profile exported! Open the extension popup and click Import.'))
+                                .catch(() => alert('✅ Data sent to extension via postMessage'));
+                        }}
+                        style={{
+                            display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem',
+                            background: 'linear-gradient(135deg, #4F46E5, #7C3AED)',
+                            color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 8,
+                            cursor: 'pointer',
+                        }}
+                    >
+                        ⚡ Export to Extension
+                    </button>
+
+                    {/* ── NEW: Auto Apply Button ── */}
+                    <button
+                        onClick={triggerAutoApply}
+                        disabled={autoApplyBtn.disabled}
+                        style={{
+                            display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem',
+                            background: autoApplyBtn.bg,
+                            color: '#fff', border: 'none', padding: '8px 18px', borderRadius: 8,
+                            cursor: autoApplyBtn.disabled ? 'not-allowed' : 'pointer',
+                            opacity: autoApplyBtn.disabled ? 0.85 : 1,
+                            transition: 'all 0.2s ease',
+                            fontWeight: 600,
+                            boxShadow: autoApplyStatus === 'idle' ? '0 2px 12px rgba(5,150,105,0.3)' : 'none',
+                        }}
+                    >
+                        {autoApplyBtn.icon} {autoApplyBtn.label}
+                    </button>
+                </div>
             </div>
+
+            {/* ── Auto Apply Status Bar ── */}
+            {autoApplyStatus !== 'idle' && (
+                <div style={{
+                    background: autoApplyStatus === 'opened'
+                        ? 'rgba(16,185,129,0.1)'
+                        : autoApplyStatus === 'error' || autoApplyStatus === 'no-extension'
+                            ? 'rgba(239,68,68,0.1)'
+                            : 'rgba(99,102,241,0.1)',
+                    border: `1px solid ${autoApplyStatus === 'opened'
+                        ? 'rgba(16,185,129,0.3)'
+                        : autoApplyStatus === 'error' || autoApplyStatus === 'no-extension'
+                            ? 'rgba(239,68,68,0.3)'
+                            : 'rgba(99,102,241,0.3)'}`,
+                    borderRadius: 'var(--radius-sm)',
+                    padding: '10px 16px',
+                    marginBottom: 16,
+                    fontSize: '0.82rem',
+                    color: autoApplyStatus === 'opened'
+                        ? '#10b981'
+                        : autoApplyStatus === 'error' || autoApplyStatus === 'no-extension'
+                            ? '#ef4444'
+                            : '#818cf8',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    animation: 'fadeIn 0.2s ease',
+                }}>
+                    {(autoApplyStatus === 'checking' || autoApplyStatus === 'sending') && (
+                        <CircleNotch size={14} className="spin" />
+                    )}
+                    {autoApplyStatus === 'opened' && <CheckCircle size={14} weight="fill" />}
+                    {autoApplyStatus === 'error' && <Warning size={14} />}
+                    {autoApplyStatus === 'no-extension' && <Lightning size={14} />}
+                    <span>{autoApplyMessage}</span>
+                    {autoApplyStatus === 'no-extension' && (
+                        <span style={{ marginLeft: 'auto', fontSize: '0.75rem', opacity: 0.8 }}>
+                            Đã mở link trong tab mới — cài Extension để auto-fill.
+                        </span>
+                    )}
+                </div>
+            )}
+
+            {/* CSS for spin animation */}
+            <style>{`
+                @keyframes spin { to { transform: rotate(360deg); } }
+                .spin { animation: spin 1s linear infinite; }
+            `}</style>
 
             {/* ══════ Job Selector Tabs ══════ */}
             <div style={{

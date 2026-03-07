@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=400">
+  <title>JobFit AI — Auto Apply</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="header">
+    <div class="logo">⚡ JobFit AI</div>
+    <div class="subtitle">Auto Apply Extension</div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" data-tab="profile">👤 Profile</button>
+    <button class="tab" data-tab="career">💼 Career</button>
+    <button class="tab" data-tab="settings">⚙️ Settings</button>
+  </div>
+
+  <!-- ═══ Profile Tab ═══ -->
+  <div class="tab-content active" id="tab-profile">
+    <div class="field-row">
+      <div class="field">
+        <label>Họ <span class="req">*</span></label>
+        <input type="text" id="lastName" placeholder="Vo">
+      </div>
+      <div class="field">
+        <label>Tên <span class="req">*</span></label>
+        <input type="text" id="firstName" placeholder="Charles">
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Họ và tên đầy đủ</label>
+      <input type="text" id="fullName" placeholder="Hieu Charles Vo">
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label>Email <span class="req">*</span></label>
+        <input type="email" id="email" placeholder="email@example.com">
+      </div>
+      <div class="field">
+        <label>Số điện thoại <span class="req">*</span></label>
+        <input type="tel" id="phone" placeholder="0901234567">
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label>Ngày sinh</label>
+        <input type="text" id="dateOfBirth" placeholder="DD/MM/YYYY">
+      </div>
+      <div class="field">
+        <label>Giới tính</label>
+        <select id="gender">
+          <option value="">Chọn...</option>
+          <option value="Nam">Nam</option>
+          <option value="Nữ">Nữ</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label>Quốc tịch</label>
+        <select id="nationality">
+          <option value="Người Việt Nam">Người Việt Nam</option>
+          <option value="Người nước ngoài">Người nước ngoài</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Hôn nhân</label>
+        <select id="maritalStatus">
+          <option value="">Chọn...</option>
+          <option value="Độc thân">Độc thân</option>
+          <option value="Đã kết hôn">Đã kết hôn</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="section-title">📍 Địa chỉ</div>
+    <div class="field-row">
+      <div class="field">
+        <label>Tỉnh/Thành phố</label>
+        <input type="text" id="addressProvince" placeholder="Hồ Chí Minh">
+      </div>
+      <div class="field">
+        <label>Quận/Huyện</label>
+        <input type="text" id="addressDistrict" placeholder="Quận 1">
+      </div>
+    </div>
+    <div class="field">
+      <label>Địa chỉ chi tiết</label>
+      <input type="text" id="addressStreet" placeholder="123 Nguyễn Huệ">
+    </div>
+  </div>
+
+  <!-- ═══ Career Tab ═══ -->
+  <div class="tab-content" id="tab-career">
+    <div class="field">
+      <label>Chức danh hiện tại <span class="req">*</span></label>
+      <input type="text" id="currentTitle" placeholder="Product Manager">
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label>Cấp bậc</label>
+        <select id="currentLevel">
+          <option value="">Chọn...</option>
+          <option value="Thực tập sinh">Thực tập sinh</option>
+          <option value="Nhân viên">Nhân viên</option>
+          <option value="Trưởng nhóm">Trưởng nhóm</option>
+          <option value="Trưởng phòng">Trưởng phòng</option>
+          <option value="Phó giám đốc">Phó giám đốc</option>
+          <option value="Giám đốc">Giám đốc</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Số năm KN</label>
+        <input type="number" id="yearsOfExperience" placeholder="3" min="0" max="50">
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label>Bằng cấp cao nhất</label>
+        <select id="highestDegree">
+          <option value="">Chọn...</option>
+          <option value="Trung học">Trung học</option>
+          <option value="Trung cấp">Trung cấp</option>
+          <option value="Cao đẳng">Cao đẳng</option>
+          <option value="Cử nhân">Cử nhân</option>
+          <option value="Thạc sĩ">Thạc sĩ</option>
+          <option value="Tiến sĩ">Tiến sĩ</option>
+          <option value="Khác">Khác</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Mức lương (USD)</label>
+        <input type="number" id="currentSalary" placeholder="1500" min="0">
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Ngành nghề</label>
+      <input type="text" id="currentIndustry" placeholder="Công nghệ thông tin">
+    </div>
+
+    <div class="field">
+      <label>Lĩnh vực</label>
+      <input type="text" id="currentFields" placeholder="Phần mềm, Internet">
+    </div>
+
+    <div class="section-title">🎯 Kỳ vọng</div>
+    <div class="field">
+      <label>Nơi làm việc mong muốn</label>
+      <input type="text" id="desiredLocations" placeholder="Hồ Chí Minh, Hà Nội">
+    </div>
+
+    <div class="field">
+      <label>Mức lương mong muốn (USD)</label>
+      <input type="number" id="desiredSalary" placeholder="2000" min="0">
+    </div>
+
+    <div class="field">
+      <label>📝 Thư giới thiệu (Cover Letter)</label>
+      <textarea id="coverLetter" placeholder="Viết thư giới thiệu ngắn gọn..." rows="4"></textarea>
+    </div>
+  </div>
+
+  <!-- ═══ Settings Tab ═══ -->
+  <div class="tab-content" id="tab-settings">
+    <div class="setting-card">
+      <div class="setting-label">
+        <span>🔗 Import từ JobFit AI App</span>
+        <p class="hint">Đồng bộ CV đã optimize từ App</p>
+      </div>
+      <button id="importFromApp" class="btn-action">Import</button>
+    </div>
+
+    <div class="setting-card">
+      <div class="setting-label">
+        <span>🌐 App URL</span>
+        <p class="hint">URL của JobFit AI App</p>
+      </div>
+      <input type="text" id="appUrl" value="http://localhost:3000" style="width: 180px; text-align: right;">
+    </div>
+
+    <div class="setting-card">
+      <div class="setting-label">
+        <span>🗑️ Xóa toàn bộ dữ liệu</span>
+        <p class="hint">Reset profile về mặc định</p>
+      </div>
+      <button id="resetAll" class="btn-danger">Reset</button>
+    </div>
+
+    <div class="status-card" id="statusCard">
+      <div class="status-title">📊 Trạng thái Profile</div>
+      <div id="statusBody">Chưa có dữ liệu</div>
+    </div>
+  </div>
+
+  <!-- ═══ Footer ═══ -->
+  <div class="footer">
+    <button id="saveBtn" class="btn-save">💾 Lưu Profile</button>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

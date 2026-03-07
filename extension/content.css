@@ -1,0 +1,218 @@
+/* ═══════════════════════════════════════════════════════════════
+   JobFit AI — Auto Apply Extension — Content Script Styles
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ─── Floating Auto Apply Button ─── */
+#jobfit-auto-apply-btn {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    z-index: 999999;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 14px 24px;
+    background: linear-gradient(135deg, #4F46E5, #7C3AED);
+    color: #fff;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 15px;
+    font-weight: 600;
+    border: none;
+    border-radius: 50px;
+    cursor: pointer;
+    box-shadow: 0 4px 20px rgba(79, 70, 229, 0.45), 0 0 0 0 rgba(79, 70, 229, 0.3);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    animation: jobfit-pulse 2s infinite;
+}
+
+#jobfit-auto-apply-btn:hover {
+    transform: translateY(-2px) scale(1.05);
+    box-shadow: 0 8px 30px rgba(79, 70, 229, 0.55);
+}
+
+#jobfit-auto-apply-btn:active {
+    transform: scale(0.97);
+}
+
+#jobfit-auto-apply-btn.filling {
+    pointer-events: none;
+    opacity: 0.7;
+    animation: none;
+}
+
+#jobfit-auto-apply-btn.filling::after {
+    content: '';
+    width: 16px;
+    height: 16px;
+    border: 2px solid #fff;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: jobfit-spin 0.8s linear infinite;
+}
+
+@keyframes jobfit-pulse {
+
+    0%,
+    100% {
+        box-shadow: 0 4px 20px rgba(79, 70, 229, 0.45), 0 0 0 0 rgba(79, 70, 229, 0.3);
+    }
+
+    50% {
+        box-shadow: 0 4px 20px rgba(79, 70, 229, 0.45), 0 0 0 8px rgba(79, 70, 229, 0);
+    }
+}
+
+@keyframes jobfit-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* ─── Confirmation Overlay ─── */
+#jobfit-confirm-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 10000000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+    animation: jobfit-fadeIn 0.2s ease;
+}
+
+@keyframes jobfit-fadeIn {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+.jobfit-confirm-card {
+    background: #1a1a2e;
+    border: 1px solid rgba(124, 58, 237, 0.3);
+    border-radius: 16px;
+    width: 420px;
+    max-width: 90vw;
+    overflow: hidden;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    animation: jobfit-slideUp 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes jobfit-slideUp {
+    from {
+        transform: translateY(20px);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+.jobfit-confirm-header {
+    padding: 20px 24px;
+    background: linear-gradient(135deg, #4F46E5, #7C3AED);
+    color: #fff;
+    font-size: 16px;
+    font-weight: 700;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.jobfit-confirm-header span {
+    font-size: 20px;
+}
+
+.jobfit-confirm-body {
+    padding: 24px;
+    color: #e2e8f0;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.jobfit-confirm-body p {
+    margin: 0 0 8px;
+}
+
+.jobfit-confirm-actions {
+    display: flex;
+    gap: 12px;
+    padding: 16px 24px 20px;
+    justify-content: flex-end;
+}
+
+.jobfit-btn-cancel {
+    padding: 10px 20px;
+    background: rgba(255, 255, 255, 0.1);
+    color: #94a3b8;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.jobfit-btn-cancel:hover {
+    background: rgba(255, 255, 255, 0.15);
+    color: #fff;
+}
+
+.jobfit-btn-submit {
+    padding: 10px 24px;
+    background: linear-gradient(135deg, #22c55e, #16a34a);
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.jobfit-btn-submit:hover {
+    transform: scale(1.03);
+    box-shadow: 0 4px 15px rgba(34, 197, 94, 0.4);
+}
+
+/* ─── Status toast ─── */
+#jobfit-toast {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 10000001;
+    padding: 12px 20px;
+    background: #1a1a2e;
+    border: 1px solid rgba(124, 58, 237, 0.3);
+    border-radius: 10px;
+    color: #e2e8f0;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 13px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+    animation: jobfit-slideIn 0.3s ease;
+}
+
+@keyframes jobfit-slideIn {
+    from {
+        transform: translateX(100px);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
