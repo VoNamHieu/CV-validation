@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { callGemini } from "@/lib/gemini";
+import { safeJsonParse } from "@/lib/safe-json";
 
 export async function POST(request: NextRequest) {
     try {
@@ -42,7 +43,7 @@ Determine a score from 0-100 for each dimension, explain the reasoning briefly, 
         const result = await callGemini(systemPrompt, userPrompt);
 
         let parsed;
-        try { parsed = JSON.parse(result); }
+        try { parsed = safeJsonParse(result); }
         catch { return NextResponse.json({ detail: "AI returned invalid JSON. Please retry." }, { status: 502 }); }
 
         return NextResponse.json(parsed);

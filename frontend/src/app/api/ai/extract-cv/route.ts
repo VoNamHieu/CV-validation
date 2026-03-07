@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { callGemini } from "@/lib/gemini";
+import { safeJsonParse } from "@/lib/safe-json";
 import { MAX_INPUT_TEXT_LENGTH } from "@/lib/validation";
 
 export async function POST(request: NextRequest) {
@@ -30,7 +31,7 @@ If some information is missing, leave strings empty or lists empty.`;
         const result = await callGemini(systemPrompt, userPrompt);
 
         let parsed;
-        try { parsed = JSON.parse(result); }
+        try { parsed = safeJsonParse(result); }
         catch { return NextResponse.json({ detail: "AI returned invalid JSON. Please retry." }, { status: 502 }); }
 
         return NextResponse.json(parsed);

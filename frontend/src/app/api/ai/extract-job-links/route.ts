@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { callGeminiLight } from "@/lib/gemini";
+import { safeJsonParse } from "@/lib/safe-json";
 
 /**
  * AI reads raw HTML text from a search results page
@@ -40,15 +41,10 @@ SITE: ${site_url || "unknown"}
 PAGE CONTENT:
 ${html_text.slice(0, 20000)}`;
 
-        console.log('[extract-job-links] Input text length:', html_text.length, '| Site:', site_url);
-        console.log('[extract-job-links] Input sample (first 1000 chars):', html_text.slice(0, 1000));
-
         const result = await callGeminiLight(systemPrompt, userPrompt);
-        console.log('[extract-job-links] Raw AI response:', result);
         let parsed;
-        try { parsed = JSON.parse(result); }
+        try { parsed = safeJsonParse(result); }
         catch { return NextResponse.json({ detail: "AI returned invalid JSON. Please retry." }, { status: 502 }); }
-        console.log('[extract-job-links] Parsed:', JSON.stringify(parsed, null, 2));
 
         return NextResponse.json(parsed);
     } catch (e: unknown) {

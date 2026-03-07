@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { callGeminiLight } from "@/lib/gemini";
+import { safeJsonParse } from "@/lib/safe-json";
 
 /**
  * AI reads the CV data and the target job site URL,
@@ -51,11 +52,9 @@ TARGET JOB SITE URL: ${siteUrl}
 
 Generate the most relevant job search URL for this candidate on this site.`;
 
-        console.log('[smart-search] Site URL:', siteUrl);
         const raw = await callGeminiLight(systemPrompt, userPrompt);
-        console.log('[smart-search] Raw AI response:', raw);
         let parsed;
-        try { parsed = JSON.parse(raw); }
+        try { parsed = safeJsonParse(raw); }
         catch { return NextResponse.json({ detail: "AI returned invalid JSON. Please retry." }, { status: 502 }); }
 
         // Gemini sometimes returns an array instead of an object — unwrap it
@@ -73,7 +72,7 @@ Generate the most relevant job search URL for this candidate on this site.`;
             );
         }
 
-        console.log('[smart-search] Parsed result:', JSON.stringify(parsed, null, 2));
+
 
         return NextResponse.json(parsed);
     } catch (e: unknown) {

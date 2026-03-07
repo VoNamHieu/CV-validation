@@ -8,7 +8,6 @@ import { isAllowedUrl } from "@/lib/validation";
 export async function POST(request: NextRequest) {
     try {
         const { url, keepLinks } = await request.json();
-        console.log('[crawl-url] Fetching:', url, '| keepLinks:', keepLinks);
 
         if (!url) {
             return NextResponse.json({ detail: "url is required" }, { status: 400 });
@@ -29,9 +28,7 @@ export async function POST(request: NextRequest) {
             signal: AbortSignal.timeout(15000),
         });
 
-        console.log('[crawl-url] HTTP status:', response.status, '| Content-Type:', response.headers.get('content-type'));
         if (!response.ok) {
-            console.log('[crawl-url] FAILED with status:', response.status);
             return NextResponse.json(
                 { detail: `Failed to fetch URL: ${response.status}` },
                 { status: 400 }
@@ -39,7 +36,6 @@ export async function POST(request: NextRequest) {
         }
 
         const html = await response.text();
-        console.log('[crawl-url] Raw HTML length:', html.length);
 
         // ── Extract JSON-LD JobPosting (before stripping tags) ──
         let jsonLd: Record<string, unknown> | null = null;
@@ -49,7 +45,6 @@ export async function POST(request: NextRequest) {
                 const data = JSON.parse(m[1]);
                 if (data?.['@type'] === 'JobPosting') {
                     jsonLd = data;
-                    console.log('[crawl-url] Found JSON-LD JobPosting:', data.title, '| desc length:', data.description?.length);
                     break;
                 }
             } catch { /* ignore parse errors */ }
@@ -93,13 +88,7 @@ export async function POST(request: NextRequest) {
                 .replace(/\s+/g, " ")
                 .trim()
                 .slice(0, 25000); // Larger limit for link extraction
-
-            // Count extracted links
-            const linkCount = (textWithLinks.match(/\[LINK:/g) || []).length;
-            console.log('[crawl-url] textWithLinks length:', textWithLinks.length, '| Links found:', linkCount);
         }
-
-        console.log('[crawl-url] Cleaned text length:', text.length, '| JSON-LD:', jsonLd ? 'found' : 'none');
 
         return NextResponse.json({
             text,

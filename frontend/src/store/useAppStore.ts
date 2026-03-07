@@ -1,6 +1,10 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
+// ── Auto-prune limits to prevent localStorage overflow (~5MB) ──
+const MAX_JD_ENTRIES = 100;
+const MAX_JOB_HISTORY = 200;
+
 // ── Shared types — single source of truth in types.ts (M1) ──
 import type {
   ExperienceDetail, EducationDetail, ProjectDetail,
@@ -122,12 +126,18 @@ export const useAppStore = create<AppState>()(
       setMatchResult: (result) => set({ matchResult: result }),
       setOptimizedCv: (data) => set({ optimizedCv: data }),
 
-      // Job History
-      addJobRecord: (record) => set((s) => ({ jobHistory: [record, ...s.jobHistory] })),
+      // Job History (auto-prune oldest)
+      addJobRecord: (record) => set((s) => {
+        const updated = [record, ...s.jobHistory];
+        return { jobHistory: updated.slice(0, MAX_JOB_HISTORY) };
+      }),
       clearJobHistory: () => set({ jobHistory: [] }),
 
-      // Multi-JD
-      addJdEntry: (entry) => set((s) => ({ jdEntries: [...s.jdEntries, entry] })),
+      // Multi-JD (auto-prune oldest when limit reached)
+      addJdEntry: (entry) => set((s) => {
+        const updated = [...s.jdEntries, entry];
+        return { jdEntries: updated.length > MAX_JD_ENTRIES ? updated.slice(-MAX_JD_ENTRIES) : updated };
+      }),
       updateJdEntry: (id, updates) =>
         set((s) => ({
           jdEntries: s.jdEntries.map((e) => (e.id === id ? { ...e, ...updates } : e)),
