@@ -2,13 +2,15 @@
 
 import { useState } from 'react';
 import {
-    ArrowLeft, DownloadSimple, ArrowCounterClockwise,
-    Sparkle, Warning, FilePdf, Eye, EyeSlash,
+    ArrowLeft, Sparkle, Warning, CaretDown, CaretUp,
+    Briefcase, CheckCircle, DownloadSimple, ArrowCounterClockwise,
+    FilePdf, Eye, EyeSlash, MapPin,
 } from '@phosphor-icons/react';
 import { useAppStore } from '@/store/useAppStore';
-import EditableCvPreview from '@/components/EditableCvPreview';
-import type { CVData } from '@/lib/types';
+import { JDEntry } from '@/store/useAppStore';
+import CvDocumentPreview from '@/components/CvDocumentPreview';
 import ScoreRing from '@/components/ScoreRing';
+import type { CVData } from '@/lib/types';
 
 /* ─── XSS-safe HTML escaping ─── */
 function esc(str: string): string {
@@ -29,78 +31,76 @@ function generateHtml(cv: CVData): string {
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: 'Helvetica Neue', Arial, sans-serif; color: #1a1a2e; padding: 40px 48px; line-height: 1.55; font-size: 11pt; }
-    h1 { font-size: 22pt; margin-bottom: 4px; color: #111; }
-    h2 { font-size: 12pt; color: #2563eb; text-transform: uppercase; letter-spacing: 1px; border-bottom: 1.5px solid #2563eb; padding-bottom: 4px; margin: 20px 0 10px; }
-    .summary { color: #444; font-size: 10.5pt; margin-bottom: 10px; }
-    .skills { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
-    .skill { background: #f0f4ff; border: 1px solid #d0d8f0; border-radius: 4px; padding: 2px 8px; font-size: 9pt; }
-    .exp-item { margin-bottom: 14px; }
+    h1 { font-size: 22pt; margin-bottom: 4px; color: #111; text-align: center; }
+    h2 { font-size: 11pt; color: #1a1a1a; text-transform: uppercase; letter-spacing: 2px; border-bottom: 2px solid #222; padding-bottom: 4px; margin: 24px 0 12px; font-weight: 700; }
+    .summary-box { border: 1px solid #ddd; padding: 12px 16px; margin-bottom: 12px; background: #fafafa; border-radius: 4px; }
+    .summary { color: #333; font-size: 10.5pt; line-height: 1.6; }
+    .skills { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+    .skill { background: #f5f5f5; border: 1px solid #e0e0e0; border-radius: 4px; padding: 2px 8px; font-size: 9pt; }
+    .timeline-row { display: grid; grid-template-columns: 150px 1fr; gap: 16px; margin-bottom: 16px; }
+    .timeline-date { color: #555; font-size: 9.5pt; }
     .exp-title { font-weight: 700; font-size: 11pt; }
-    .exp-meta { font-size: 9pt; color: #666; margin-bottom: 3px; }
-    .exp-desc { font-size: 10pt; color: #333; white-space: pre-wrap; }
-    .edu-item { margin-bottom: 8px; }
-    .disclaimer { margin-top: 24px; font-size: 8pt; color: #999; text-align: center; border-top: 1px solid #eee; padding-top: 8px; }
+    .exp-company { font-weight: 700; font-size: 10pt; color: #333; margin-bottom: 4px; }
+    .exp-desc { font-size: 10pt; color: #333; white-space: pre-wrap; line-height: 1.6; }
+    .edu-institution { font-weight: 700; font-size: 11pt; }
+    .edu-degree { font-size: 10pt; color: #444; }
+    .disclaimer { margin-top: 28px; font-size: 8pt; color: #bbb; text-align: center; border-top: 1px solid #eee; padding-top: 8px; }
   </style>
 </head>
 <body>
   <h1>${esc(cv.name)}</h1>
-  <h2>Summary</h2>
-  <p class="summary">${esc(cv.summary)}</p>
-  <h2>Skills</h2>
-  <div class="skills">${(cv.skills || []).map(s => `<span class="skill">${esc(s)}</span>`).join('')}</div>
-  <h2>Experience</h2>
-  ${(cv.experience || []).map(e => `
-    <div class="exp-item">
-      <div class="exp-title">${esc(e.title)} — ${esc(e.company)}</div>
-      <div class="exp-meta">${e.duration_months} months</div>
-      <div class="exp-desc">${esc(e.description)}</div>
+  <h2>MỤC TIÊU NGHỀ NGHIỆP</h2>
+  <div class="summary-box"><p class="summary">${esc(cv.summary)}</p></div>
+  <h2>HỌC VẤN</h2>
+  ${(cv.education || []).map(e => `
+    <div class="timeline-row">
+      <div class="timeline-date">${esc(e.year)}</div>
+      <div>
+        <div class="edu-institution">${esc(e.institution)}</div>
+        <div class="edu-degree">${esc(e.degree)}</div>
+      </div>
     </div>
   `).join('')}
-  <h2>Education</h2>
-  ${(cv.education || []).map(e => `
-    <div class="edu-item">
-      <strong>${esc(e.degree)}</strong> — ${esc(e.institution)} (${esc(e.year)})
+  <h2>KỸ NĂNG</h2>
+  <div class="skills">${(cv.skills || []).map(s => `<span class="skill">${esc(s)}</span>`).join('')}</div>
+  <h2>KINH NGHIỆM LÀM VIỆC</h2>
+  ${(cv.experience || []).map(e => `
+    <div class="timeline-row">
+      <div class="timeline-date">${e.duration_months} months</div>
+      <div>
+        <div class="exp-title">${esc(e.title)}</div>
+        <div class="exp-company">${esc(e.company)}</div>
+        <div class="exp-desc">${esc(e.description)}</div>
+      </div>
     </div>
   `).join('')}
   ${(cv.projects || []).length > 0 ? `
-    <h2>Projects</h2>
+    <h2>DỰ ÁN</h2>
     ${cv.projects.map(p => `
-      <div class="exp-item">
+      <div style="margin-bottom: 14px;">
         <div class="exp-title">${esc(p.name)}</div>
         <div class="exp-desc">${esc(p.description)}</div>
       </div>
     `).join('')}
   ` : ''}
-  <div class="disclaimer">AI-assisted optimization · Generated by AI Job Fit Optimizer</div>
+  <div class="disclaimer">AI-assisted optimization · Generated by JobFit AI</div>
 </body>
 </html>`;
 }
 
-export default function StepEditCv() {
-    const {
-        cvData, jdEntries, selectedJdId, setStep, updateJdEntry,
-    } = useAppStore();
-
-    const [showPreview, setShowPreview] = useState(false);
-
-    // Find the selected entry
-    const entry = jdEntries.find(e => e.id === selectedJdId);
-
-    if (!cvData || !entry || !entry.optimizedCv) {
-        return (
-            <div className="animate-fade-in" style={{ maxWidth: 600, margin: '0 auto', padding: '60px 20px', textAlign: 'center' }}>
-                <p style={{ color: 'var(--text-secondary)' }}>
-                    No optimized CV found. Go back to the report and optimize a job first.
-                </p>
-                <button className="btn-secondary" onClick={() => setStep(3)} style={{ marginTop: 20, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                    <ArrowLeft size={16} /> Back to Report
-                </button>
-            </div>
-        );
-    }
-
+/* ─── Single Job CV Section ─── */
+function JobCvSection({
+    entry,
+    cvData,
+    defaultExpanded = false,
+}: {
+    entry: JDEntry;
+    cvData: CVData;
+    defaultExpanded?: boolean;
+}) {
+    const [expanded, setExpanded] = useState(defaultExpanded);
     const m = entry.matchResult;
-    const jd = entry.jdData;
+    const score = m?.overall_score ?? 0;
 
     const handleDownload = (editedCv: CVData) => {
         const html = generateHtml(editedCv);
@@ -108,87 +108,246 @@ export default function StepEditCv() {
         const urlObj = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = urlObj;
-        a.download = `${editedCv.name.replace(/\s+/g, '_')}_optimized.html`;
+        a.download = `${editedCv.name.replace(/\s+/g, '_')}_${(entry.jobTitle || 'optimized').replace(/\s+/g, '_')}.html`;
         a.click();
         URL.revokeObjectURL(urlObj);
     };
 
     return (
-        <div className="animate-fade-in" style={{ maxWidth: 1100, margin: '0 auto', padding: '40px 20px' }}>
+        <div style={{
+            borderRadius: 'var(--radius-lg)',
+            border: '1px solid var(--border-subtle)',
+            overflow: 'hidden',
+            transition: 'all 0.2s ease',
+            background: expanded ? 'rgba(99,102,241,0.02)' : 'transparent',
+        }}>
+            {/* Section Header — clickable bar */}
+            <button
+                onClick={() => setExpanded(!expanded)}
+                style={{
+                    display: 'flex', alignItems: 'center', gap: 16,
+                    width: '100%', padding: '16px 20px',
+                    background: expanded
+                        ? 'linear-gradient(135deg, rgba(99,102,241,0.06), rgba(139,92,246,0.03))'
+                        : 'var(--bg-secondary)',
+                    border: 'none', cursor: 'pointer',
+                    color: 'var(--text-primary)',
+                    transition: 'all 0.15s',
+                }}
+            >
+                {/* Score ring */}
+                <ScoreRing score={score} size={44} label="" />
 
-            {/* ── Header Bar ── */}
-            <div style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                marginBottom: 24,
-            }}>
-                <div>
-                    <h2 style={{ fontSize: '1.4rem', fontWeight: 700, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <Sparkle size={22} weight="duotone" style={{ color: 'var(--accent-purple)' }} />
-                        Edit Optimized CV
-                    </h2>
-                    <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>
-                        Review and edit the AI-optimized CV, then download when ready.
+                {/* Job info */}
+                <div style={{ flex: 1, textAlign: 'left', minWidth: 0 }}>
+                    <p style={{
+                        fontWeight: 600, fontSize: '0.95rem', marginBottom: 2,
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>
+                        {entry.jobTitle || 'Unknown Position'}
                     </p>
+                    <div style={{
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        fontSize: '0.78rem', color: 'var(--text-muted)',
+                    }}>
+                        {entry.company && (
+                            <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                                <Briefcase size={11} /> {entry.company}
+                            </span>
+                        )}
+                        <span style={{ opacity: 0.5 }}>·</span>
+                        <span>{entry.label}</span>
+                    </div>
                 </div>
-                <button
-                    className="btn-secondary"
-                    onClick={() => setStep(3)}
-                    style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem' }}
-                >
-                    <ArrowLeft size={14} /> Back to Results
-                </button>
-            </div>
 
-            {/* ── Job Context Card ── */}
-            {m && jd && (
-                <div className="glass-card" style={{
-                    padding: '16px 24px', marginBottom: 24,
-                    display: 'flex', alignItems: 'center', gap: 20,
-                    background: 'linear-gradient(135deg, rgba(59,130,246,0.05), rgba(139,92,246,0.03))',
+                {/* Tags */}
+                <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                    {entry.jdData?.domain && (
+                        <span style={{
+                            fontSize: '0.7rem', padding: '3px 10px', borderRadius: 12,
+                            background: 'rgba(59,130,246,0.1)', color: 'var(--accent-blue)',
+                        }}>{entry.jdData.domain}</span>
+                    )}
+                    {entry.jdData?.seniority_expected && (
+                        <span style={{
+                            fontSize: '0.7rem', padding: '3px 10px', borderRadius: 12,
+                            background: 'rgba(139,92,246,0.1)', color: 'var(--accent-purple)',
+                        }}>{entry.jdData.seniority_expected}</span>
+                    )}
+                </div>
+
+                {/* Expand indicator */}
+                <div style={{
+                    width: 32, height: 32, borderRadius: 8,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: expanded ? 'var(--accent-blue)' : 'var(--bg-card)',
+                    color: expanded ? 'white' : 'var(--text-muted)',
+                    transition: 'all 0.15s',
+                    flexShrink: 0,
                 }}>
-                    <ScoreRing score={m.overall_score} size={56} label="" />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                        <p style={{ fontWeight: 600, fontSize: '0.95rem', marginBottom: 2 }}>
-                            {entry.jobTitle || 'Unknown Position'}
-                        </p>
-                        <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                            {entry.company && `${entry.company} · `}{entry.label}
-                        </p>
+                    {expanded ? <CaretUp size={16} /> : <CaretDown size={16} />}
+                </div>
+            </button>
+
+            {/* Expanded CV Preview */}
+            {expanded && entry.optimizedCv && (
+                <div style={{
+                    padding: '24px 20px',
+                    borderTop: '1px solid var(--border-subtle)',
+                    animation: 'cvSlideDown 0.3s ease',
+                }}>
+                    {/* AI warning */}
+                    <div style={{
+                        background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)',
+                        borderRadius: 'var(--radius-sm)', padding: '8px 14px', marginBottom: 16,
+                        fontSize: '0.78rem', color: 'var(--accent-amber)',
+                        display: 'flex', alignItems: 'center', gap: 6,
+                    }}>
+                        <Warning size={12} />
+                        AI-optimized CV for this position — Click any text to edit, then Save & Download
                     </div>
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                        {jd.domain && (
-                            <span style={{
-                                fontSize: '0.7rem', padding: '3px 10px', borderRadius: 12,
-                                background: 'rgba(59,130,246,0.1)', color: 'var(--accent-blue)',
-                            }}>{jd.domain}</span>
-                        )}
-                        {jd.seniority_expected && (
-                            <span style={{
-                                fontSize: '0.7rem', padding: '3px 10px', borderRadius: 12,
-                                background: 'rgba(139,92,246,0.1)', color: 'var(--accent-purple)',
-                            }}>{jd.seniority_expected}</span>
-                        )}
-                    </div>
+
+                    {/* The CV Document */}
+                    <CvDocumentPreview
+                        originalCv={cvData}
+                        optimizedCv={entry.optimizedCv}
+                        onSave={handleDownload}
+                        compact
+                    />
                 </div>
             )}
+        </div>
+    );
+}
 
-            {/* ── Disclaimer ── */}
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+   MAIN: StepEditCv — Batch CV Viewer
+   ═══════════════════════════════════════════════════════════════════════════════ */
+
+export default function StepEditCv() {
+    const { cvData, jdEntries, setStep, resetAll } = useAppStore();
+
+    // All entries that have optimized CVs
+    const optimizedEntries = jdEntries.filter(e => e.optimizedCv);
+    // Sort by score descending
+    const sortedEntries = [...optimizedEntries].sort((a, b) =>
+        (b.matchResult?.overall_score ?? 0) - (a.matchResult?.overall_score ?? 0)
+    );
+
+    if (!cvData || sortedEntries.length === 0) {
+        return (
+            <div className="animate-fade-in" style={{ maxWidth: 600, margin: '0 auto', padding: '60px 20px', textAlign: 'center' }}>
+                <div style={{
+                    width: 72, height: 72, borderRadius: 20,
+                    background: 'var(--gradient-hero-subtle)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    margin: '0 auto 24px',
+                    border: '1px solid var(--border-subtle)',
+                }}>
+                    <FilePdf size={28} weight="duotone" style={{ color: 'var(--accent-blue)' }} />
+                </div>
+                <h3 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: 8 }}>
+                    No Optimized CVs Yet
+                </h3>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: 24, lineHeight: 1.6 }}>
+                    Go back to the Report page and click &quot;Optimize&quot; on jobs you&apos;re interested in.
+                    Each optimized CV will appear here as a section.
+                </p>
+                <button className="btn-secondary" onClick={() => setStep(3)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    <ArrowLeft size={16} /> Back to Report
+                </button>
+            </div>
+        );
+    }
+
+    return (
+        <div className="animate-fade-in" style={{ maxWidth: 1100, margin: '0 auto', padding: '40px 20px' }}>
+
+            {/* ── Header ── */}
             <div style={{
-                background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)',
-                borderRadius: 'var(--radius-md)', padding: '10px 16px', marginBottom: 20,
-                fontSize: '0.82rem', color: 'var(--accent-amber)',
-                display: 'flex', alignItems: 'center', gap: 6,
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                marginBottom: 28,
             }}>
-                <Warning size={14} />
-                AI-assisted optimization · Edit any section below, then click &ldquo;Save &amp; Download&rdquo;
+                <div>
+                    <h2 style={{
+                        fontSize: '1.4rem', fontWeight: 700, marginBottom: 6,
+                        display: 'flex', alignItems: 'center', gap: 10,
+                    }}>
+                        <Sparkle size={22} weight="duotone" style={{ color: 'var(--accent-purple)' }} />
+                        Optimized CVs
+                    </h2>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>
+                        {sortedEntries.length} CV{sortedEntries.length !== 1 ? 's' : ''} optimized for different positions.
+                        Click each section to view & edit.
+                    </p>
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                    <button
+                        className="btn-secondary"
+                        onClick={() => setStep(3)}
+                        style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem' }}
+                    >
+                        <ArrowLeft size={14} /> Back to Results
+                    </button>
+                </div>
             </div>
 
-            {/* ── Editable CV Preview ── */}
-            <EditableCvPreview
-                originalCv={cvData}
-                optimizedCv={entry.optimizedCv}
-                onSave={handleDownload}
-            />
+            {/* ── Summary badges ── */}
+            <div style={{
+                display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap',
+            }}>
+                <div style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '8px 16px', borderRadius: 12,
+                    background: 'rgba(52,211,153,0.06)',
+                    border: '1px solid rgba(52,211,153,0.15)',
+                }}>
+                    <CheckCircle size={16} weight="fill" style={{ color: 'var(--accent-green)' }} />
+                    <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+                        <strong style={{ color: 'var(--accent-green)' }}>{sortedEntries.length}</strong> CVs ready
+                    </span>
+                </div>
+                <div style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '8px 16px', borderRadius: 12,
+                    background: 'rgba(99,102,241,0.06)',
+                    border: '1px solid rgba(99,102,241,0.15)',
+                }}>
+                    <DownloadSimple size={16} style={{ color: 'var(--accent-blue)' }} />
+                    <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+                        Click to expand, edit, and download each CV
+                    </span>
+                </div>
+            </div>
+
+            {/* ── CV Sections — one per job ── */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {sortedEntries.map((entry, idx) => (
+                    <JobCvSection
+                        key={entry.id}
+                        entry={entry}
+                        cvData={cvData}
+                        defaultExpanded={idx === 0}
+                    />
+                ))}
+            </div>
+
+            {/* Animation */}
+            <style>{`
+                @keyframes cvSlideDown {
+                    from {
+                        opacity: 0;
+                        max-height: 0;
+                        transform: translateY(-8px);
+                    }
+                    to {
+                        opacity: 1;
+                        max-height: 3000px;
+                        transform: translateY(0);
+                    }
+                }
+            `}</style>
         </div>
     );
 }

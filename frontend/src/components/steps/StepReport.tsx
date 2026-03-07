@@ -5,7 +5,7 @@ import {
     ArrowLeft, Sparkle, ArrowSquareOut, Warning,
     CheckCircle, XCircle, CaretDown, CaretUp, DownloadSimple,
     ArrowCounterClockwise, SpinnerGap, Lightning,
-    ShieldWarning, ChartBar, Eye,
+    ShieldWarning, ChartBar, Eye, PencilSimple,
 } from '@phosphor-icons/react';
 import { useAppStore, JDEntry } from '@/store/useAppStore';
 import type { CVData, JDData, MatchResult, CategoryScore } from '@/lib/types';
@@ -328,15 +328,14 @@ export default function StepReport() {
         );
     }
 
+    const optimizedCount = doneEntries.filter(e => e.optimizedCv).length;
+
     const handleOptimize = async (entry: JDEntry) => {
         if (!cvData || !entry.jdData || !entry.matchResult) return;
         setOptimizingId(entry.id);
         try {
             const result = await optimizeCv(cvData, entry.jdData, entry.matchResult);
             updateJdEntry(entry.id, { optimizedCv: result });
-            // Navigate to Edit CV page
-            setSelectedJdId(entry.id);
-            setStep(4);
         } catch (e) {
             console.error('Optimization failed:', e);
         }
@@ -365,6 +364,19 @@ export default function StepReport() {
                     </p>
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
+                    {optimizedCount > 0 && (
+                        <button
+                            className="btn-primary"
+                            onClick={() => setStep(4)}
+                            style={{
+                                display: 'flex', alignItems: 'center', gap: 7,
+                                fontSize: '0.85rem', padding: '10px 22px',
+                            }}
+                        >
+                            <PencilSimple size={15} weight="fill" />
+                            View All CVs ({optimizedCount})
+                        </button>
+                    )}
                     <button className="btn-secondary" onClick={() => setStep(2)} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem' }}>
                         <ArrowLeft size={14} /> Try Another
                     </button>
@@ -502,12 +514,7 @@ export default function StepReport() {
                                 {/* Optimize button */}
                                 <div style={{ display: 'flex', justifyContent: 'center' }}>
                                     {entry.optimizedCv ? (
-                                        <button
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                setSelectedJdId(entry.id);
-                                                setStep(4);
-                                            }}
+                                        <span
                                             style={{
                                                 display: 'flex', alignItems: 'center', gap: 4,
                                                 padding: '6px 14px', borderRadius: 'var(--radius-sm)',
@@ -515,11 +522,10 @@ export default function StepReport() {
                                                 background: 'rgba(16,185,129,0.1)',
                                                 border: '1px solid rgba(16,185,129,0.3)',
                                                 color: 'var(--accent-green)',
-                                                cursor: 'pointer',
                                             }}
                                         >
-                                            <DownloadSimple size={12} /> Edit CV
-                                        </button>
+                                            <CheckCircle size={12} weight="fill" /> Optimized
+                                        </span>
                                     ) : (
                                         <button
                                             className="btn-primary"
