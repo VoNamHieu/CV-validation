@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from app.services.crawler import crawl_url
+from app.services.url_validator import is_allowed_url
 
 router = APIRouter(prefix="/crawl", tags=["Crawl Testing"])
 
@@ -43,6 +44,9 @@ async def test_crawl(req: CrawlRequest):
         url = url.strip()
         if not url:
             continue
+        # ── SSRF Protection (B1) ──
+        if not is_allowed_url(url):
+            raise HTTPException(status_code=400, detail=f"URL not allowed: {url}")
         result = await crawl_url(url)
         results.append(result.to_dict())
 

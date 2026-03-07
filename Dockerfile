@@ -42,6 +42,10 @@ RUN playwright install-deps chromium
 # Copy backend application code
 COPY backend/app ./app
 
+# Create non-root user (M5: security best practice)
+RUN useradd -m -s /bin/bash appuser && chown -R appuser:appuser /app
+USER appuser
+
 # Railway provides PORT env var dynamically
 ENV PORT=8000
 

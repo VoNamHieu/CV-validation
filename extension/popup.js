@@ -104,7 +104,6 @@ function updateStatus(profile) {
 
     const required = ['lastName', 'firstName', 'email', 'phone'];
     const filled = required.filter(k => profile[k]);
-    const total = FIELD_IDS.filter(id => id !== 'appUrl').length;
     const filledCount = Object.keys(profile).filter(k => {
         const v = profile[k];
         if (typeof v === 'object') return Object.values(v).some(Boolean);
@@ -112,21 +111,31 @@ function updateStatus(profile) {
         return v !== '' && v !== null && v !== undefined && v !== 0;
     }).length;
 
-    statusEl.innerHTML = `
-    <div style="margin-bottom: 6px;">
-      <strong style="color: ${filled.length === required.length ? '#22c55e' : '#facc15'}">
-        ${filled.length === required.length ? '✅' : '⚠️'} 
-        Bắt buộc: ${filled.length}/${required.length}
-      </strong>
-    </div>
-    <div>📊 Đã điền: ${filledCount} fields</div>
-    <div style="margin-top: 4px; font-size: 11px;">
-      ${!profile.lastName ? '❌ Thiếu Họ' : ''}
-      ${!profile.firstName ? '❌ Thiếu Tên' : ''}
-      ${!profile.email ? '❌ Thiếu Email' : ''}
-      ${!profile.phone ? '❌ Thiếu SĐT' : ''}
-    </div>
-  `;
+    // Safe DOM construction (no innerHTML with user data)
+    statusEl.textContent = '';
+
+    const reqLine = document.createElement('div');
+    reqLine.style.marginBottom = '6px';
+    const reqStrong = document.createElement('strong');
+    reqStrong.style.color = filled.length === required.length ? '#22c55e' : '#facc15';
+    reqStrong.textContent = `${filled.length === required.length ? '✅' : '⚠️'} Bắt buộc: ${filled.length}/${required.length}`;
+    reqLine.appendChild(reqStrong);
+    statusEl.appendChild(reqLine);
+
+    const countLine = document.createElement('div');
+    countLine.textContent = `📊 Đã điền: ${filledCount} fields`;
+    statusEl.appendChild(countLine);
+
+    const missingLine = document.createElement('div');
+    missingLine.style.marginTop = '4px';
+    missingLine.style.fontSize = '11px';
+    const missing = [];
+    if (!profile.lastName) missing.push('❌ Thiếu Họ');
+    if (!profile.firstName) missing.push('❌ Thiếu Tên');
+    if (!profile.email) missing.push('❌ Thiếu Email');
+    if (!profile.phone) missing.push('❌ Thiếu SĐT');
+    missingLine.textContent = missing.join(' ');
+    statusEl.appendChild(missingLine);
 }
 
 // ─── Import from JobFit AI App ───
