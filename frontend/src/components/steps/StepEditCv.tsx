@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import {
     ArrowLeft, Sparkle, Warning, Briefcase,
     CheckCircle, FilePdf, CaretLeft, CaretRight,
     RocketLaunch, Lightning, CircleNotch,
+    XCircle, Play, Stop, ArrowsClockwise,
 } from '@phosphor-icons/react';
 import { useAppStore } from '@/store/useAppStore';
 import CvDocumentPreview from '@/components/CvDocumentPreview';
@@ -12,6 +13,23 @@ import ScoreRing from '@/components/ScoreRing';
 import type { CVData } from '@/lib/types';
 
 type AutoApplyStatus = 'idle' | 'checking' | 'sending' | 'opened' | 'error' | 'no-extension';
+
+interface BatchJobStatus {
+    jobUrl: string;
+    jobTitle: string;
+    company: string;
+    status: 'pending' | 'processing' | 'done' | 'error';
+    result?: { success: boolean; detail?: string };
+}
+
+interface BatchProgress {
+    isProcessing: boolean;
+    queue: BatchJobStatus[];
+    currentIndex: number;
+    total: number;
+    completed: number;
+    successful?: number;
+}
 
 /**
  * Check if the JobFit AI extension is installed.
@@ -119,11 +137,39 @@ export default function StepEditCv() {
     const [autoApplyStatus, setAutoApplyStatus] = useState<AutoApplyStatus>('idle');
     const [autoApplyMessage, setAutoApplyMessage] = useState('');
 
-    // Listen for extension announcement
+    // ── Batch Apply State ──
+    const [batchProgress, setBatchProgress] = useState<BatchProgress | null>(null);
+    const [batchStarting, setBatchStarting] = useState(false);
+    const progressPollRef = useRef<NodeJS.Timeout | null>(null);
+
+    // Listen for extension announcement + progress updates
     useEffect(() => {
         const handler = (event: MessageEvent) => {
             if (event.data?.type === 'JOBFIT_EXTENSION_READY' && event.data?.extensionId) {
                 (window as any).__jobfitExtensionId = event.data.extensionId;
+            }
+            // Real-time progress updates from extension
+            if (event.data?.type === 'JOBFIT_APPLY_PROGRESS') {
+                setBatchProgress({
+                    isProcessing: event.data.isProcessing,
+                    queue: event.data.queue || [],
+                    currentIndex: event.data.currentIndex ?? -1,
+                    total: event.data.total ?? 0,
+                    completed: event.data.completed ?? 0,
+                    successful: event.data.successful ?? 0,
+                });
+                if (!event.data.isProcessing) {
+                    setBatchStarting(false);
+                }
+            }
+            // Response to batch start
+            if (event.data?.type === 'JOBFIT_AUTO_APPLY_ALL_RESPONSE') {
+                if (event.data.success) {
+                    setBatchStarting(false);
+                } else {
+                    setBatchStarting(false);
+                    setAutoApplyMessage(`Lỗi: ${event.data.error}`);
+                }
             }
         };
         window.addEventListener('message', handler);
@@ -170,18 +216,13 @@ export default function StepEditCv() {
         URL.revokeObjectURL(urlObj);
     };
 
-    /* ─── Auto Apply: send profile + job URL to extension via postMessage ─── */
-    const triggerAutoApply = async () => {
-        const cv = currentEntry?.optimizedCv;
-        const jobUrl = currentEntry?.source;
-        if (!cv || !jobUrl) {
-            setAutoApplyStatus('error');
-            setAutoApplyMessage('Thiếu dữ liệu CV hoặc Job URL.');
-            return;
-        }
-
-        // Build rich profile from optimized CV + any stored extra fields
-        const profile = {
+    /* ─── Build profile from an optimized CV ─── */
+    const buildProfile = useCallback((cv: CVData) => {
+        const extraProfile = (() => {
+            try { return JSON.parse(localStorage.getItem('jobfit-extra-profile') || '{}'); }
+            catch { return {}; }
+        })();
+        return {
             fullName: cv.name || '',
             firstName: cv.name?.split(' ').pop() || '',
             lastName: cv.name?.split(' ').slice(0, -1).join(' ') || '',
@@ -191,24 +232,31 @@ export default function StepEditCv() {
             skills: (cv.skills || []).join(', '),
             yearsOfExperience: cv.experience?.length || 0,
             highestDegree: cv.education?.[0]?.degree || '',
-            // Merge with any stored profile data from extension popup
-            ...((() => { try { return JSON.parse(localStorage.getItem('jobfit-extra-profile') || '{}'); } catch { return {}; } })()),
+            ...extraProfile,
         };
+    }, []);
+
+    /* ─── Single Auto Apply (legacy) ─── */
+    const triggerAutoApply = async () => {
+        const cv = currentEntry?.optimizedCv;
+        const jobUrl = currentEntry?.source;
+        if (!cv || !jobUrl) {
+            setAutoApplyStatus('error');
+            setAutoApplyMessage('Thiếu dữ liệu CV hoặc Job URL.');
+            return;
+        }
+
+        const profile = buildProfile(cv);
 
         setAutoApplyStatus('checking');
         setAutoApplyMessage('Đang kiểm tra Extension...');
 
         try {
-            // Check if extension is available (content-webapp.js sets this)
-            if (!isExtensionAvailable()) {
-                throw new Error('NO_EXTENSION');
-            }
+            if (!isExtensionAvailable()) throw new Error('NO_EXTENSION');
 
-            // Send auto-apply command via postMessage (no Extension ID needed!)
             setAutoApplyStatus('sending');
             setAutoApplyMessage('Đang gửi lệnh Auto Apply...');
 
-            // Listen for response
             const responsePromise = new Promise<any>((resolve, reject) => {
                 const timeout = setTimeout(() => reject(new Error('Extension timeout')), 10000);
                 const handler = (event: MessageEvent) => {
@@ -221,13 +269,7 @@ export default function StepEditCv() {
                 window.addEventListener('message', handler);
             });
 
-            // Send command
-            window.postMessage({
-                type: 'JOBFIT_AUTO_APPLY',
-                jobUrl,
-                profile,
-            }, '*');
-
+            window.postMessage({ type: 'JOBFIT_AUTO_APPLY', jobUrl, profile }, '*');
             const response = await responsePromise;
 
             if (response?.success) {
@@ -242,7 +284,6 @@ export default function StepEditCv() {
             if (message === 'NO_EXTENSION') {
                 setAutoApplyStatus('no-extension');
                 setAutoApplyMessage('Extension chưa cài. Đang mở trang apply...');
-                // Fallback: just open the URL
                 window.open(jobUrl, '_blank');
             } else {
                 setAutoApplyStatus('error');
@@ -251,6 +292,47 @@ export default function StepEditCv() {
             setTimeout(() => setAutoApplyStatus('idle'), 5000);
         }
     };
+
+    /* ═══════════════════════════════════════════════════════════════
+       BATCH AUTO APPLY ALL — Send all jobs to extension at once
+       ═══════════════════════════════════════════════════════════════ */
+    const triggerAutoApplyAll = useCallback(() => {
+        if (!isExtensionAvailable()) {
+            setAutoApplyStatus('no-extension');
+            setAutoApplyMessage('Extension chưa cài! Vui lòng cài JobFit AI Extension trước.');
+            setTimeout(() => setAutoApplyStatus('idle'), 5000);
+            return;
+        }
+
+        // Build jobs array from all optimized entries that have a source URL
+        const jobs = sortedEntries
+            .filter(e => e.optimizedCv && e.source)
+            .map(entry => ({
+                jobUrl: entry.source!,
+                jobTitle: entry.jobTitle || 'Unknown',
+                company: entry.company || entry.label || '',
+                profile: buildProfile(entry.optimizedCv!),
+            }));
+
+        if (jobs.length === 0) {
+            setAutoApplyMessage('Không có job nào có URL để apply.');
+            return;
+        }
+
+        setBatchStarting(true);
+
+        // Send batch command to extension
+        window.postMessage({
+            type: 'JOBFIT_AUTO_APPLY_ALL',
+            jobs,
+        }, '*');
+    }, [sortedEntries, buildProfile]);
+
+    const cancelBatchApply = useCallback(() => {
+        window.postMessage({ type: 'JOBFIT_AUTO_APPLY_CANCEL' }, '*');
+        setBatchProgress(null);
+        setBatchStarting(false);
+    }, []);
 
     const goPrev = () => setSelectedIdx(i => Math.max(0, i - 1));
     const goNext = () => setSelectedIdx(i => Math.min(sortedEntries.length - 1, i + 1));
@@ -265,13 +347,17 @@ export default function StepEditCv() {
         'no-extension': { label: 'Cần Extension', icon: <Lightning size={14} />, disabled: true, bg: 'linear-gradient(135deg, #d97706, #f59e0b)' },
     }[autoApplyStatus];
 
+    // Is batch running?
+    const isBatchActive = batchStarting || (batchProgress?.isProcessing ?? false);
+    const batchDone = batchProgress && !batchProgress.isProcessing && batchProgress.completed > 0;
+
     return (
         <div className="animate-fade-in" style={{ maxWidth: 1100, margin: '0 auto', padding: '40px 20px' }}>
 
             {/* ── Header ── */}
             <div style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                marginBottom: autoApplyStatus !== 'idle' ? 8 : 20,
+                marginBottom: (autoApplyStatus !== 'idle' || isBatchActive || batchDone) ? 8 : 20,
             }}>
                 <div>
                     <h2 style={{
@@ -285,7 +371,7 @@ export default function StepEditCv() {
                         {sortedEntries.length} CV{sortedEntries.length !== 1 ? 's' : ''} optimized — switch between jobs to view each version
                     </p>
                 </div>
-                <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                     <button
                         className="btn-secondary"
                         onClick={() => setStep(3)}
@@ -307,9 +393,7 @@ export default function StepEditCv() {
                                 },
                                 cvData: cv,
                             };
-                            // Try to send to extension via postMessage
                             window.postMessage(profileData, '*');
-                            // Also copy to clipboard as fallback
                             navigator.clipboard.writeText(JSON.stringify(profileData.profile, null, 2))
                                 .then(() => alert('✅ Profile exported! Open the extension popup and click Import.'))
                                 .catch(() => alert('✅ Data sent to extension via postMessage'));
@@ -324,16 +408,16 @@ export default function StepEditCv() {
                         ⚡ Export to Extension
                     </button>
 
-                    {/* ── NEW: Auto Apply Button ── */}
+                    {/* ── Single Auto Apply Button ── */}
                     <button
                         onClick={triggerAutoApply}
-                        disabled={autoApplyBtn.disabled}
+                        disabled={autoApplyBtn.disabled || isBatchActive}
                         style={{
                             display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem',
                             background: autoApplyBtn.bg,
                             color: '#fff', border: 'none', padding: '8px 18px', borderRadius: 8,
-                            cursor: autoApplyBtn.disabled ? 'not-allowed' : 'pointer',
-                            opacity: autoApplyBtn.disabled ? 0.85 : 1,
+                            cursor: (autoApplyBtn.disabled || isBatchActive) ? 'not-allowed' : 'pointer',
+                            opacity: (autoApplyBtn.disabled || isBatchActive) ? 0.7 : 1,
                             transition: 'all 0.2s ease',
                             fontWeight: 600,
                             boxShadow: autoApplyStatus === 'idle' ? '0 2px 12px rgba(5,150,105,0.3)' : 'none',
@@ -341,10 +425,162 @@ export default function StepEditCv() {
                     >
                         {autoApplyBtn.icon} {autoApplyBtn.label}
                     </button>
+
+                    {/* ── 🚀 AUTO APPLY ALL Button ── */}
+                    {!isBatchActive ? (
+                        <button
+                            onClick={triggerAutoApplyAll}
+                            disabled={batchStarting || sortedEntries.filter(e => e.source).length === 0}
+                            style={{
+                                display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem',
+                                background: 'linear-gradient(135deg, #7C3AED, #EC4899)',
+                                color: '#fff', border: 'none', padding: '8px 20px', borderRadius: 8,
+                                cursor: batchStarting ? 'not-allowed' : 'pointer',
+                                fontWeight: 700,
+                                boxShadow: '0 2px 16px rgba(124,58,237,0.4)',
+                                transition: 'all 0.2s ease',
+                                opacity: batchStarting ? 0.7 : 1,
+                            }}
+                        >
+                            {batchStarting
+                                ? <><CircleNotch size={14} className="spin" /> Starting...</>
+                                : <><RocketLaunch size={14} weight="fill" /> Auto Apply All ({sortedEntries.filter(e => e.source).length})</>
+                            }
+                        </button>
+                    ) : (
+                        <button
+                            onClick={cancelBatchApply}
+                            style={{
+                                display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem',
+                                background: 'linear-gradient(135deg, #dc2626, #ef4444)',
+                                color: '#fff', border: 'none', padding: '8px 20px', borderRadius: 8,
+                                cursor: 'pointer', fontWeight: 600,
+                                transition: 'all 0.2s ease',
+                            }}
+                        >
+                            <Stop size={14} weight="fill" /> Cancel Batch
+                        </button>
+                    )}
                 </div>
             </div>
 
-            {/* ── Auto Apply Status Bar ── */}
+            {/* ═══ Batch Apply Progress Panel ═══ */}
+            {(isBatchActive || batchDone) && batchProgress && (
+                <div style={{
+                    background: 'linear-gradient(135deg, rgba(124,58,237,0.06), rgba(236,72,153,0.04))',
+                    border: '1px solid rgba(124,58,237,0.2)',
+                    borderRadius: 'var(--radius-md, 12px)',
+                    padding: '16px 20px',
+                    marginBottom: 16,
+                    animation: 'fadeIn 0.3s ease',
+                }}>
+                    {/* Progress Header */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            {batchProgress.isProcessing
+                                ? <CircleNotch size={16} className="spin" style={{ color: '#a78bfa' }} />
+                                : <CheckCircle size={16} weight="fill" style={{ color: '#22c55e' }} />
+                            }
+                            <span style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--text-primary)' }}>
+                                {batchProgress.isProcessing
+                                    ? `⚡ Batch Apply — ${batchProgress.completed}/${batchProgress.total} jobs`
+                                    : `✅ Batch Complete — ${batchProgress.successful || 0}/${batchProgress.total} successful`
+                                }
+                            </span>
+                        </div>
+                        {/* Progress bar */}
+                        <div style={{ width: 120, height: 6, background: 'rgba(255,255,255,0.08)', borderRadius: 3, overflow: 'hidden' }}>
+                            <div style={{
+                                height: '100%',
+                                width: `${batchProgress.total > 0 ? (batchProgress.completed / batchProgress.total) * 100 : 0}%`,
+                                background: 'linear-gradient(90deg, #7c3aed, #ec4899)',
+                                borderRadius: 3,
+                                transition: 'width 0.5s ease',
+                            }} />
+                        </div>
+                    </div>
+
+                    {/* Job List */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 200, overflowY: 'auto' }}>
+                        {batchProgress.queue.map((job, idx) => (
+                            <div key={idx} style={{
+                                display: 'flex', alignItems: 'center', gap: 10,
+                                padding: '8px 12px',
+                                background: job.status === 'processing'
+                                    ? 'rgba(124,58,237,0.1)'
+                                    : job.status === 'done'
+                                        ? 'rgba(34,197,94,0.06)'
+                                        : job.status === 'error'
+                                            ? 'rgba(239,68,68,0.06)'
+                                            : 'rgba(255,255,255,0.02)',
+                                borderRadius: 8,
+                                border: job.status === 'processing'
+                                    ? '1px solid rgba(124,58,237,0.3)'
+                                    : '1px solid rgba(255,255,255,0.05)',
+                                transition: 'all 0.3s ease',
+                            }}>
+                                {/* Status icon */}
+                                <div style={{ flexShrink: 0, width: 20, display: 'flex', justifyContent: 'center' }}>
+                                    {job.status === 'pending' && <span style={{ opacity: 0.3, fontSize: '0.75rem' }}>⏳</span>}
+                                    {job.status === 'processing' && <CircleNotch size={14} className="spin" style={{ color: '#a78bfa' }} />}
+                                    {job.status === 'done' && <CheckCircle size={14} weight="fill" style={{ color: '#22c55e' }} />}
+                                    {job.status === 'error' && <XCircle size={14} weight="fill" style={{ color: '#ef4444' }} />}
+                                </div>
+
+                                {/* Job info */}
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                    <p style={{
+                                        fontSize: '0.8rem', fontWeight: 600,
+                                        color: job.status === 'processing' ? '#a78bfa' : 'var(--text-primary)',
+                                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                                    }}>
+                                        {job.jobTitle}
+                                    </p>
+                                    <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                        {job.company}
+                                    </p>
+                                </div>
+
+                                {/* Status label */}
+                                <span style={{
+                                    fontSize: '0.65rem', fontWeight: 600, flexShrink: 0,
+                                    padding: '2px 8px', borderRadius: 6,
+                                    background: job.status === 'done' ? 'rgba(34,197,94,0.15)'
+                                        : job.status === 'error' ? 'rgba(239,68,68,0.15)'
+                                            : job.status === 'processing' ? 'rgba(124,58,237,0.15)'
+                                                : 'rgba(255,255,255,0.05)',
+                                    color: job.status === 'done' ? '#22c55e'
+                                        : job.status === 'error' ? '#ef4444'
+                                            : job.status === 'processing' ? '#a78bfa'
+                                                : 'var(--text-muted)',
+                                }}>
+                                    {job.status === 'pending' && 'Chờ'}
+                                    {job.status === 'processing' && 'Đang xử lý...'}
+                                    {job.status === 'done' && 'Thành công'}
+                                    {job.status === 'error' && (job.result?.detail || 'Lỗi')}
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Close button when done */}
+                    {batchDone && (
+                        <button
+                            onClick={() => setBatchProgress(null)}
+                            style={{
+                                marginTop: 12, padding: '6px 16px',
+                                background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
+                                borderRadius: 8, color: 'var(--text-secondary)', fontSize: '0.8rem',
+                                cursor: 'pointer', fontFamily: 'inherit',
+                            }}
+                        >
+                            Đóng
+                        </button>
+                    )}
+                </div>
+            )}
+
+            {/* ── Single Auto Apply Status Bar ── */}
             {autoApplyStatus !== 'idle' && (
                 <div style={{
                     background: autoApplyStatus === 'opened'
@@ -386,11 +622,13 @@ export default function StepEditCv() {
                 </div>
             )}
 
-            {/* CSS for spin animation */}
+            {/* CSS for spin + fadeIn animation */}
             <style>{`
                 @keyframes spin { to { transform: rotate(360deg); } }
                 .spin { animation: spin 1s linear infinite; }
-            `}</style>
+                @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+            `}
+            </style>
 
             {/* ══════ Job Selector Tabs ══════ */}
             <div style={{

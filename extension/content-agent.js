@@ -191,33 +191,37 @@ function findApplyButton() {
     return null;
 }
 
-// ─── Call LLM to map form fields to profile ───
+// ─── Call LLM to map form fields to profile (via background proxy) ───
 async function callLLMMapping(formFields, profileData) {
-    // Get web app URL from storage
-    const data = await new Promise(r => chrome.storage.local.get('jobfitAppUrl', r));
-    const appUrl = data.jobfitAppUrl || 'http://localhost:3000';
+    return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+            reject(new Error('LLM proxy timeout (30s)'));
+        }, LLM_TIMEOUT);
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), LLM_TIMEOUT);
+        chrome.runtime.sendMessage({
+            type: 'PROXY_LLM_MAP_FORM',
+            formFields,
+            profileData,
+        }, (response) => {
+            clearTimeout(timeout);
 
-    try {
-        const res = await fetch(`${appUrl}/api/ai/map-form`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ formFields, profileData }),
-            signal: controller.signal,
+            if (chrome.runtime.lastError) {
+                reject(new Error(`Extension error: ${chrome.runtime.lastError.message}`));
+                return;
+            }
+
+            if (!response) {
+                reject(new Error('No response from background'));
+                return;
+            }
+
+            if (response.success) {
+                resolve(response.data);
+            } else {
+                reject(new Error(response.error || 'LLM proxy failed'));
+            }
         });
-        clearTimeout(timeout);
-
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.detail || `API error: ${res.status}`);
-        }
-        return res.json();
-    } catch (e) {
-        clearTimeout(timeout);
-        throw e;
-    }
+    });
 }
 
 // ─── Execute fill instructions ───
@@ -406,27 +410,39 @@ function reportResult(success, detail) {
 async function init() {
     await sleep(1500); // Wait for page render
 
-    // Check for pending auto-apply
+    // Check for pending auto-apply (single or batch)
     try {
         const data = await new Promise(r => {
-            chrome.storage.local.get(['pendingAutoApply', 'jobfitProfile'], r);
+            chrome.storage.local.get(['pendingAutoApply', 'jobfitProfile', 'batchMode'], r);
         });
 
         if (data.pendingAutoApply && data.jobfitProfile) {
-            // Clear flag immediately
+            const isBatch = data.batchMode === true;
+
+            // Clear flags immediately to prevent re-triggering
             await new Promise(r => {
-                chrome.storage.local.remove(['pendingAutoApply', 'autoApplyJobUrl'], r);
+                chrome.storage.local.remove(['pendingAutoApply', 'autoApplyJobUrl', 'batchMode'], r);
             });
 
-            showToast('🚀 JobFit AI Agent đang xử lý...', 0);
+            console.log(`[JobFit Agent] Auto-apply triggered (batch: ${isBatch})`);
+
+            showToast(isBatch
+                ? '🚀 Batch Apply — Đang xử lý job này...'
+                : '🚀 JobFit AI Agent đang xử lý...', 0);
             await sleep(500);
             document.getElementById('jobfit-toast')?.remove();
 
             await runApplyAgent(data.jobfitProfile);
+
+            // If batch mode, the reportResult in runApplyAgent already
+            // sends AUTO_APPLY_RESULT back to background, which triggers
+            // the next job in queue. Nothing extra needed here.
             return;
         }
     } catch (e) {
         console.warn('[JobFit Agent] Auto-apply check failed:', e);
+        // Report failure so batch can continue
+        reportResult(false, `Init error: ${e.message}`);
     }
 
     // Normal mode: show floating button if there's a profile
