@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import {
     ArrowLeft, Sparkle, Warning, Briefcase,
     CheckCircle, FilePdf, CaretLeft, CaretRight,
@@ -11,22 +11,16 @@ import CvDocumentPreview from '@/components/CvDocumentPreview';
 import ScoreRing from '@/components/ScoreRing';
 import type { CVData } from '@/lib/types';
 
-/**
- * Extension ID — Replace with your actual extension ID after first install.
- * Find it in chrome://extensions → Details → ID
- * For development, also works with the extension's reload ID.
- */
-const EXTENSION_ID = '';  // Will be set by user
-
 type AutoApplyStatus = 'idle' | 'checking' | 'sending' | 'opened' | 'error' | 'no-extension';
 
-/** Try to get extension ID from localStorage (set by user or auto-detected) */
-async function getStoredExtensionId(): Promise<string | null> {
-    try {
-        return localStorage.getItem('jobfit-extension-id');
-    } catch {
-        return null;
-    }
+/**
+ * Check if the JobFit AI extension is installed.
+ * The extension's content-webapp.js posts JOBFIT_EXTENSION_READY on load.
+ * We also listen for JOBFIT_AUTO_APPLY_RESPONSE.
+ */
+function isExtensionAvailable(): boolean {
+    // Extension sets this on the window when content-webapp.js loads
+    return !!(window as any).__jobfitExtensionId;
 }
 
 /* ─── XSS-safe HTML escaping ─── */
@@ -125,6 +119,17 @@ export default function StepEditCv() {
     const [autoApplyStatus, setAutoApplyStatus] = useState<AutoApplyStatus>('idle');
     const [autoApplyMessage, setAutoApplyMessage] = useState('');
 
+    // Listen for extension announcement
+    useEffect(() => {
+        const handler = (event: MessageEvent) => {
+            if (event.data?.type === 'JOBFIT_EXTENSION_READY' && event.data?.extensionId) {
+                (window as any).__jobfitExtensionId = event.data.extensionId;
+            }
+        };
+        window.addEventListener('message', handler);
+        return () => window.removeEventListener('message', handler);
+    }, []);
+
     // Empty state
     if (!cvData || sortedEntries.length === 0) {
         return (
@@ -165,7 +170,7 @@ export default function StepEditCv() {
         URL.revokeObjectURL(urlObj);
     };
 
-    /* ─── Auto Apply: send profile + job URL to extension ─── */
+    /* ─── Auto Apply: send profile + job URL to extension via postMessage ─── */
     const triggerAutoApply = async () => {
         const cv = currentEntry?.optimizedCv;
         const jobUrl = currentEntry?.source;
@@ -175,91 +180,73 @@ export default function StepEditCv() {
             return;
         }
 
-        // Check if this is a supported job URL
-        const isSupported = jobUrl.includes('vietnamworks.com') || jobUrl.includes('topcv.vn');
-        if (!isSupported) {
-            setAutoApplyStatus('error');
-            setAutoApplyMessage('Hiện chỉ hỗ trợ VietnamWorks và TopCV. URL này chưa được hỗ trợ.');
-            setTimeout(() => setAutoApplyStatus('idle'), 4000);
-            return;
-        }
-
-        // Build profile from optimized CV
+        // Build rich profile from optimized CV + any stored extra fields
         const profile = {
             fullName: cv.name || '',
             firstName: cv.name?.split(' ').pop() || '',
             lastName: cv.name?.split(' ').slice(0, -1).join(' ') || '',
-            currentTitle: cv.summary || '',
-            coverLetter: '',
-            // Add skills as fields for the extension
-            skills: cv.skills || [],
+            currentTitle: cv.experience?.[0]?.title || '',
+            summary: cv.summary || '',
+            coverLetter: cv.summary || '',
+            skills: (cv.skills || []).join(', '),
+            yearsOfExperience: cv.experience?.length || 0,
+            highestDegree: cv.education?.[0]?.degree || '',
+            // Merge with any stored profile data from extension popup
+            ...((() => { try { return JSON.parse(localStorage.getItem('jobfit-extra-profile') || '{}'); } catch { return {}; } })()),
         };
 
         setAutoApplyStatus('checking');
         setAutoApplyMessage('Đang kiểm tra Extension...');
 
         try {
-            // Check if chrome.runtime is available and extension is installed
-            const chromeRuntime = (window as any).chrome?.runtime;
-            if (!chromeRuntime?.sendMessage) {
+            // Check if extension is available (content-webapp.js sets this)
+            if (!isExtensionAvailable()) {
                 throw new Error('NO_EXTENSION');
             }
 
-            // Determine extension ID — try stored or use constant
-            const extId = EXTENSION_ID || await getStoredExtensionId();
-            if (!extId) {
-                throw new Error('NO_EXTENSION_ID');
-            }
-
-            // Step 1: Ping extension to check it's alive
-            const pingResponse = await new Promise<any>((resolve, reject) => {
-                chromeRuntime.sendMessage(extId, { type: 'JOBFIT_PING' }, (response: any) => {
-                    if (chromeRuntime.lastError) {
-                        reject(new Error('NO_EXTENSION'));
-                    } else {
-                        resolve(response);
-                    }
-                });
-            });
-
-            if (!pingResponse?.success) {
-                throw new Error('NO_EXTENSION');
-            }
-
-            // Step 2: Send auto-apply command
+            // Send auto-apply command via postMessage (no Extension ID needed!)
             setAutoApplyStatus('sending');
-            setAutoApplyMessage(`Đang gửi lệnh Auto Apply tới ${jobUrl.includes('topcv') ? 'TopCV' : 'VietnamWorks'}...`);
+            setAutoApplyMessage('Đang gửi lệnh Auto Apply...');
 
-            const applyResponse = await new Promise<any>((resolve, reject) => {
-                chromeRuntime.sendMessage(extId, {
-                    type: 'AUTO_APPLY_START',
-                    jobUrl: jobUrl,
-                    profile: profile,
-                }, (response: any) => {
-                    if (chromeRuntime.lastError) {
-                        reject(new Error(chromeRuntime.lastError.message));
-                    } else {
-                        resolve(response);
+            // Listen for response
+            const responsePromise = new Promise<any>((resolve, reject) => {
+                const timeout = setTimeout(() => reject(new Error('Extension timeout')), 10000);
+                const handler = (event: MessageEvent) => {
+                    if (event.data?.type === 'JOBFIT_AUTO_APPLY_RESPONSE') {
+                        clearTimeout(timeout);
+                        window.removeEventListener('message', handler);
+                        resolve(event.data);
                     }
-                });
+                };
+                window.addEventListener('message', handler);
             });
 
-            if (applyResponse?.success) {
+            // Send command
+            window.postMessage({
+                type: 'JOBFIT_AUTO_APPLY',
+                jobUrl,
+                profile,
+            }, '*');
+
+            const response = await responsePromise;
+
+            if (response?.success) {
                 setAutoApplyStatus('opened');
-                setAutoApplyMessage('✅ Tab đã mở! Extension đang tự động điền form. Chuyển sang tab mới để kiểm tra.');
+                setAutoApplyMessage('✅ Tab đã mở! AI Agent đang tự động phân tích và điền form.');
                 setTimeout(() => setAutoApplyStatus('idle'), 6000);
             } else {
-                throw new Error(applyResponse?.error || 'Unknown error');
+                throw new Error(response?.error || 'Unknown error');
             }
-        } catch (err: any) {
-            if (err.message === 'NO_EXTENSION' || err.message === 'NO_EXTENSION_ID') {
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : 'Unknown error';
+            if (message === 'NO_EXTENSION') {
                 setAutoApplyStatus('no-extension');
-                setAutoApplyMessage('Extension chưa được cài đặt hoặc chưa cấu hình Extension ID.');
-                // Fallback: open URL in new tab
+                setAutoApplyMessage('Extension chưa cài. Đang mở trang apply...');
+                // Fallback: just open the URL
                 window.open(jobUrl, '_blank');
             } else {
                 setAutoApplyStatus('error');
-                setAutoApplyMessage(`Lỗi: ${err.message}`);
+                setAutoApplyMessage(`Lỗi: ${message}`);
             }
             setTimeout(() => setAutoApplyStatus('idle'), 5000);
         }
