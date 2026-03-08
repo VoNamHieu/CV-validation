@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
         if (!response.ok) {
             return NextResponse.json(
                 { detail: `Failed to fetch URL: ${response.status}` },
-                { status: 400 }
+                { status: 502 }
             );
         }
 

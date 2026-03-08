@@ -78,12 +78,27 @@ export default function StepInputUrl() {
             try {
                 searchPage = await crawlUrl(searchResult.search_url, true);
             } catch (crawlErr) {
-                console.log('[StepInputUrl] Search page crawl failed:', crawlErr);
+                console.log('[StepInputUrl] HTTP crawl failed, trying Playwright...', crawlErr);
+                // Playwright fallback for search pages (sites like VietnamWorks block direct HTTP)
+                try {
+                    const pw = await fetchPage(searchResult.search_url);
+                    if (pw.success && pw.text.length >= 200) {
+                        searchPage = { text: pw.text, textWithLinks: pw.text };
+                    }
+                } catch (pwErr) {
+                    console.log('[StepInputUrl] Playwright fallback also failed:', pwErr);
+                }
             }
 
             // ─── Phase 3: Extract job links ───
             setPhase('extracting_links');
             setPhaseDetail('AI is finding job listings...');
+
+            // Guard: don't call AI with empty text
+            if (!searchPage.text && !searchPage.textWithLinks) {
+                throw new Error(`Could not load search results from ${hostname}. The site may be blocking automated access. Try pasting a direct job URL instead.`);
+            }
+
             const linksResult = await extractJobLinks(searchPage.textWithLinks || searchPage.text, trimmed);
             if (!linksResult.found || !linksResult.job_urls?.length) {
                 throw new Error(`No job listings found on ${hostname}. Try a different job site.`);
