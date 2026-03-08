@@ -150,22 +150,32 @@ export default function StepInputUrl() {
 
                     // Try HTTP first
                     try {
+                        console.log(`[DEBUG] HTTP crawl: ${jobUrl}`);
                         const jobPage = await crawlUrl(jobUrl);
+                        console.log(`[DEBUG] HTTP result: text=${jobPage.text?.length ?? 0} chars, jsonLd=${!!(jobPage as any).jsonLd}`);
                         // eslint-disable-next-line @typescript-eslint/no-explicit-any
                         const ld = (jobPage as any).jsonLd;
                         if (ld?.description) {
                             jobPageText = buildJdFromLd(ld);
                             jobTitle = ld.title || '';
                             company = ld.hiringOrganization?.name || '';
+                            console.log(`[DEBUG] HTTP JSON-LD found: title=${jobTitle}`);
                         } else if ((jobPage.text?.length ?? 0) >= 500) {
                             jobPageText = jobPage.text;
+                            console.log(`[DEBUG] HTTP text fallback: ${jobPageText.length} chars`);
+                        } else {
+                            console.log(`[DEBUG] HTTP text too short: ${jobPage.text?.length ?? 0} chars`);
                         }
-                    } catch { /* HTTP fail, try playwright */ }
+                    } catch (httpErr) {
+                        console.log(`[DEBUG] HTTP crawl FAILED:`, httpErr);
+                    }
 
                     // Playwright fallback
                     if (jobPageText.length < 200) {
                         try {
+                            console.log(`[DEBUG] Playwright fallback: ${jobUrl}`);
                             const pw = await fetchPage(jobUrl);
+                            console.log(`[DEBUG] Playwright result: success=${pw.success}, text=${pw.text?.length ?? 0} chars, jsonLd=${!!pw.jsonLd}`);
                             if (pw.success) {
                                 if (pw.jsonLd?.description) {
                                     jobPageText = buildJdFromLd(pw.jsonLd);
@@ -173,12 +183,22 @@ export default function StepInputUrl() {
                                     jobTitle = (pw.jsonLd as any).title || '';
                                     // eslint-disable-next-line @typescript-eslint/no-explicit-any
                                     company = (pw.jsonLd as any).hiringOrganization?.name || '';
+                                    console.log(`[DEBUG] Playwright JSON-LD found: title=${jobTitle}`);
                                 } else if (pw.text.length >= 200) {
                                     jobPageText = pw.text;
+                                    console.log(`[DEBUG] Playwright text fallback: ${jobPageText.length} chars`);
+                                } else {
+                                    console.log(`[DEBUG] Playwright text too short: ${pw.text.length} chars`);
                                 }
+                            } else {
+                                console.log(`[DEBUG] Playwright returned success=false`);
                             }
-                        } catch { /* pw fail */ }
+                        } catch (pwErr) {
+                            console.log(`[DEBUG] Playwright FAILED:`, pwErr);
+                        }
                     }
+
+                    console.log(`[DEBUG] Final jobPageText: ${jobPageText.length} chars`);
 
                     if (jobPageText.length < 100) {
                         updateJdEntry(entryId, { status: 'error', error: 'Could not load job page' });
