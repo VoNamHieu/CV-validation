@@ -28,6 +28,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
+# Create non-root user EARLY (M5: security best practice)
+RUN useradd -m -s /bin/bash appuser
+
 # Install Python dependencies
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
@@ -35,15 +38,18 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Force install python-multipart (in case cache skipped it)
 RUN pip install --no-cache-dir python-multipart
 
-# Install Playwright Chromium browser
-RUN playwright install chromium
-RUN playwright install-deps chromium
+# Install Playwright Chromium INTO a shared path accessible by appuser
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
+RUN mkdir -p /opt/pw-browsers && \
+    playwright install chromium && \
+    playwright install-deps chromium && \
+    chmod -R 755 /opt/pw-browsers
 
 # Copy backend application code
 COPY backend/app ./app
 
-# Create non-root user (M5: security best practice)
-RUN useradd -m -s /bin/bash appuser && chown -R appuser:appuser /app
+# Set ownership and switch to non-root
+RUN chown -R appuser:appuser /app
 USER appuser
 
 # Railway provides PORT env var dynamically
