@@ -52,17 +52,21 @@ For each form field, determine if you have matching data from the user profile. 
    - "experience", "kinh nghiệm" → yearsOfExperience
    - "skills", "kỹ năng" → skills (join with comma)
    - "education", "học vấn" → highestDegree
-5. Build CSS selectors: prefer #id, then [name="..."], then tag.class
-6. For dropdowns (select), look at the options and pick the best match
-7. NEVER fabricate data. Only use what's in the profile.
+5. Build CSS selectors: prefer #id, then [name="..."], then tag.class. If the field has a "selector" property, use that.
+6. For native dropdowns (select), look at the options and pick the best match. Use action "select".
+7. For custom dropdowns (componentType: "react-select", "mui-autocomplete", "ant-select", "select2", "custom-dropdown"), use action "custom-select" with the display text as value.
+8. For datepicker fields (componentType: "datepicker"), use action "datepicker" and format the date as shown in the placeholder.
+9. For file upload fields (componentType: "file-upload"), use action "upload" if the user has a CV.
+10. NEVER fabricate data. Only use what's in the profile.
 
 ## OUTPUT FORMAT:
 Return a JSON array of instructions:
 [
   {
     "selector": "CSS selector to find the element",
-    "action": "fill" | "select" | "click",
+    "action": "fill" | "select" | "custom-select" | "datepicker" | "upload" | "click",
     "value": "the value to set",
+    "componentType": "native | react-select | mui-autocomplete | ant-select | select2 | custom-dropdown | datepicker | file-upload",
     "fieldLabel": "human-readable label for logging"
   }
 ]
@@ -85,7 +89,7 @@ If no fields can be mapped, return an empty array [].`;
             (inst: Record<string, unknown>) =>
                 inst.selector && typeof inst.selector === 'string' &&
                 inst.action && typeof inst.action === 'string' &&
-                ['fill', 'select', 'click', 'type'].includes(inst.action as string)
+                ['fill', 'select', 'custom-select', 'datepicker', 'upload', 'click', 'type'].includes(inst.action as string)
         );
 
         return NextResponse.json({ instructions: validInstructions });

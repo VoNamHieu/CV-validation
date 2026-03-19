@@ -209,4 +209,40 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('saveBtn').addEventListener('click', saveProfile);
     document.getElementById('importFromApp').addEventListener('click', importFromApp);
     document.getElementById('resetAll').addEventListener('click', resetAll);
+
+    // CV upload
+    const cvFileInput = document.getElementById('cvFileInput');
+    const uploadCvBtn = document.getElementById('uploadCvBtn');
+    const cvFileNameEl = document.getElementById('cvFileName');
+
+    // Load existing CV name
+    chrome.storage.local.get('cvFileName', (data) => {
+        if (data.cvFileName) {
+            cvFileNameEl.textContent = data.cvFileName;
+            uploadCvBtn.textContent = 'Change';
+        }
+    });
+
+    uploadCvBtn.addEventListener('click', () => cvFileInput.click());
+    cvFileInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        if (file.size > 5 * 1024 * 1024) {
+            alert('File quá lớn (tối đa 5MB).');
+            return;
+        }
+        const reader = new FileReader();
+        reader.onload = () => {
+            const base64 = reader.result.split(',')[1]; // Remove data:...;base64, prefix
+            chrome.storage.local.set({
+                cvFileBase64: base64,
+                cvFileName: file.name,
+            }, () => {
+                cvFileNameEl.textContent = file.name;
+                uploadCvBtn.textContent = '✅ Uploaded';
+                setTimeout(() => { uploadCvBtn.textContent = 'Change'; }, 2000);
+            });
+        };
+        reader.readAsDataURL(file);
+    });
 });

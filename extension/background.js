@@ -117,6 +117,50 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     // ══════════════════════════════════════════════════════════════
+    // ── LLM PROXY — Agent Plan (agentic loop brain) ──
+    // ══════════════════════════════════════════════════════════════
+    if (message.type === 'PROXY_LLM_AGENT_PLAN') {
+        const { pageState, profileData, history, hasCV } = message;
+        (async () => {
+            try {
+                const data = await chrome.storage.local.get('jobfitAppUrl');
+                const appUrl = data.jobfitAppUrl || 'http://localhost:3000';
+
+                const urls = [
+                    appUrl,
+                    appUrl.includes('localhost') ? null : 'http://localhost:3000',
+                ].filter(Boolean);
+
+                let lastError = null;
+                for (const baseUrl of urls) {
+                    try {
+                        const res = await fetch(`${baseUrl}/api/ai/agent-plan`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ pageState, profileData, history, hasCV }),
+                            signal: AbortSignal.timeout(30000),
+                        });
+                        if (!res.ok) {
+                            const err = await res.json().catch(() => ({}));
+                            throw new Error(err.detail || `API error: ${res.status}`);
+                        }
+                        const result = await res.json();
+                        sendResponse({ success: true, data: result });
+                        return;
+                    } catch (e) {
+                        lastError = e;
+                        console.warn(`[JobFit AI] Agent plan proxy failed for ${baseUrl}:`, e.message);
+                    }
+                }
+                sendResponse({ success: false, error: lastError?.message || 'All endpoints failed' });
+            } catch (e) {
+                sendResponse({ success: false, error: e.message });
+            }
+        })();
+        return true;
+    }
+
+    // ══════════════════════════════════════════════════════════════
     // ── BATCH AUTO APPLY — Start processing a queue of jobs ──
     // ══════════════════════════════════════════════════════════════
     if (message.type === 'AUTO_APPLY_ALL_START') {
