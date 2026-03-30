@@ -72,6 +72,14 @@ interface AgentPlanRequest {
     hasCV: boolean;
 }
 
+interface AgentPlan {
+    action: string;
+    instructions?: Array<Record<string, unknown>>;
+    clickTarget?: string;
+    reason?: string;
+    waitMs?: number;
+}
+
 export async function POST(request: Request) {
     try {
         const { pageState, profileData, history, hasCV } = (await request.json()) as AgentPlanRequest;
@@ -169,7 +177,7 @@ Decide the single best next action. Return a JSON object.
             prompt
         );
 
-        const plan = safeJsonParse(result);
+        const plan = safeJsonParse<AgentPlan>(result);
 
         // Validate the plan structure
         if (!plan || typeof plan !== 'object' || !plan.action) {
