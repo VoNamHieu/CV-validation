@@ -77,7 +77,7 @@ If no fields can be mapped, return an empty array [].`;
             'You are a form-filling AI agent. Map user profile data to HTML form fields. Return a JSON array of fill instructions.',
             prompt
         );
-        const instructions = safeJsonParse(result);
+        const instructions = safeJsonParse<Record<string, unknown>[]>(result);
 
         // Validate instructions format
         if (!Array.isArray(instructions)) {

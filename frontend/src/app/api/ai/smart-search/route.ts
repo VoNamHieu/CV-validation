@@ -53,8 +53,8 @@ TARGET JOB SITE URL: ${siteUrl}
 Generate the most relevant job search URL for this candidate on this site.`;
 
         const raw = await callGeminiLight(systemPrompt, userPrompt);
-        let parsed;
-        try { parsed = safeJsonParse(raw); }
+        let parsed: Record<string, unknown> | Record<string, unknown>[];
+        try { parsed = safeJsonParse<Record<string, unknown> | Record<string, unknown>[]>(raw); }
         catch { return NextResponse.json({ detail: "AI returned invalid JSON. Please retry." }, { status: 502 }); }
 
         // Gemini sometimes returns an array instead of an object — unwrap it
