@@ -3,7 +3,7 @@ import type { NextRequest } from 'next/server';
 
 /**
  * Rate limiting middleware for AI API routes (H1).
- * Prevents Gemini API cost abuse by limiting requests per IP.
+ * Prevents OpenAI API cost abuse by limiting requests per IP.
  *
  * NOTE: In-memory map resets on Vercel cold starts.
  * For strict enforcement, upgrade to Upstash Redis.

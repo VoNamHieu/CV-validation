@@ -1,6 +1,6 @@
-"""Tests for shared Gemini client — overload detection."""
+"""Tests for shared OpenAI client — overload detection."""
 import pytest
-from app.services.gemini_client import is_overloaded
+from app.services.openai_client import is_overloaded
 
 
 class TestIsOverloaded:

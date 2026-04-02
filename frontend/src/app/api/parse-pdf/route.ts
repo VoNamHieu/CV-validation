@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { callGeminiWithPdf } from "@/lib/gemini";
+import { callAIWithPdf } from "@/lib/openai";
 import { safeJsonParse } from "@/lib/safe-json";
 import { MAX_PDF_BASE64_LENGTH } from "@/lib/validation";
 
@@ -44,7 +44,7 @@ Return ONLY valid JSON matching this exact schema:
             ? "Extract all structured information from this CV/Resume PDF."
             : "Extract the key requirements, nice-to-haves, responsibilities, seniority, and domain from this Job Description PDF.";
 
-        const result = await callGeminiWithPdf(systemPrompt, userPrompt, pdf_base64);
+        const result = await callAIWithPdf(systemPrompt, userPrompt, pdf_base64);
 
         let parsed;
         try {

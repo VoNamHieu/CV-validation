@@ -92,7 +92,7 @@ export default function Home() {
         position: 'relative',
         zIndex: 1,
       }}>
-        <span style={{ opacity: 0.7 }}>JobFit AI · Powered by Gemini · No hallucination policy</span>
+        <span style={{ opacity: 0.7 }}>JobFit AI · Powered by GPT-5 · No hallucination policy</span>
       </footer>
     </div>
   );

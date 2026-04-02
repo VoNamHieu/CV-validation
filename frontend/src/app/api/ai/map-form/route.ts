@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { callGemini } from '@/lib/gemini';
+import { callAI } from '@/lib/openai';
 import { safeJsonParse } from '@/lib/safe-json';
 
 /**
@@ -73,7 +73,7 @@ Return a JSON array of instructions:
 
 If no fields can be mapped, return an empty array [].`;
 
-        const result = await callGemini(
+        const result = await callAI(
             'You are a form-filling AI agent. Map user profile data to HTML form fields. Return a JSON array of fill instructions.',
             prompt
         );
