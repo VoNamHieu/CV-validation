@@ -1,83 +1,76 @@
-import { GoogleGenAI, Part } from "@google/genai";
+import OpenAI from "openai";
 
-let _client: GoogleGenAI | null = null;
+let _client: OpenAI | null = null;
 
-function getClient(): GoogleGenAI {
+function getClient(): OpenAI {
     if (!_client) {
-        const key = process.env.GEMINI_API_KEY;
+        const key = process.env.OPENAI_API_KEY;
         if (!key) {
-            throw new Error("GEMINI_API_KEY environment variable is not set");
+            throw new Error("OPENAI_API_KEY environment variable is not set");
         }
-        _client = new GoogleGenAI({ apiKey: key });
+        _client = new OpenAI({ apiKey: key });
     }
     return _client;
 }
 
-// ── Model chains ──
-// Complex tasks (CV/JD extraction, scoring, optimization): need thinking
-const MODELS_PRO = ["gemini-3-pro-preview", "gemini-3-flash-preview", "gemini-2.5-pro"];
-// Simple tasks (search URL, link extraction): no thinking needed
-const MODELS_FLASH = ["gemini-3-flash-preview", "gemini-2.5-pro"];
+// ── Model ──
+const MODEL = "gpt-5";
 
 function isOverloaded(err: unknown): boolean {
     const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
     return msg.includes("503") || msg.includes("unavailable") || msg.includes("overloaded")
-        || msg.includes("resource_exhausted") || msg.includes("quota");
+        || msg.includes("resource_exhausted") || msg.includes("quota") || msg.includes("rate_limit");
 }
 
-// ── Core: try model chain with fallback ──
-async function callWithFallback(
-    models: string[],
+// ── Core: call GPT-5 with JSON schema enforcement ──
+async function callModel(
     systemPrompt: string,
     userPrompt: string,
-    useThinking: boolean,
 ): Promise<string> {
     const client = getClient();
 
-    for (let i = 0; i < models.length; i++) {
-        const model = models[i];
-        const isLast = i === models.length - 1;
+    const MAX_RETRIES = 2;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
         try {
-            console.log(`[gemini] Trying ${model}...`);
-            const response = await client.models.generateContent({
-                model,
-                contents: userPrompt,
-                config: {
-                    systemInstruction: systemPrompt,
-                    responseMimeType: "application/json",
-                    ...(useThinking ? { thinkingConfig: { thinkingBudget: 2048 } } : {}),
-                },
+            console.log(`[openai] Calling ${MODEL}... (attempt ${attempt + 1})`);
+            const response = await client.chat.completions.create({
+                model: MODEL,
+                messages: [
+                    { role: "system", content: systemPrompt },
+                    { role: "user", content: userPrompt },
+                ],
+                response_format: { type: "json_object" },
             });
-            return response?.text ?? "";
+            return response.choices[0]?.message?.content ?? "";
         } catch (e) {
-            if (!isLast && isOverloaded(e)) {
-                console.warn(`[gemini] ${model} unavailable, trying ${models[i + 1]}...`);
+            if (attempt < MAX_RETRIES && isOverloaded(e)) {
+                console.warn(`[openai] ${MODEL} overloaded, retrying...`);
                 continue;
             }
             throw e;
         }
     }
-    throw new Error("All models failed");
+    throw new Error("All retries failed");
 }
 
 /**
- * Complex tasks: 3.0-pro → 3-flash → 2.5-pro (WITH thinking)
+ * Complex tasks: GPT-5 with JSON mode
  * Use for: CV extraction, JD extraction, scoring, optimization
  */
 export async function callGemini(systemPrompt: string, userPrompt: string): Promise<string> {
-    return callWithFallback(MODELS_PRO, systemPrompt, userPrompt, true);
+    return callModel(systemPrompt, userPrompt);
 }
 
 /**
- * Simple tasks: 3-flash → 2.5-pro (NO thinking)
+ * Simple tasks: GPT-5 with JSON mode
  * Use for: search URL generation, job link extraction
  */
 export async function callGeminiLight(systemPrompt: string, userPrompt: string): Promise<string> {
-    return callWithFallback(MODELS_FLASH, systemPrompt, userPrompt, false);
+    return callModel(systemPrompt, userPrompt);
 }
 
 /**
- * PDF parsing: 3.0-pro → 3-flash → 2.5-pro (WITH thinking)
+ * PDF parsing: GPT-5 with vision (base64 PDF as image)
  */
 export async function callGeminiWithPdf(
     systemPrompt: string,
@@ -86,36 +79,38 @@ export async function callGeminiWithPdf(
 ): Promise<string> {
     const client = getClient();
 
-    const pdfPart: Part = {
-        inlineData: {
-            mimeType: "application/pdf",
-            data: pdfBase64,
-        },
-    };
-    const textPart: Part = { text: userPrompt };
-
-    for (let i = 0; i < MODELS_PRO.length; i++) {
-        const model = MODELS_PRO[i];
-        const isLast = i === MODELS_PRO.length - 1;
+    const MAX_RETRIES = 2;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
         try {
-            console.log(`[gemini-pdf] Trying ${model}...`);
-            const response = await client.models.generateContent({
-                model,
-                contents: [{ role: "user", parts: [pdfPart, textPart] }],
-                config: {
-                    systemInstruction: systemPrompt,
-                    responseMimeType: "application/json",
-                    thinkingConfig: { thinkingBudget: 2048 },
-                },
+            console.log(`[openai-pdf] Calling ${MODEL}... (attempt ${attempt + 1})`);
+            const response = await client.chat.completions.create({
+                model: MODEL,
+                messages: [
+                    { role: "system", content: systemPrompt },
+                    {
+                        role: "user",
+                        content: [
+                            {
+                                type: "file",
+                                file: {
+                                    filename: "document.pdf",
+                                    file_data: `data:application/pdf;base64,${pdfBase64}`,
+                                },
+                            },
+                            { type: "text", text: userPrompt },
+                        ],
+                    },
+                ],
+                response_format: { type: "json_object" },
             });
-            return response?.text ?? "";
+            return response.choices[0]?.message?.content ?? "";
         } catch (e) {
-            if (!isLast && isOverloaded(e)) {
-                console.warn(`[gemini-pdf] ${model} unavailable, trying ${MODELS_PRO[i + 1]}...`);
+            if (attempt < MAX_RETRIES && isOverloaded(e)) {
+                console.warn(`[openai-pdf] ${MODEL} overloaded, retrying...`);
                 continue;
             }
             throw e;
         }
     }
-    throw new Error("All models failed");
+    throw new Error("All retries failed");
 }
