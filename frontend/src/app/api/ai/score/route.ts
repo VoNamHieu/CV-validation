@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { callGemini } from "@/lib/gemini";
+import { callAI } from "@/lib/openai";
 import { safeJsonParse } from "@/lib/safe-json";
 
 export async function POST(request: NextRequest) {
@@ -40,7 +40,7 @@ ${JSON.stringify(jd, null, 2)}
 
 Determine a score from 0-100 for each dimension, explain the reasoning briefly, list the gaps, and calculate the weighted overall score. Be rigorous and identify any risk flags.`;
 
-        const result = await callGemini(systemPrompt, userPrompt);
+        const result = await callAI(systemPrompt, userPrompt);
 
         let parsed;
         try { parsed = safeJsonParse(result); }

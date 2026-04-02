@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { callGeminiLight } from "@/lib/gemini";
+import { callAILight } from "@/lib/openai";
 import { safeJsonParse } from "@/lib/safe-json";
 
 /**
@@ -52,12 +52,12 @@ TARGET JOB SITE URL: ${siteUrl}
 
 Generate the most relevant job search URL for this candidate on this site.`;
 
-        const raw = await callGeminiLight(systemPrompt, userPrompt);
+        const raw = await callAILight(systemPrompt, userPrompt);
         let parsed: Record<string, unknown> | Record<string, unknown>[];
         try { parsed = safeJsonParse<Record<string, unknown> | Record<string, unknown>[]>(raw); }
         catch { return NextResponse.json({ detail: "AI returned invalid JSON. Please retry." }, { status: 502 }); }
 
-        // Gemini sometimes returns an array instead of an object — unwrap it
+        // LLM sometimes returns an array instead of an object — unwrap it
         if (Array.isArray(parsed)) {
             console.log('[smart-search] Got array with', parsed.length, 'items, using first element');
             parsed = parsed[0];

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { callGemini } from "@/lib/gemini";
+import { callAI } from "@/lib/openai";
 import { safeJsonParse } from "@/lib/safe-json";
 
 export async function POST(request: NextRequest) {
@@ -45,7 +45,7 @@ OPTIMIZATION INSTRUCTIONS:
 4. Keep the same structure, job titles, companies, and duration.
 5. NEVER fabricate new information.`;
 
-        const result = await callGemini(systemPrompt, userPrompt);
+        const result = await callAI(systemPrompt, userPrompt);
 
         let parsed;
         try {

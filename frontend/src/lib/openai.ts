@@ -57,7 +57,7 @@ async function callModel(
  * Complex tasks: GPT-5 with JSON mode
  * Use for: CV extraction, JD extraction, scoring, optimization
  */
-export async function callGemini(systemPrompt: string, userPrompt: string): Promise<string> {
+export async function callAI(systemPrompt: string, userPrompt: string): Promise<string> {
     return callModel(systemPrompt, userPrompt);
 }
 
@@ -65,14 +65,14 @@ export async function callGemini(systemPrompt: string, userPrompt: string): Prom
  * Simple tasks: GPT-5 with JSON mode
  * Use for: search URL generation, job link extraction
  */
-export async function callGeminiLight(systemPrompt: string, userPrompt: string): Promise<string> {
+export async function callAILight(systemPrompt: string, userPrompt: string): Promise<string> {
     return callModel(systemPrompt, userPrompt);
 }
 
 /**
  * PDF parsing: GPT-5 with vision (base64 PDF as image)
  */
-export async function callGeminiWithPdf(
+export async function callAIWithPdf(
     systemPrompt: string,
     userPrompt: string,
     pdfBase64: string

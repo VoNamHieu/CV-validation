@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { callGemini } from "@/lib/gemini";
+import { callAI } from "@/lib/openai";
 import { safeJsonParse } from "@/lib/safe-json";
 import { MAX_INPUT_TEXT_LENGTH } from "@/lib/validation";
 
@@ -28,7 +28,7 @@ If some information is missing, leave strings empty or lists empty.`;
 
         const userPrompt = `Extract the following information from this CV text:\n\n${text}`;
 
-        const result = await callGemini(systemPrompt, userPrompt);
+        const result = await callAI(systemPrompt, userPrompt);
 
         let parsed;
         try { parsed = safeJsonParse(result); }

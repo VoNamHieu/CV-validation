@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { callGeminiLight } from "@/lib/gemini";
+import { callAILight } from "@/lib/openai";
 import { safeJsonParse } from "@/lib/safe-json";
 
 /**
@@ -41,7 +41,7 @@ SITE: ${site_url || "unknown"}
 PAGE CONTENT:
 ${html_text.slice(0, 20000)}`;
 
-        const result = await callGeminiLight(systemPrompt, userPrompt);
+        const result = await callAILight(systemPrompt, userPrompt);
         let parsed;
         try { parsed = safeJsonParse(result); }
         catch { return NextResponse.json({ detail: "AI returned invalid JSON. Please retry." }, { status: 502 }); }

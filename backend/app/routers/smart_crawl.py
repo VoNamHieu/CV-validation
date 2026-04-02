@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
 from app.services.crawler import try_http_fetch, try_playwright_fetch, clean_html, detect_needs_playwright, extract_json_ld as _extract_jsonld_job
-from app.services.gemini_client import get_raw_client, MODEL, is_overloaded
+from app.services.openai_client import get_raw_client, MODEL, is_overloaded
 from app.services.url_validator import is_allowed_url
 
 logger = logging.getLogger(__name__)
