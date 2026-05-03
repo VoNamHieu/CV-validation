@@ -1,6 +1,6 @@
 """
 Smart Search Router — LLM-powered job link extraction
-Uses Playwright to crawl SPA job sites, then GPT-5 to identify job posting URLs.
+Uses Playwright to crawl SPA job sites, then Gemini to identify job posting URLs.
 """
 
 import json
@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
 from app.services.crawler import try_http_fetch, try_playwright_fetch, clean_html, detect_needs_playwright, extract_json_ld as _extract_jsonld_job
-from app.services.openai_client import get_raw_client, MODEL, is_overloaded
+from app.services.gemini_client import generate_json
 from app.services.url_validator import is_allowed_url
 
 logger = logging.getLogger(__name__)
@@ -112,14 +112,14 @@ def extract_candidate_links(html: str, target_hostname: str) -> list[dict]:
     return candidates[:100]  # Cap at 100 for LLM context
 
 
-# ── Step 2: Ask GPT-5 to identify job posting URLs ──
+# ── Step 2: Ask Gemini to identify job posting URLs ──
 async def llm_identify_job_links(
     candidates: list[dict],
     search_keyword: str,
     target_hostname: str,
 ) -> list[str]:
     """
-    Use GPT-5 to identify which URLs are individual job posting pages.
+    Use Gemini to identify which URLs are individual job posting pages.
     Returns list of job posting URLs.
     """
     if not candidates:
@@ -152,19 +152,10 @@ Example: {{"urls": ["https://example.com/job/123", "https://example.com/viec-lam
 If no job posting URLs found, return: {{"urls": []}}"""
 
     try:
-        client = get_raw_client()
-        logger.info(f"[llm_identify_jobs] Calling {MODEL}...")
-        response = client.chat.completions.create(
-            model=MODEL,
-            messages=[
-                {"role": "system", "content": "You identify job posting URLs from a list of links. Always respond in JSON format."},
-                {"role": "user", "content": prompt},
-            ],
-            response_format={"type": "json_object"},
-        )
-
-        text = response.choices[0].message.content or ""
-        text = text.strip()
+        text = generate_json(
+            system_prompt="You identify job posting URLs from a list of links. Always respond in JSON format.",
+            user_prompt=prompt,
+        ).strip()
         logger.info(f"[llm_identify_jobs] Raw LLM response: {text[:500]}")
 
         parsed = json.loads(text)
@@ -229,7 +220,7 @@ async def smart_crawl(req: SmartCrawlRequest):
     """
     1. Crawl search page (HTTP → Playwright fallback)
     2. Extract candidate links
-    3. Ask GPT-5 to identify job posting URLs
+    3. Ask Gemini to identify job posting URLs
     4. Pick random job, crawl it, return cleaned text
     """
     search_url = req.search_url or req.url
@@ -287,7 +278,7 @@ async def smart_crawl(req: SmartCrawlRequest):
             debug={**debug_info, "error": "No links found on search page"}
         )
 
-    # ── Step 3: GPT-5 identifies job posting URLs ──
+    # ── Step 3: Gemini identifies job posting URLs ──
     job_links = await llm_identify_job_links(candidates, req.search_keyword, target_hostname)
     debug_info["job_links_found"] = len(job_links)
     debug_info["job_links"] = job_links[:10]

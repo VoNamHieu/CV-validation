@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { callAILight } from "@/lib/openai";
+import { callAILight } from "@/lib/gemini";
 import { safeJsonParse } from "@/lib/safe-json";
 
 /**
