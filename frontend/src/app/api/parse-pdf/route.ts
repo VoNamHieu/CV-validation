@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { callAIWithPdf } from "@/lib/openai";
+import { callAIWithPdf } from "@/lib/gemini";
 import { safeJsonParse } from "@/lib/safe-json";
 import { MAX_PDF_BASE64_LENGTH } from "@/lib/validation";
 
