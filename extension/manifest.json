@@ -31,7 +31,7 @@
         "https://*.google.com/*",
         "https://*.youtube.com/*",
         "https://*.facebook.com/*",
-        "https://localhost:3000/*"
+        "https://*.vercel.app/*"
       ],
       "js": [
         "utils.js",
