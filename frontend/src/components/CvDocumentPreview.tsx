@@ -3,9 +3,10 @@
 import { useState, useCallback, useMemo } from 'react';
 import {
     Plus, X, ArrowCounterClockwise, FloppyDisk, Printer,
-    ArrowUp, ArrowDown, Trash,
+    ArrowUp, ArrowDown, Trash, CircleNotch, Warning,
 } from '@phosphor-icons/react';
 import type { CVData, ExperienceDetail, EducationDetail, ProjectDetail } from '@/lib/types';
+import { generateCvHtml } from '@/lib/cv-html';
 
 /* ═══════════════════════════════════════════════════════════════════════════════
    Professional CV Document Preview — looks like a real printed CV
@@ -412,8 +413,12 @@ function ItemActions({
 interface CvDocumentPreviewProps {
     originalCv: CVData;
     optimizedCv: CVData;
-    onSave: (editedCv: CVData) => void;
-    keywords?: string[]; // ATS must-have keywords for highlighting
+    /** Optional: invoked after a successful download, with the edited CV. */
+    onSave?: (editedCv: CVData) => void;
+    /** ATS must-have keywords for highlighting in the on-screen preview. */
+    keywords?: string[];
+    /** File name base (no extension). */
+    fileNameBase?: string;
     compact?: boolean;
 }
 
@@ -422,10 +427,12 @@ const EMPTY_EDUCATION: EducationDetail = { degree: '', institution: '', year: ''
 const EMPTY_PROJECT: ProjectDetail = { name: '', description: '' };
 
 export default function CvDocumentPreview({
-    originalCv, optimizedCv, onSave, keywords, compact = false,
+    originalCv, optimizedCv, onSave, keywords, fileNameBase, compact = false,
 }: CvDocumentPreviewProps) {
     const [edited, setEdited] = useState<CVData>(() => JSON.parse(JSON.stringify(optimizedCv)));
     const [hasChanges, setHasChanges] = useState(false);
+    const [exporting, setExporting] = useState(false);
+    const [exportError, setExportError] = useState<string | null>(null);
 
     const update = useCallback(<K extends keyof CVData>(field: K, value: CVData[K]) => {
         setEdited(prev => ({ ...prev, [field]: value }));
@@ -496,6 +503,42 @@ export default function CvDocumentPreview({
 
     const handlePrint = () => window.print();
 
+    const handleDownloadPdf = useCallback(async () => {
+        setExporting(true);
+        setExportError(null);
+        try {
+            const html = generateCvHtml(edited);
+            const filename = (fileNameBase || edited.name || 'cv').replace(/\s+/g, '_');
+
+            const res = await fetch('/api/render-pdf', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ html, filename }),
+            });
+
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.detail || `Render failed: ${res.status}`);
+            }
+
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${filename}.pdf`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+
+            onSave?.(edited);
+        } catch (e) {
+            setExportError(e instanceof Error ? e.message : 'Failed to download PDF');
+        } finally {
+            setExporting(false);
+        }
+    }, [edited, fileNameBase, onSave]);
+
     const pagePadding = compact ? '32px 36px' : '48px 56px';
 
     return (
@@ -526,21 +569,37 @@ export default function CvDocumentPreview({
                         background: 'var(--bg-secondary)', border: '1px solid var(--border-default)',
                         color: 'var(--text-primary)', cursor: 'pointer',
                     }}
-                    title="Print to PDF (use the system print dialog)"
+                    title="Print via the browser dialog"
                 >
-                    <Printer size={14} /> Print PDF
+                    <Printer size={14} /> Print
                 </button>
                 <button
-                    onClick={() => onSave(edited)}
+                    onClick={handleDownloadPdf}
+                    disabled={exporting}
                     className="btn-primary"
                     style={{
                         display: 'flex', alignItems: 'center', gap: 5,
                         padding: '8px 20px', fontSize: '0.82rem',
+                        cursor: exporting ? 'not-allowed' : 'pointer',
+                        opacity: exporting ? 0.7 : 1,
                     }}
+                    title="Render a text-selectable PDF via the backend"
                 >
-                    <FloppyDisk size={14} weight="fill" /> Save & Download
+                    {exporting
+                        ? <><CircleNotch size={14} className="spin" /> Rendering PDF…</>
+                        : <><FloppyDisk size={14} weight="fill" /> Save & Download PDF</>
+                    }
                 </button>
             </div>
+            {exportError && (
+                <div style={{
+                    marginBottom: 10, padding: '8px 12px', borderRadius: 8,
+                    background: 'rgba(239,68,68,0.08)', color: '#ef4444',
+                    fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: 6,
+                }}>
+                    <Warning size={13} /> PDF download failed: {exportError}
+                </div>
+            )}
 
             {/* The CV Document — white paper */}
             <div
@@ -812,6 +871,9 @@ export default function CvDocumentPreview({
                     border-radius: 2px;
                     box-shadow: inset 0 -1px 0 #f59e0b;
                 }
+
+                @keyframes spin { to { transform: rotate(360deg); } }
+                .spin { animation: spin 1s linear infinite; }
 
                 @media print {
                     body * { visibility: hidden; }
