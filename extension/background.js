@@ -10,6 +10,23 @@ let currentTabId = null;
 let isProcessing = false;
 const TAB_DELAY_MS = 3000; // Delay between opening tabs
 
+// ─── Restore in-flight state on service-worker wake (MV3 kills idle SWs) ───
+chrome.storage.local.get(['applyQueue', 'isProcessing', 'currentJobIndex', 'currentTabId'], (data) => {
+    if (data.isProcessing && Array.isArray(data.applyQueue) && data.applyQueue.length > 0) {
+        applyQueue = data.applyQueue;
+        isProcessing = data.isProcessing;
+        currentJobIndex = typeof data.currentJobIndex === 'number' ? data.currentJobIndex : -1;
+        currentTabId = data.currentTabId ?? null;
+        console.log('[JobFit AI] SW woke — restored batch state:', {
+            queue: applyQueue.length, currentJobIndex, currentTabId,
+        });
+    }
+});
+
+function persistState() {
+    chrome.storage.local.set({ applyQueue, isProcessing, currentJobIndex, currentTabId });
+}
+
 // ─── Listen for external messages from JobFit AI web app ───
 chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
     if (message.type === 'JOBFIT_EXPORT_PROFILE') {
@@ -188,7 +205,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         isProcessing = true;
 
         // Save queue to storage for persistence
-        chrome.storage.local.set({ applyQueue, isProcessing: true });
+        persistState();
 
         // Notify web app
         broadcastProgress();
@@ -207,7 +224,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         applyQueue = [];
         currentJobIndex = -1;
         currentTabId = null;
-        chrome.storage.local.remove(['applyQueue', 'isProcessing']);
+        chrome.storage.local.remove(['applyQueue', 'isProcessing', 'currentJobIndex', 'currentTabId']);
         broadcastProgress();
         sendResponse({ success: true });
         return true;
@@ -233,7 +250,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (isProcessing && currentJobIndex >= 0 && currentJobIndex < applyQueue.length) {
             applyQueue[currentJobIndex].status = message.result?.success ? 'done' : 'error';
             applyQueue[currentJobIndex].result = message.result;
-            chrome.storage.local.set({ applyQueue });
+            persistState();
 
             // Broadcast progress update to web app
             broadcastProgress();
@@ -260,14 +277,15 @@ function processNextJob() {
         // All done!
         console.log('[JobFit AI] Batch Apply: all jobs completed!');
         isProcessing = false;
-        chrome.storage.local.set({ applyQueue, isProcessing: false });
+        currentTabId = null;
+        persistState();
         broadcastProgress();
         return;
     }
 
     const job = applyQueue[currentJobIndex];
     job.status = 'processing';
-    chrome.storage.local.set({ applyQueue });
+    persistState();
 
     console.log(`[JobFit AI] Batch Apply: processing job ${currentJobIndex + 1}/${applyQueue.length} — ${job.jobUrl}`);
 
@@ -281,6 +299,7 @@ function processNextJob() {
         // Open the job URL in a new tab
         chrome.tabs.create({ url: job.jobUrl, active: true }, (tab) => {
             currentTabId = tab.id;
+            persistState();
             broadcastProgress();
 
             // Safety timeout: if content script doesn't report back in 60s, skip
@@ -290,7 +309,7 @@ function processNextJob() {
                     console.warn(`[JobFit AI] Batch Apply: timeout for job ${currentJobIndex + 1}, skipping`);
                     applyQueue[currentJobIndex].status = 'error';
                     applyQueue[currentJobIndex].result = { success: false, detail: 'Timeout — page did not respond' };
-                    chrome.storage.local.set({ applyQueue });
+                    persistState();
                     broadcastProgress();
                     processNextJob();
                 }
@@ -332,7 +351,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
             console.log('[JobFit AI] Batch Apply: tab closed, marking as error and continuing');
             applyQueue[currentJobIndex].status = 'error';
             applyQueue[currentJobIndex].result = { success: false, detail: 'Tab was closed' };
-            chrome.storage.local.set({ applyQueue });
+            persistState();
             broadcastProgress();
             setTimeout(() => processNextJob(), 1000);
         }
@@ -365,5 +384,8 @@ function updateBadge() {
 chrome.runtime.onInstalled.addListener(() => {
     console.log('[JobFit AI] Extension installed!');
     // Clear any stale queue
-    chrome.storage.local.remove(['applyQueue', 'isProcessing', 'pendingAutoApply', 'autoApplyJobUrl', 'batchMode']);
+    chrome.storage.local.remove([
+        'applyQueue', 'isProcessing', 'currentJobIndex', 'currentTabId',
+        'pendingAutoApply', 'autoApplyJobUrl', 'batchMode',
+    ]);
 });

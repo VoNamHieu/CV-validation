@@ -20,6 +20,23 @@ const SCROLL_STEP_PX = 600;
 const SCROLL_PAUSE_MS = 300;
 const POST_ACTION_WAIT_MS = 1000;
 const LLM_TIMEOUT = 30000;
+const JOB_PAGE_DETECT_TIMEOUT_MS = 8000;
+const JOB_PAGE_DETECT_POLL_MS = 600;
+
+// URL keywords that strongly hint at a job/apply page
+const JOB_URL_KEYWORDS = [
+    'apply', 'application', 'job', 'jobs', 'career', 'careers', 'hiring',
+    'recruit', 'vacancy', 'position', 'opening',
+    'viec-lam', 'tuyen-dung', 'ung-tuyen', 'tim-viec',
+    'workday', 'greenhouse', 'lever.co', 'ashbyhq', 'smartrecruiters',
+    'icims', 'taleo', 'jobvite', 'breezy', 'bamboohr',
+];
+
+// Apply-button text (en + vi)
+const APPLY_BUTTON_TEXTS = [
+    'apply now', 'apply', 'easy apply', 'quick apply', 'submit application',
+    'ứng tuyển', 'nộp đơn', 'nộp hồ sơ', 'ứng tuyển ngay',
+];
 
 // ─── Helpers ───
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -468,8 +485,13 @@ async function handleAntSelect(el, value) {
  */
 async function handleSelect2(el, value) {
     const container = el.closest('.form-group') || el.parentElement;
-    const select2Container = container?.querySelector('.select2-container') ||
-        el.nextElementSibling?.classList?.contains('select2-container') ? el.nextElementSibling : null;
+    // Operator precedence: `||` binds tighter than `?:`, so this needs explicit grouping
+    // to avoid select2Container always being el.nextElementSibling.
+    const fromContainer = container?.querySelector('.select2-container') || null;
+    const fromSibling = el.nextElementSibling?.classList?.contains('select2-container')
+        ? el.nextElementSibling
+        : null;
+    const select2Container = fromContainer || fromSibling;
 
     if (select2Container) {
         select2Container.click();
@@ -1137,17 +1159,133 @@ function reportResult(success, detail) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// Job-page detection — only show the button on actual job/apply pages
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * Quick URL heuristic. Cheap, runs first.
+ */
+function urlLooksLikeJobPage() {
+    const haystack = (window.location.hostname + window.location.pathname + window.location.search).toLowerCase();
+    return JOB_URL_KEYWORDS.some(kw => haystack.includes(kw));
+}
+
+/**
+ * Check the current DOM for an apply-style button (visible).
+ */
+function hasVisibleApplyButton() {
+    const clickables = document.querySelectorAll('button, a[role="button"], [role="button"], a, input[type="submit"]');
+    for (const el of clickables) {
+        if (!el.offsetParent) continue;
+        const text = (el.textContent || el.value || '').trim().toLowerCase();
+        if (!text || text.length > 60) continue;
+        if (APPLY_BUTTON_TEXTS.some(t => text.includes(t))) return true;
+    }
+    return false;
+}
+
+/**
+ * Check whether the page exposes a real form likely to be an application.
+ * Looks for a container with multiple text/select inputs OR a file input
+ * (CV upload) — single search bars on news sites don't qualify.
+ */
+function hasApplicationForm() {
+    if (document.querySelector('input[type="file"]')) return true;
+
+    const forms = document.querySelectorAll('form');
+    for (const f of forms) {
+        const inputs = f.querySelectorAll(
+            'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="search"]), select, textarea'
+        );
+        if (inputs.length >= 3) return true;
+    }
+    // Also count formless inputs (modern frameworks often skip <form>)
+    const looseInputs = document.querySelectorAll(
+        'input[type="text"], input[type="email"], input[type="tel"], textarea, select'
+    );
+    return looseInputs.length >= 4;
+}
+
+/**
+ * Returns true once any of the signals fire (URL, apply button, form).
+ */
+function isLikelyJobPage() {
+    return urlLooksLikeJobPage() || hasVisibleApplyButton() || hasApplicationForm();
+}
+
+/**
+ * Wait up to `timeoutMs` for the page to look like a job page (handles SPAs
+ * that render forms after initial paint). Resolves with boolean.
+ */
+function waitForJobPageSignal(timeoutMs = JOB_PAGE_DETECT_TIMEOUT_MS) {
+    return new Promise((resolve) => {
+        if (isLikelyJobPage()) return resolve(true);
+
+        let settled = false;
+        const finish = (val) => {
+            if (settled) return;
+            settled = true;
+            observer.disconnect();
+            clearInterval(poll);
+            clearTimeout(timer);
+            resolve(val);
+        };
+
+        const observer = new MutationObserver(() => {
+            if (isLikelyJobPage()) finish(true);
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+
+        // Fallback poll for cases where mutations fire too fast / too rarely
+        const poll = setInterval(() => {
+            if (isLikelyJobPage()) finish(true);
+        }, JOB_PAGE_DETECT_POLL_MS);
+
+        const timer = setTimeout(() => finish(false), timeoutMs);
+    });
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Floating button
+// ═══════════════════════════════════════════════════════════════════
+
+function injectFloatingButton(profile) {
+    if (document.getElementById('jobfit-auto-apply-btn')) return;
+
+    const btn = document.createElement('button');
+    btn.id = 'jobfit-auto-apply-btn';
+    btn.textContent = '⚡ Auto Apply';
+    btn.title = 'JobFit AI — Auto Apply Agent';
+    Object.assign(btn.style, {
+        position: 'fixed', bottom: '80px', right: '20px', zIndex: '99999',
+        background: 'linear-gradient(135deg, #7c3aed, #6366f1)',
+        color: 'white', border: 'none', borderRadius: '14px',
+        padding: '12px 20px', fontSize: '14px', fontWeight: '700',
+        cursor: 'pointer', fontFamily: 'system-ui, sans-serif',
+        boxShadow: '0 4px 20px rgba(124,58,237,0.4)',
+        transition: 'transform 0.2s, box-shadow 0.2s',
+    });
+    btn.onmouseenter = () => { btn.style.transform = 'scale(1.05)'; };
+    btn.onmouseleave = () => { btn.style.transform = 'scale(1)'; };
+    btn.addEventListener('click', () => runAgentLoop(profile));
+    document.body.appendChild(btn);
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // Initialize
 // ═══════════════════════════════════════════════════════════════════
 
 async function init() {
-    await sleep(1500);
+    // Small grace period so we don't race with the very first paint.
+    await sleep(800);
 
     try {
         const data = await new Promise(r => {
             chrome.storage.local.get(['pendingAutoApply', 'jobfitProfile', 'batchMode'], r);
         });
 
+        // Auto-apply was triggered from the web app / batch flow → run immediately,
+        // do NOT gate on heuristics (the user already chose this URL).
         if (data.pendingAutoApply && data.jobfitProfile) {
             const isBatch = data.batchMode === true;
 
@@ -1171,34 +1309,40 @@ async function init() {
         reportResult(false, `Init error: ${e.message}`);
     }
 
-    // Normal mode: show floating button
+    // Manual mode: only inject the floating button on pages that look like
+    // job/apply pages. Re-evaluate on SPA navigation.
     const profile = await new Promise(r => {
         chrome.storage.local.get('jobfitProfile', d => r(d.jobfitProfile || null));
     });
+    if (!profile) return;
 
-    if (profile) {
-        const existingBtn = document.getElementById('jobfit-auto-apply-btn');
-        if (existingBtn) return;
+    const evaluateAndInject = async () => {
+        const isJobPage = await waitForJobPageSignal();
+        if (isJobPage) {
+            injectFloatingButton(profile);
+        } else {
+            console.log('[JobFit Agent] Page does not look like a job/apply page, skipping button.');
+        }
+    };
 
-        const btn = document.createElement('button');
-        btn.id = 'jobfit-auto-apply-btn';
-        btn.textContent = '⚡ Auto Apply';
-        btn.title = 'JobFit AI — Auto Apply Agent';
-        Object.assign(btn.style, {
-            position: 'fixed', bottom: '80px', right: '20px', zIndex: '99999',
-            background: 'linear-gradient(135deg, #7c3aed, #6366f1)',
-            color: 'white', border: 'none', borderRadius: '14px',
-            padding: '12px 20px', fontSize: '14px', fontWeight: '700',
-            cursor: 'pointer', fontFamily: 'system-ui, sans-serif',
-            boxShadow: '0 4px 20px rgba(124,58,237,0.4)',
-            transition: 'transform 0.2s, box-shadow 0.2s',
-        });
-        btn.onmouseenter = () => { btn.style.transform = 'scale(1.05)'; };
-        btn.onmouseleave = () => { btn.style.transform = 'scale(1)'; };
+    await evaluateAndInject();
 
-        btn.addEventListener('click', () => runAgentLoop(profile));
-        document.body.appendChild(btn);
-    }
+    // Handle SPA route changes (history.pushState / popstate) — re-check once
+    // the URL changes so the button can appear/disappear correctly.
+    let lastUrl = location.href;
+    const onRouteChange = () => {
+        if (location.href === lastUrl) return;
+        lastUrl = location.href;
+        document.getElementById('jobfit-auto-apply-btn')?.remove();
+        evaluateAndInject();
+    };
+    window.addEventListener('popstate', onRouteChange);
+    const _push = history.pushState;
+    history.pushState = function (...args) {
+        const ret = _push.apply(this, args);
+        setTimeout(onRouteChange, 100);
+        return ret;
+    };
 }
 
 init();

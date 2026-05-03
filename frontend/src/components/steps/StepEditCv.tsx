@@ -5,11 +5,15 @@ import {
     ArrowLeft, Sparkle, Warning, Briefcase,
     CheckCircle, FilePdf, CaretLeft, CaretRight,
     RocketLaunch, Lightning, CircleNotch,
-    XCircle, Play, Stop, ArrowsClockwise,
+    XCircle, Stop, ArrowsClockwise, SlidersHorizontal,
 } from '@phosphor-icons/react';
 import { useAppStore } from '@/store/useAppStore';
 import CvDocumentPreview from '@/components/CvDocumentPreview';
 import ScoreRing from '@/components/ScoreRing';
+import { optimizeCvVariants } from '@/lib/api';
+import type {
+    OptimizeStyle, OptimizeFocus, OptimizeLength, OptimizeVariant,
+} from '@/lib/api';
 import type { CVData } from '@/lib/types';
 
 type AutoApplyStatus = 'idle' | 'checking' | 'sending' | 'opened' | 'error' | 'no-extension';
@@ -124,7 +128,7 @@ function generateHtml(cv: CVData): string {
    ═══════════════════════════════════════════════════════════════════════════════ */
 
 export default function StepEditCv() {
-    const { cvData, jdEntries, setStep } = useAppStore();
+    const { cvData, jdEntries, setStep, updateJdEntry } = useAppStore();
 
     // All entries that have optimized CVs, sorted by score
     const sortedEntries = useMemo(() => {
@@ -136,6 +140,17 @@ export default function StepEditCv() {
     const [selectedIdx, setSelectedIdx] = useState(0);
     const [autoApplyStatus, setAutoApplyStatus] = useState<AutoApplyStatus>('idle');
     const [autoApplyMessage, setAutoApplyMessage] = useState('');
+
+    // ── Optimize variants state (per-entry) ──
+    const [variantsByEntry, setVariantsByEntry] = useState<Record<string, OptimizeVariant[]>>({});
+    const [variantIdxByEntry, setVariantIdxByEntry] = useState<Record<string, number>>({});
+    const [reoptimizing, setReoptimizing] = useState(false);
+    const [reoptimizeError, setReoptimizeError] = useState<string | null>(null);
+    const [showOptions, setShowOptions] = useState(false);
+    const [optStyle, setOptStyle] = useState<OptimizeStyle>('direct');
+    const [optFocus, setOptFocus] = useState<OptimizeFocus>('balanced');
+    const [optLength, setOptLength] = useState<OptimizeLength>('concise');
+    const [optVariantCount, setOptVariantCount] = useState<number>(1);
 
     // ── Batch Apply State ──
     const [batchProgress, setBatchProgress] = useState<BatchProgress | null>(null);
@@ -176,34 +191,55 @@ export default function StepEditCv() {
         return () => window.removeEventListener('message', handler);
     }, []);
 
-    // Empty state
-    if (!cvData || sortedEntries.length === 0) {
-        return (
-            <div className="animate-fade-in" style={{ maxWidth: 600, margin: '0 auto', padding: '60px 20px', textAlign: 'center' }}>
-                <div style={{
-                    width: 72, height: 72, borderRadius: 20,
-                    background: 'var(--gradient-hero-subtle)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    margin: '0 auto 24px',
-                    border: '1px solid var(--border-subtle)',
-                }}>
-                    <FilePdf size={28} weight="duotone" style={{ color: 'var(--accent-blue)' }} />
-                </div>
-                <h3 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: 8 }}>
-                    No Optimized CVs Yet
-                </h3>
-                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: 24, lineHeight: 1.6 }}>
-                    Go back to the Report page and click &quot;Optimize&quot; on jobs you&apos;re interested in.
-                </p>
-                <button className="btn-secondary" onClick={() => setStep(3)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                    <ArrowLeft size={16} /> Back to Report
-                </button>
-            </div>
-        );
-    }
-
     const currentEntry = sortedEntries[selectedIdx];
     const score = currentEntry?.matchResult?.overall_score ?? 0;
+
+    // ATS keywords drawn from the JD must-have list (used by CvDocumentPreview to highlight)
+    const atsKeywords = useMemo(
+        () => (currentEntry?.jdData?.must_have ?? []).filter(Boolean),
+        [currentEntry],
+    );
+
+    const currentVariants = currentEntry ? variantsByEntry[currentEntry.id] : undefined;
+    const currentVariantIdx = currentEntry ? (variantIdxByEntry[currentEntry.id] ?? 0) : 0;
+
+    /* ─── Re-optimize with chosen options ─── */
+    const handleReoptimize = useCallback(async () => {
+        if (!currentEntry || !cvData || !currentEntry.jdData || !currentEntry.matchResult) return;
+        setReoptimizing(true);
+        setReoptimizeError(null);
+        try {
+            const data = await optimizeCvVariants(
+                cvData,
+                currentEntry.jdData,
+                currentEntry.matchResult,
+                {
+                    style: optStyle,
+                    focus: optFocus,
+                    length: optLength,
+                    variants: optVariantCount,
+                    useGaps: true,
+                },
+            );
+            setVariantsByEntry(prev => ({ ...prev, [currentEntry.id]: data.variants }));
+            setVariantIdxByEntry(prev => ({ ...prev, [currentEntry.id]: 0 }));
+            // Make the first variant the canonical optimizedCv (used by apply / download flows)
+            updateJdEntry(currentEntry.id, { optimizedCv: data.variants[0].cv });
+        } catch (err) {
+            setReoptimizeError(err instanceof Error ? err.message : 'Failed to re-optimize');
+        } finally {
+            setReoptimizing(false);
+        }
+    }, [currentEntry, cvData, optStyle, optFocus, optLength, optVariantCount, updateJdEntry]);
+
+    /* ─── Switch to a different variant ─── */
+    const selectVariant = useCallback((idx: number) => {
+        if (!currentEntry || !currentVariants) return;
+        const v = currentVariants[idx];
+        if (!v) return;
+        setVariantIdxByEntry(prev => ({ ...prev, [currentEntry.id]: idx }));
+        updateJdEntry(currentEntry.id, { optimizedCv: v.cv });
+    }, [currentEntry, currentVariants, updateJdEntry]);
 
     const handleDownload = (editedCv: CVData) => {
         const html = generateHtml(editedCv);
@@ -350,6 +386,32 @@ export default function StepEditCv() {
     // Is batch running?
     const isBatchActive = batchStarting || (batchProgress?.isProcessing ?? false);
     const batchDone = batchProgress && !batchProgress.isProcessing && batchProgress.completed > 0;
+
+    // Empty state (placed AFTER all hooks to satisfy rules-of-hooks)
+    if (!cvData || sortedEntries.length === 0 || !currentEntry) {
+        return (
+            <div className="animate-fade-in" style={{ maxWidth: 600, margin: '0 auto', padding: '60px 20px', textAlign: 'center' }}>
+                <div style={{
+                    width: 72, height: 72, borderRadius: 20,
+                    background: 'var(--gradient-hero-subtle)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    margin: '0 auto 24px',
+                    border: '1px solid var(--border-subtle)',
+                }}>
+                    <FilePdf size={28} weight="duotone" style={{ color: 'var(--accent-blue)' }} />
+                </div>
+                <h3 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: 8 }}>
+                    No Optimized CVs Yet
+                </h3>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: 24, lineHeight: 1.6 }}>
+                    Go back to the Report page and click &quot;Optimize&quot; on jobs you&apos;re interested in.
+                </p>
+                <button className="btn-secondary" onClick={() => setStep(3)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    <ArrowLeft size={16} /> Back to Report
+                </button>
+            </div>
+        );
+    }
 
     return (
         <div className="animate-fade-in" style={{ maxWidth: 1100, margin: '0 auto', padding: '40px 20px' }}>
@@ -811,20 +873,158 @@ export default function StepEditCv() {
             {/* ══════ AI Disclaimer ══════ */}
             <div style={{
                 background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)',
-                borderRadius: 'var(--radius-sm)', padding: '8px 14px', marginBottom: 20,
+                borderRadius: 'var(--radius-sm)', padding: '8px 14px', marginBottom: 12,
                 fontSize: '0.78rem', color: 'var(--accent-amber)',
                 display: 'flex', alignItems: 'center', gap: 6,
             }}>
                 <Warning size={12} />
-                AI-optimized for &quot;{currentEntry.jobTitle || 'this position'}&quot; — Click any text to edit, then Save &amp; Download
+                AI-optimized for &quot;{currentEntry.jobTitle || 'this position'}&quot; — Click any text to edit, hover items to reorder/remove
             </div>
+
+            {/* ══════ Optimize Options Panel ══════ */}
+            <div className="glass-card" style={{
+                marginBottom: 12, padding: showOptions ? '14px 18px' : '10px 14px',
+                transition: 'padding 0.15s',
+            }}>
+                <div style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    gap: 10, flexWrap: 'wrap',
+                }}>
+                    <button
+                        onClick={() => setShowOptions(o => !o)}
+                        style={{
+                            display: 'flex', alignItems: 'center', gap: 8,
+                            background: 'transparent', border: 'none', cursor: 'pointer',
+                            color: 'var(--text-primary)', fontSize: '0.85rem', fontWeight: 600,
+                            padding: 0,
+                        }}
+                    >
+                        <SlidersHorizontal size={14} weight="duotone" style={{ color: 'var(--accent-purple)' }} />
+                        Optimize Options
+                        <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: '0.78rem' }}>
+                            {optStyle} · {optFocus} · {optLength} · {optVariantCount} variant{optVariantCount > 1 ? 's' : ''}
+                        </span>
+                    </button>
+                    <button
+                        onClick={handleReoptimize}
+                        disabled={reoptimizing}
+                        style={{
+                            display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.82rem',
+                            background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                            color: '#fff', border: 'none', padding: '7px 16px', borderRadius: 8,
+                            cursor: reoptimizing ? 'not-allowed' : 'pointer',
+                            opacity: reoptimizing ? 0.7 : 1, fontWeight: 600,
+                        }}
+                    >
+                        {reoptimizing
+                            ? <><CircleNotch size={13} className="spin" /> Optimizing…</>
+                            : <><ArrowsClockwise size={13} weight="bold" /> Re-optimize</>
+                        }
+                    </button>
+                </div>
+                {showOptions && (
+                    <div style={{
+                        marginTop: 14, display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 10,
+                    }}>
+                        <OptionSelect
+                            label="Style"
+                            value={optStyle}
+                            onChange={(v) => setOptStyle(v as OptimizeStyle)}
+                            options={[
+                                { value: 'direct', label: 'Direct & concise' },
+                                { value: 'formal', label: 'Formal & polished' },
+                                { value: 'impact-driven', label: 'Impact-driven' },
+                                { value: 'storytelling', label: 'Storytelling' },
+                            ]}
+                        />
+                        <OptionSelect
+                            label="Focus"
+                            value={optFocus}
+                            onChange={(v) => setOptFocus(v as OptimizeFocus)}
+                            options={[
+                                { value: 'balanced', label: 'Balanced' },
+                                { value: 'technical', label: 'Technical depth' },
+                                { value: 'leadership', label: 'Leadership' },
+                                { value: 'metrics', label: 'Metrics & impact' },
+                                { value: 'ats-keyword', label: 'ATS keywords' },
+                            ]}
+                        />
+                        <OptionSelect
+                            label="Length"
+                            value={optLength}
+                            onChange={(v) => setOptLength(v as OptimizeLength)}
+                            options={[
+                                { value: 'concise', label: 'Concise (1 page)' },
+                                { value: 'detailed', label: 'Detailed' },
+                            ]}
+                        />
+                        <OptionSelect
+                            label="Variants"
+                            value={String(optVariantCount)}
+                            onChange={(v) => setOptVariantCount(parseInt(v, 10) || 1)}
+                            options={[
+                                { value: '1', label: '1 (single tailored)' },
+                                { value: '2', label: '2 (technical + impact)' },
+                                { value: '3', label: '3 (+ leadership)' },
+                            ]}
+                        />
+                    </div>
+                )}
+                {reoptimizeError && (
+                    <div style={{
+                        marginTop: 10, padding: '6px 10px', borderRadius: 6,
+                        background: 'rgba(239,68,68,0.08)', color: '#ef4444',
+                        fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: 6,
+                    }}>
+                        <Warning size={12} /> {reoptimizeError}
+                    </div>
+                )}
+            </div>
+
+            {/* ══════ Variant Tabs (when >1 variant) ══════ */}
+            {currentVariants && currentVariants.length > 1 && (
+                <div style={{
+                    display: 'flex', gap: 6, flexWrap: 'wrap',
+                    marginBottom: 12,
+                }}>
+                    {currentVariants.map((v, i) => {
+                        const isActive = i === currentVariantIdx;
+                        return (
+                            <button
+                                key={i}
+                                onClick={() => selectVariant(i)}
+                                style={{
+                                    padding: '6px 14px', borderRadius: 8,
+                                    border: isActive
+                                        ? '1.5px solid var(--accent-purple)'
+                                        : '1px solid var(--border-subtle)',
+                                    background: isActive
+                                        ? 'linear-gradient(135deg, rgba(139,92,246,0.12), rgba(99,102,241,0.06))'
+                                        : 'var(--bg-card)',
+                                    color: 'var(--text-primary)',
+                                    fontSize: '0.78rem', fontWeight: isActive ? 700 : 500,
+                                    cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
+                                }}
+                            >
+                                {isActive && <Sparkle size={11} weight="fill" style={{ color: 'var(--accent-purple)' }} />}
+                                {v.label}
+                                <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: '0.7rem' }}>
+                                    {v.style}
+                                </span>
+                            </button>
+                        );
+                    })}
+                </div>
+            )}
 
             {/* ══════ CV Document — ALWAYS VISIBLE ══════ */}
             <CvDocumentPreview
-                key={currentEntry.id}
+                key={`${currentEntry.id}-${currentVariantIdx}`}
                 originalCv={cvData}
                 optimizedCv={currentEntry.optimizedCv!}
                 onSave={handleDownload}
+                keywords={atsKeywords}
             />
 
             {/* Hide scrollbar for tabs */}
@@ -832,5 +1032,38 @@ export default function StepEditCv() {
                 div::-webkit-scrollbar { display: none; }
             `}</style>
         </div>
+    );
+}
+
+/* ─── Small select component for the options panel ─── */
+function OptionSelect({
+    label, value, onChange, options,
+}: {
+    label: string;
+    value: string;
+    onChange: (v: string) => void;
+    options: { value: string; label: string }[];
+}) {
+    return (
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                {label}
+            </span>
+            <select
+                value={value}
+                onChange={(e) => onChange(e.target.value)}
+                style={{
+                    padding: '6px 10px', borderRadius: 6,
+                    background: 'var(--bg-secondary)',
+                    border: '1px solid var(--border-subtle)',
+                    color: 'var(--text-primary)', fontSize: '0.82rem',
+                    fontFamily: 'inherit', cursor: 'pointer',
+                }}
+            >
+                {options.map(o => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+            </select>
+        </label>
     );
 }

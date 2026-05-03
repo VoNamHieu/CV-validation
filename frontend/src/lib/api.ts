@@ -1,4 +1,29 @@
 // All API calls use Next.js API routes (relative paths)
+import type { CVData } from './types';
+
+export type OptimizeStyle = 'formal' | 'direct' | 'impact-driven' | 'storytelling';
+export type OptimizeFocus = 'balanced' | 'technical' | 'leadership' | 'metrics' | 'ats-keyword';
+export type OptimizeLength = 'concise' | 'detailed';
+
+export interface OptimizeOptions {
+    style?: OptimizeStyle;
+    focus?: OptimizeFocus;
+    length?: OptimizeLength;
+    variants?: number;
+    useGaps?: boolean;
+}
+
+export interface OptimizeVariant {
+    label: string;
+    style: OptimizeStyle;
+    focus: OptimizeFocus;
+    length: OptimizeLength;
+    cv: CVData;
+}
+
+export interface OptimizeResponse {
+    variants: OptimizeVariant[];
+}
 
 export async function parsePdfWithAI(file: File, type: 'cv' | 'jd') {
     const arrayBuffer = await file.arrayBuffer();
@@ -58,17 +83,33 @@ export async function scoreFit(cv: unknown, jd: unknown) {
     return res.json();
 }
 
-export async function optimizeCv(cv: unknown, jd: unknown, match: unknown) {
+export async function optimizeCvVariants(
+    cv: unknown,
+    jd: unknown,
+    match: unknown,
+    options?: OptimizeOptions,
+): Promise<OptimizeResponse> {
     const res = await fetch('/api/ai/optimize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cv, jd, match }),
+        body: JSON.stringify({ cv, jd, match, options }),
     });
     if (!res.ok) {
-        const err = await res.json();
+        const err = await res.json().catch(() => ({}));
         throw new Error(err.detail || 'Failed to optimize CV');
     }
     return res.json();
+}
+
+/** Backwards-compatible single-variant optimize. Returns first variant's CV. */
+export async function optimizeCv(
+    cv: unknown,
+    jd: unknown,
+    match: unknown,
+    options?: OptimizeOptions,
+): Promise<CVData> {
+    const data = await optimizeCvVariants(cv, jd, match, options);
+    return data.variants[0].cv;
 }
 
 export async function crawlUrl(url: string, keepLinks = false): Promise<{ text: string; textWithLinks?: string }> {
