@@ -247,15 +247,40 @@ export default function StepEditCv() {
         updateJdEntry(currentEntry.id, { optimizedCv: v.cv });
     }, [currentEntry, currentVariants, updateJdEntry]);
 
-    const handleDownload = (editedCv: CVData) => {
-        const html = generateHtml(editedCv);
-        const blob = new Blob([html], { type: 'text/html' });
-        const urlObj = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = urlObj;
-        a.download = `${editedCv.name.replace(/\s+/g, '_')}_${(currentEntry.jobTitle || 'optimized').replace(/\s+/g, '_')}.html`;
-        a.click();
-        URL.revokeObjectURL(urlObj);
+    const [downloadingPdf, setDownloadingPdf] = useState(false);
+    const handleDownload = async (editedCv: CVData) => {
+        if (downloadingPdf) return;
+        setDownloadingPdf(true);
+        try {
+            const html = generateHtml(editedCv);
+            const filename = `${editedCv.name.replace(/\s+/g, '_')}_${(currentEntry.jobTitle || 'optimized').replace(/\s+/g, '_')}.pdf`;
+            const res = await fetch('/api/render-cv-pdf', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ html, filename }),
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.detail || `HTTP ${res.status}`);
+            }
+            const { base64, filename: outName } = await res.json() as { base64: string; filename: string };
+            // base64 → Blob (PDF)
+            const bin = atob(base64);
+            const bytes = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+            const blob = new Blob([bytes], { type: 'application/pdf' });
+            const urlObj = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = urlObj;
+            a.download = outName;
+            a.click();
+            URL.revokeObjectURL(urlObj);
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : 'PDF export failed';
+            alert(`❌ Export PDF lỗi: ${msg}`);
+        } finally {
+            setDownloadingPdf(false);
+        }
     };
 
     /* ─── Build profile from an optimized CV ─── */
