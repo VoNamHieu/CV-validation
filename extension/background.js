@@ -81,6 +81,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return true;
     }
 
+    // Sync generated CV PDF from the web app into extension storage so the
+    // agent can upload it without the user manually using the popup.
+    if (message.type === 'SYNC_CV_FILE') {
+        const { cvFileBase64, cvFileName } = message;
+        if (!cvFileBase64 || !cvFileName) {
+            sendResponse({ success: false, error: 'Missing cvFileBase64 or cvFileName' });
+            return true;
+        }
+        chrome.storage.local.set({ cvFileBase64, cvFileName }, () => {
+            sendResponse({ success: true });
+        });
+        return true;
+    }
+
     if (message.type === 'GET_APP_URL') {
         chrome.storage.local.get('jobfitAppUrl', (data) => {
             sendResponse({ url: data.jobfitAppUrl || 'http://localhost:3000' });
@@ -289,13 +303,18 @@ function processNextJob() {
 
     console.log(`[JobFit AI] Batch Apply: processing job ${currentJobIndex + 1}/${applyQueue.length} — ${job.jobUrl}`);
 
-    // Save profile for this specific job + set pending flag
-    chrome.storage.local.set({
+    // Save profile + (optional) per-job CV file for this specific job + set pending flag
+    const storage = {
         jobfitProfile: job.profile,
         pendingAutoApply: true,
         autoApplyJobUrl: job.jobUrl,
         batchMode: true,
-    }, () => {
+    };
+    if (job.cvFileBase64 && job.cvFileName) {
+        storage.cvFileBase64 = job.cvFileBase64;
+        storage.cvFileName = job.cvFileName;
+    }
+    chrome.storage.local.set(storage, () => {
         // Open the job URL in a new tab
         chrome.tabs.create({ url: job.jobUrl, active: true }, (tab) => {
             currentTabId = tab.id;

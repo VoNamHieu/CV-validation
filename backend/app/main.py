@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
-from app.routers import extract, crawl, smart_crawl
+from app.routers import extract, crawl, smart_crawl, render
 
 app = FastAPI(title="AI Job Fit Optimizer API", version="1.0.0")
 
@@ -67,3 +67,4 @@ def health_check():
 app.include_router(extract.router)
 app.include_router(crawl.router)
 app.include_router(smart_crawl.router)
+app.include_router(render.router)

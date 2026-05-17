@@ -17,6 +17,7 @@ import type {
 import type { CVData } from '@/lib/types';
 
 type AutoApplyStatus = 'idle' | 'checking' | 'sending' | 'opened' | 'error' | 'no-extension';
+type FullAutoStatus = 'idle' | 'rendering' | 'syncing' | 'launching' | 'error';
 
 interface BatchJobStatus {
     jobUrl: string;
@@ -156,6 +157,11 @@ export default function StepEditCv() {
     const [batchProgress, setBatchProgress] = useState<BatchProgress | null>(null);
     const [batchStarting, setBatchStarting] = useState(false);
     const progressPollRef = useRef<NodeJS.Timeout | null>(null);
+
+    // ── Fully Autonomous Apply State ──
+    const [fullAutoStatus, setFullAutoStatus] = useState<FullAutoStatus>('idle');
+    const [fullAutoProgress, setFullAutoProgress] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
+    const [fullAutoError, setFullAutoError] = useState<string | null>(null);
 
     // Listen for extension announcement + progress updates
     useEffect(() => {
@@ -364,6 +370,90 @@ export default function StepEditCv() {
         }, '*');
     }, [sortedEntries, buildProfile]);
 
+    /* ═══════════════════════════════════════════════════════════════
+       FULLY AUTONOMOUS APPLY ALL — Generate PDFs + sync + launch batch
+       1. Render every optimized CV → PDF via /api/render-cv-pdf
+       2. Bundle profile + per-job cvFileBase64 + cvFileName into the batch
+       3. Trigger AUTO_APPLY_ALL — extension opens each tab, writes the
+          matching CV + profile into chrome.storage before agent runs.
+       ═══════════════════════════════════════════════════════════════ */
+    const triggerFullyAutoApply = useCallback(async () => {
+        if (!isExtensionAvailable()) {
+            setAutoApplyStatus('no-extension');
+            setAutoApplyMessage('Extension chưa cài! Vui lòng cài JobFit AI Extension trước.');
+            setTimeout(() => setAutoApplyStatus('idle'), 5000);
+            return;
+        }
+
+        const candidates = sortedEntries.filter(e => e.optimizedCv && e.source);
+        if (candidates.length === 0) {
+            setFullAutoError('Không có job nào có CV optimize + URL.');
+            setTimeout(() => setFullAutoError(null), 4000);
+            return;
+        }
+
+        setFullAutoError(null);
+        setFullAutoStatus('rendering');
+        setFullAutoProgress({ done: 0, total: candidates.length });
+
+        // 1. Render PDFs sequentially so the backend doesn't get hammered.
+        const jobs: Array<{
+            jobUrl: string;
+            jobTitle: string;
+            company: string;
+            profile: ReturnType<typeof buildProfile>;
+            cvFileBase64?: string;
+            cvFileName?: string;
+        }> = [];
+
+        for (let i = 0; i < candidates.length; i++) {
+            const entry = candidates[i];
+            const cv = entry.optimizedCv!;
+            try {
+                const html = generateHtml(cv);
+                const safeTitle = (entry.jobTitle || 'job').replace(/\s+/g, '_').slice(0, 40);
+                const filename = `${cv.name.replace(/\s+/g, '_')}_${safeTitle}.pdf`;
+                const res = await fetch('/api/render-cv-pdf', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ html, filename }),
+                });
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    throw new Error(err.detail || `HTTP ${res.status}`);
+                }
+                const data = await res.json() as { base64: string; filename: string };
+                jobs.push({
+                    jobUrl: entry.source!,
+                    jobTitle: entry.jobTitle || 'Unknown',
+                    company: entry.company || entry.label || '',
+                    profile: buildProfile(cv),
+                    cvFileBase64: data.base64,
+                    cvFileName: data.filename,
+                });
+            } catch (err) {
+                // Per-job render failure: include the job without a CV file
+                // so the agent can still try to fill text fields.
+                console.warn('[FullAuto] PDF render failed for', entry.jobTitle, err);
+                jobs.push({
+                    jobUrl: entry.source!,
+                    jobTitle: entry.jobTitle || 'Unknown',
+                    company: entry.company || entry.label || '',
+                    profile: buildProfile(cv),
+                });
+            }
+            setFullAutoProgress({ done: i + 1, total: candidates.length });
+        }
+
+        // 2. Hand off to the extension's existing batch path with embedded CV files.
+        setFullAutoStatus('launching');
+        setBatchStarting(true);
+        window.postMessage({ type: 'JOBFIT_AUTO_APPLY_ALL', jobs }, '*');
+
+        // Reset status after handoff — batch progress UI takes over from here.
+        setTimeout(() => setFullAutoStatus('idle'), 1500);
+    }, [sortedEntries, buildProfile]);
+
     const cancelBatchApply = useCallback(() => {
         window.postMessage({ type: 'JOBFIT_AUTO_APPLY_CANCEL' }, '*');
         setBatchProgress(null);
@@ -386,6 +476,7 @@ export default function StepEditCv() {
     // Is batch running?
     const isBatchActive = batchStarting || (batchProgress?.isProcessing ?? false);
     const batchDone = batchProgress && !batchProgress.isProcessing && batchProgress.completed > 0;
+    const isFullAutoBusy = fullAutoStatus !== 'idle';
 
     // Empty state (placed AFTER all hooks to satisfy rules-of-hooks)
     if (!cvData || sortedEntries.length === 0 || !currentEntry) {
@@ -523,8 +614,52 @@ export default function StepEditCv() {
                             <Stop size={14} weight="fill" /> Cancel Batch
                         </button>
                     )}
+
+                    {/* ── 🤖 FULLY AUTONOMOUS APPLY — render PDFs + sync + launch ── */}
+                    {!isBatchActive && (
+                        <button
+                            onClick={triggerFullyAutoApply}
+                            disabled={isFullAutoBusy || sortedEntries.filter(e => e.optimizedCv && e.source).length === 0}
+                            title="Tự render PDF từ CV optimize, đẩy sang extension, rồi launch Apply All — không cần upload thủ công."
+                            style={{
+                                display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem',
+                                background: 'linear-gradient(135deg, #f59e0b, #dc2626)',
+                                color: '#fff', border: 'none', padding: '8px 20px', borderRadius: 8,
+                                cursor: isFullAutoBusy ? 'not-allowed' : 'pointer',
+                                fontWeight: 700,
+                                boxShadow: '0 2px 16px rgba(245,158,11,0.4)',
+                                transition: 'all 0.2s ease',
+                                opacity: isFullAutoBusy ? 0.7 : 1,
+                            }}
+                        >
+                            {fullAutoStatus === 'rendering'
+                                ? <><CircleNotch size={14} className="spin" /> Render PDF {fullAutoProgress.done}/{fullAutoProgress.total}</>
+                                : fullAutoStatus === 'syncing'
+                                    ? <><CircleNotch size={14} className="spin" /> Đang sync...</>
+                                    : fullAutoStatus === 'launching'
+                                        ? <><CircleNotch size={14} className="spin" /> Launching batch...</>
+                                        : <><RocketLaunch size={14} weight="fill" /> Fully Auto Apply All</>
+                            }
+                        </button>
+                    )}
                 </div>
             </div>
+
+            {/* ── Fully Auto error banner ── */}
+            {fullAutoError && (
+                <div style={{
+                    background: 'rgba(239,68,68,0.1)',
+                    border: '1px solid rgba(239,68,68,0.3)',
+                    borderRadius: 'var(--radius-sm)',
+                    padding: '10px 16px',
+                    marginBottom: 16,
+                    fontSize: '0.82rem',
+                    color: '#ef4444',
+                    display: 'flex', alignItems: 'center', gap: 8,
+                }}>
+                    <Warning size={14} /> {fullAutoError}
+                </div>
+            )}
 
             {/* ═══ Batch Apply Progress Panel ═══ */}
             {(isBatchActive || batchDone) && batchProgress && (

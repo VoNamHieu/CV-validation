@@ -62,6 +62,34 @@
             });
         }
 
+        // ─── Sync CV file (PDF base64) into extension storage ───
+        if (event.data?.type === 'JOBFIT_SYNC_CV_FILE') {
+            chrome.runtime.sendMessage({
+                type: 'SYNC_CV_FILE',
+                cvFileBase64: event.data.cvFileBase64,
+                cvFileName: event.data.cvFileName,
+            }, (response) => {
+                window.postMessage({
+                    type: 'JOBFIT_SYNC_CV_FILE_RESPONSE',
+                    ...response,
+                }, '*');
+            });
+        }
+
+        // ─── Sync profile JSON into extension storage ───
+        if (event.data?.type === 'JOBFIT_EXPORT_PROFILE'
+            || event.data?.type === 'JOBFIT_SYNC_PROFILE') {
+            chrome.runtime.sendMessage({
+                type: 'SAVE_PROFILE',
+                profile: event.data.profile,
+            }, (response) => {
+                window.postMessage({
+                    type: 'JOBFIT_SYNC_PROFILE_RESPONSE',
+                    ...response,
+                }, '*');
+            });
+        }
+
         // ─── Get Progress ───
         if (event.data?.type === 'JOBFIT_GET_PROGRESS') {
             chrome.runtime.sendMessage({
