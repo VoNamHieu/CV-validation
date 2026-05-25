@@ -1,6 +1,7 @@
 import os
 import time
 from collections import defaultdict
+from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 load_dotenv()  # Load env vars before router imports
@@ -11,8 +12,18 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 from app.routers import extract, crawl, smart_crawl, render
+from app.services.browser_pool import close_browser
 
-app = FastAPI(title="AI Job Fit Optimizer API", version="1.0.0")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # Browser is launched lazily on first use (see browser_pool.get_browser);
+    # only need to clean it up on shutdown.
+    yield
+    await close_browser()
+
+
+app = FastAPI(title="AI Job Fit Optimizer API", version="1.0.0", lifespan=lifespan)
 
 
 # ── Rate Limiting Middleware (H2) ──

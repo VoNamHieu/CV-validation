@@ -3,7 +3,9 @@ Job Crawler Service
 Handles HTTP fetching, JSON-LD extraction, Playwright fallback, and HTML cleaning.
 """
 
+import asyncio
 import json
+import logging
 import re
 import time
 from dataclasses import dataclass, field, asdict
@@ -11,6 +13,8 @@ from typing import Optional
 
 import requests
 from bs4 import BeautifulSoup
+
+logger = logging.getLogger(__name__)
 
 
 # ── DATA STRUCTURES ───────────────────────────────────────────────────────────
@@ -131,35 +135,120 @@ def detect_needs_playwright(html: str) -> bool:
 
 # ── PLAYWRIGHT FETCH ──────────────────────────────────────────────────────────
 
-async def try_playwright_fetch(url: str) -> tuple[bool, str]:
-    """Fetch with headless Chromium — used when HTTP isn't enough."""
+# Content signals we wait for — whichever appears first tells us the page is
+# ready (vs. blindly sleeping a fixed number of seconds).
+_CONTENT_SELECTORS = (
+    "script[type='application/ld+json'], "
+    "h1, [itemprop='title'], [data-testid*='title' i], "
+    "[class*='job-title' i], [class*='JobTitle' i], "
+    "main, article, [role='main']"
+)
+
+# Block these resource types on crawls — we only want text/HTML/JS.
+# Cuts bandwidth + render time 50–80 %.
+_BLOCKED_RESOURCE_TYPES = {"image", "media", "font", "stylesheet"}
+
+
+def _is_transient_error(msg: str) -> bool:
+    """Decide whether a Playwright failure is worth retrying once."""
+    m = msg.lower()
+    return any(s in m for s in (
+        "timeout", "net::err_", "navigation failed",
+        "connection closed", "target closed", "browser has been closed",
+    ))
+
+
+async def _wait_for_content(page, timeout_ms: int = 8000) -> None:
+    """Wait until the page exposes real content — a job-shaped selector
+    appears OR body text crosses 1500 chars. Falls back to a short
+    networkidle if neither fires."""
+    selector_task = asyncio.create_task(
+        page.wait_for_selector(_CONTENT_SELECTORS, state="attached", timeout=timeout_ms)
+    )
+    text_task = asyncio.create_task(
+        page.wait_for_function(
+            "() => document.body && document.body.innerText.length > 1500",
+            timeout=timeout_ms,
+        )
+    )
     try:
-        from playwright.async_api import async_playwright
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
+        _done, pending = await asyncio.wait(
+            [selector_task, text_task],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for t in pending:
+            t.cancel()
+            try:
+                await t
+            except BaseException:
+                pass
+    except Exception:
+        pass
+    # Final small grace period — some SPAs fetch JSON after content is visible.
+    try:
+        await page.wait_for_load_state("networkidle", timeout=2500)
+    except Exception:
+        pass
+
+
+async def _block_noise(route, request) -> None:
+    if request.resource_type in _BLOCKED_RESOURCE_TYPES:
+        await route.abort()
+    else:
+        await route.continue_()
+
+
+async def try_playwright_fetch(url: str) -> tuple[bool, str]:
+    """Fetch with headless Chromium — used when HTTP isn't enough.
+
+    Uses the shared browser pool (no per-request Chromium spawn), blocks
+    images/fonts/CSS/media, and waits on real content selectors instead of
+    a fixed sleep. Retries once on transient errors.
+    """
+    try:
+        from app.services.browser_pool import get_browser
+    except ImportError:
+        return False, "Playwright not installed"
+
+    last_err = ""
+    for attempt in range(2):
+        context = None
+        try:
+            browser = await get_browser()
             context = await browser.new_context(
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                 viewport={"width": 1280, "height": 720},
                 locale="vi-VN",
+                extra_http_headers={
+                    "Accept-Language": "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7",
+                },
             )
+            await context.route("**/*", _block_noise)
+
             page = await context.new_page()
-            await page.add_init_script("delete Object.getPrototypeOf(navigator).webdriver")
+            # Shallow stealth: hide the most-checked automation flag.
+            await page.add_init_script(
+                "Object.defineProperty(navigator, 'webdriver', { get: () => undefined });"
+            )
+
             await page.goto(url, timeout=30000, wait_until="domcontentloaded")
-            # Wait for SPA frameworks to render content
-            await page.wait_for_timeout(4000)
-            # Try to wait for network to settle, but don't fail if it doesn't
-            try:
-                await page.wait_for_load_state("networkidle", timeout=8000)
-            except Exception:
-                pass  # SPA may never reach networkidle — that's OK
+            await _wait_for_content(page, timeout_ms=8000)
             html = await page.content()
-            await context.close()
-            await browser.close()
             return True, html
-    except ImportError:
-        return False, "Playwright not installed"
-    except Exception as e:
-        return False, str(e)[:200]
+        except Exception as e:
+            last_err = str(e)[:200]
+            if attempt == 0 and _is_transient_error(last_err):
+                logger.warning(f"[playwright_fetch] transient error on {url}: {last_err} — retrying")
+                await asyncio.sleep(1)
+                continue
+            return False, last_err
+        finally:
+            if context is not None:
+                try:
+                    await context.close()
+                except Exception:
+                    pass
+    return False, last_err or "Unknown Playwright failure"
 
 
 # ── HTML CLEANING ─────────────────────────────────────────────────────────────
