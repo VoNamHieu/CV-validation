@@ -15,13 +15,14 @@
  */
 
 // ─── Config ───
-const AGENT_MAX_ITERATIONS = 15;
+const AGENT_MAX_ITERATIONS = 25;
 const SCROLL_STEP_PX = 600;
 const SCROLL_PAUSE_MS = 300;
 const POST_ACTION_WAIT_MS = 1000;
 const LLM_TIMEOUT = 30000;
 const JOB_PAGE_DETECT_TIMEOUT_MS = 8000;
 const JOB_PAGE_DETECT_POLL_MS = 600;
+const FILL_RETRY_THRESHOLD = 2; // After N failed fill attempts on same selector → mark persistently unfilled
 
 // URL keywords that strongly hint at a job/apply page
 const JOB_URL_KEYWORDS = [
@@ -143,6 +144,28 @@ async function scrollAndCollect() {
     // Scroll back to original position
     window.scrollTo(0, originalY);
     await sleep(200);
+
+    // Also scroll inside the active modal (if any) — many apply forms live in
+    // a scrollable dialog whose body doesn't move when the window scrolls.
+    const modal = findActiveModal();
+    if (modal) {
+        const scrollEls = [modal, ...modal.querySelectorAll('div, section, main')]
+            .filter(el => {
+                const s = window.getComputedStyle(el);
+                return (s.overflowY === 'auto' || s.overflowY === 'scroll')
+                    && el.scrollHeight > el.clientHeight + 40
+                    && el.clientHeight > 150;
+            })
+            .slice(0, 3);
+        for (const el of scrollEls) {
+            const origTop = el.scrollTop;
+            for (let y = 0; y < el.scrollHeight; y += SCROLL_STEP_PX) {
+                el.scrollTop = y;
+                await sleep(SCROLL_PAUSE_MS);
+            }
+            el.scrollTop = origTop;
+        }
+    }
 }
 
 /**
@@ -190,6 +213,9 @@ function detectComponentType(el) {
     }
     // File upload
     if (el.type === 'file') return 'file-upload';
+    // Radio / checkbox handled separately via radio-group / checkbox componentTypes
+    if (el.type === 'checkbox') return 'checkbox';
+    if (el.type === 'radio') return 'radio-group';
     // Custom dropdown (div-based)
     if (el.getAttribute('role') === 'combobox' || el.getAttribute('role') === 'listbox') {
         return 'custom-dropdown';
@@ -198,23 +224,103 @@ function detectComponentType(el) {
 }
 
 /**
+ * Find a label for an element by checking <label for=>, parent label, fieldset legend, and form-group containers.
+ */
+function findLabelFor(el, root) {
+    if (el.id) {
+        const labelEl = root.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+        if (labelEl) return labelEl.textContent.trim();
+    }
+    const parentLabel = el.closest('label');
+    if (parentLabel) {
+        // Exclude the input's own value text from the label
+        const clone = parentLabel.cloneNode(true);
+        clone.querySelectorAll('input, select, textarea').forEach(n => n.remove());
+        const text = clone.textContent.trim();
+        if (text) return text;
+    }
+    const fieldset = el.closest('fieldset');
+    const legend = fieldset?.querySelector('legend');
+    if (legend) return legend.textContent.trim();
+    const parent = el.closest('.form-group, .form-field, [class*="field"], [class*="input"], [class*="form-item"]');
+    if (parent) {
+        const labelEl = parent.querySelector('label, .label, [class*="label"], .ant-form-item-label');
+        if (labelEl && labelEl !== el) return labelEl.textContent.trim();
+    }
+    return '';
+}
+
+/**
  * Extract form fields from a DOM root (document, modal, or iframe doc).
  */
 function extractFieldsFromRoot(root) {
     const fields = [];
     const seen = new Set();
+    const radioGroups = new Map(); // name → group entry
 
     const elements = root.querySelectorAll(
         'input:not([type="hidden"]):not([type="submit"]):not([type="button"]), ' +
         'input[type="file"], ' +
         'select, textarea, [contenteditable="true"], ' +
-        '[role="combobox"], [role="listbox"]'
+        '[role="combobox"], [role="listbox"], [role="radiogroup"]'
     );
 
     for (const el of elements) {
         // Skip truly hidden elements (display:none / visibility:hidden) but NOT off-screen elements
         const style = window.getComputedStyle(el);
         if (style.display === 'none' || style.visibility === 'hidden') continue;
+
+        // ── Radio: group by `name`, emit one field per group with options ──
+        if (el.type === 'radio' && el.name) {
+            const groupName = el.name;
+            if (!radioGroups.has(groupName)) {
+                radioGroups.set(groupName, {
+                    name: groupName,
+                    options: [],
+                    label: '',
+                    required: false,
+                    value: '',
+                });
+            }
+            const group = radioGroups.get(groupName);
+            const optLabel =
+                (el.id && root.querySelector(`label[for="${CSS.escape(el.id)}"]`)?.textContent?.trim()) ||
+                el.closest('label')?.textContent?.trim() ||
+                el.value || '';
+            group.options.push({ value: el.value, text: optLabel });
+            if (el.checked) group.value = el.value;
+            if (el.required || el.getAttribute('aria-required') === 'true') group.required = true;
+            if (!group.label) group.label = findLabelFor(el, root);
+            continue;
+        }
+
+        // ── Standalone checkbox ──
+        if (el.type === 'checkbox') {
+            const label = findLabelFor(el, root);
+            const selector = el.id
+                ? `#${CSS.escape(el.id)}`
+                : (el.name ? `input[type="checkbox"][name="${CSS.escape(el.name)}"]` : buildUniqueSelector(el));
+            const key = `checkbox|${el.id}|${el.name}|${label}`;
+            if (!seen.has(key)) {
+                seen.add(key);
+                fields.push({
+                    index: fields.length,
+                    tag: 'input',
+                    type: 'checkbox',
+                    id: el.id || '',
+                    name: el.name || '',
+                    label,
+                    placeholder: '',
+                    ariaLabel: el.getAttribute('aria-label') || '',
+                    classes: el.className?.toString().substring(0, 100) || '',
+                    value: el.checked ? 'true' : 'false',
+                    required: el.required || el.getAttribute('aria-required') === 'true',
+                    componentType: 'checkbox',
+                    selector,
+                });
+            }
+            continue;
+        }
 
         const id = el.id || '';
         const name = el.name || '';
@@ -223,19 +329,8 @@ function extractFieldsFromRoot(root) {
         const ariaLabel = el.getAttribute('aria-label') || '';
         const componentType = detectComponentType(el);
 
-        // Find associated label
-        let label = '';
-        if (id) {
-            const labelEl = root.querySelector(`label[for="${CSS.escape(id)}"]`);
-            if (labelEl) label = labelEl.textContent.trim();
-        }
-        if (!label) {
-            const parent = el.closest('label, .form-group, .form-field, [class*="field"], [class*="input"], [class*="form-item"]');
-            if (parent) {
-                const labelEl = parent.querySelector('label, .label, [class*="label"], .ant-form-item-label');
-                if (labelEl && labelEl !== el) label = labelEl.textContent.trim();
-            }
-        }
+        // Find associated label (via shared helper)
+        const label = findLabelFor(el, root);
 
         // Build unique key
         const key = `${id}|${name}|${type}|${label}`;
@@ -284,6 +379,26 @@ function extractFieldsFromRoot(root) {
             required: el.required || el.getAttribute('aria-required') === 'true',
             componentType,
             selector,
+        });
+    }
+
+    // Emit one entry per radio group
+    for (const [name, group] of radioGroups) {
+        fields.push({
+            index: fields.length,
+            tag: 'input',
+            type: 'radio',
+            id: '',
+            name,
+            label: group.label,
+            placeholder: '',
+            ariaLabel: '',
+            classes: '',
+            value: group.value,
+            options: group.options.slice(0, 30),
+            required: group.required,
+            componentType: 'radio-group',
+            selector: `input[type="radio"][name="${CSS.escape(name)}"]`,
         });
     }
 
@@ -542,6 +657,60 @@ async function handleCustomDropdown(el, value) {
     return false;
 }
 
+/**
+ * Handle a radio group: click the radio whose label/value matches `value`.
+ * Accepts either the group name (when called with a name string selector)
+ * or any radio element in the group.
+ */
+async function handleRadioGroup(elOrName, value) {
+    const name = typeof elOrName === 'string'
+        ? elOrName
+        : (elOrName.name || '');
+    const radios = name
+        ? document.querySelectorAll(`input[type="radio"][name="${CSS.escape(name)}"]`)
+        : (elOrName instanceof Element ? [elOrName] : []);
+    if (!radios.length) return false;
+
+    const lower = String(value ?? '').toLowerCase().trim();
+    if (!lower) return false;
+
+    let match = null;
+    let fallback = null;
+    for (const r of radios) {
+        const lblEl = r.id ? document.querySelector(`label[for="${CSS.escape(r.id)}"]`) : null;
+        const lblText = (lblEl?.textContent?.trim() ||
+            r.closest('label')?.textContent?.trim() ||
+            r.value || '').toLowerCase();
+        if (String(r.value).toLowerCase() === lower) { match = r; break; }
+        if (lblText === lower) { match = r; break; }
+        if (!fallback && (lblText.includes(lower) || lower.includes(lblText))) fallback = r;
+    }
+    const target = match || fallback;
+    if (!target) return false;
+
+    target.click();
+    if (!target.checked) {
+        target.checked = true;
+        target.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    return true;
+}
+
+/**
+ * Handle a checkbox: toggle to match `value` (truthy → checked).
+ */
+async function handleCheckbox(el, value) {
+    const want = value === true || value === 1 ||
+        ['true', 'yes', '1', 'on', 'checked', 'có', 'đồng ý'].includes(
+            String(value ?? '').toLowerCase().trim()
+        );
+    if (el.checked !== want) {
+        el.click();
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    return true;
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // Phase 4: File Upload
 // ═══════════════════════════════════════════════════════════════════
@@ -600,6 +769,16 @@ async function executeSingleInstruction(inst, cvData) {
         if (action === 'click') {
             el.click();
             return true;
+        }
+
+        // Radio group
+        if (action === 'radio' || componentType === 'radio-group') {
+            return await handleRadioGroup(inst.name || el, value);
+        }
+
+        // Checkbox
+        if (action === 'checkbox' || componentType === 'checkbox') {
+            return await handleCheckbox(el, value);
         }
 
         // Custom select based on componentType
@@ -777,6 +956,51 @@ function detectStepIndicator() {
 }
 
 /**
+ * Detect things that block automation: captchas, login walls, Cloudflare challenges.
+ * Returns an array — empty means the page is interactable.
+ */
+function detectBlockers() {
+    const blockers = [];
+
+    // reCAPTCHA (v2 / v3 invisible — anything that needs user solve)
+    if (document.querySelector(
+        'iframe[src*="recaptcha/api2"], iframe[src*="google.com/recaptcha"], .g-recaptcha, [data-sitekey][class*="recaptcha"]'
+    )) {
+        // v3 is invisible — only flag v2 (checkbox) or visible challenge frames
+        const visibleChallenge = [...document.querySelectorAll('iframe[src*="recaptcha"]')].some(
+            f => f.offsetParent !== null && f.getBoundingClientRect().width > 100
+        );
+        if (visibleChallenge || document.querySelector('.g-recaptcha')) {
+            blockers.push({ type: 'recaptcha', message: 'Google reCAPTCHA cần người dùng giải' });
+        }
+    }
+
+    // hCaptcha
+    if (document.querySelector('iframe[src*="hcaptcha.com"], .h-captcha')) {
+        blockers.push({ type: 'hcaptcha', message: 'hCaptcha cần người dùng giải' });
+    }
+
+    // Cloudflare interactive challenge
+    if (document.querySelector(
+        'iframe[src*="challenges.cloudflare.com"], #cf-challenge-stage, #challenge-form, [class*="cf-turnstile"]'
+    )) {
+        blockers.push({ type: 'cloudflare', message: 'Cloudflare challenge' });
+    }
+
+    // Login wall: visible password input + "sign in / log in / đăng nhập" wording
+    const pw = document.querySelector('input[type="password"]');
+    if (pw && pw.offsetParent !== null) {
+        const scope = pw.closest('form')?.textContent?.toLowerCase() ||
+            document.body.innerText.toLowerCase().substring(0, 3000);
+        if (/\b(sign in|log in|login|đăng nhập)\b/.test(scope)) {
+            blockers.push({ type: 'login', message: 'Trang yêu cầu đăng nhập' });
+        }
+    }
+
+    return blockers;
+}
+
+/**
  * Detect success/completion signals.
  */
 function detectCompletionSignals() {
@@ -805,6 +1029,7 @@ async function observePageState() {
     const errors = detectErrors();
     const stepIndicator = detectStepIndicator();
     const completionSignals = detectCompletionSignals();
+    const blockers = detectBlockers();
 
     const unfilledRequired = formFields
         .filter(f => f.required && !f.value)
@@ -817,6 +1042,7 @@ async function observePageState() {
         errors,
         stepIndicator,
         completionSignals,
+        blockers,
         unfilledRequired,
         totalFields: formFields.length,
     };
@@ -909,6 +1135,7 @@ function summarizeState(state) {
         fieldCount: state.formFields.length,
         unfilled: state.unfilledRequired.length,
         errors: state.errors.length,
+        blockers: (state.blockers || []).map(b => b.type),
         step: state.stepIndicator,
         buttons: state.buttons.map(b => b.text).slice(0, 5),
     };
@@ -920,6 +1147,10 @@ function summarizeState(state) {
 async function runAgentLoop(profile) {
     const history = [];
     let prevStateHash = '';
+    let prevStepCurrent = null;
+    let prevUrl = window.location.href;
+    const fillAttempts = new Map(); // selector → { count, lastValue }
+    const persistentlyUnfilled = new Set();
 
     // Load CV data if available
     const cvData = await new Promise(r => {
@@ -967,6 +1198,38 @@ async function runAgentLoop(profile) {
                 reportResult(true, `Success detected: ${state.completionSignals[0]}`);
                 return;
             }
+
+            // Blocker detected (captcha, login wall, Cloudflare) — bail out to human
+            if (state.blockers && state.blockers.length > 0) {
+                const blockerMsg = state.blockers.map(b => b.message).join(', ');
+                removeProgress();
+                showToast(`⚠️ Cần người dùng: ${blockerMsg}`, 8000);
+                reportResult(false, `Blocker: ${blockerMsg}`);
+                return;
+            }
+
+            // Step changed (multi-step wizard advanced) or URL changed → reset
+            // stuck-detection state so a fresh page doesn't trip false positives.
+            const curStep = state.stepIndicator?.current ?? null;
+            if (curStep !== prevStepCurrent || state.url !== prevUrl) {
+                prevStateHash = '';
+                fillAttempts.clear();
+                persistentlyUnfilled.clear();
+                prevStepCurrent = curStep;
+                prevUrl = state.url;
+            }
+
+            // Detect fields the LLM previously tried to fill but stayed empty.
+            // Pass these back so the LLM can try a different strategy or escalate.
+            for (const [selector, attempt] of fillAttempts) {
+                const field = state.formFields.find(f => f.selector === selector);
+                if (!field) continue;
+                const stillEmpty = !field.value || String(field.value).trim() === '';
+                if (stillEmpty && attempt.count >= FILL_RETRY_THRESHOLD) {
+                    persistentlyUnfilled.add(selector);
+                }
+            }
+            state.persistentlyUnfilled = [...persistentlyUnfilled];
 
             // No fields and no actionable buttons
             if (state.formFields.length === 0 && state.buttons.length === 0) {
@@ -1051,6 +1314,16 @@ async function runAgentLoop(profile) {
             showProgress(i + 1, AGENT_MAX_ITERATIONS, plan.reason || 'Đang thực hiện...');
 
             if (plan.action === 'FILL' && plan.instructions?.length > 0) {
+                // Track each fill attempt by selector so we can detect
+                // persistently-unfilled fields on the next observation.
+                for (const inst of plan.instructions) {
+                    if (!inst.selector) continue;
+                    const prior = fillAttempts.get(inst.selector) || { count: 0, lastValue: '' };
+                    fillAttempts.set(inst.selector, {
+                        count: prior.count + 1,
+                        lastValue: inst.value,
+                    });
+                }
                 const filled = await executeFillInstructions(plan.instructions, cvData);
                 actionResult = { filled, total: plan.instructions.length };
             } else if (plan.action === 'CLICK' && plan.clickTarget) {

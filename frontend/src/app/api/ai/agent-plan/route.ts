@@ -40,6 +40,11 @@ interface PageError {
     nearFieldSelector?: string;
 }
 
+interface PageBlocker {
+    type: string;
+    message: string;
+}
+
 interface PageState {
     url: string;
     formFields: FormField[];
@@ -47,7 +52,9 @@ interface PageState {
     errors: PageError[];
     stepIndicator?: { current: number; total: number } | null;
     completionSignals: string[];
+    blockers?: PageBlocker[];
     unfilledRequired: string[];
+    persistentlyUnfilled?: string[];
     totalFields: number;
 }
 
@@ -103,6 +110,8 @@ export async function POST(request: Request) {
 - Step indicator: ${pageState.stepIndicator ? `Step ${pageState.stepIndicator.current} of ${pageState.stepIndicator.total}` : 'None detected'}
 - Validation errors: ${JSON.stringify(pageState.errors)}
 - Completion signals: ${JSON.stringify(pageState.completionSignals)}
+- Blockers (captcha / login / Cloudflare): ${JSON.stringify(pageState.blockers || [])}
+- Persistently unfilled selectors (we tried filling these ≥2 times and the value did NOT stick — do NOT keep retrying, escalate to NEED_HUMAN if they're required): ${JSON.stringify(pageState.persistentlyUnfilled || [])}
 - Visible buttons: ${JSON.stringify(pageState.buttons)}
 
 ## UNFILLED FORM FIELDS (need filling):
@@ -129,14 +138,17 @@ Decide the single best next action. Return a JSON object.
 4. If all fields are filled, no errors, and there's a "Submit"/"Apply" button → action "DONE" (let user review and submit manually)
 5. If no fields found → action "SCROLL" to discover more fields
 6. If the page shows success/completion → action "DONE"
-7. If you're stuck or the form requires info not in the profile → action "NEED_HUMAN" with explanation
+7. If you're stuck, the form requires info not in the profile, or there are BLOCKERS (captcha/login/Cloudflare) → action "NEED_HUMAN" with explanation
 8. NEVER click Submit/Apply yourself — always return DONE and let the user submit
 9. For fields with componentType 'react-select', 'mui-autocomplete', 'ant-select', 'select2', or 'custom-dropdown': use action 'custom-select'
 10. For fields with componentType 'native-select': use action 'select'
 11. For fields with componentType 'datepicker': use action 'datepicker'
 12. For fields with componentType 'file-upload' and hasCV is true: use action 'upload'
 13. For text inputs/textareas: use action 'fill'
-14. Map profile data intelligently (Vietnamese + English field names):
+14. For fields with componentType 'radio-group': use action 'radio' — value must match one of the option texts/values exactly (case-insensitive)
+15. For fields with componentType 'checkbox': use action 'checkbox' — value 'true' to check, 'false' to uncheck (only check when profile/legal text clearly requires it)
+16. If a selector is in "Persistently unfilled" → do NOT include it in instructions again. If it's required and you can't proceed, return NEED_HUMAN explaining which field
+17. Map profile data intelligently (Vietnamese + English field names):
     - "họ", "last name" → lastName
     - "tên", "first name" → firstName
     - "họ và tên", "full name" → fullName (or combine lastName + " " + firstName)
@@ -151,9 +163,9 @@ Decide the single best next action. Return a JSON object.
     - "kinh nghiệm" → yearsOfExperience
     - "kỹ năng", "skills" → skills
     - "bằng cấp", "education" → highestDegree
-15. Build CSS selectors: prefer the selector already provided in each field object
-16. NEVER fabricate data not in the profile
-17. For dropdowns, pick the closest matching option from available choices
+18. Build CSS selectors: prefer the selector already provided in each field object
+19. NEVER fabricate data not in the profile
+20. For dropdowns, pick the closest matching option from available choices
 
 ## OUTPUT FORMAT:
 {
@@ -161,7 +173,7 @@ Decide the single best next action. Return a JSON object.
     "instructions": [                    // only for FILL action
         {
             "selector": "CSS selector",
-            "action": "fill" | "select" | "custom-select" | "datepicker" | "upload" | "click",
+            "action": "fill" | "select" | "custom-select" | "datepicker" | "upload" | "click" | "radio" | "checkbox",
             "value": "the value",
             "componentType": "native | react-select | ...",
             "fieldLabel": "human-readable label"
@@ -196,7 +208,7 @@ Decide the single best next action. Return a JSON object.
 
         // Validate fill instructions if present
         if (plan.action === 'FILL' && plan.instructions) {
-            const validInstructionActions = ['fill', 'select', 'custom-select', 'datepicker', 'upload', 'click', 'type'];
+            const validInstructionActions = ['fill', 'select', 'custom-select', 'datepicker', 'upload', 'click', 'type', 'radio', 'checkbox'];
             plan.instructions = plan.instructions.filter(
                 (inst: Record<string, unknown>) =>
                     inst.selector && typeof inst.selector === 'string' &&
