@@ -4,11 +4,11 @@ import { useState } from 'react';
 import {
     ArrowLeft, Globe, SpinnerGap, MagnifyingGlass, Sparkle,
     Brain, LinkSimple, Crosshair, ChartBar, MagicWand, CheckCircle,
+    Briefcase, ArrowRight,
 } from '@phosphor-icons/react';
 import type { Icon } from '@phosphor-icons/react';
 import { useAppStore } from '@/store/useAppStore';
 import { smartSearch, crawlUrl, extractJdStructured, scoreFit, fetchPage, extractJobLinks } from '@/lib/api';
-import JobBoard from '@/components/JobBoard';
 
 type Phase = 'idle' | 'analyzing_cv' | 'searching' | 'extracting_links' | 'crawling_job' | 'detecting_jd' | 'scoring';
 
@@ -29,6 +29,7 @@ export default function StepInputUrl() {
     const {
         setStep, cvData, setJdData, setMatchResult,
         clearJdEntries, addJdEntry, updateJdEntry, setOptimizedCv, addJobRecord,
+        setView, jobHistory,
     } = useAppStore();
 
     const [url, setUrl] = useState('');
@@ -255,6 +256,7 @@ export default function StepInputUrl() {
                         timestamp: Date.now(),
                         jdData,
                         matchResult,
+                        status: 'saved',
                     });
 
                 } catch (err) {
@@ -458,8 +460,39 @@ export default function StepInputUrl() {
                 </button>
             </div>
 
-            {/* Job History Board */}
-            <JobBoard />
+            {/* Link to History view */}
+            {jobHistory.length > 0 && (
+                <button
+                    onClick={() => setView('history')}
+                    style={{
+                        marginTop: 28,
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        padding: '12px 16px', width: '100%',
+                        borderRadius: 'var(--radius-md)',
+                        border: '1px solid var(--border-subtle)',
+                        background: 'var(--bg-card)',
+                        color: 'var(--text-secondary)',
+                        cursor: 'pointer',
+                        fontSize: '0.85rem',
+                        transition: 'all 0.18s ease',
+                    }}
+                    onMouseEnter={(e) => {
+                        e.currentTarget.style.background = 'var(--bg-card-hover)';
+                        e.currentTarget.style.color = 'var(--text-primary)';
+                    }}
+                    onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'var(--bg-card)';
+                        e.currentTarget.style.color = 'var(--text-secondary)';
+                    }}
+                >
+                    <Briefcase size={15} weight="duotone" style={{ color: 'var(--accent-blue)' }} />
+                    <span style={{ flex: 1, textAlign: 'left' }}>
+                        <strong style={{ color: 'var(--text-primary)' }}>{jobHistory.length}</strong>
+                        {' '}application{jobHistory.length === 1 ? '' : 's'} saved · view all in History
+                    </span>
+                    <ArrowRight size={14} weight="bold" />
+                </button>
+            )}
         </div>
     );
 }

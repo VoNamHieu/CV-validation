@@ -14,6 +14,11 @@ import type {
 // Re-export for backward compatibility
 export type { ExperienceDetail, EducationDetail, ProjectDetail, CVData, JDData, CategoryScore, MatchResult };
 
+// ── Application Status (ATS-lite) ──
+export type JobStatus = 'saved' | 'applied' | 'interviewing' | 'offer' | 'rejected';
+
+export const JOB_STATUS_ORDER: JobStatus[] = ['saved', 'applied', 'interviewing', 'offer', 'rejected'];
+
 // ── Job History Board ──
 export interface JobRecord {
   id: string;
@@ -25,6 +30,9 @@ export interface JobRecord {
   timestamp: number;
   jdData?: JDData;
   matchResult?: MatchResult;
+  optimizedCv?: CVData;
+  status: JobStatus;
+  notes?: string;
 }
 
 // ── Multi-JD Ranking ──
@@ -44,9 +52,14 @@ export interface JDEntry {
 }
 
 type Step = 1 | 2 | 3 | 4;
+export type AppView = 'apply' | 'history';
 
 interface AppState {
-  // Navigation
+  // Top-level navigation (sidebar)
+  view: AppView;
+  setView: (view: AppView) => void;
+
+  // Wizard step
   currentStep: Step;
   setStep: (step: Step) => void;
 
@@ -74,7 +87,10 @@ interface AppState {
   // Job History Board
   jobHistory: JobRecord[];
   addJobRecord: (record: JobRecord) => void;
+  updateJobRecord: (id: string, updates: Partial<JobRecord>) => void;
+  removeJobRecord: (id: string) => void;
   clearJobHistory: () => void;
+  loadJobRecordIntoWizard: (id: string) => void;
 
   // Multi-JD Ranking
   jdEntries: JDEntry[];
@@ -95,6 +111,7 @@ interface AppState {
 }
 
 const initialState = {
+  view: 'apply' as AppView,
   currentStep: 1 as Step,
   cvRawText: '',
   cvFileName: '',
@@ -112,9 +129,10 @@ const initialState = {
 
 export const useAppStore = create<AppState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       ...initialState,
 
+      setView: (view) => set({ view }),
       setStep: (step) => set({ currentStep: step }),
 
       setCvRawText: (text, fileName) => set({ cvRawText: text, cvFileName: fileName }),
@@ -128,10 +146,29 @@ export const useAppStore = create<AppState>()(
 
       // Job History (auto-prune oldest)
       addJobRecord: (record) => set((s) => {
-        const updated = [record, ...s.jobHistory];
+        const updated = [{ ...record, status: record.status ?? 'saved' }, ...s.jobHistory];
         return { jobHistory: updated.slice(0, MAX_JOB_HISTORY) };
       }),
+      updateJobRecord: (id, updates) => set((s) => ({
+        jobHistory: s.jobHistory.map((r) => (r.id === id ? { ...r, ...updates } : r)),
+      })),
+      removeJobRecord: (id) => set((s) => ({
+        jobHistory: s.jobHistory.filter((r) => r.id !== id),
+      })),
       clearJobHistory: () => set({ jobHistory: [] }),
+
+      // Re-open a saved job inside the wizard at the Report step
+      loadJobRecordIntoWizard: (id) => {
+        const record = get().jobHistory.find((r) => r.id === id);
+        if (!record) return;
+        set({
+          jdData: record.jdData ?? null,
+          matchResult: record.matchResult ?? null,
+          optimizedCv: record.optimizedCv ?? null,
+          currentStep: 3,
+          view: 'apply',
+        });
+      },
 
       // Multi-JD (auto-prune oldest when limit reached)
       addJdEntry: (entry) => set((s) => {
@@ -153,6 +190,21 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: 'ai-job-fit-optimizer',
+      version: 2,
+      // Defaults missing fields on persisted records from older versions.
+      // Why: jobHistory existed before status/notes/view — without this, restored
+      // records would crash filters/dropdowns expecting `status` to be set.
+      migrate: (persistedState, version) => {
+        const state = persistedState as Partial<AppState> & Record<string, unknown>;
+        if (version < 2 && state?.jobHistory && Array.isArray(state.jobHistory)) {
+          state.jobHistory = (state.jobHistory as JobRecord[]).map((r) => ({
+            ...r,
+            status: r.status ?? 'saved',
+          }));
+        }
+        if (!state.view) state.view = 'apply';
+        return state as AppState;
+      },
     }
   )
 );
