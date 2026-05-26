@@ -351,8 +351,31 @@ class FetchPageResponse(BaseModel):
     method: str = ""
     error: str = ""
     jsonLd: dict | None = None
+    blocked: bool = False  # True when an anti-bot page (Cloudflare, DataDome, etc.) was detected
 
 
+# High-precision markers for anti-bot interstitials. Matched against raw HTML
+# before stripping tags so we can recognize challenge pages even when the
+# cleaned text is short.
+_ANTI_BOT_MARKERS = (
+    "attention required! | cloudflare",
+    "just a moment...",                       # Cloudflare interstitial title
+    "checking your browser before accessing", # Cloudflare classic
+    "cf-browser-verification",                # Cloudflare element
+    "cf-error-details",                       # Cloudflare error page
+    "why have i been blocked?",
+    "ray id:",                                # only Cloudflare block pages show this
+    "px-captcha",                             # PerimeterX
+    "datado.me",                              # DataDome
+    "_imperva_",                              # Imperva
+)
+
+
+def _looks_like_anti_bot(html: str) -> bool:
+    if not html:
+        return False
+    h = html.lower()
+    return any(m in h for m in _ANTI_BOT_MARKERS)
 
 
 
@@ -371,7 +394,7 @@ async def fetch_page(req: FetchPageRequest):
 
     # Try HTTP first
     http_ok, http_data = try_http_fetch(req.url)
-    if http_ok and not detect_needs_playwright(http_data):
+    if http_ok and not detect_needs_playwright(http_data) and not _looks_like_anti_bot(http_data):
         jsonld = _extract_jsonld_job(http_data)
         cleaned = clean_html(http_data)
         if len(cleaned) >= 200 or jsonld:
@@ -381,11 +404,24 @@ async def fetch_page(req: FetchPageRequest):
     logger.info(f"[fetch_page] Using Playwright for: {req.url}")
     pw_ok, pw_data = await try_playwright_fetch(req.url)
     if pw_ok:
+        if _looks_like_anti_bot(pw_data):
+            logger.info(f"[fetch_page] Anti-bot block detected on: {req.url}")
+            return FetchPageResponse(
+                success=False,
+                method="playwright",
+                blocked=True,
+                error="anti_bot_blocked",
+            )
         jsonld = _extract_jsonld_job(pw_data)
         cleaned = clean_html(pw_data)
         return FetchPageResponse(success=True, text=cleaned[:15000], method="playwright", jsonLd=jsonld)
 
+    # Both HTTP and Playwright failed outright. If the HTTP body looked like a
+    # block page, surface that so the caller can choose the extension fallback.
+    blocked = _looks_like_anti_bot(http_data) if not http_ok else False
     return FetchPageResponse(
         success=False,
-        error=f"HTTP: {http_data if not http_ok else 'thin content'} | Playwright: {pw_data if not pw_ok else 'failed'}"
+        blocked=blocked,
+        error=("anti_bot_blocked" if blocked
+               else f"HTTP: {http_data if not http_ok else 'thin content'} | Playwright: {pw_data if not pw_ok else 'failed'}"),
     )

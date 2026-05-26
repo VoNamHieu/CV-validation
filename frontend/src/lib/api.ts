@@ -112,7 +112,7 @@ export async function optimizeCv(
     return data.variants[0].cv;
 }
 
-export async function crawlUrl(url: string, keepLinks = false): Promise<{ text: string; textWithLinks?: string }> {
+export async function crawlUrl(url: string, keepLinks = false): Promise<{ text: string; textWithLinks?: string; jsonLd?: Record<string, unknown> | null; source_url?: string }> {
     const res = await fetch('/api/crawl-url', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -154,7 +154,14 @@ export async function extractJobLinks(htmlText: string, siteUrl: string) {
 }
 
 // ── Fetch a single page with Playwright via Railway backend ──
-export async function fetchPage(url: string): Promise<{ success: boolean; text: string; method: string; error?: string; jsonLd?: Record<string, unknown> }> {
+export async function fetchPage(url: string): Promise<{
+    success: boolean;
+    text: string;
+    method: string;
+    error?: string;
+    jsonLd?: Record<string, unknown>;
+    blocked?: boolean;
+}> {
     const res = await fetch('/api/fetch-page', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -165,4 +172,58 @@ export async function fetchPage(url: string): Promise<{ success: boolean; text: 
         throw new Error(err.detail || 'Failed to fetch page');
     }
     return res.json();
+}
+
+// ── Extension presence check ──
+export function isExtensionAvailable(): boolean {
+    if (typeof window === 'undefined') return false;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return !!(window as any).__jobfitExtensionId;
+}
+
+// ── Crawl a URL by opening it in a background tab via the Chrome extension.
+//    Bypasses Cloudflare because the request originates from the user's own
+//    browser on their residential IP, with their normal cookies/session.    ──
+export async function extensionCrawl(url: string, timeoutMs = 45000): Promise<{
+    success: boolean;
+    text: string;
+    html?: string;
+    jsonLd?: Record<string, unknown> | null;
+    error?: string;
+}> {
+    if (typeof window === 'undefined') {
+        return { success: false, text: '', error: 'No window (SSR)' };
+    }
+    if (!isExtensionAvailable()) {
+        return { success: false, text: '', error: 'Extension not installed' };
+    }
+
+    const requestId = `extcrawl-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    return new Promise((resolve) => {
+        const onMessage = (event: MessageEvent) => {
+            if (event.source !== window) return;
+            const d = event.data;
+            if (d?.type !== 'JOBFIT_EXT_CRAWL_RESPONSE' || d.requestId !== requestId) return;
+            cleanup();
+            resolve({
+                success: !!d.success,
+                text: d.text || '',
+                html: d.html,
+                jsonLd: d.jsonLd ?? null,
+                error: d.error,
+            });
+        };
+        const timer = setTimeout(() => {
+            cleanup();
+            resolve({ success: false, text: '', error: `Extension crawl timed out after ${timeoutMs}ms` });
+        }, timeoutMs);
+        const cleanup = () => {
+            window.removeEventListener('message', onMessage);
+            clearTimeout(timer);
+        };
+
+        window.addEventListener('message', onMessage);
+        window.postMessage({ type: 'JOBFIT_EXT_CRAWL', requestId, url }, '*');
+    });
 }

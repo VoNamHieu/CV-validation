@@ -192,6 +192,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     // ══════════════════════════════════════════════════════════════
+    // ── EXT_CRAWL — Crawl a URL by opening a background tab. ──
+    //    Used by the web app as a Cloudflare bypass: when the Railway
+    //    backend's Playwright fetch is blocked, we open the page in the
+    //    user's own browser (residential IP, real Chrome) and scrape it
+    //    via chrome.scripting.executeScript.
+    // ══════════════════════════════════════════════════════════════
+    if (message.type === 'EXT_CRAWL') {
+        const { url } = message;
+        if (!url) {
+            sendResponse({ success: false, error: 'Missing url' });
+            return true;
+        }
+        extCrawl(url).then(sendResponse).catch((e) => {
+            sendResponse({ success: false, error: e?.message || String(e) });
+        });
+        return true; // async
+    }
+
+    // ══════════════════════════════════════════════════════════════
     // ── BATCH AUTO APPLY — Start processing a queue of jobs ──
     // ══════════════════════════════════════════════════════════════
     if (message.type === 'AUTO_APPLY_ALL_START') {
@@ -396,6 +415,124 @@ function updateBadge() {
         chrome.action.setBadgeBackgroundColor({ color: '#7C3AED' });
     } else {
         chrome.action.setBadgeText({ text: '' });
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// ─── EXT_CRAWL implementation ───
+// Opens a background tab, waits for Cloudflare's JS challenge (if any)
+// to auto-resolve in the user's real browser, scrapes content, closes tab.
+// ═══════════════════════════════════════════════════════════════════════
+
+const EXT_CRAWL_TAB_LOAD_TIMEOUT = 30000;  // max time waiting for tabs.onUpdated complete
+const EXT_CRAWL_CHALLENGE_TIMEOUT = 25000; // max time for challenge to clear after load
+const EXT_CRAWL_POLL_INTERVAL = 1500;
+
+function _waitForTabComplete(tabId, timeoutMs) {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+            chrome.tabs.onUpdated.removeListener(listener);
+            reject(new Error('Tab load timed out'));
+        }, timeoutMs);
+        const listener = (id, info) => {
+            if (id === tabId && info.status === 'complete') {
+                clearTimeout(timer);
+                chrome.tabs.onUpdated.removeListener(listener);
+                resolve();
+            }
+        };
+        chrome.tabs.onUpdated.addListener(listener);
+    });
+}
+
+// Runs inside the target page. Returns content + whether the page still
+// looks like an anti-bot challenge so the background script can keep polling.
+function _extractPageContent() {
+    const title = document.title || '';
+    const bodyText = (document.body && document.body.innerText) || '';
+    const looksLikeChallenge =
+        /just a moment|attention required|checking your browser|verifying you are human/i.test(title)
+        || /attention required! \| cloudflare|cf-browser-verification|cf-error-details|ray id:/i
+            .test(bodyText.slice(0, 2000));
+
+    const html = document.documentElement ? document.documentElement.outerHTML : '';
+    const text = bodyText.slice(0, 50000);
+
+    let jsonLd = null;
+    const scripts = document.querySelectorAll('script[type="application/ld+json"]');
+    for (const el of scripts) {
+        try {
+            const parsed = JSON.parse(el.textContent || 'null');
+            const items = Array.isArray(parsed) ? parsed : [parsed];
+            for (const item of items) {
+                if (item && item['@type'] === 'JobPosting') {
+                    jsonLd = item;
+                    break;
+                }
+            }
+            if (jsonLd) break;
+        } catch (_) { /* ignore */ }
+    }
+
+    return { html, text, jsonLd, title, looksLikeChallenge };
+}
+
+async function extCrawl(url) {
+    let tabId = null;
+    try {
+        const tab = await chrome.tabs.create({ url, active: false });
+        tabId = tab.id;
+        console.log(`[JobFit AI] EXT_CRAWL: opened background tab ${tabId} for ${url}`);
+
+        // Wait for initial load (Cloudflare challenge page may load first)
+        try {
+            await _waitForTabComplete(tabId, EXT_CRAWL_TAB_LOAD_TIMEOUT);
+        } catch (e) {
+            console.warn(`[JobFit AI] EXT_CRAWL: initial load timeout — continuing to poll`);
+        }
+
+        // Poll until the page no longer looks like a challenge, OR timeout.
+        // Real Chrome auto-solves Cloudflare's JS challenge in ~5s.
+        const deadline = Date.now() + EXT_CRAWL_CHALLENGE_TIMEOUT;
+        let last = null;
+        while (Date.now() < deadline) {
+            try {
+                const [{ result }] = await chrome.scripting.executeScript({
+                    target: { tabId },
+                    func: _extractPageContent,
+                });
+                last = result;
+                if (result && !result.looksLikeChallenge && (result.text?.length || 0) >= 200) {
+                    console.log(`[JobFit AI] EXT_CRAWL: extracted ${result.text.length} chars from ${url}`);
+                    return {
+                        success: true,
+                        text: result.text,
+                        html: result.html,
+                        jsonLd: result.jsonLd,
+                        method: 'extension',
+                    };
+                }
+            } catch (e) {
+                console.warn(`[JobFit AI] EXT_CRAWL: executeScript error:`, e.message);
+            }
+            await new Promise(r => setTimeout(r, EXT_CRAWL_POLL_INTERVAL));
+        }
+
+        // Timed out. If we ever got content but it was a challenge, return blocked.
+        const blocked = !!(last && last.looksLikeChallenge);
+        return {
+            success: false,
+            blocked,
+            error: blocked
+                ? 'Anti-bot challenge did not auto-resolve. The site may require manual interaction.'
+                : 'Extension crawl produced no usable content.',
+        };
+    } catch (e) {
+        return { success: false, error: e?.message || String(e) };
+    } finally {
+        if (tabId != null) {
+            chrome.tabs.remove(tabId).catch(() => { });
+        }
     }
 }
 

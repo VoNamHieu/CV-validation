@@ -8,7 +8,7 @@ import {
 } from '@phosphor-icons/react';
 import type { Icon } from '@phosphor-icons/react';
 import { useAppStore } from '@/store/useAppStore';
-import { smartSearch, crawlUrl, extractJdStructured, scoreFit, fetchPage, extractJobLinks } from '@/lib/api';
+import { smartSearch, crawlUrl, extractJdStructured, scoreFit, fetchPage, extractJobLinks, extensionCrawl, isExtensionAvailable } from '@/lib/api';
 
 type Phase = 'idle' | 'analyzing_cv' | 'searching' | 'extracting_links' | 'crawling_job' | 'detecting_jd' | 'scoring';
 
@@ -76,6 +76,7 @@ export default function StepInputUrl() {
             setPhaseDetail(`Searching on ${hostname}...`);
 
             let searchPage: { text: string; textWithLinks?: string } = { text: '', textWithLinks: '' };
+            let searchBlocked = false;
             try {
                 searchPage = await crawlUrl(searchResult.search_url, true);
             } catch (crawlErr) {
@@ -85,9 +86,25 @@ export default function StepInputUrl() {
                     const pw = await fetchPage(searchResult.search_url);
                     if (pw.success && pw.text.length >= 200) {
                         searchPage = { text: pw.text, textWithLinks: pw.text };
+                    } else if (pw.blocked) {
+                        searchBlocked = true;
                     }
                 } catch (pwErr) {
                     console.log('[StepInputUrl] Playwright fallback also failed:', pwErr);
+                }
+            }
+
+            // ── Extension fallback: open in user's browser (Cloudflare bypass) ──
+            const noContent = !searchPage.text && !searchPage.textWithLinks;
+            if ((searchBlocked || noContent) && isExtensionAvailable()) {
+                setPhaseDetail(`Site is anti-bot protected → opening via your browser extension...`);
+                console.log('[StepInputUrl] Trying extension crawl for search page');
+                const ext = await extensionCrawl(searchResult.search_url);
+                if (ext.success && ext.text.length >= 200) {
+                    searchPage = { text: ext.text, textWithLinks: ext.html || ext.text };
+                    console.log(`[StepInputUrl] Extension crawl OK: ${ext.text.length} chars`);
+                } else {
+                    console.log('[StepInputUrl] Extension crawl failed:', ext.error);
                 }
             }
 
@@ -97,7 +114,10 @@ export default function StepInputUrl() {
 
             // Guard: don't call AI with empty text
             if (!searchPage.text && !searchPage.textWithLinks) {
-                throw new Error(`Could not load search results from ${hostname}. The site may be blocking automated access. Try pasting a direct job URL instead.`);
+                const tail = isExtensionAvailable()
+                    ? 'Even the browser-extension bypass failed — the site may require manual login or solving a CAPTCHA.'
+                    : 'Install the JobFit AI Chrome extension to bypass anti-bot protection by browsing as you.';
+                throw new Error(`Could not load search results from ${hostname}. ${tail}`);
             }
 
             const linksResult = await extractJobLinks(searchPage.textWithLinks || searchPage.text, trimmed);
@@ -153,9 +173,9 @@ export default function StepInputUrl() {
                     try {
                         console.log(`[DEBUG] HTTP crawl: ${jobUrl}`);
                         const jobPage = await crawlUrl(jobUrl);
-                        console.log(`[DEBUG] HTTP result: text=${jobPage.text?.length ?? 0} chars, jsonLd=${!!(jobPage as any).jsonLd}`);
+                        console.log(`[DEBUG] HTTP result: text=${jobPage.text?.length ?? 0} chars, jsonLd=${!!jobPage.jsonLd}`);
                         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                        const ld = (jobPage as any).jsonLd;
+                        const ld = jobPage.jsonLd as any;
                         if (ld?.description) {
                             jobPageText = buildJdFromLd(ld);
                             jobTitle = ld.title || '';
@@ -172,11 +192,13 @@ export default function StepInputUrl() {
                     }
 
                     // Playwright fallback
+                    let pwBlocked = false;
                     if (jobPageText.length < 200) {
                         try {
                             console.log(`[DEBUG] Playwright fallback: ${jobUrl}`);
                             const pw = await fetchPage(jobUrl);
-                            console.log(`[DEBUG] Playwright result: success=${pw.success}, text=${pw.text?.length ?? 0} chars, jsonLd=${!!pw.jsonLd}`);
+                            console.log(`[DEBUG] Playwright result: success=${pw.success}, text=${pw.text?.length ?? 0} chars, jsonLd=${!!pw.jsonLd}, blocked=${!!pw.blocked}`);
+                            pwBlocked = !!pw.blocked;
                             if (pw.success) {
                                 if (pw.jsonLd?.description) {
                                     jobPageText = buildJdFromLd(pw.jsonLd);
@@ -196,6 +218,32 @@ export default function StepInputUrl() {
                             }
                         } catch (pwErr) {
                             console.log(`[DEBUG] Playwright FAILED:`, pwErr);
+                        }
+
+                        // ── Extension fallback (Cloudflare bypass via user's browser) ──
+                        if (jobPageText.length < 200 && isExtensionAvailable()) {
+                            setPhaseDetail(`Job ${completedCount + 1}/${jobUrls.length}: ${pwBlocked ? 'site blocks bots → ' : ''}opening via extension...`);
+                            try {
+                                console.log(`[DEBUG] Extension crawl: ${jobUrl}`);
+                                const ext = await extensionCrawl(jobUrl);
+                                console.log(`[DEBUG] Extension result: success=${ext.success}, text=${ext.text?.length ?? 0} chars, jsonLd=${!!ext.jsonLd}`);
+                                if (ext.success) {
+                                    const ld = ext.jsonLd;
+                                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                                    if (ld && (ld as any).description) {
+                                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                                        jobPageText = buildJdFromLd(ld as any);
+                                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                                        jobTitle = (ld as any).title || '';
+                                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                                        company = (ld as any).hiringOrganization?.name || '';
+                                    } else if (ext.text.length >= 200) {
+                                        jobPageText = ext.text;
+                                    }
+                                }
+                            } catch (extErr) {
+                                console.log(`[DEBUG] Extension crawl FAILED:`, extErr);
+                            }
                         }
                     }
 

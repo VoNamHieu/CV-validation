@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import Sidebar, { SIDEBAR_WIDTH } from '@/components/Sidebar';
 import Stepper from '@/components/Stepper';
@@ -12,6 +13,21 @@ import HistoryView from '@/components/views/HistoryView';
 export default function Home() {
   const view = useAppStore((s) => s.view);
   const currentStep = useAppStore((s) => s.currentStep);
+
+  // Global listener so __jobfitExtensionId is set as soon as the
+  // extension's content-webapp.js posts JOBFIT_EXTENSION_READY,
+  // regardless of which step the user is currently on.
+  useEffect(() => {
+    const handler = (event: MessageEvent) => {
+      if (event.source !== window) return;
+      if (event.data?.type === 'JOBFIT_EXTENSION_READY' && event.data?.extensionId) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (window as any).__jobfitExtensionId = event.data.extensionId;
+      }
+    };
+    window.addEventListener('message', handler);
+    return () => window.removeEventListener('message', handler);
+  }, []);
 
   return (
     <div style={{ minHeight: '100vh', position: 'relative' }}>

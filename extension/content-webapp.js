@@ -90,6 +90,21 @@
             });
         }
 
+        // ─── Crawl a URL via background tab (Cloudflare bypass) ───
+        if (event.data?.type === 'JOBFIT_EXT_CRAWL') {
+            const requestId = event.data.requestId;
+            chrome.runtime.sendMessage({
+                type: 'EXT_CRAWL',
+                url: event.data.url,
+            }, (response) => {
+                window.postMessage({
+                    type: 'JOBFIT_EXT_CRAWL_RESPONSE',
+                    requestId,
+                    ...(response || { success: false, error: 'no response from background' }),
+                }, '*');
+            });
+        }
+
         // ─── Get Progress ───
         if (event.data?.type === 'JOBFIT_GET_PROGRESS') {
             chrome.runtime.sendMessage({
