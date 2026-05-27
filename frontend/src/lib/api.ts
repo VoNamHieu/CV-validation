@@ -153,6 +153,33 @@ export async function extractJobLinks(htmlText: string, siteUrl: string) {
     return res.json();
 }
 
+export interface RankedJob {
+    url: string;
+    title: string;
+    fit_score: number;
+    reason: string;
+}
+
+// ── Rank candidate jobs by predicted CV fit BEFORE crawling, so we spend the
+//    crawl budget on the most promising jobs instead of whatever the site
+//    listed first. Falls back to original order if ranking is unavailable. ──
+export async function rankJobsByFit(
+    cv: unknown,
+    jobs: { url: string; title?: string }[],
+): Promise<RankedJob[]> {
+    const res = await fetch('/api/ai/rank-jobs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cv, jobs }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || 'Failed to rank jobs');
+    }
+    const data = await res.json();
+    return Array.isArray(data?.ranked) ? data.ranked : [];
+}
+
 // ── Fetch a single page with Playwright via Railway backend ──
 export async function fetchPage(url: string): Promise<{
     success: boolean;
@@ -187,6 +214,7 @@ export function isExtensionAvailable(): boolean {
 export async function extensionCrawl(url: string, timeoutMs = 45000): Promise<{
     success: boolean;
     text: string;
+    textWithLinks?: string;
     html?: string;
     jsonLd?: Record<string, unknown> | null;
     error?: string;
@@ -209,6 +237,7 @@ export async function extensionCrawl(url: string, timeoutMs = 45000): Promise<{
             resolve({
                 success: !!d.success,
                 text: d.text || '',
+                textWithLinks: d.textWithLinks,
                 html: d.html,
                 jsonLd: d.jsonLd ?? null,
                 error: d.error,

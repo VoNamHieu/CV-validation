@@ -8,22 +8,48 @@ import {
 } from '@phosphor-icons/react';
 import type { Icon } from '@phosphor-icons/react';
 import { useAppStore } from '@/store/useAppStore';
-import { smartSearch, crawlUrl, extractJdStructured, scoreFit, fetchPage, extractJobLinks, extensionCrawl, isExtensionAvailable } from '@/lib/api';
+import { smartSearch, crawlUrl, extractJdStructured, scoreFit, fetchPage, extractJobLinks, rankJobsByFit, extensionCrawl, isExtensionAvailable } from '@/lib/api';
 
-type Phase = 'idle' | 'analyzing_cv' | 'searching' | 'extracting_links' | 'crawling_job' | 'detecting_jd' | 'scoring';
+type Phase = 'idle' | 'analyzing_cv' | 'searching' | 'extracting_links' | 'ranking' | 'crawling_job' | 'detecting_jd' | 'scoring';
 
 const PHASE_CONFIG: Record<Exclude<Phase, 'idle'>, { label: string; icon: Icon }> = {
     analyzing_cv: { label: 'AI analyzing your CV...', icon: Brain },
     searching: { label: 'Searching jobs on the site...', icon: MagnifyingGlass },
     extracting_links: { label: 'Finding job listings...', icon: LinkSimple },
+    ranking: { label: 'Ranking jobs by CV fit...', icon: Sparkle },
     crawling_job: { label: 'Fetching job page...', icon: Globe },
     detecting_jd: { label: 'AI extracting job description...', icon: Crosshair },
     scoring: { label: 'Calculating match score...', icon: ChartBar },
 };
 
 const PHASE_ORDER: Exclude<Phase, 'idle'>[] = [
-    'analyzing_cv', 'searching', 'extracting_links', 'crawling_job', 'detecting_jd', 'scoring',
+    'analyzing_cv', 'searching', 'extracting_links', 'ranking', 'crawling_job', 'detecting_jd', 'scoring',
 ];
+
+// Mirror of backend /api/crawl-url ?keepLinks=true cleanup so the AI extractor
+// receives compact "[LINK:url] text [/LINK]" markers instead of raw HTML noise.
+// Used as a fallback when the user's extension hasn't been reloaded yet and
+// doesn't yet send pre-cleaned textWithLinks.
+function htmlToTextWithLinks(html: string): string {
+    if (!html) return '';
+    try {
+        return html
+            .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+            .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+            .replace(
+                /<a\s+[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi,
+                (_, href, inner) => `[LINK:${href}] ${inner.replace(/<[^>]+>/g, '').trim()} [/LINK]`,
+            )
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/&nbsp;/g, ' ')
+            .replace(/&amp;/g, '&')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, 25000);
+    } catch {
+        return '';
+    }
+}
 
 export default function StepInputUrl() {
     const {
@@ -101,8 +127,12 @@ export default function StepInputUrl() {
                 console.log('[StepInputUrl] Trying extension crawl for search page');
                 const ext = await extensionCrawl(searchResult.search_url);
                 if (ext.success && ext.text.length >= 200) {
-                    searchPage = { text: ext.text, textWithLinks: ext.html || ext.text };
-                    console.log(`[StepInputUrl] Extension crawl OK: ${ext.text.length} chars`);
+                    // Prefer the extension's pre-cleaned textWithLinks. If the user
+                    // hasn't reloaded the extension yet, fall back to converting
+                    // ext.html ourselves so the AI doesn't get raw HTML noise.
+                    const linkText = ext.textWithLinks || htmlToTextWithLinks(ext.html || '') || ext.text;
+                    searchPage = { text: ext.text, textWithLinks: linkText };
+                    console.log(`[StepInputUrl] Extension crawl OK: text=${ext.text.length} chars, links=${linkText.length} chars`);
                 } else {
                     console.log('[StepInputUrl] Extension crawl failed:', ext.error);
                 }
@@ -121,22 +151,46 @@ export default function StepInputUrl() {
             }
 
             const linksResult = await extractJobLinks(searchPage.textWithLinks || searchPage.text, trimmed);
-            if (!linksResult.found || !linksResult.job_urls?.length) {
+            const candidates: { url: string; title?: string }[] =
+                Array.isArray(linksResult.jobs) && linksResult.jobs.length
+                    ? linksResult.jobs
+                    : (linksResult.job_urls || []).map((u: string) => ({ url: u, title: '' }));
+            if (!linksResult.found || candidates.length === 0) {
                 throw new Error(`No job listings found on ${hostname}. Try a different job site.`);
             }
 
-            // Take up to 5 unique job URLs
-            const MAX_JOBS = 5;
-            const jobUrls: string[] = linksResult.job_urls.slice(0, MAX_JOBS);
-            setPhaseDetail(`Found ${linksResult.total_found} jobs → processing top ${jobUrls.length}`);
+            // ─── Phase 3.5: Rank candidates by CV fit BEFORE crawling ───
+            // The site lists jobs by its own relevance; this re-orders them by
+            // fit to THIS candidate's CV so we crawl the most promising first.
+            setPhase('ranking');
+            setPhaseDetail(`Ranking ${candidates.length} jobs by fit to your CV...`);
 
-            // Create placeholder entries
-            for (const jobUrl of jobUrls) {
+            const MAX_JOBS = 5;
+            let ranked: { url: string; title?: string; fit_score?: number; reason?: string }[] = [];
+            try {
+                ranked = await rankJobsByFit(cvData, candidates);
+            } catch (rankErr) {
+                console.log('[StepInputUrl] Job ranking failed, using site order:', rankErr);
+            }
+            // Fall back to the page's original order if ranking returned nothing.
+            const ordered = ranked.length ? ranked : candidates;
+            const topJobs = ordered.slice(0, MAX_JOBS);
+            const jobUrls: string[] = topJobs.map((j) => j.url);
+            setPhaseDetail(
+                ranked.length
+                    ? `Found ${candidates.length} jobs → crawling top ${jobUrls.length} by CV fit`
+                    : `Found ${candidates.length} jobs → processing top ${jobUrls.length}`,
+            );
+
+            // Create placeholder entries — pre-filled with the ranked title so
+            // the user sees real job names (and fit order) before crawling resolves.
+            for (const job of topJobs) {
                 addJdEntry({
                     id: `jd-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-                    source: jobUrl,
-                    label: getHostname(jobUrl),
+                    source: job.url,
+                    label: job.title || getHostname(job.url),
                     status: 'crawling',
+                    jobTitle: job.title || undefined,
                 });
             }
 
@@ -275,16 +329,15 @@ export default function StepInputUrl() {
                         continue;
                     }
 
-                    // Detect job title from JD if not from JSON-LD
-                    if (!jobTitle && jdData.domain) {
-                        jobTitle = searchResult.inferred_job_title;
-                    }
+                    // Prefer a title from the crawled page, then the ranked title
+                    // from the search page (entry.jobTitle), then the inferred role.
+                    const resolvedTitle = jobTitle || entry.jobTitle || searchResult.inferred_job_title;
 
                     updateJdEntry(entryId, {
                         status: 'done',
                         jdData,
                         matchResult,
-                        jobTitle: jobTitle || searchResult.inferred_job_title,
+                        jobTitle: resolvedTitle,
                         company,
                     });
 
@@ -296,7 +349,7 @@ export default function StepInputUrl() {
 
                     addJobRecord({
                         id: `job-${Date.now()}`,
-                        jobTitle: jobTitle || searchResult.inferred_job_title,
+                        jobTitle: resolvedTitle,
                         company,
                         jobUrl,
                         siteName: hostname,
