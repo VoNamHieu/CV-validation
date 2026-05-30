@@ -458,6 +458,30 @@ function _extractPageContent() {
     const html = document.documentElement ? document.documentElement.outerHTML : '';
     const text = bodyText.slice(0, 50000);
 
+    // Build a compact text-with-links representation so the AI extractor on
+    // the frontend can find job URLs even though the first 20KB of raw HTML
+    // would be mostly <head>/scripts/CSS noise.
+    // Mirrors the backend's /api/crawl-url ?keepLinks=true logic.
+    let textWithLinks = '';
+    try {
+        textWithLinks = html
+            .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+            .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+            .replace(
+                /<a\s+[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi,
+                (_, href, innerText) => {
+                    const cleanInner = innerText.replace(/<[^>]+>/g, '').trim();
+                    return `[LINK:${href}] ${cleanInner} [/LINK]`;
+                }
+            )
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/&nbsp;/g, ' ')
+            .replace(/&amp;/g, '&')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, 25000);
+    } catch (_) { /* fall back to empty */ }
+
     let jsonLd = null;
     const scripts = document.querySelectorAll('script[type="application/ld+json"]');
     for (const el of scripts) {
@@ -474,7 +498,7 @@ function _extractPageContent() {
         } catch (_) { /* ignore */ }
     }
 
-    return { html, text, jsonLd, title, looksLikeChallenge };
+    return { html, text, textWithLinks, jsonLd, title, looksLikeChallenge };
 }
 
 async function extCrawl(url) {
@@ -495,6 +519,7 @@ async function extCrawl(url) {
         // Real Chrome auto-solves Cloudflare's JS challenge in ~5s.
         const deadline = Date.now() + EXT_CRAWL_CHALLENGE_TIMEOUT;
         let last = null;
+        let pollIdx = 0;
         while (Date.now() < deadline) {
             try {
                 const [{ result }] = await chrome.scripting.executeScript({
@@ -502,11 +527,30 @@ async function extCrawl(url) {
                     func: _extractPageContent,
                 });
                 last = result;
+
+                // ── DEBUG: dump what we actually got so we can tell whether
+                //    a "successful" 25k-char return is real content or a soft
+                //    anti-bot page that our looksLikeChallenge regex missed.
+                const hasTopCVJobLinks = /\/viec-lam\/[^"\s]+\.html/.test(result?.html || '');
+                const hasVNWJobLinks = /-jv(?:["\/]|$)/.test(result?.html || '');
+                console.log(`[JobFit AI] EXT_CRAWL DEBUG poll #${pollIdx}`, {
+                    url,
+                    title: result?.title,
+                    textLen: result?.text?.length || 0,
+                    htmlLen: result?.html?.length || 0,
+                    looksLikeChallenge: result?.looksLikeChallenge,
+                    hasTopCVJobLinks,
+                    hasVNWJobLinks,
+                    firstChars: (result?.text || '').slice(0, 300),
+                });
+                pollIdx++;
+
                 if (result && !result.looksLikeChallenge && (result.text?.length || 0) >= 200) {
                     console.log(`[JobFit AI] EXT_CRAWL: extracted ${result.text.length} chars from ${url}`);
                     return {
                         success: true,
                         text: result.text,
+                        textWithLinks: result.textWithLinks,
                         html: result.html,
                         jsonLd: result.jsonLd,
                         method: 'extension',
@@ -520,6 +564,13 @@ async function extCrawl(url) {
 
         // Timed out. If we ever got content but it was a challenge, return blocked.
         const blocked = !!(last && last.looksLikeChallenge);
+        console.log(`[JobFit AI] EXT_CRAWL DEBUG timeout`, {
+            url,
+            blocked,
+            finalTitle: last?.title,
+            finalTextLen: last?.text?.length || 0,
+            finalFirstChars: (last?.text || '').slice(0, 300),
+        });
         return {
             success: false,
             blocked,
