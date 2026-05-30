@@ -97,7 +97,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     if (message.type === 'GET_APP_URL') {
         chrome.storage.local.get('jobfitAppUrl', (data) => {
-            sendResponse({ url: data.jobfitAppUrl || 'http://localhost:3000' });
+            sendResponse({ url: data.jobfitAppUrl || 'https://cv-validation.vercel.app' });
         });
         return true;
     }
@@ -110,7 +110,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         (async () => {
             try {
                 const data = await chrome.storage.local.get('jobfitAppUrl');
-                const appUrl = data.jobfitAppUrl || 'http://localhost:3000';
+                const appUrl = data.jobfitAppUrl || 'https://cv-validation.vercel.app';
 
                 // Try Vercel first, then localhost
                 const urls = [
@@ -155,7 +155,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         (async () => {
             try {
                 const data = await chrome.storage.local.get('jobfitAppUrl');
-                const appUrl = data.jobfitAppUrl || 'http://localhost:3000';
+                const appUrl = data.jobfitAppUrl || 'https://cv-validation.vercel.app';
 
                 const urls = [
                     appUrl,

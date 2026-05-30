@@ -140,7 +140,7 @@ function updateStatus(profile) {
 
 // ─── Import from JobFit AI App ───
 async function importFromApp() {
-    const appUrl = document.getElementById('appUrl')?.value || 'http://localhost:3000';
+    const appUrl = document.getElementById('appUrl')?.value || 'https://cv-validation.vercel.app';
     const btn = document.getElementById('importFromApp');
     btn.textContent = '⏳ Loading...';
     btn.disabled = true;
