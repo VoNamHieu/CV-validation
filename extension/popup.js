@@ -14,8 +14,9 @@ const FIELD_IDS = [
 
 // ─── Load profile from storage ───
 function loadProfile() {
-    chrome.storage.local.get('jobfitProfile', (data) => {
+    chrome.storage.local.get(['jobfitProfile', 'jobfitProfileSyncedAt'], (data) => {
         const profile = data.jobfitProfile;
+        renderSyncStatus(data.jobfitProfileSyncedAt);
         if (!profile) return;
 
         // Fill simple fields
@@ -23,19 +24,19 @@ function loadProfile() {
             const el = document.getElementById(id);
             if (!el) continue;
 
+            // Flat keys (sent by the web app) take precedence over the legacy
+            // nested `profile.address.*` shape; fall back so old-shape data
+            // still imports.
             let value = profile[id];
-
-            // Handle nested address
-            if (id === 'addressProvince') value = profile.address?.province;
-            else if (id === 'addressDistrict') value = profile.address?.district;
-            else if (id === 'addressStreet') value = profile.address?.street;
-
-            // Handle arrays
-            if (id === 'desiredLocations' && Array.isArray(profile.desiredLocations)) {
-                value = profile.desiredLocations.join(', ');
+            if (value === undefined || value === null || value === '') {
+                if (id === 'addressProvince') value = profile.address?.province;
+                else if (id === 'addressDistrict') value = profile.address?.district;
+                else if (id === 'addressStreet') value = profile.address?.street;
             }
-            if (id === 'currentFields' && Array.isArray(profile.currentFields)) {
-                value = profile.currentFields.join(', ');
+
+            // Arrays may arrive as either string (web app) or array (legacy).
+            if ((id === 'desiredLocations' || id === 'currentFields') && Array.isArray(value)) {
+                value = value.join(', ');
             }
 
             if (value !== undefined && value !== null) {
@@ -45,6 +46,24 @@ function loadProfile() {
 
         updateStatus(profile);
     });
+}
+
+// ─── Render the "Synced …" line in the Settings → Status card ───
+function renderSyncStatus(syncedAt) {
+    const el = document.getElementById('syncStatus');
+    if (!el) return;
+    if (!syncedAt) {
+        el.textContent = '⚪ Chưa đồng bộ — mở web app và mở step Edit CV.';
+        return;
+    }
+    const ageMs = Date.now() - syncedAt;
+    const ageSec = Math.round(ageMs / 1000);
+    let label;
+    if (ageSec < 5) label = 'vừa xong';
+    else if (ageSec < 60) label = `${ageSec}s trước`;
+    else if (ageSec < 3600) label = `${Math.round(ageSec / 60)} phút trước`;
+    else label = `${Math.round(ageSec / 3600)} giờ trước`;
+    el.textContent = `🟢 Đã đồng bộ từ CV · ${label}`;
 }
 
 // ─── Save profile to storage ───
@@ -198,6 +217,19 @@ function initTabs() {
 document.addEventListener('DOMContentLoaded', () => {
     initTabs();
     loadProfile();
+
+    // Live-refresh when background.js writes a new profile (auto-sync from web app).
+    chrome.runtime.onMessage.addListener((message) => {
+        if (message?.type === 'PROFILE_UPDATED') {
+            loadProfile();
+        }
+    });
+    // Keep the relative timestamp ("3 phút trước") fresh while the popup is open.
+    setInterval(() => {
+        chrome.storage.local.get('jobfitProfileSyncedAt', (data) => {
+            renderSyncStatus(data.jobfitProfileSyncedAt);
+        });
+    }, 15000);
 
     // Load app URL
     chrome.storage.local.get('jobfitAppUrl', (data) => {

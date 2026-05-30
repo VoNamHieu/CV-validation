@@ -14,7 +14,13 @@ import { optimizeCvVariants } from '@/lib/api';
 import type {
     OptimizeStyle, OptimizeFocus, OptimizeLength, OptimizeVariant,
 } from '@/lib/api';
-import type { CVData } from '@/lib/types';
+import type {
+    CVData, ContactInfo, PersonalInfo, EmploymentInfo, JobPreferences,
+} from '@/lib/types';
+import {
+    EMPTY_CONTACT, EMPTY_PERSONAL, EMPTY_EMPLOYMENT, EMPTY_PREFERENCES,
+} from '@/lib/types';
+import { cvToExtensionProfile } from '@/lib/extension-profile';
 
 type AutoApplyStatus = 'idle' | 'checking' | 'sending' | 'opened' | 'error' | 'no-extension';
 type FullAutoStatus = 'idle' | 'rendering' | 'syncing' | 'launching' | 'error';
@@ -129,7 +135,7 @@ function generateHtml(cv: CVData): string {
    ═══════════════════════════════════════════════════════════════════════════════ */
 
 export default function StepEditCv() {
-    const { cvData, jdEntries, setStep, updateJdEntry } = useAppStore();
+    const { cvData, jdEntries, setStep, setCvData, updateJdEntry } = useAppStore();
 
     // All entries that have optimized CVs, sorted by score
     const sortedEntries = useMemo(() => {
@@ -283,25 +289,39 @@ export default function StepEditCv() {
         }
     };
 
-    /* ─── Build profile from an optimized CV ─── */
+    /* ─── Build extension profile (23-field shape) from an optimized CV ───
+       The personal-info fields (contact/personal/employment/preferences) are
+       authored by the user against the base cvData via the Personal Info
+       section, but per-job optimized variants don't necessarily carry them.
+       Merge the base cvData's profile sub-objects in so every per-job push
+       carries the same contact info, address, etc. */
     const buildProfile = useCallback((cv: CVData) => {
-        const extraProfile = (() => {
-            try { return JSON.parse(localStorage.getItem('jobfit-extra-profile') || '{}'); }
-            catch { return {}; }
-        })();
-        return {
-            fullName: cv.name || '',
-            firstName: cv.name?.split(' ').pop() || '',
-            lastName: cv.name?.split(' ').slice(0, -1).join(' ') || '',
-            currentTitle: cv.experience?.[0]?.title || '',
-            summary: cv.summary || '',
-            coverLetter: cv.summary || '',
-            skills: (cv.skills || []).join(', '),
-            yearsOfExperience: cv.experience?.length || 0,
-            highestDegree: cv.education?.[0]?.degree || '',
-            ...extraProfile,
-        };
-    }, []);
+        const enrichedCv: CVData = cvData ? {
+            ...cv,
+            contact: cvData.contact ?? cv.contact,
+            personal: cvData.personal ?? cv.personal,
+            employment: cvData.employment ?? cv.employment,
+            preferences: cvData.preferences ?? cv.preferences,
+        } : cv;
+        return cvToExtensionProfile(enrichedCv);
+    }, [cvData]);
+
+    /* ─── Auto-push profile to extension whenever cvData changes ───
+       Debounced so a burst of edits in the Personal info section only emits
+       one postMessage. Bypassed entirely if cvData is null. */
+    useEffect(() => {
+        if (!cvData) return;
+        const handle = setTimeout(() => {
+            const profile = cvToExtensionProfile(cvData);
+            window.postMessage({
+                type: 'JOBFIT_EXPORT_PROFILE',
+                profile,
+                cvData,
+                lastSyncedAt: Date.now(),
+            }, '*');
+        }, 500);
+        return () => clearTimeout(handle);
+    }, [cvData]);
 
     /* ─── Single Auto Apply (legacy) ─── */
     const triggerAutoApply = async () => {
@@ -560,20 +580,19 @@ export default function StepEditCv() {
                     <button
                         className="btn-secondary"
                         onClick={() => {
-                            const cv = currentEntry?.optimizedCv;
+                            // Prefer the currently-selected optimized CV (with personal info edits
+                            // applied via the Personal info section) — otherwise fall back to the
+                            // base cvData so the extension still gets something.
+                            const cv = currentEntry?.optimizedCv ?? cvData;
                             if (!cv) return;
-                            const profileData = {
+                            const profile = buildProfile(cv);
+                            window.postMessage({
                                 type: 'JOBFIT_EXPORT_PROFILE',
-                                profile: {
-                                    fullName: cv.name || '',
-                                    currentTitle: cv.summary || '',
-                                    coverLetter: '',
-                                },
+                                profile,
                                 cvData: cv,
-                            };
-                            window.postMessage(profileData, '*');
-                            navigator.clipboard.writeText(JSON.stringify(profileData.profile, null, 2))
-                                .then(() => alert('✅ Profile exported! Open the extension popup and click Import.'))
+                            }, '*');
+                            navigator.clipboard.writeText(JSON.stringify(profile, null, 2))
+                                .then(() => alert('✅ Profile resynced to extension.'))
                                 .catch(() => alert('✅ Data sent to extension via postMessage'));
                         }}
                         style={{
@@ -583,7 +602,7 @@ export default function StepEditCv() {
                             cursor: 'pointer',
                         }}
                     >
-                        ⚡ Export to Extension
+                        ⚡ Resync to Extension
                     </button>
 
                     {/* ── Single Auto Apply Button ── */}
@@ -1041,6 +1060,9 @@ export default function StepEditCv() {
                 AI-optimized for &quot;{currentEntry.jobTitle || 'this position'}&quot; — Click any text to edit, hover items to reorder/remove
             </div>
 
+            {/* ══════ Personal Info — pre-filled from CV, editable, auto-synced ══════ */}
+            <PersonalInfoSection cv={cvData} onChange={setCvData} />
+
             {/* ══════ Optimize Options Panel ══════ */}
             <div className="glass-card" style={{
                 marginBottom: 12, padding: showOptions ? '14px 18px' : '10px 14px',
@@ -1192,6 +1214,156 @@ export default function StepEditCv() {
                 div::-webkit-scrollbar { display: none; }
             `}</style>
         </div>
+    );
+}
+
+/* ─── Personal Info section — editable contact/personal/employment/preferences ───
+   These fields are pre-filled by the LLM extractor when the CV is parsed and
+   are pushed to the extension automatically via the auto-push effect above. */
+function PersonalInfoSection({
+    cv, onChange,
+}: {
+    cv: CVData;
+    onChange: (updated: CVData) => void;
+}) {
+    const [open, setOpen] = useState(true);
+
+    const contact: ContactInfo = { ...EMPTY_CONTACT, ...(cv.contact ?? {}) };
+    const personal: PersonalInfo = { ...EMPTY_PERSONAL, ...(cv.personal ?? {}) };
+    const employment: EmploymentInfo = { ...EMPTY_EMPLOYMENT, ...(cv.employment ?? {}) };
+    const preferences: JobPreferences = { ...EMPTY_PREFERENCES, ...(cv.preferences ?? {}) };
+
+    const patchContact = (patch: Partial<ContactInfo>) =>
+        onChange({ ...cv, contact: { ...contact, ...patch } });
+    const patchPersonal = (patch: Partial<PersonalInfo>) =>
+        onChange({ ...cv, personal: { ...personal, ...patch } });
+    const patchEmployment = (patch: Partial<EmploymentInfo>) =>
+        onChange({ ...cv, employment: { ...employment, ...patch } });
+    const patchPreferences = (patch: Partial<JobPreferences>) =>
+        onChange({ ...cv, preferences: { ...preferences, ...patch } });
+
+    const fillCount = [
+        contact.email, contact.phone, contact.address_province,
+        personal.date_of_birth, personal.gender,
+        employment.current_title, employment.current_salary,
+        preferences.desired_locations,
+    ].filter(Boolean).length;
+
+    return (
+        <div className="glass-card" style={{
+            marginBottom: 12, padding: open ? '14px 18px' : '10px 14px',
+            transition: 'padding 0.15s',
+        }}>
+            <button
+                onClick={() => setOpen(o => !o)}
+                style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    width: '100%',
+                    background: 'transparent', border: 'none', cursor: 'pointer',
+                    color: 'var(--text-primary)', fontSize: '0.85rem', fontWeight: 600,
+                    padding: 0,
+                }}
+            >
+                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Briefcase size={14} weight="duotone" style={{ color: 'var(--accent-blue)' }} />
+                    Personal Info
+                    <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: '0.78rem' }}>
+                        {fillCount} / 8 key fields filled · auto-synced to extension
+                    </span>
+                </span>
+                <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+                    {open ? '▾' : '▸'}
+                </span>
+            </button>
+            {open && (
+                <div style={{
+                    marginTop: 14, display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10,
+                }}>
+                    {/* ── Contact ── */}
+                    <ProfileInput label="Email" value={contact.email}
+                        onChange={(v) => patchContact({ email: v })} placeholder="you@example.com" />
+                    <ProfileInput label="Phone" value={contact.phone}
+                        onChange={(v) => patchContact({ phone: v })} placeholder="+84 …" />
+                    <ProfileInput label="LinkedIn" value={contact.linkedin}
+                        onChange={(v) => patchContact({ linkedin: v })} placeholder="linkedin.com/in/…" />
+                    <ProfileInput label="GitHub" value={contact.github}
+                        onChange={(v) => patchContact({ github: v })} placeholder="github.com/…" />
+                    <ProfileInput label="Portfolio" value={contact.portfolio}
+                        onChange={(v) => patchContact({ portfolio: v })} placeholder="https://…" />
+                    <ProfileInput label="Province / City" value={contact.address_province}
+                        onChange={(v) => patchContact({ address_province: v })} />
+                    <ProfileInput label="District / Ward" value={contact.address_district}
+                        onChange={(v) => patchContact({ address_district: v })} />
+                    <ProfileInput label="Street" value={contact.address_street}
+                        onChange={(v) => patchContact({ address_street: v })} />
+
+                    {/* ── Personal ── */}
+                    <ProfileInput label="Date of birth" value={personal.date_of_birth}
+                        onChange={(v) => patchPersonal({ date_of_birth: v })} placeholder="YYYY-MM-DD" />
+                    <ProfileInput label="Gender" value={personal.gender}
+                        onChange={(v) => patchPersonal({ gender: v })} />
+                    <ProfileInput label="Nationality" value={personal.nationality}
+                        onChange={(v) => patchPersonal({ nationality: v })} />
+                    <ProfileInput label="Marital status" value={personal.marital_status}
+                        onChange={(v) => patchPersonal({ marital_status: v })} />
+
+                    {/* ── Employment ── */}
+                    <ProfileInput label="Current title" value={employment.current_title}
+                        onChange={(v) => patchEmployment({ current_title: v })} />
+                    <ProfileInput label="Current company" value={employment.current_company}
+                        onChange={(v) => patchEmployment({ current_company: v })} />
+                    <ProfileInput label="Current level" value={employment.current_level}
+                        onChange={(v) => patchEmployment({ current_level: v })} placeholder="Junior / Mid / Senior" />
+                    <ProfileInput label="Current industry" value={employment.current_industry}
+                        onChange={(v) => patchEmployment({ current_industry: v })} />
+                    <ProfileInput label="Current fields" value={employment.current_fields}
+                        onChange={(v) => patchEmployment({ current_fields: v })} placeholder="Backend, Data, Product…" />
+                    <ProfileInput label="Current salary" value={employment.current_salary}
+                        onChange={(v) => patchEmployment({ current_salary: v })} />
+                    <ProfileInput label="Years of experience" value={String(employment.years_of_experience || '')}
+                        onChange={(v) => patchEmployment({ years_of_experience: parseInt(v, 10) || 0 })} />
+                    <ProfileInput label="Highest degree" value={employment.highest_degree}
+                        onChange={(v) => patchEmployment({ highest_degree: v })} />
+
+                    {/* ── Preferences ── */}
+                    <ProfileInput label="Desired locations" value={preferences.desired_locations}
+                        onChange={(v) => patchPreferences({ desired_locations: v })} />
+                    <ProfileInput label="Desired salary" value={preferences.desired_salary}
+                        onChange={(v) => patchPreferences({ desired_salary: v })} />
+                </div>
+            )}
+        </div>
+    );
+}
+
+function ProfileInput({
+    label, value, onChange, placeholder,
+}: {
+    label: string;
+    value: string;
+    onChange: (v: string) => void;
+    placeholder?: string;
+}) {
+    return (
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                {label}
+            </span>
+            <input
+                type="text"
+                value={value}
+                placeholder={placeholder}
+                onChange={(e) => onChange(e.target.value)}
+                style={{
+                    padding: '6px 10px', borderRadius: 6,
+                    background: 'var(--bg-secondary)',
+                    border: '1px solid var(--border-subtle)',
+                    color: 'var(--text-primary)', fontSize: '0.82rem',
+                    fontFamily: 'inherit',
+                }}
+            />
+        </label>
     );
 }
 

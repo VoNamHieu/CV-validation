@@ -30,10 +30,14 @@ function persistState() {
 // ─── Listen for external messages from JobFit AI web app ───
 chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
     if (message.type === 'JOBFIT_EXPORT_PROFILE') {
-        chrome.storage.local.set({ jobfitProfile: message.profile }, () => {
-            sendResponse({ success: true });
-            chrome.runtime.sendMessage({ type: 'PROFILE_UPDATED' }).catch(() => { });
-        });
+        const syncedAt = Date.now();
+        chrome.storage.local.set(
+            { jobfitProfile: message.profile, jobfitProfileSyncedAt: syncedAt },
+            () => {
+                sendResponse({ success: true, syncedAt });
+                chrome.runtime.sendMessage({ type: 'PROFILE_UPDATED', syncedAt }).catch(() => { });
+            },
+        );
         return true;
     }
 
@@ -75,9 +79,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     if (message.type === 'SAVE_PROFILE') {
-        chrome.storage.local.set({ jobfitProfile: message.profile }, () => {
-            sendResponse({ success: true });
-        });
+        const syncedAt = Date.now();
+        chrome.storage.local.set(
+            { jobfitProfile: message.profile, jobfitProfileSyncedAt: syncedAt },
+            () => {
+                sendResponse({ success: true, syncedAt });
+                // Push to popup if open so the "Synced …" line refreshes immediately.
+                chrome.runtime.sendMessage({ type: 'PROFILE_UPDATED', syncedAt }).catch(() => { });
+            },
+        );
         return true;
     }
 

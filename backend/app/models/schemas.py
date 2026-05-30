@@ -16,6 +16,36 @@ class ProjectDetail(BaseModel):
     name: str
     description: str
 
+class ContactInfo(BaseModel):
+    email: str = ""
+    phone: str = ""
+    address_province: str = Field(default="", description="Province / city / region")
+    address_district: str = Field(default="", description="District / ward (Vietnamese-style addresses)")
+    address_street: str = Field(default="", description="Street address line")
+    linkedin: str = ""
+    github: str = ""
+    portfolio: str = Field(default="", description="Personal website or portfolio URL")
+
+class PersonalInfo(BaseModel):
+    date_of_birth: str = Field(default="", description="ISO date string YYYY-MM-DD if known")
+    gender: str = ""
+    nationality: str = ""
+    marital_status: str = ""
+
+class EmploymentInfo(BaseModel):
+    current_title: str = ""
+    current_company: str = ""
+    current_level: str = Field(default="", description="e.g., Junior, Mid, Senior, Lead")
+    current_industry: str = ""
+    current_fields: str = Field(default="", description="Functional area, e.g., Backend, Data, Product")
+    current_salary: str = ""
+    years_of_experience: int = 0
+    highest_degree: str = ""
+
+class JobPreferences(BaseModel):
+    desired_locations: str = ""
+    desired_salary: str = ""
+
 class CVSchema(BaseModel):
     name: str = Field(default="", description="Full name of the candidate")
     summary: str = Field(default="", description="Professional summary or objective")
@@ -23,6 +53,10 @@ class CVSchema(BaseModel):
     experience: List[ExperienceDetail] = Field(default_factory=list)
     education: List[EducationDetail] = Field(default_factory=list)
     projects: List[ProjectDetail] = Field(default_factory=list)
+    contact: ContactInfo = Field(default_factory=ContactInfo)
+    personal: PersonalInfo = Field(default_factory=PersonalInfo)
+    employment: EmploymentInfo = Field(default_factory=EmploymentInfo)
+    preferences: JobPreferences = Field(default_factory=JobPreferences)
 
 class JDSchema(BaseModel):
     must_have: List[str] = Field(default_factory=list, description="Strictly required skills, tools, or experiences")

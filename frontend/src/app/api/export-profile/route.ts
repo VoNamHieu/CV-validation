@@ -1,86 +1,64 @@
 import { NextResponse } from 'next/server';
+import { cvToExtensionProfile, type ExtensionProfile } from '@/lib/extension-profile';
+import type { CVData } from '@/lib/types';
 
 /**
  * GET /api/export-profile
- * 
- * Returns the current user profile data from localStorage (via client-side store).
- * The extension popup calls this to import optimized CV data.
- * 
- * Since Zustand persists to localStorage, this endpoint reads from the
- * persisted store data passed via query params or returns a template.
+ * Returns the canonical 23-field schema the extension popup expects.
+ * The server is stateless and has no session — the actual profile data
+ * flows from the web app to the extension via window.postMessage, not via
+ * this endpoint. Kept as a schema reference + health check.
  */
-export async function GET(request: Request) {
-    // The actual profile data lives in the browser's localStorage (Zustand persist)
-    // The extension will read it from the web app via postMessage instead.
-    // This endpoint serves as a health check and provides the data schema.
-
+export async function GET() {
     return NextResponse.json({
         status: 'ready',
-        message: 'Use the "Export to Extension" button in the CV editor to send data to the extension.',
+        message: 'Profile data is pushed to the extension via postMessage from the CV editor. This endpoint exposes the canonical 23-field schema only.',
         schema: {
+            fullName: 'string',
             firstName: 'string',
             lastName: 'string',
-            fullName: 'string',
             email: 'string',
             phone: 'string',
-            dateOfBirth: 'DD/MM/YYYY',
-            gender: 'Nam | Nữ',
-            nationality: 'Người Việt Nam | Người nước ngoài',
-            maritalStatus: 'Độc thân | Đã kết hôn',
-            address: { province: 'string', district: 'string', street: 'string' },
+            dateOfBirth: 'string (YYYY-MM-DD)',
+            gender: 'string',
+            nationality: 'string',
+            maritalStatus: 'string',
+            addressProvince: 'string',
+            addressDistrict: 'string',
+            addressStreet: 'string',
             currentTitle: 'string',
             currentLevel: 'string',
             yearsOfExperience: 'number',
             highestDegree: 'string',
+            currentSalary: 'string',
             currentIndustry: 'string',
-            currentFields: 'string[]',
-            currentSalary: 'number',
-            desiredLocations: 'string[]',
-            desiredSalary: 'number',
+            currentFields: 'string',
+            desiredLocations: 'string',
+            desiredSalary: 'string',
             coverLetter: 'string',
-        }
+            skills: 'string (comma-separated)',
+        } satisfies Record<keyof ExtensionProfile, string>,
     });
 }
 
 /**
  * POST /api/export-profile
- * 
- * Receives profile data from the client-side and returns it formatted
- * for the extension to consume.
+ * Body: { cvData: CVData } — server maps it into the 23-field ExtensionProfile.
+ * Single source of truth for the mapping: cvToExtensionProfile.
  */
 export async function POST(request: Request) {
     try {
         const body = await request.json();
-
-        // Transform CVData + user input into extension profile format
-        const profile = {
-            firstName: body.firstName || '',
-            lastName: body.lastName || '',
-            fullName: body.fullName || `${body.lastName || ''} ${body.firstName || ''}`.trim(),
-            email: body.email || '',
-            phone: body.phone || '',
-            dateOfBirth: body.dateOfBirth || '',
-            gender: body.gender || '',
-            nationality: body.nationality || 'Người Việt Nam',
-            maritalStatus: body.maritalStatus || '',
-            address: body.address || { province: '', district: '', street: '' },
-            currentTitle: body.currentTitle || body.cvData?.objective || '',
-            currentLevel: body.currentLevel || '',
-            yearsOfExperience: body.yearsOfExperience || 0,
-            highestDegree: body.highestDegree || '',
-            currentIndustry: body.currentIndustry || '',
-            currentFields: body.currentFields || [],
-            currentSalary: body.currentSalary || 0,
-            desiredLocations: body.desiredLocations || [],
-            desiredSalary: body.desiredSalary || 0,
-            coverLetter: body.coverLetter || '',
-        };
-
+        const cvData = body?.cvData as CVData | undefined;
+        if (!cvData || typeof cvData !== 'object') {
+            return NextResponse.json(
+                { error: 'cvData is required in the request body' },
+                { status: 400 },
+            );
+        }
+        const profile = cvToExtensionProfile(cvData);
         return NextResponse.json({ success: true, profile });
-    } catch (error) {
-        return NextResponse.json(
-            { error: 'Invalid request body' },
-            { status: 400 }
-        );
+    } catch {
+        return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
     }
 }

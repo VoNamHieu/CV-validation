@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { callAIWithPdf } from "@/lib/gemini";
 import { safeJsonParse } from "@/lib/safe-json";
 import { MAX_PDF_BASE64_LENGTH } from "@/lib/validation";
+import { CV_EXTRACTION_SYSTEM_PROMPT, normalizeCVResponse } from "@/lib/cv-extraction-schema";
 
 export async function POST(request: NextRequest) {
     try {
@@ -19,17 +20,7 @@ export async function POST(request: NextRequest) {
         const isCV = type === "cv";
 
         const systemPrompt = isCV
-            ? `You are an intelligent CV parser. Extract accurate and structured data.
-Return ONLY valid JSON matching this exact schema:
-{
-  "name": "string",
-  "summary": "string",
-  "skills": ["string"],
-  "experience": [{"title": "string", "company": "string", "duration_months": number, "description": "string"}],
-  "education": [{"degree": "string", "institution": "string", "year": "string"}],
-  "projects": [{"name": "string", "description": "string"}]
-}
-If some information is missing, leave strings empty or lists empty.`
+            ? CV_EXTRACTION_SYSTEM_PROMPT
             : `You are an intelligent Job Description parser. Extract strict and accurate requirements.
 Return ONLY valid JSON matching this exact schema:
 {
@@ -53,7 +44,7 @@ Return ONLY valid JSON matching this exact schema:
             return NextResponse.json({ detail: "AI returned invalid JSON. Please retry." }, { status: 502 });
         }
 
-        return NextResponse.json(parsed);
+        return NextResponse.json(isCV ? normalizeCVResponse(parsed) : parsed);
     } catch (e: unknown) {
         const message = e instanceof Error ? e.message : "Failed to parse PDF";
         return NextResponse.json({ detail: message }, { status: 500 });

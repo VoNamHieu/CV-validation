@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { callAI } from "@/lib/gemini";
 import { safeJsonParse } from "@/lib/safe-json";
 import { MAX_INPUT_TEXT_LENGTH } from "@/lib/validation";
+import { CV_EXTRACTION_SYSTEM_PROMPT, normalizeCVResponse } from "@/lib/cv-extraction-schema";
 
 export async function POST(request: NextRequest) {
     try {
@@ -14,27 +15,15 @@ export async function POST(request: NextRequest) {
         // ── Input size guard (H4) ──
         const text = typeof raw_text === "string" ? raw_text.slice(0, MAX_INPUT_TEXT_LENGTH) : "";
 
-        const systemPrompt = `You are an intelligent CV parser. Extract accurate and structured data. 
-Return ONLY valid JSON matching this exact schema:
-{
-  "name": "string",
-  "summary": "string",
-  "skills": ["string"],
-  "experience": [{"title": "string", "company": "string", "duration_months": number, "description": "string"}],
-  "education": [{"degree": "string", "institution": "string", "year": "string"}],
-  "projects": [{"name": "string", "description": "string"}]
-}
-If some information is missing, leave strings empty or lists empty.`;
-
         const userPrompt = `Extract the following information from this CV text:\n\n${text}`;
 
-        const result = await callAI(systemPrompt, userPrompt);
+        const result = await callAI(CV_EXTRACTION_SYSTEM_PROMPT, userPrompt);
 
         let parsed;
         try { parsed = safeJsonParse(result); }
         catch { return NextResponse.json({ detail: "AI returned invalid JSON. Please retry." }, { status: 502 }); }
 
-        return NextResponse.json(parsed);
+        return NextResponse.json(normalizeCVResponse(parsed));
     } catch (e: unknown) {
         const message = e instanceof Error ? e.message : "Failed to extract CV";
         return NextResponse.json({ detail: message }, { status: 500 });

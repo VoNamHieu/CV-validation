@@ -18,6 +18,40 @@ export interface ProjectDetail {
     description: string;
 }
 
+export interface ContactInfo {
+    email: string;
+    phone: string;
+    address_province: string;
+    address_district: string;
+    address_street: string;
+    linkedin: string;
+    github: string;
+    portfolio: string;
+}
+
+export interface PersonalInfo {
+    date_of_birth: string;
+    gender: string;
+    nationality: string;
+    marital_status: string;
+}
+
+export interface EmploymentInfo {
+    current_title: string;
+    current_company: string;
+    current_level: string;
+    current_industry: string;
+    current_fields: string;
+    current_salary: string;
+    years_of_experience: number;
+    highest_degree: string;
+}
+
+export interface JobPreferences {
+    desired_locations: string;
+    desired_salary: string;
+}
+
 export interface CVData {
     name: string;
     summary: string;
@@ -25,7 +59,31 @@ export interface CVData {
     experience: ExperienceDetail[];
     education: EducationDetail[];
     projects: ProjectDetail[];
+    contact: ContactInfo;
+    personal: PersonalInfo;
+    employment: EmploymentInfo;
+    preferences: JobPreferences;
 }
+
+export const EMPTY_CONTACT: ContactInfo = {
+    email: '', phone: '',
+    address_province: '', address_district: '', address_street: '',
+    linkedin: '', github: '', portfolio: '',
+};
+
+export const EMPTY_PERSONAL: PersonalInfo = {
+    date_of_birth: '', gender: '', nationality: '', marital_status: '',
+};
+
+export const EMPTY_EMPLOYMENT: EmploymentInfo = {
+    current_title: '', current_company: '', current_level: '',
+    current_industry: '', current_fields: '', current_salary: '',
+    years_of_experience: 0, highest_degree: '',
+};
+
+export const EMPTY_PREFERENCES: JobPreferences = {
+    desired_locations: '', desired_salary: '',
+};
 
 export interface JDData {
     must_have: string[];
