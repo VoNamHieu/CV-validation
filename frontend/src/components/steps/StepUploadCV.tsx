@@ -7,6 +7,7 @@ import {
 } from '@phosphor-icons/react';
 import { useAppStore } from '@/store/useAppStore';
 import { parsePdfWithAI } from '@/lib/api';
+import { cvToExtensionProfile } from '@/lib/extension-profile';
 
 export default function StepUploadCV() {
     const { setCvRawText, setCvData, setStep, cvFileName } = useAppStore();
@@ -29,6 +30,20 @@ export default function StepUploadCV() {
             const structured = await parsePdfWithAI(file, 'cv');
             setCvRawText('(parsed from PDF)', file.name);
             setCvData(structured);
+
+            // Push extracted profile to the extension immediately so the popup
+            // is filled the moment the CV is uploaded — without waiting for
+            // the user to reach Step 4 (Edit CV).
+            try {
+                const profile = cvToExtensionProfile(structured);
+                window.postMessage({
+                    type: 'JOBFIT_EXPORT_PROFILE',
+                    profile,
+                    cvData: structured,
+                    lastSyncedAt: Date.now(),
+                }, '*');
+            } catch { /* extension not installed — non-fatal */ }
+
             setUploaded(true);
             setProcessing(false);
         } catch (e: unknown) {
