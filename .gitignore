@@ -8,3 +8,10 @@ __pycache__/
 .env*.local
 .DS_Store
 .vercel
+
+# Local SQLite caches (company_cache.db, etc.)
+backend/data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
