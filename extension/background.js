@@ -530,6 +530,11 @@ async function extCrawl(url) {
         const deadline = Date.now() + EXT_CRAWL_CHALLENGE_TIMEOUT;
         let last = null;
         let pollIdx = 0;
+        // Search-result pages render job cards via JS after initial load. If
+        // we return on poll #0 the DOM is "complete" but <a> tags aren't there
+        // yet — text is full of header/footer, no usable job URLs. Force the
+        // loop to keep polling until job links actually appear in the DOM.
+        const isSearchPage = /topcv\.vn\/(?:tim-viec-lam-|tim-kiem|search)|vietnamworks\.com\/(?:tim-viec-lam|jobs)/i.test(url);
         while (Date.now() < deadline) {
             try {
                 const [{ result }] = await chrome.scripting.executeScript({
@@ -543,6 +548,7 @@ async function extCrawl(url) {
                 //    anti-bot page that our looksLikeChallenge regex missed.
                 const hasTopCVJobLinks = /\/viec-lam\/[^"\s]+\.html/.test(result?.html || '');
                 const hasVNWJobLinks = /-jv(?:["\/]|$)/.test(result?.html || '');
+                const hasJobLinks = hasTopCVJobLinks || hasVNWJobLinks;
                 console.log(`[JobFit AI] EXT_CRAWL DEBUG poll #${pollIdx}`, {
                     url,
                     title: result?.title,
@@ -551,11 +557,16 @@ async function extCrawl(url) {
                     looksLikeChallenge: result?.looksLikeChallenge,
                     hasTopCVJobLinks,
                     hasVNWJobLinks,
+                    isSearchPage,
                     firstChars: (result?.text || '').slice(0, 300),
                 });
                 pollIdx++;
 
-                if (result && !result.looksLikeChallenge && (result.text?.length || 0) >= 200) {
+                const contentReady = result && !result.looksLikeChallenge && (result.text?.length || 0) >= 200;
+                // Search pages MUST have job links in the DOM before we return —
+                // otherwise the AI extractor downstream gets a card-less page.
+                const searchReady = !isSearchPage || hasJobLinks;
+                if (contentReady && searchReady) {
                     console.log(`[JobFit AI] EXT_CRAWL: extracted ${result.text.length} chars from ${url}`);
                     return {
                         success: true,

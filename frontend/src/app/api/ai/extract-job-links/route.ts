@@ -17,7 +17,25 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        const systemPrompt = `You are an expert web scraper. Given the text content from a job search results page, extract all individual job postings (URL + the visible job title shown for that link).
+        // Pre-extract every [LINK:href] text [/LINK] record from the upstream
+        // payload (extension or backend produces this markup). Sending the AI
+        // a compact, dedup'd link list — instead of 20k chars of mixed
+        // header/footer/card text — guarantees no real link gets truncated
+        // out, even on pages where job cards render late.
+        const linkRecords: string[] = [];
+        const seenHrefs = new Set<string>();
+        const linkRe = /\[LINK:([^\]]+)\]\s*([\s\S]*?)\s*\[\/LINK\]/g;
+        for (const m of html_text.matchAll(linkRe)) {
+            const href = (m[1] || "").trim();
+            const label = (m[2] || "").replace(/\s+/g, " ").trim().slice(0, 200);
+            if (!href || seenHrefs.has(href)) continue;
+            seenHrefs.add(href);
+            linkRecords.push(`[LINK:${href}] ${label}`);
+            if (linkRecords.length >= 400) break;
+        }
+        const compactLinks = linkRecords.join("\n");
+
+        const systemPrompt = `You are an expert web scraper. Given a list of links extracted from a job search results page, identify which ones are individual job postings (URL + the visible job title shown for that link).
 
 RULES:
 - Look for URLs that point to individual job postings (not category pages, not the homepage).
@@ -35,12 +53,18 @@ Return ONLY valid JSON matching this schema:
   "total_found": number
 }`;
 
+        // Prefer the compact link list. Fall back to raw text only when the
+        // page didn't come through the [LINK:...] preprocessor at all.
+        const payload = compactLinks
+            ? compactLinks.slice(0, 40000)
+            : html_text.slice(0, 20000);
+
         const userPrompt = `Extract job posting URLs from this search results page.
 
 SITE: ${site_url || "unknown"}
 
-PAGE CONTENT:
-${html_text.slice(0, 20000)}`;
+${compactLinks ? "LINKS ON PAGE (one per line):" : "PAGE CONTENT:"}
+${payload}`;
 
         const result = await callAILight(systemPrompt, userPrompt);
         let parsed: { found?: boolean; jobs?: Array<{ url?: string; title?: string }>; total_found?: number };
