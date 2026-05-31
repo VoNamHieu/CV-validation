@@ -201,6 +201,61 @@ export async function fetchPage(url: string): Promise<{
     return res.json();
 }
 
+// ── Career Finder: discover a company's own careers page + jobs ──
+//
+// Backend pipeline (career_finder.py) accepts ONE of:
+//   - input_url:   TopCV/VietnamWorks URL (company profile or job posting)
+//   - homepage_url: the company's own homepage (skips Stage 0)
+//   - company_name: cache-lookup only; misses return notes telling the caller
+//                   to provide a TopCV/VNW URL once to populate
+export interface CareerFinderInput {
+    input_url?: string;
+    homepage_url?: string;
+    company_name?: string;
+}
+
+export interface CompanyResolution {
+    company_name: string;
+    website_url: string;
+    source: string;        // "topcv_profile" | "topcv_job" | "vnw_job" | "user_input" | "cache"
+    notes: string;
+}
+
+export interface CareerPage {
+    url: string;
+    method: string;        // "nav" | "brute_force" | "sitemap"
+    title: string;
+    confidence: number;    // 0..1
+}
+
+export interface JobListing {
+    title: string;
+    url: string;
+    location: string;
+}
+
+export interface FinderResult {
+    resolution: CompanyResolution;
+    career_candidates: CareerPage[];
+    chosen_career: CareerPage | null;
+    jobs: JobListing[];
+    stages_run: string[];
+    errors: string[];
+}
+
+export async function findCareer(input: CareerFinderInput): Promise<FinderResult> {
+    const res = await fetch('/api/career/find', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || 'Failed to find career page');
+    }
+    return res.json();
+}
+
 // ── Extension presence check ──
 export function isExtensionAvailable(): boolean {
     if (typeof window === 'undefined') return false;

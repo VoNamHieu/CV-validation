@@ -24,6 +24,7 @@ Stage 1 → 2 → 3 and stops at the first confirmed hit.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 from dataclasses import dataclass, field, asdict
@@ -41,6 +42,7 @@ from app.services.crawler import (
 )
 from app.services.url_validator import is_allowed_url
 from app.services import company_cache
+from app.services.gemini_client import generate_json
 
 logger = logging.getLogger(__name__)
 
@@ -580,12 +582,148 @@ _JOB_URL_PATTERNS = (
 )
 
 
+# If the anchor heuristic returns fewer than this many jobs, fall back to the
+# LLM extractor. SPA career pages often render the job grid client-side with
+# anchors that don't match the path patterns above; the LLM gets the cleaned
+# text + a link inventory and picks out real postings.
+_MIN_JOBS_BEFORE_LLM = 3
+
+# Generic CTA / navigation anchor texts that should never be treated as jobs.
+_CTA_BLACKLIST = {
+    "apply", "view", "details", "learn more", "more", "see more",
+    "see all", "view all", "all jobs", "all positions", "apply now",
+    "read more", "find out more", "tim hieu them", "xem them", "xem tat ca",
+    "ung tuyen", "ung tuyen ngay",
+}
+
+
+def _collect_link_candidates(html: str, base: str) -> list[dict]:
+    """Build a compact `[{url, text}]` inventory of internal anchors on the
+    career page — used as input to the LLM fallback.
+
+    We drop nav/CTA/social/external links so the prompt stays small and the
+    LLM has a cleaner search space.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    base_host = (urlparse(base).hostname or "").lower().removeprefix("www.")
+
+    seen: set[str] = set()
+    candidates: list[dict] = []
+    for a in soup.find_all("a", href=True):
+        href = (a["href"] or "").strip()
+        if not href or href.startswith(("#", "mailto:", "tel:", "javascript:")):
+            continue
+        full = urljoin(base + "/", href)
+        try:
+            parsed = urlparse(full)
+        except Exception:
+            continue
+        host = (parsed.hostname or "").lower().removeprefix("www.")
+        if not host or host in NON_COMPANY_HOSTS:
+            continue
+        # Stay on the same registrable domain (allow career subdomains).
+        if _root_domain(host).split(".")[-2:] != _root_domain(base_host).split(".")[-2:]:
+            continue
+        if not parsed.path or parsed.path == "/":
+            continue
+        if full in seen:
+            continue
+        text = a.get_text(" ", strip=True)
+        norm = _normalize(text)
+        if not text or norm in _CTA_BLACKLIST:
+            continue
+        seen.add(full)
+        candidates.append({"url": full, "text": text[:160]})
+        if len(candidates) >= 120:
+            break
+    return candidates
+
+
+async def _extract_jobs_via_llm(
+    career_url: str, html: str, candidates: list[dict]
+) -> list[JobListing]:
+    """LLM fallback for Stage 4. Asks Gemini to pick which links from the
+    candidate inventory are real job postings and to title them properly.
+
+    The LLM may NOT invent URLs — we validate every returned URL against
+    the candidate list.
+    """
+    if not candidates:
+        return []
+
+    # Trim the page text so the prompt stays cheap. The link list carries
+    # most of the useful signal; the text just helps disambiguate.
+    page_text = clean_html(html)[:6000]
+    link_list = "\n".join(
+        f"{i+1}. {c['url']}  |  {c['text']}"
+        for i, c in enumerate(candidates)
+    )
+
+    prompt = f"""You are extracting job postings from a company's careers page.
+
+CAREER PAGE URL: {career_url}
+
+Below is the page text followed by a numbered list of every internal link on the page.
+Your task: pick the links that go to a SPECIFIC job opening (e.g. "Senior Backend Engineer", "Marketing Intern") — NOT navigation, NOT "View all jobs", NOT generic categories like "Engineering" or "Sales".
+
+PAGE TEXT (truncated):
+{page_text}
+
+LINKS:
+{link_list}
+
+Return a JSON object: {{"jobs": [{{"url": "<exact url from the list above>", "title": "<role title>", "location": "<city if visible, else empty string>"}}]}}
+
+Rules:
+- url MUST be copied verbatim from the LINKS list above. Do NOT invent or modify URLs.
+- title is the role name as it appears, with leading/trailing whitespace stripped.
+- If no real job postings are visible, return {{"jobs": []}}.
+- Cap at 50 jobs."""
+
+    try:
+        raw = await asyncio.to_thread(
+            generate_json,
+            "You extract individual job-posting links from a careers page. Always return JSON.",
+            prompt,
+        )
+        parsed = json.loads(raw.strip())
+    except Exception as e:
+        logger.warning(f"[llm_jobs] failed: {e}")
+        return []
+
+    jobs_field = parsed.get("jobs") if isinstance(parsed, dict) else parsed
+    if not isinstance(jobs_field, list):
+        return []
+
+    candidate_urls = {c["url"] for c in candidates}
+    results: list[JobListing] = []
+    seen: set[str] = set()
+    for item in jobs_field:
+        if not isinstance(item, dict):
+            continue
+        url = (item.get("url") or "").strip()
+        title = (item.get("title") or "").strip()
+        location = (item.get("location") or "").strip()
+        if not url or url not in candidate_urls or url in seen:
+            continue
+        if not title or len(title) < 3:
+            continue
+        seen.add(url)
+        results.append(JobListing(title=title[:200], url=url, location=location[:120]))
+        if len(results) >= 50:
+            break
+    logger.info(f"[llm_jobs] LLM picked {len(results)} jobs from {len(candidates)} candidates")
+    return results
+
+
 async def extract_jobs_from_career_page(career_url: str) -> list[JobListing]:
     """Stage 4: list job postings on the discovered career page.
 
-    Heuristic only — we look for anchors whose href matches a job-posting
-    URL pattern AND whose text looks like a role title (>= 3 chars, not
-    a single keyword like "Apply").
+    Strategy:
+      1. Heuristic: anchors whose href matches a job-posting URL pattern.
+      2. If the heuristic returns < _MIN_JOBS_BEFORE_LLM jobs (common on SPA
+         career pages that don't follow URL conventions), ask the LLM to pick
+         job links out of the candidate inventory. The LLM may not invent URLs.
     """
     ok, html, _ = await _fetch_html(career_url)
     if not ok:
@@ -606,13 +744,29 @@ async def extract_jobs_from_career_page(career_url: str) -> list[JobListing]:
         if full in seen:
             continue
         text = a.get_text(" ", strip=True)
-        # Skip generic CTA anchors ("Apply", "View", "Learn more")
-        if len(text) < 4 or text.lower() in {"apply", "view", "details", "learn more", "more"}:
+        if len(text) < 4 or _normalize(text) in _CTA_BLACKLIST:
             continue
         seen.add(full)
         jobs.append(JobListing(title=text[:200], url=full))
         if len(jobs) >= 50:
             break
+
+    if len(jobs) >= _MIN_JOBS_BEFORE_LLM:
+        return jobs
+
+    logger.info(
+        f"[stage4] heuristic found {len(jobs)} jobs on {career_url} — "
+        f"trying LLM fallback"
+    )
+    candidates = _collect_link_candidates(html, base)
+    llm_jobs = await _extract_jobs_via_llm(career_url, html, candidates)
+
+    # Merge: keep heuristic hits first, dedupe against LLM picks.
+    merged_urls = {j.url for j in jobs}
+    for lj in llm_jobs:
+        if lj.url not in merged_urls:
+            jobs.append(lj)
+            merged_urls.add(lj.url)
     return jobs
 
 

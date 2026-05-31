@@ -4,27 +4,64 @@ import { useState } from 'react';
 import {
     ArrowLeft, Globe, SpinnerGap, MagnifyingGlass, Sparkle,
     Brain, LinkSimple, Crosshair, ChartBar, MagicWand, CheckCircle,
-    Briefcase, ArrowRight,
+    Briefcase, ArrowRight, Building,
 } from '@phosphor-icons/react';
 import type { Icon } from '@phosphor-icons/react';
 import { useAppStore } from '@/store/useAppStore';
-import { smartSearch, crawlUrl, extractJdStructured, scoreFit, fetchPage, extractJobLinks, rankJobsByFit, extensionCrawl, isExtensionAvailable } from '@/lib/api';
+import {
+    smartSearch, crawlUrl, extractJdStructured, scoreFit, fetchPage,
+    extractJobLinks, rankJobsByFit, extensionCrawl, isExtensionAvailable,
+    findCareer, type JobListing,
+} from '@/lib/api';
 
-type Phase = 'idle' | 'analyzing_cv' | 'searching' | 'extracting_links' | 'ranking' | 'crawling_job' | 'detecting_jd' | 'scoring';
+type Phase = 'idle' | 'analyzing_cv' | 'searching' | 'extracting_links' | 'ranking'
+    | 'resolving_career' | 'crawling_job' | 'detecting_jd' | 'scoring';
 
 const PHASE_CONFIG: Record<Exclude<Phase, 'idle'>, { label: string; icon: Icon }> = {
     analyzing_cv: { label: 'AI analyzing your CV...', icon: Brain },
     searching: { label: 'Searching jobs on the site...', icon: MagnifyingGlass },
     extracting_links: { label: 'Finding job listings...', icon: LinkSimple },
     ranking: { label: 'Ranking jobs by CV fit...', icon: Sparkle },
+    resolving_career: { label: 'Finding companies’ official career pages...', icon: Building },
     crawling_job: { label: 'Fetching job page...', icon: Globe },
     detecting_jd: { label: 'AI extracting job description...', icon: Crosshair },
     scoring: { label: 'Calculating match score...', icon: ChartBar },
 };
 
 const PHASE_ORDER: Exclude<Phase, 'idle'>[] = [
-    'analyzing_cv', 'searching', 'extracting_links', 'ranking', 'crawling_job', 'detecting_jd', 'scoring',
+    'analyzing_cv', 'searching', 'extracting_links', 'ranking',
+    'resolving_career', 'crawling_job', 'detecting_jd', 'scoring',
 ];
+
+// ── Title matching helpers ───────────────────────────────────────────────────
+// Pick the career-page job whose title most overlaps the title we got from the
+// ranked TopCV/VNW result. Token-overlap is good enough here — career pages
+// typically have a handful of distinct roles, so a strict match is fine.
+function _titleTokens(s: string): Set<string> {
+    const norm = (s || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    return new Set(norm.split(' ').filter((t) => t.length >= 3));
+}
+
+function pickBestTitleMatch(targetTitle: string, jobs: JobListing[]): JobListing | null {
+    if (!jobs.length) return null;
+    const target = _titleTokens(targetTitle);
+    if (target.size === 0) return jobs[0];
+
+    let best: { job: JobListing; score: number } | null = null;
+    for (const job of jobs) {
+        const jt = _titleTokens(job.title);
+        let overlap = 0;
+        for (const t of target) if (jt.has(t)) overlap++;
+        if (overlap > 0 && (!best || overlap > best.score)) {
+            best = { job, score: overlap };
+        }
+    }
+    return best?.job ?? null;
+}
 
 // Mirror of backend /api/crawl-url ?keepLinks=true cleanup so the AI extractor
 // receives compact "[LINK:url] text [/LINK]" markers instead of raw HTML noise.
@@ -75,8 +112,17 @@ export default function StepInputUrl() {
         try { return new URL(u).hostname; } catch { return u; }
     };
 
-    const handleSmartAnalyze = async () => {
-        const trimmed = url.trim();
+    // Hidden internal engine used when the user picks "Find jobs from my CV"
+    // — they never see this URL. Keep here, not in user-facing copy. See
+    // memory: feedback-hide-scraped-sites.
+    const INTERNAL_SEARCH_SITE = 'https://www.topcv.vn/';
+
+    const handleSmartAnalyze = async (overrideUrl?: string) => {
+        const trimmed = (overrideUrl ?? url).trim();
+        // Auto mode = the URL is internal (user clicked "Find jobs from my CV").
+        // Suppress the aggregator hostname in all user-facing copy so we never
+        // leak which site we're scraping.
+        const isAuto = !!overrideUrl;
         if (!trimmed) { setError('Please enter a job site URL.'); return; }
         if (!isValidUrl(trimmed)) { setError('Please enter a valid URL (http:// or https://)'); return; }
         if (!cvData) { setError('Please upload your CV first.'); return; }
@@ -99,7 +145,7 @@ export default function StepInputUrl() {
             // ─── Phase 2: Crawl the search results page ───
             setPhase('searching');
             const hostname = getHostname(trimmed);
-            setPhaseDetail(`Searching on ${hostname}...`);
+            setPhaseDetail(isAuto ? 'Searching for matching companies...' : `Searching on ${hostname}...`);
 
             let searchPage: { text: string; textWithLinks?: string } = { text: '', textWithLinks: '' };
             let searchBlocked = false;
@@ -145,9 +191,13 @@ export default function StepInputUrl() {
             // Guard: don't call AI with empty text
             if (!searchPage.text && !searchPage.textWithLinks) {
                 const tail = isExtensionAvailable()
-                    ? 'Even the browser-extension bypass failed — the site may require manual login or solving a CAPTCHA.'
-                    : 'Install the JobFit AI Chrome extension to bypass anti-bot protection by browsing as you.';
-                throw new Error(`Could not load search results from ${hostname}. ${tail}`);
+                    ? 'Even the browser-extension bypass failed — try again later or install the extension.'
+                    : 'Install the JobFit AI Chrome extension to bypass anti-bot protection.';
+                throw new Error(
+                    isAuto
+                        ? `Could not load matching jobs. ${tail}`
+                        : `Could not load search results from ${hostname}. ${tail}`,
+                );
             }
 
             const linksResult = await extractJobLinks(searchPage.textWithLinks || searchPage.text, trimmed);
@@ -156,7 +206,11 @@ export default function StepInputUrl() {
                     ? linksResult.jobs
                     : (linksResult.job_urls || []).map((u: string) => ({ url: u, title: '' }));
             if (!linksResult.found || candidates.length === 0) {
-                throw new Error(`No job listings found on ${hostname}. Try a different job site.`);
+                throw new Error(
+                    isAuto
+                        ? 'No matching jobs found. Try uploading a different CV or check back later.'
+                        : `No job listings found on ${hostname}. Try a different job site.`,
+                );
             }
 
             // ─── Phase 3.5: Rank candidates by CV fit BEFORE crawling ───
@@ -184,6 +238,9 @@ export default function StepInputUrl() {
 
             // Create placeholder entries — pre-filled with the ranked title so
             // the user sees real job names (and fit order) before crawling resolves.
+            // `source` starts as the TopCV/VNW URL; the resolving phase below
+            // rewrites it to the matching job URL on the company's own career
+            // page so we never crawl/score against the aggregator.
             for (const job of topJobs) {
                 addJdEntry({
                     id: `jd-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -194,7 +251,83 @@ export default function StepInputUrl() {
                 });
             }
 
-            // ─── Phase 4-6: Crawl + Extract JD + Score for each job ───
+            // ─── Phase 3.6: Resolve each ranked job → company → career page ───
+            // We use the TopCV/VNW posting only as a lead — once we know the
+            // company we look up its own career page, find the role there, and
+            // crawl that for the JD. This is what hides the aggregator from the
+            // end user and lines up with the apply-on-company-site model.
+            setPhase('resolving_career');
+
+            const initialEntries = useAppStore.getState().jdEntries;
+            const seenCompanies = new Set<string>();
+            for (let i = 0; i < initialEntries.length; i++) {
+                const entry = initialEntries[i];
+                setPhaseDetail(`Resolving company ${i + 1}/${initialEntries.length}...`);
+
+                try {
+                    const finder = await findCareer({ input_url: entry.source });
+                    const company = (finder.resolution.company_name || '').trim();
+                    const companyKey = company.toLowerCase();
+
+                    if (companyKey && seenCompanies.has(companyKey)) {
+                        updateJdEntry(entry.id, {
+                            status: 'error',
+                            error: `Duplicate company: ${company}`,
+                        });
+                        continue;
+                    }
+                    if (companyKey) seenCompanies.add(companyKey);
+
+                    if (!finder.chosen_career) {
+                        updateJdEntry(entry.id, {
+                            status: 'error',
+                            error: company
+                                ? `${company} — career page not found`
+                                : 'Could not resolve company from posting',
+                            company: company || undefined,
+                        });
+                        continue;
+                    }
+
+                    if (!finder.jobs.length) {
+                        updateJdEntry(entry.id, {
+                            status: 'error',
+                            error: `${company || 'Company'} — no openings on their career page`,
+                            company: company || undefined,
+                        });
+                        continue;
+                    }
+
+                    const targetTitle = entry.jobTitle || searchResult.inferred_job_title;
+                    const bestMatch = pickBestTitleMatch(targetTitle, finder.jobs);
+                    if (!bestMatch) {
+                        updateJdEntry(entry.id, {
+                            status: 'error',
+                            error: `${company} — no matching role on career page`,
+                            company: company || undefined,
+                        });
+                        continue;
+                    }
+
+                    // Rewrite the entry to point at the canonical career-page job.
+                    updateJdEntry(entry.id, {
+                        source: bestMatch.url,
+                        label: bestMatch.title || entry.label,
+                        jobTitle: bestMatch.title || entry.jobTitle,
+                        company: company || undefined,
+                        status: 'crawling',
+                    });
+                } catch (err) {
+                    updateJdEntry(entry.id, {
+                        status: 'error',
+                        error: err instanceof Error
+                            ? err.message
+                            : 'Failed to resolve career page',
+                    });
+                }
+            }
+
+            // ─── Phase 4-6: Crawl + Extract JD + Score for each resolved job ───
             setPhase('crawling_job');
 
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -207,12 +340,20 @@ export default function StepInputUrl() {
                 ld.jobBenefits && `\nBenefits:\n${ld.jobBenefits}`,
             ].filter(Boolean).join('\n');
 
-            // Process all jobs (sequential to avoid rate limits)
+            // Process all jobs (sequential to avoid rate limits). Re-read from
+            // the store after the resolving phase rewrote each entry's source
+            // to point at the company's own career-page job URL.
             const entries = useAppStore.getState().jdEntries;
             let completedCount = 0;
 
             for (const entry of entries) {
                 const entryId = entry.id;
+                // Skip entries the resolving phase already gave up on
+                // (no career page, no matching role, duplicate company).
+                if (entry.status === 'error') {
+                    completedCount++;
+                    continue;
+                }
                 const jobUrl = entry.source;
                 setPhaseDetail(`Processing job ${completedCount + 1}/${jobUrls.length}: ${jobUrl.slice(0, 50)}...`);
 
@@ -332,13 +473,17 @@ export default function StepInputUrl() {
                     // Prefer a title from the crawled page, then the ranked title
                     // from the search page (entry.jobTitle), then the inferred role.
                     const resolvedTitle = jobTitle || entry.jobTitle || searchResult.inferred_job_title;
+                    // Same priority for company: JSON-LD on the career page wins,
+                    // but fall back to the name we resolved in the prior phase
+                    // so we never display an empty company.
+                    const resolvedCompany = company || entry.company || '';
 
                     updateJdEntry(entryId, {
                         status: 'done',
                         jdData,
                         matchResult,
                         jobTitle: resolvedTitle,
-                        company,
+                        company: resolvedCompany,
                     });
 
                     // Also save first successful to legacy fields for backward compat
@@ -350,9 +495,9 @@ export default function StepInputUrl() {
                     addJobRecord({
                         id: `job-${Date.now()}`,
                         jobTitle: resolvedTitle,
-                        company,
+                        company: resolvedCompany,
                         jobUrl,
-                        siteName: hostname,
+                        siteName: getHostname(jobUrl),
                         overallScore: matchResult.overall_score,
                         timestamp: Date.now(),
                         jdData,
@@ -389,10 +534,8 @@ export default function StepInputUrl() {
                 Smart Job Finder
             </h2>
             <p style={{ color: 'var(--text-secondary)', marginBottom: 32, fontSize: '0.95rem', lineHeight: 1.6 }}>
-                Paste any job site URL (e.g. <span style={{ color: 'var(--accent-cyan)' }}>vietnamworks.com</span>,{' '}
-                <span style={{ color: 'var(--accent-cyan)' }}>topcv.vn</span>,{' '}
-                <span style={{ color: 'var(--accent-cyan)' }}>indeed.com</span>).
-                AI will read your CV, search for matching jobs, pick one, and analyze the fit.
+                AI reads your CV, finds companies hiring for your role, and scores each opening
+                directly from the company&apos;s official career page.
             </p>
 
             {/* How it works */}
@@ -404,7 +547,7 @@ export default function StepInputUrl() {
                     How it works
                 </p>
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                    {['CV → AI infers role', 'Search jobs on site', 'Pick a random job', 'Extract JD', 'Score match'].map((step, i) => (
+                    {['CV → AI infers role', 'Find matching companies', 'Resolve career pages', 'Score JD vs CV'].map((step, i) => (
                         <span key={i} style={{
                             fontSize: '0.75rem', padding: '3px 10px', borderRadius: 20,
                             background: 'var(--bg-secondary)', color: 'var(--text-secondary)',
@@ -417,29 +560,80 @@ export default function StepInputUrl() {
                 </div>
             </div>
 
-            {/* URL Input */}
-            <div style={{ position: 'relative', marginBottom: 16 }}>
-                <div style={{
-                    position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)',
-                    color: 'var(--text-muted)', pointerEvents: 'none',
-                }}>
-                    <Globe size={18} weight="duotone" />
+            {/* Primary CTA: Auto-find from CV */}
+            <button
+                className="btn-primary"
+                onClick={() => handleSmartAnalyze(INTERNAL_SEARCH_SITE)}
+                disabled={isProcessing || !cvData}
+                style={{
+                    width: '100%',
+                    height: 56,
+                    fontSize: '1rem',
+                    fontWeight: 600,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+                    marginBottom: 16,
+                    borderRadius: 'var(--radius-lg)',
+                }}
+            >
+                {isProcessing ? (
+                    <>
+                        <SpinnerGap size={18} style={{ animation: 'spin 1s linear infinite' }} />
+                        Processing...
+                    </>
+                ) : (
+                    <>
+                        <Sparkle size={18} weight="fill" /> Find jobs from my CV
+                    </>
+                )}
+            </button>
+
+            {/* Divider */}
+            <div style={{
+                display: 'flex', alignItems: 'center', gap: 12,
+                margin: '20px 0',
+                color: 'var(--text-muted)', fontSize: '0.75rem',
+            }}>
+                <div style={{ flex: 1, height: 1, background: 'var(--border-subtle)' }} />
+                <span style={{ textTransform: 'uppercase', letterSpacing: '0.08em' }}>or paste a specific URL</span>
+                <div style={{ flex: 1, height: 1, background: 'var(--border-subtle)' }} />
+            </div>
+
+            {/* URL Input (advanced / manual mode) */}
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                <div style={{ position: 'relative', flex: 1 }}>
+                    <div style={{
+                        position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)',
+                        color: 'var(--text-muted)', pointerEvents: 'none',
+                    }}>
+                        <Globe size={18} weight="duotone" />
+                    </div>
+                    <input
+                        className="input-field"
+                        type="url"
+                        value={url}
+                        onChange={(e) => { setUrl(e.target.value); setError(''); }}
+                        onKeyDown={(e) => { if (e.key === 'Enter' && !isProcessing) handleSmartAnalyze(); }}
+                        disabled={isProcessing}
+                        style={{
+                            paddingLeft: 42,
+                            height: 48,
+                            fontSize: '0.9rem',
+                            borderRadius: 'var(--radius-lg)',
+                            width: '100%',
+                        }}
+                    />
                 </div>
-                <input
-                    className="input-field"
-                    type="url"
-                    placeholder="https://www.vietnamworks.com/"
-                    value={url}
-                    onChange={(e) => { setUrl(e.target.value); setError(''); }}
-                    onKeyDown={(e) => { if (e.key === 'Enter' && !isProcessing) handleSmartAnalyze(); }}
-                    disabled={isProcessing}
+                <button
+                    className="btn-secondary"
+                    onClick={() => handleSmartAnalyze()}
+                    disabled={isProcessing || !url.trim()}
                     style={{
-                        paddingLeft: 42,
-                        height: 52,
-                        fontSize: '0.95rem',
-                        borderRadius: 'var(--radius-lg)',
+                        height: 48, padding: '0 18px',
+                        display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.88rem',
                     }}
-                />
+                >
+                    Search this URL
+                </button>
             </div>
 
             {/* Inferred title badge */}
@@ -541,23 +735,6 @@ export default function StepInputUrl() {
                 <button className="btn-secondary" onClick={() => setStep(1)} disabled={isProcessing}
                     style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <ArrowLeft size={16} weight="bold" /> Back
-                </button>
-                <button
-                    className="btn-primary"
-                    onClick={handleSmartAnalyze}
-                    disabled={isProcessing || !url.trim()}
-                    style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.95rem' }}
-                >
-                    {isProcessing ? (
-                        <>
-                            <SpinnerGap size={16} style={{ animation: 'spin 1s linear infinite' }} />
-                            Processing...
-                        </>
-                    ) : (
-                        <>
-                            <Sparkle size={16} weight="fill" /> Find & Analyze Job
-                        </>
-                    )}
                 </button>
             </div>
 
