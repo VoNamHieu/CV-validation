@@ -176,9 +176,23 @@ export default function StepInputUrl() {
                     // Prefer the extension's pre-cleaned textWithLinks. If the user
                     // hasn't reloaded the extension yet, fall back to converting
                     // ext.html ourselves so the AI doesn't get raw HTML noise.
+                    const fallbackBuilt = !ext.textWithLinks && !!ext.html;
                     const linkText = ext.textWithLinks || htmlToTextWithLinks(ext.html || '') || ext.text;
                     searchPage = { text: ext.text, textWithLinks: linkText };
-                    console.log(`[StepInputUrl] Extension crawl OK: text=${ext.text.length} chars, links=${linkText.length} chars`);
+                    // Detailed payload stats — we ship `linkText` to the AI
+                    // extractor next, so we want to see exactly what it looks
+                    // like before blaming the AI for missing job URLs.
+                    const linkMarkerCount = (linkText.match(/\[LINK:/g) || []).length;
+                    console.log('[StepInputUrl] Extension crawl OK', {
+                        searchUrl: searchResult.search_url,
+                        textLen: ext.text.length,
+                        extTextWithLinksLen: ext.textWithLinks?.length || 0,
+                        htmlLen: ext.html?.length || 0,
+                        finalLinkTextLen: linkText.length,
+                        linkMarkerCount,
+                        usedFallbackBuilder: fallbackBuilt,
+                        linkTextSample: linkText.slice(0, 500),
+                    });
                 } else {
                     console.log('[StepInputUrl] Extension crawl failed:', ext.error);
                 }
@@ -200,7 +214,20 @@ export default function StepInputUrl() {
                 );
             }
 
-            const linksResult = await extractJobLinks(searchPage.textWithLinks || searchPage.text, trimmed);
+            const aiInput = searchPage.textWithLinks || searchPage.text;
+            const aiInputMarkers = (aiInput.match(/\[LINK:/g) || []).length;
+            console.log('[StepInputUrl] Calling extractJobLinks', {
+                inputLen: aiInput.length,
+                linkMarkerCount: aiInputMarkers,
+                hasLinkMarkers: aiInputMarkers > 0,
+            });
+            const linksResult = await extractJobLinks(aiInput, trimmed);
+            console.log('[StepInputUrl] extractJobLinks response', {
+                found: linksResult.found,
+                totalFound: linksResult.total_found,
+                jobsCount: Array.isArray(linksResult.jobs) ? linksResult.jobs.length : 0,
+                firstJob: Array.isArray(linksResult.jobs) ? linksResult.jobs[0] : null,
+            });
             const candidates: { url: string; title?: string }[] =
                 Array.isArray(linksResult.jobs) && linksResult.jobs.length
                     ? linksResult.jobs

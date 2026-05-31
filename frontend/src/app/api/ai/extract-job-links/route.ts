@@ -35,6 +35,20 @@ export async function POST(request: NextRequest) {
         }
         const compactLinks = linkRecords.join("\n");
 
+        // ── DEBUG: log what arrived and what we extracted, so we can tell
+        //    whether an empty-result run was caused by (a) upstream sending
+        //    no [LINK:] markers at all, (b) markers present but no job-shaped
+        //    URLs among them, or (c) AI failing to pick anything from a
+        //    healthy link list. Server-side console — visible in dev logs.
+        console.log("[extract-job-links] incoming payload", {
+            siteUrl: site_url,
+            htmlTextLen: html_text.length,
+            linkMarkerCount: linkRecords.length,
+            compactLinksLen: compactLinks.length,
+            usingCompactLinks: !!compactLinks,
+            firstLinkRecords: linkRecords.slice(0, 5),
+        });
+
         const systemPrompt = `You are an expert web scraper. Given a list of links extracted from a job search results page, identify which ones are individual job postings (URL + the visible job title shown for that link).
 
 RULES:
@@ -67,9 +81,16 @@ ${compactLinks ? "LINKS ON PAGE (one per line):" : "PAGE CONTENT:"}
 ${payload}`;
 
         const result = await callAILight(systemPrompt, userPrompt);
+        console.log("[extract-job-links] AI raw response", {
+            len: result?.length || 0,
+            sample: (result || "").slice(0, 500),
+        });
         let parsed: { found?: boolean; jobs?: Array<{ url?: string; title?: string }>; total_found?: number };
         try { parsed = safeJsonParse(result); }
-        catch { return NextResponse.json({ detail: "AI returned invalid JSON. Please retry." }, { status: 502 }); }
+        catch {
+            console.warn("[extract-job-links] AI returned invalid JSON");
+            return NextResponse.json({ detail: "AI returned invalid JSON. Please retry." }, { status: 502 });
+        }
 
         // Normalize: keep jobs with a url, de-dupe, and derive job_urls for
         // backward compatibility with callers that only read the URL list.
@@ -81,6 +102,12 @@ ${payload}`;
             seen.add(url);
             jobs.push({ url, title: (j?.title || "").trim() });
         }
+
+        console.log("[extract-job-links] returning", {
+            found: jobs.length > 0,
+            jobsCount: jobs.length,
+            firstJob: jobs[0] || null,
+        });
 
         return NextResponse.json({
             found: jobs.length > 0,

@@ -473,6 +473,8 @@ function _extractPageContent() {
     // would be mostly <head>/scripts/CSS noise.
     // Mirrors the backend's /api/crawl-url ?keepLinks=true logic.
     let textWithLinks = '';
+    let textWithLinksLinkCount = 0;
+    let textWithLinksBuildError = '';
     try {
         textWithLinks = html
             .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
@@ -489,8 +491,14 @@ function _extractPageContent() {
             .replace(/&amp;/g, '&')
             .replace(/\s+/g, ' ')
             .trim()
-            .slice(0, 25000);
-    } catch (_) { /* fall back to empty */ }
+            // TopCV/VNW search pages bury job cards under a heavy filter sidebar
+            // + ads — the first 25k chars often run out before the cards. Use
+            // 80k to give the AI room to see all visible postings.
+            .slice(0, 80000);
+        textWithLinksLinkCount = (textWithLinks.match(/\[LINK:/g) || []).length;
+    } catch (e) {
+        textWithLinksBuildError = e?.message || String(e);
+    }
 
     let jsonLd = null;
     const scripts = document.querySelectorAll('script[type="application/ld+json"]');
@@ -508,7 +516,14 @@ function _extractPageContent() {
         } catch (_) { /* ignore */ }
     }
 
-    return { html, text, textWithLinks, jsonLd, title, looksLikeChallenge };
+    return {
+        html, text, textWithLinks, jsonLd, title, looksLikeChallenge,
+        // Debug fields — surfaced in EXT_CRAWL polling logs so we can tell
+        // whether textWithLinks actually contains usable [LINK:] markers
+        // before we ship it to the AI extractor downstream.
+        textWithLinksLinkCount,
+        textWithLinksBuildError,
+    };
 }
 
 async function extCrawl(url) {
@@ -546,19 +561,35 @@ async function extCrawl(url) {
                 // ── DEBUG: dump what we actually got so we can tell whether
                 //    a "successful" 25k-char return is real content or a soft
                 //    anti-bot page that our looksLikeChallenge regex missed.
-                const hasTopCVJobLinks = /\/viec-lam\/[^"\s]+\.html/.test(result?.html || '');
-                const hasVNWJobLinks = /-jv(?:["\/]|$)/.test(result?.html || '');
+                //
+                // The job-link regexes are anchored to `href=` so we only
+                // accept the page once real <a> tags with job URLs exist —
+                // matching loose text would let us return when /viec-lam/...
+                // appears only inside data-attrs or inline JSON.
+                const hasTopCVJobLinks =
+                    /href=["'][^"']*\/viec-lam\/[^"'\s]+\.html/.test(result?.html || '');
+                const hasVNWJobLinks =
+                    /href=["'][^"']*-jv(?:["'?#\/])/.test(result?.html || '');
                 const hasJobLinks = hasTopCVJobLinks || hasVNWJobLinks;
+                // Sample a few [LINK:] markers so we can eyeball whether the
+                // textWithLinks payload is what we expect to ship downstream.
+                const linkSamples = (result?.textWithLinks || '')
+                    .match(/\[LINK:[^\]]+\][^[]{0,80}/g)
+                    ?.slice(0, 3) || [];
                 console.log(`[JobFit AI] EXT_CRAWL DEBUG poll #${pollIdx}`, {
                     url,
                     title: result?.title,
                     textLen: result?.text?.length || 0,
                     htmlLen: result?.html?.length || 0,
+                    textWithLinksLen: result?.textWithLinks?.length || 0,
+                    textWithLinksLinkCount: result?.textWithLinksLinkCount || 0,
+                    textWithLinksBuildError: result?.textWithLinksBuildError || '',
                     looksLikeChallenge: result?.looksLikeChallenge,
                     hasTopCVJobLinks,
                     hasVNWJobLinks,
                     isSearchPage,
                     firstChars: (result?.text || '').slice(0, 300),
+                    linkSamples,
                 });
                 pollIdx++;
 
