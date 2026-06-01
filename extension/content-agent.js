@@ -226,6 +226,28 @@ function detectComponentType(el) {
 /**
  * Find a label for an element by checking <label for=>, parent label, fieldset legend, and form-group containers.
  */
+/**
+ * Walk up ancestors and capture the surrounding text. Used as fallback context
+ * when label/placeholder are empty — gives the LLM enough to infer field intent
+ * (e.g., a `<div>` headline above a bare input). Strips other form controls so
+ * the captured text doesn't include sibling field values.
+ */
+function getNearbyText(el, maxChars = 300) {
+    let cur = el.parentElement;
+    let depth = 0;
+    while (cur && depth < 6) {
+        const clone = cur.cloneNode(true);
+        clone.querySelectorAll('input, select, textarea, button, script, style, svg').forEach(n => n.remove());
+        const text = (clone.textContent || '').replace(/\s+/g, ' ').trim();
+        if (text.length > 5) {
+            return text.length > maxChars ? text.slice(0, maxChars) + '…' : text;
+        }
+        cur = cur.parentElement;
+        depth++;
+    }
+    return '';
+}
+
 function findLabelFor(el, root) {
     if (el.id) {
         const labelEl = root.querySelector(`label[for="${CSS.escape(el.id)}"]`);
@@ -255,7 +277,7 @@ function findLabelFor(el, root) {
  */
 function extractFieldsFromRoot(root) {
     const fields = [];
-    const seen = new Set();
+    const seenEl = new WeakSet(); // dedupe by element identity (selectors can overlap)
     const radioGroups = new Map(); // name → group entry
 
     const elements = root.querySelectorAll(
@@ -266,9 +288,15 @@ function extractFieldsFromRoot(root) {
     );
 
     for (const el of elements) {
-        // Skip truly hidden elements (display:none / visibility:hidden) but NOT off-screen elements
+        if (seenEl.has(el)) continue;
+        seenEl.add(el);
+
+        // Skip truly hidden elements (display:none / visibility:hidden) but NOT off-screen elements.
+        // Exception: <input type="file"> is routinely hidden behind a styled button/label —
+        // the file can still be set programmatically via DataTransfer, so keep it.
         const style = window.getComputedStyle(el);
-        if (style.display === 'none' || style.visibility === 'hidden') continue;
+        const isHidden = style.display === 'none' || style.visibility === 'hidden';
+        if (isHidden && el.type !== 'file') continue;
 
         // ── Radio: group by `name`, emit one field per group with options ──
         if (el.type === 'radio' && el.name) {
@@ -291,6 +319,7 @@ function extractFieldsFromRoot(root) {
             if (el.checked) group.value = el.value;
             if (el.required || el.getAttribute('aria-required') === 'true') group.required = true;
             if (!group.label) group.label = findLabelFor(el, root);
+            if (!group.nearbyText) group.nearbyText = getNearbyText(el);
             continue;
         }
 
@@ -300,25 +329,22 @@ function extractFieldsFromRoot(root) {
             const selector = el.id
                 ? `#${CSS.escape(el.id)}`
                 : (el.name ? `input[type="checkbox"][name="${CSS.escape(el.name)}"]` : buildUniqueSelector(el));
-            const key = `checkbox|${el.id}|${el.name}|${label}`;
-            if (!seen.has(key)) {
-                seen.add(key);
-                fields.push({
-                    index: fields.length,
-                    tag: 'input',
-                    type: 'checkbox',
-                    id: el.id || '',
-                    name: el.name || '',
-                    label,
-                    placeholder: '',
-                    ariaLabel: el.getAttribute('aria-label') || '',
-                    classes: el.className?.toString().substring(0, 100) || '',
-                    value: el.checked ? 'true' : 'false',
-                    required: el.required || el.getAttribute('aria-required') === 'true',
-                    componentType: 'checkbox',
-                    selector,
-                });
-            }
+            fields.push({
+                index: fields.length,
+                tag: 'input',
+                type: 'checkbox',
+                id: el.id || '',
+                name: el.name || '',
+                label,
+                nearbyText: getNearbyText(el),
+                placeholder: '',
+                ariaLabel: el.getAttribute('aria-label') || '',
+                classes: el.className?.toString().substring(0, 100) || '',
+                value: el.checked ? 'true' : 'false',
+                required: el.required || el.getAttribute('aria-required') === 'true',
+                componentType: 'checkbox',
+                selector,
+            });
             continue;
         }
 
@@ -331,11 +357,6 @@ function extractFieldsFromRoot(root) {
 
         // Find associated label (via shared helper)
         const label = findLabelFor(el, root);
-
-        // Build unique key
-        const key = `${id}|${name}|${type}|${label}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
 
         // Get current value
         let value = el.value || '';
@@ -371,6 +392,7 @@ function extractFieldsFromRoot(root) {
             id,
             name,
             label,
+            nearbyText: getNearbyText(el),
             placeholder,
             ariaLabel,
             classes,
@@ -391,6 +413,7 @@ function extractFieldsFromRoot(root) {
             id: '',
             name,
             label: group.label,
+            nearbyText: group.nearbyText || '',
             placeholder: '',
             ariaLabel: '',
             classes: '',
@@ -1021,6 +1044,23 @@ function detectCompletionSignals() {
 }
 
 /**
+ * Capture the visible text of the active form area as a single block.
+ * Lets the LLM see headings / instructions / required-field hints that aren't
+ * attached to any specific input via a label.
+ */
+function getFormContext(maxChars = 3000) {
+    const root = findActiveModal()
+        || document.querySelector('form')
+        || document.querySelector('main')
+        || document.body;
+    if (!root) return '';
+    const clone = root.cloneNode(true);
+    clone.querySelectorAll('script, style, nav, header, footer, svg').forEach(n => n.remove());
+    const text = (clone.textContent || '').replace(/\s+/g, ' ').trim();
+    return text.length > maxChars ? text.slice(0, maxChars) + '…' : text;
+}
+
+/**
  * Full page state observation.
  */
 async function observePageState() {
@@ -1030,6 +1070,7 @@ async function observePageState() {
     const stepIndicator = detectStepIndicator();
     const completionSignals = detectCompletionSignals();
     const blockers = detectBlockers();
+    const formContext = getFormContext();
 
     const unfilledRequired = formFields
         .filter(f => f.required && !f.value)
@@ -1038,6 +1079,7 @@ async function observePageState() {
     return {
         url: window.location.href,
         formFields,
+        formContext,
         buttons,
         errors,
         stepIndicator,

@@ -19,6 +19,7 @@ interface FormField {
     id: string;
     name: string;
     label: string;
+    nearbyText?: string;
     placeholder: string;
     ariaLabel: string;
     classes: string;
@@ -48,6 +49,7 @@ interface PageBlocker {
 interface PageState {
     url: string;
     formFields: FormField[];
+    formContext?: string;
     buttons: PageButton[];
     errors: PageError[];
     stepIndicator?: { current: number; total: number } | null;
@@ -114,7 +116,11 @@ export async function POST(request: Request) {
 - Persistently unfilled selectors (we tried filling these ≥2 times and the value did NOT stick — do NOT keep retrying, escalate to NEED_HUMAN if they're required): ${JSON.stringify(pageState.persistentlyUnfilled || [])}
 - Visible buttons: ${JSON.stringify(pageState.buttons)}
 
+## FORM CONTEXT (visible text of the form area — use this to understand field intent when label/placeholder are empty, and to spot required-field hints like asterisks or "bắt buộc"):
+${pageState.formContext || '(empty)'}
+
 ## UNFILLED FORM FIELDS (need filling):
+Each field carries label, placeholder, ariaLabel, and **nearbyText** (text of the nearest ancestor — use this when label is empty to infer what the field is asking for).
 ${JSON.stringify(unfilledFields, null, 2)}
 
 ## ALREADY FILLED FIELDS:
