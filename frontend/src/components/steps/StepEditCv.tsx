@@ -135,7 +135,11 @@ function generateHtml(cv: CVData): string {
    ═══════════════════════════════════════════════════════════════════════════════ */
 
 export default function StepEditCv() {
-    const { cvData, jdEntries, setStep, setCvData, updateJdEntry } = useAppStore();
+    const {
+        cvData, jdEntries, setStep, setCvData, updateJdEntry,
+        fullyAutoMode, setFullyAutoMode,
+    } = useAppStore();
+    const fullAutoFiredRef = useRef(false);
 
     // All entries that have optimized CVs, sorted by score
     const sortedEntries = useMemo(() => {
@@ -235,8 +239,13 @@ export default function StepEditCv() {
             );
             setVariantsByEntry(prev => ({ ...prev, [currentEntry.id]: data.variants }));
             setVariantIdxByEntry(prev => ({ ...prev, [currentEntry.id]: 0 }));
-            // Make the first variant the canonical optimizedCv (used by apply / download flows)
-            updateJdEntry(currentEntry.id, { optimizedCv: data.variants[0].cv });
+            // Make the first variant the canonical optimizedCv (used by apply / download flows).
+            // Invalidate the cached PDF — content changed, so the batch loop will re-render.
+            updateJdEntry(currentEntry.id, {
+                optimizedCv: data.variants[0].cv,
+                optimizedCvPdfBase64: undefined,
+                optimizedCvFileName: undefined,
+            });
         } catch (err) {
             setReoptimizeError(err instanceof Error ? err.message : 'Failed to re-optimize');
         } finally {
@@ -250,7 +259,11 @@ export default function StepEditCv() {
         const v = currentVariants[idx];
         if (!v) return;
         setVariantIdxByEntry(prev => ({ ...prev, [currentEntry.id]: idx }));
-        updateJdEntry(currentEntry.id, { optimizedCv: v.cv });
+        updateJdEntry(currentEntry.id, {
+            optimizedCv: v.cv,
+            optimizedCvPdfBase64: undefined,
+            optimizedCvFileName: undefined,
+        });
     }, [currentEntry, currentVariants, updateJdEntry]);
 
     const [downloadingPdf, setDownloadingPdf] = useState(false);
@@ -455,26 +468,33 @@ export default function StepEditCv() {
             const entry = candidates[i];
             const cv = entry.optimizedCv!;
             try {
-                const html = generateHtml(cv);
-                const safeTitle = (entry.jobTitle || 'job').replace(/\s+/g, '_').slice(0, 40);
-                const filename = `${cv.name.replace(/\s+/g, '_')}_${safeTitle}.pdf`;
-                const res = await fetch('/api/render-cv-pdf', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ html, filename }),
-                });
-                if (!res.ok) {
-                    const err = await res.json().catch(() => ({}));
-                    throw new Error(err.detail || `HTTP ${res.status}`);
+                // Use the PDF cached at Optimize time if available; only render on miss.
+                let base64 = entry.optimizedCvPdfBase64;
+                let outFilename = entry.optimizedCvFileName;
+                if (!base64 || !outFilename) {
+                    const html = generateHtml(cv);
+                    const safeTitle = (entry.jobTitle || 'job').replace(/\s+/g, '_').slice(0, 40);
+                    const filename = `${cv.name.replace(/\s+/g, '_')}_${safeTitle}.pdf`;
+                    const res = await fetch('/api/render-cv-pdf', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ html, filename }),
+                    });
+                    if (!res.ok) {
+                        const err = await res.json().catch(() => ({}));
+                        throw new Error(err.detail || `HTTP ${res.status}`);
+                    }
+                    const data = await res.json() as { base64: string; filename: string };
+                    base64 = data.base64;
+                    outFilename = data.filename;
                 }
-                const data = await res.json() as { base64: string; filename: string };
                 jobs.push({
                     jobUrl: entry.source!,
                     jobTitle: entry.jobTitle || 'Unknown',
                     company: entry.company || entry.label || '',
                     profile: buildProfile(cv),
-                    cvFileBase64: data.base64,
-                    cvFileName: data.filename,
+                    cvFileBase64: base64,
+                    cvFileName: outFilename,
                 });
             } catch (err) {
                 // Per-job render failure: include the job without a CV file
@@ -504,6 +524,18 @@ export default function StepEditCv() {
         setBatchProgress(null);
         setBatchStarting(false);
     }, []);
+
+    // ── Fully-auto handoff: when we land here in auto mode with optimized
+    //    CVs already in place (from StepInputUrl's full_auto branch), fire
+    //    the batch apply immediately and exit auto mode. Guarded against
+    //    Strict-Mode double-mount + late hydration. ──
+    useEffect(() => {
+        if (!fullyAutoMode || fullAutoFiredRef.current) return;
+        if (sortedEntries.length === 0) return;
+        fullAutoFiredRef.current = true;
+        triggerFullyAutoApply();
+        setFullyAutoMode(false);
+    }, [fullyAutoMode, sortedEntries, triggerFullyAutoApply, setFullyAutoMode]);
 
     const goPrev = () => setSelectedIdx(i => Math.max(0, i - 1));
     const goNext = () => setSelectedIdx(i => Math.min(sortedEntries.length - 1, i + 1));

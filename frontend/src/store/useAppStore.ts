@@ -47,6 +47,8 @@ export interface JDEntry {
   jdData?: JDData;
   matchResult?: MatchResult;
   optimizedCv?: CVData;
+  optimizedCvPdfBase64?: string;
+  optimizedCvFileName?: string;
   jobTitle?: string;
   company?: string;
 }
@@ -106,6 +108,11 @@ interface AppState {
   loadingMessage: string;
   setLoading: (loading: boolean, message?: string) => void;
 
+  // Fully-auto pipeline (CV upload → search → optimize → batch apply, no clicks)
+  // Volatile: not persisted, so a page reload exits auto mode.
+  fullyAutoMode: boolean;
+  setFullyAutoMode: (v: boolean) => void;
+
   // Reset
   resetAll: () => void;
 }
@@ -125,6 +132,7 @@ const initialState = {
   selectedJdId: null as string | null,
   isLoading: false,
   loadingMessage: '',
+  fullyAutoMode: false,
 };
 
 export const useAppStore = create<AppState>()(
@@ -186,11 +194,20 @@ export const useAppStore = create<AppState>()(
 
       setLoading: (loading, message = '') => set({ isLoading: loading, loadingMessage: message }),
 
+      setFullyAutoMode: (v) => set({ fullyAutoMode: v }),
+
       resetAll: () => set(initialState),
     }),
     {
       name: 'ai-job-fit-optimizer',
       version: 2,
+      // fullyAutoMode is intentionally excluded so a reload mid-pipeline
+      // doesn't resurrect auto-apply on a stale state.
+      partialize: (state) => {
+        const rest: Partial<AppState> = { ...state };
+        delete (rest as { fullyAutoMode?: boolean }).fullyAutoMode;
+        return rest;
+      },
       // Defaults missing fields on persisted records from older versions.
       // Why: jobHistory existed before status/notes/view — without this, restored
       // records would crash filters/dropdowns expecting `status` to be set.

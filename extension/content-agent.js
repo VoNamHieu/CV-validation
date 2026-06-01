@@ -1199,14 +1199,9 @@ async function runAgentLoop(profile) {
                 return;
             }
 
-            // Blocker detected (captcha, login wall, Cloudflare) — bail out to human
-            if (state.blockers && state.blockers.length > 0) {
-                const blockerMsg = state.blockers.map(b => b.message).join(', ');
-                removeProgress();
-                showToast(`⚠️ Cần người dùng: ${blockerMsg}`, 8000);
-                reportResult(false, `Blocker: ${blockerMsg}`);
-                return;
-            }
+            // Blockers (captcha, login wall) are reported to the LLM via state.blockers
+            // (see line 1138). Don't bail here — let the LLM keep filling non-blocker
+            // fields and decide NEED_HUMAN itself only when there's nothing left to fill.
 
             // Step changed (multi-step wizard advanced) or URL changed → reset
             // stuck-detection state so a fresh page doesn't trip false positives.

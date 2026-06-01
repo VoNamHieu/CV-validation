@@ -3,14 +3,14 @@
 import { useCallback, useRef, useState } from 'react';
 import {
     UploadSimple, FileText, X, SpinnerGap, Brain,
-    CheckCircle, Sparkle, ArrowRight, WarningCircle,
+    CheckCircle, Sparkle, ArrowRight, WarningCircle, Lightning,
 } from '@phosphor-icons/react';
 import { useAppStore } from '@/store/useAppStore';
 import { parsePdfWithAI } from '@/lib/api';
 import { cvToExtensionProfile } from '@/lib/extension-profile';
 
 export default function StepUploadCV() {
-    const { setCvRawText, setCvData, setStep, cvFileName } = useAppStore();
+    const { setCvRawText, setCvData, setStep, cvFileName, setFullyAutoMode } = useAppStore();
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [dragOver, setDragOver] = useState(false);
     const [error, setError] = useState('');
@@ -263,7 +263,7 @@ export default function StepUploadCV() {
             )}
 
             {/* Action */}
-            <div style={{ marginTop: 40, display: 'flex', justifyContent: 'flex-end' }}>
+            <div style={{ marginTop: 40, display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
                 <button
                     className="btn-primary"
                     disabled={!uploaded || processing}
@@ -271,6 +271,19 @@ export default function StepUploadCV() {
                     style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '13px 28px' }}
                 >
                     Find Matching Jobs <ArrowRight size={16} weight="bold" />
+                </button>
+                <button
+                    className="btn-primary"
+                    disabled={!uploaded || processing}
+                    onClick={() => { setFullyAutoMode(true); setStep(2); }}
+                    title="Auto-search, optimize, and apply with no further clicks"
+                    style={{
+                        display: 'flex', alignItems: 'center', gap: 8, padding: '13px 22px',
+                        background: 'linear-gradient(135deg, #059669, #10b981)',
+                        boxShadow: '0 2px 12px rgba(5,150,105,0.3)',
+                    }}
+                >
+                    <Lightning size={16} weight="fill" /> Fully Auto Apply
                 </button>
             </div>
         </div>

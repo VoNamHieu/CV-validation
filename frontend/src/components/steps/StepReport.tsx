@@ -335,7 +335,29 @@ export default function StepReport() {
         setOptimizingId(entry.id);
         try {
             const result = await optimizeCv(cvData, entry.jdData, entry.matchResult);
-            updateJdEntry(entry.id, { optimizedCv: result });
+
+            // Render PDF eagerly so the extension can upload it during auto-apply
+            // without paying the render cost per job. Render failure is non-fatal —
+            // the batch flow will fall back to rendering on demand.
+            let pdfCache: { optimizedCvPdfBase64?: string; optimizedCvFileName?: string } = {};
+            try {
+                const html = generateHtml(result);
+                const safeTitle = (entry.jobTitle || 'job').replace(/\s+/g, '_').slice(0, 40);
+                const filename = `${result.name.replace(/\s+/g, '_')}_${safeTitle}.pdf`;
+                const res = await fetch('/api/render-cv-pdf', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ html, filename }),
+                });
+                if (res.ok) {
+                    const { base64, filename: outName } = await res.json() as { base64: string; filename: string };
+                    pdfCache = { optimizedCvPdfBase64: base64, optimizedCvFileName: outName };
+                }
+            } catch (pdfErr) {
+                console.warn('[Optimize] PDF cache render failed (non-fatal):', pdfErr);
+            }
+
+            updateJdEntry(entry.id, { optimizedCv: result, ...pdfCache });
         } catch (e) {
             console.error('Optimization failed:', e);
         }

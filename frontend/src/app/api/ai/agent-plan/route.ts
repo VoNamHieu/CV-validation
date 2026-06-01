@@ -138,7 +138,7 @@ Decide the single best next action. Return a JSON object.
 4. If all fields are filled, no errors, and there's a "Submit"/"Apply" button → action "DONE" (let user review and submit manually)
 5. If no fields found → action "SCROLL" to discover more fields
 6. If the page shows success/completion → action "DONE"
-7. If you're stuck, the form requires info not in the profile, or there are BLOCKERS (captcha/login/Cloudflare) → action "NEED_HUMAN" with explanation
+7. If you're stuck or the form requires info not in the profile → action "NEED_HUMAN" with explanation. BLOCKERS (captcha/login) alone are NOT a reason to bail: keep filling every other unfilled field first. Only return NEED_HUMAN for a blocker when there are no more fields you can fill AND the blocker still prevents progress.
 8. NEVER click Submit/Apply yourself — always return DONE and let the user submit
 9. For fields with componentType 'react-select', 'mui-autocomplete', 'ant-select', 'select2', or 'custom-dropdown': use action 'custom-select'
 10. For fields with componentType 'native-select': use action 'select'

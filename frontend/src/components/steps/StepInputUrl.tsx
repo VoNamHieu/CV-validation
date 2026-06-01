@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
     ArrowLeft, Globe, SpinnerGap, MagnifyingGlass, Sparkle,
     Brain, LinkSimple, Crosshair, ChartBar, MagicWand, CheckCircle,
@@ -11,11 +11,12 @@ import { useAppStore } from '@/store/useAppStore';
 import {
     smartSearch, crawlUrl, extractJdStructured, scoreFit, fetchPage,
     extractJobLinks, rankJobsByFit, extensionCrawl, isExtensionAvailable,
-    findCareer, getFeaturedJobs, type JobListing,
+    findCareer, getFeaturedJobs, optimizeCv, type JobListing,
 } from '@/lib/api';
 
 type Phase = 'idle' | 'analyzing_cv' | 'searching' | 'extracting_links'
-    | 'ranking' | 'resolving_career' | 'crawling_job' | 'detecting_jd' | 'scoring';
+    | 'ranking' | 'resolving_career' | 'crawling_job' | 'detecting_jd' | 'scoring'
+    | 'optimizing';
 
 // Phase labels are intentionally generic — the user should perceive the system
 // as "AI is searching for matching jobs", regardless of which backend path is
@@ -29,6 +30,7 @@ const PHASE_CONFIG: Record<Exclude<Phase, 'idle'>, { label: string; icon: Icon }
     crawling_job: { label: 'Fetching job page...', icon: Globe },
     detecting_jd: { label: 'AI extracting job description...', icon: Crosshair },
     scoring: { label: 'Calculating match score...', icon: ChartBar },
+    optimizing: { label: 'Tailoring your CV per job...', icon: Sparkle },
 };
 
 // Two pipelines, same UX. Auto-find ("Find jobs from my CV") uses the demo
@@ -41,6 +43,12 @@ const PHASE_ORDER_FEATURED: Exclude<Phase, 'idle'>[] = [
 const PHASE_ORDER_URL: Exclude<Phase, 'idle'>[] = [
     'analyzing_cv', 'searching', 'extracting_links', 'ranking',
     'resolving_career', 'crawling_job', 'detecting_jd', 'scoring',
+];
+// Fully-auto extends the featured pipeline with a CV-tailoring step
+// before handoff to the extension's batch apply.
+const PHASE_ORDER_FULL_AUTO: Exclude<Phase, 'idle'>[] = [
+    'analyzing_cv', 'searching', 'extracting_links', 'ranking',
+    'crawling_job', 'detecting_jd', 'scoring', 'optimizing',
 ];
 
 // ── Title matching helpers ───────────────────────────────────────────────────
@@ -102,7 +110,7 @@ export default function StepInputUrl() {
     const {
         setStep, cvData, setJdData, setMatchResult,
         clearJdEntries, addJdEntry, updateJdEntry, setOptimizedCv, addJobRecord,
-        setView, jobHistory,
+        setView, jobHistory, fullyAutoMode, setFullyAutoMode,
     } = useAppStore();
 
     const [url, setUrl] = useState('');
@@ -112,8 +120,11 @@ export default function StepInputUrl() {
     const [inferredTitle, setInferredTitle] = useState('');
     // Which pipeline is currently running — controls which phase chip-row to
     // render. 'featured' = curated VN employers (demo flow); 'url' = paste-a-
-    // URL flow that goes through TopCV/VNW.
-    const [flowMode, setFlowMode] = useState<'featured' | 'url'>('featured');
+    // URL flow that goes through VNW. 'full_auto' = featured + auto-optimize +
+    // jump to step 4 for the extension batch.
+    const [flowMode, setFlowMode] = useState<'featured' | 'url' | 'full_auto'>('featured');
+    // Guard the auto-trigger useEffect against React Strict-Mode double-fires.
+    const autoStartedRef = useRef(false);
 
     const isValidUrl = (u: string) => {
         try {
@@ -132,11 +143,13 @@ export default function StepInputUrl() {
     const handleFeaturedAnalyze = async () => {
         if (!cvData) { setError('Please upload your CV first.'); return; }
 
+        const isFullAuto = useAppStore.getState().fullyAutoMode;
+
         setError('');
         setOptimizedCv(null);
         setInferredTitle('');
         clearJdEntries();
-        setFlowMode('featured');
+        setFlowMode(isFullAuto ? 'full_auto' : 'featured');
 
         try {
             // ── Phase 1: read CV → inferred role (display only; ranker uses the full CV) ──
@@ -209,6 +222,33 @@ export default function StepInputUrl() {
             // ── Phase 4-6: crawl JD + extract + score for each job ──
             await crawlExtractScoreLoop(topJobs.length);
 
+            // ── Full-auto extension: optimize CV per scored job, then jump
+            //    to step 4 where the batch-apply auto-trigger takes over. ──
+            if (isFullAuto) {
+                const done = useAppStore.getState().jdEntries.filter(
+                    (e) => e.status === 'done' && e.jdData && e.matchResult,
+                );
+                if (done.length === 0) {
+                    throw new Error('No scorable jobs to optimize.');
+                }
+                setPhase('optimizing');
+                let optimizedCount = 0;
+                for (const entry of done) {
+                    setPhaseDetail(`Tailoring CV for "${entry.jobTitle || entry.label}" (${optimizedCount + 1}/${done.length})...`);
+                    try {
+                        const opt = await optimizeCv(cvData, entry.jdData!, entry.matchResult!);
+                        updateJdEntry(entry.id, { optimizedCv: opt });
+                        optimizedCount++;
+                    } catch (optErr) {
+                        console.log('[StepInputUrl/full_auto] optimize failed for', entry.id, optErr);
+                    }
+                }
+                setPhaseDetail(`Optimized ${optimizedCount}/${done.length} CVs. Handing off to extension...`);
+                setPhase('idle');
+                setStep(4);
+                return;
+            }
+
             setPhase('idle');
             setStep(3);
         } catch (e: unknown) {
@@ -216,6 +256,8 @@ export default function StepInputUrl() {
             setError(msg);
             setPhase('idle');
             setPhaseDetail('');
+            // Exit auto mode on failure so the user isn't stuck looping.
+            if (useAppStore.getState().fullyAutoMode) setFullyAutoMode(false);
         }
     };
 
@@ -805,8 +847,24 @@ export default function StepInputUrl() {
     };
 
     const isProcessing = phase !== 'idle';
-    const phaseOrder = flowMode === 'featured' ? PHASE_ORDER_FEATURED : PHASE_ORDER_URL;
+    const phaseOrder =
+        flowMode === 'full_auto' ? PHASE_ORDER_FULL_AUTO
+            : flowMode === 'featured' ? PHASE_ORDER_FEATURED
+                : PHASE_ORDER_URL;
     const currentPhaseIdx = phaseOrder.indexOf(phase as Exclude<Phase, 'idle'>);
+
+    // Fully-auto flow: kick off the featured pipeline as soon as we land
+    // on this step with a CV in hand. The pipeline itself jumps to step 4
+    // on success (or clears fullyAutoMode on failure), so this effect only
+    // ever fires once per session.
+    useEffect(() => {
+        if (!fullyAutoMode || !cvData || phase !== 'idle' || autoStartedRef.current) return;
+        autoStartedRef.current = true;
+        handleFeaturedAnalyze();
+        // handleFeaturedAnalyze depends on store getters / setters that are stable;
+        // we explicitly do not want this re-running on every render.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [fullyAutoMode, cvData]);
 
     return (
         <div className="animate-fade-in" style={{ maxWidth: 660, margin: '0 auto', padding: '40px 20px' }}>
