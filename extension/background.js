@@ -409,7 +409,9 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 // ─── Badge: show active status ───
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     if (changeInfo.status === 'complete' && tab.url) {
-        const isSupported = tab.url.includes('vietnamworks.com') || tab.url.includes('topcv.vn');
+        // topcv.vn disabled — only fetch jobs from embedded sites. Keep VNW.
+        // const isSupported = tab.url.includes('vietnamworks.com') || tab.url.includes('topcv.vn');
+        const isSupported = tab.url.includes('vietnamworks.com');
         if (isSupported) {
             chrome.action.setBadgeText({ text: '⚡', tabId });
             chrome.action.setBadgeBackgroundColor({ color: '#7C3AED', tabId });
@@ -491,9 +493,10 @@ function _extractPageContent() {
             .replace(/&amp;/g, '&')
             .replace(/\s+/g, ' ')
             .trim()
-            // TopCV/VNW search pages bury job cards under a heavy filter sidebar
+            // VNW search pages bury job cards under a heavy filter sidebar
             // + ads — the first 25k chars often run out before the cards. Use
             // 80k to give the AI room to see all visible postings.
+            // (topcv path disabled — only fetch from embedded sites.)
             .slice(0, 80000);
         textWithLinksLinkCount = (textWithLinks.match(/\[LINK:/g) || []).length;
     } catch (e) {
@@ -549,7 +552,9 @@ async function extCrawl(url) {
         // we return on poll #0 the DOM is "complete" but <a> tags aren't there
         // yet — text is full of header/footer, no usable job URLs. Force the
         // loop to keep polling until job links actually appear in the DOM.
-        const isSearchPage = /topcv\.vn\/(?:tim-viec-lam-|tim-kiem|search)|vietnamworks\.com\/(?:tim-viec-lam|jobs)/i.test(url);
+        // topcv.vn search pattern disabled — only fetch from embedded sites. Keep VNW.
+        // const isSearchPage = /topcv\.vn\/(?:tim-viec-lam-|tim-kiem|search)|vietnamworks\.com\/(?:tim-viec-lam|jobs)/i.test(url);
+        const isSearchPage = /vietnamworks\.com\/(?:tim-viec-lam|jobs)/i.test(url);
         while (Date.now() < deadline) {
             try {
                 const [{ result }] = await chrome.scripting.executeScript({
@@ -566,8 +571,10 @@ async function extCrawl(url) {
                 // accept the page once real <a> tags with job URLs exist —
                 // matching loose text would let us return when /viec-lam/...
                 // appears only inside data-attrs or inline JSON.
-                const hasTopCVJobLinks =
-                    /href=["'][^"']*\/viec-lam\/[^"'\s]+\.html/.test(result?.html || '');
+                // topcv link detection disabled — only fetch from embedded sites. Keep VNW.
+                // const hasTopCVJobLinks =
+                //     /href=["'][^"']*\/viec-lam\/[^"'\s]+\.html/.test(result?.html || '');
+                const hasTopCVJobLinks = false;
                 const hasVNWJobLinks =
                     /href=["'][^"']*-jv(?:["'?#\/])/.test(result?.html || '');
                 const hasJobLinks = hasTopCVJobLinks || hasVNWJobLinks;

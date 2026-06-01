@@ -256,6 +256,33 @@ export async function findCareer(input: CareerFinderInput): Promise<FinderResult
     return res.json();
 }
 
+// ── Featured companies (demo flow) ──
+// Returns jobs aggregated across a curated list of VN employers' career
+// pages. Backend caches the result for ~30 minutes; pass {refresh:true} to
+// force a re-fetch.
+export interface FeaturedCompanyJobs {
+    name: string;
+    homepage: string;
+    career_url: string;
+    jobs: JobListing[];
+}
+
+export interface FeaturedJobsResult {
+    fetched_at: number;
+    from_cache: boolean;
+    companies: FeaturedCompanyJobs[];
+}
+
+export async function getFeaturedJobs(opts: { refresh?: boolean } = {}): Promise<FeaturedJobsResult> {
+    const qs = opts.refresh ? '?refresh=true' : '';
+    const res = await fetch(`/api/career/featured-jobs${qs}`, { method: 'POST' });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || 'Failed to load featured jobs');
+    }
+    return res.json();
+}
+
 // ── Extension presence check ──
 export function isExtensionAvailable(): boolean {
     if (typeof window === 'undefined') return false;

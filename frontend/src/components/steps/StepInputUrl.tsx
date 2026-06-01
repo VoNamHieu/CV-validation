@@ -11,16 +11,19 @@ import { useAppStore } from '@/store/useAppStore';
 import {
     smartSearch, crawlUrl, extractJdStructured, scoreFit, fetchPage,
     extractJobLinks, rankJobsByFit, extensionCrawl, isExtensionAvailable,
-    findCareer, type JobListing,
+    findCareer, getFeaturedJobs, type JobListing,
 } from '@/lib/api';
 
-type Phase = 'idle' | 'analyzing_cv' | 'searching' | 'extracting_links' | 'ranking'
-    | 'resolving_career' | 'crawling_job' | 'detecting_jd' | 'scoring';
+type Phase = 'idle' | 'analyzing_cv' | 'searching' | 'extracting_links'
+    | 'ranking' | 'resolving_career' | 'crawling_job' | 'detecting_jd' | 'scoring';
 
+// Phase labels are intentionally generic — the user should perceive the system
+// as "AI is searching for matching jobs", regardless of which backend path is
+// actually running. Never name an underlying source (TopCV, featured list...).
 const PHASE_CONFIG: Record<Exclude<Phase, 'idle'>, { label: string; icon: Icon }> = {
     analyzing_cv: { label: 'AI analyzing your CV...', icon: Brain },
-    searching: { label: 'Searching jobs on the site...', icon: MagnifyingGlass },
-    extracting_links: { label: 'Finding job listings...', icon: LinkSimple },
+    searching: { label: 'Searching for matching openings...', icon: MagnifyingGlass },
+    extracting_links: { label: 'Compiling job listings...', icon: LinkSimple },
     ranking: { label: 'Ranking jobs by CV fit...', icon: Sparkle },
     resolving_career: { label: 'Finding companies’ official career pages...', icon: Building },
     crawling_job: { label: 'Fetching job page...', icon: Globe },
@@ -28,7 +31,14 @@ const PHASE_CONFIG: Record<Exclude<Phase, 'idle'>, { label: string; icon: Icon }
     scoring: { label: 'Calculating match score...', icon: ChartBar },
 };
 
-const PHASE_ORDER: Exclude<Phase, 'idle'>[] = [
+// Two pipelines, same UX. Auto-find ("Find jobs from my CV") uses the demo
+// backend path but presents itself as a general AI search. URL-paste keeps
+// the resolve-career step because it still goes through Stage 0.
+const PHASE_ORDER_FEATURED: Exclude<Phase, 'idle'>[] = [
+    'analyzing_cv', 'searching', 'extracting_links', 'ranking',
+    'crawling_job', 'detecting_jd', 'scoring',
+];
+const PHASE_ORDER_URL: Exclude<Phase, 'idle'>[] = [
     'analyzing_cv', 'searching', 'extracting_links', 'ranking',
     'resolving_career', 'crawling_job', 'detecting_jd', 'scoring',
 ];
@@ -100,6 +110,10 @@ export default function StepInputUrl() {
     const [phase, setPhase] = useState<Phase>('idle');
     const [phaseDetail, setPhaseDetail] = useState('');
     const [inferredTitle, setInferredTitle] = useState('');
+    // Which pipeline is currently running — controls which phase chip-row to
+    // render. 'featured' = curated VN employers (demo flow); 'url' = paste-a-
+    // URL flow that goes through TopCV/VNW.
+    const [flowMode, setFlowMode] = useState<'featured' | 'url'>('featured');
 
     const isValidUrl = (u: string) => {
         try {
@@ -112,10 +126,248 @@ export default function StepInputUrl() {
         try { return new URL(u).hostname; } catch { return u; }
     };
 
-    // Hidden internal engine used when the user picks "Find jobs from my CV"
-    // — they never see this URL. Keep here, not in user-facing copy. See
-    // memory: feedback-hide-scraped-sites.
-    const INTERNAL_SEARCH_SITE = 'https://www.topcv.vn/';
+    // ─── Auto-find flow ("Find jobs from my CV"): backend serves jobs from a
+    //     curated list of VN employers, but UI presents this as a general AI
+    //     search. No phase label or detail string may name the source list. ───
+    const handleFeaturedAnalyze = async () => {
+        if (!cvData) { setError('Please upload your CV first.'); return; }
+
+        setError('');
+        setOptimizedCv(null);
+        setInferredTitle('');
+        clearJdEntries();
+        setFlowMode('featured');
+
+        try {
+            // ── Phase 1: read CV → inferred role (display only; ranker uses the full CV) ──
+            setPhase('analyzing_cv');
+            setPhaseDetail('Reading your CV to understand what job you want...');
+            let cvSearch = await smartSearch(cvData, 'https://example.com/');
+            if (Array.isArray(cvSearch)) cvSearch = cvSearch[0];
+            const inferred = cvSearch?.inferred_job_title || '';
+            setInferredTitle(inferred);
+
+            // ── Phase 2 (presented as "searching"): pull aggregated jobs. ──
+            setPhase('searching');
+            setPhaseDetail(inferred
+                ? `Scanning live openings for "${inferred}"...`
+                : 'Scanning live openings...');
+            const featured = await getFeaturedJobs();
+            const allJobs: { url: string; title: string; company: string; careerUrl: string }[] = [];
+            for (const c of featured.companies) {
+                for (const j of c.jobs) {
+                    if (!j.url || !j.title) continue;
+                    allJobs.push({
+                        url: j.url, title: j.title,
+                        company: c.name, careerUrl: c.career_url,
+                    });
+                }
+            }
+            if (allJobs.length === 0) {
+                throw new Error('No matching openings found right now. Try again in a moment.');
+            }
+
+            // ── Phase 3 (presented as "compiling listings"): handoff to ranker. ──
+            setPhase('extracting_links');
+            setPhaseDetail(`Found ${allJobs.length} openings — preparing them for AI ranking...`);
+
+            // ── Phase 4: rank by CV fit ──
+            setPhase('ranking');
+            setPhaseDetail(`Ranking ${allJobs.length} jobs by fit to your CV...`);
+            const MAX_JOBS = 5;
+            let ranked: { url: string; title?: string; fit_score?: number }[] = [];
+            try {
+                ranked = await rankJobsByFit(
+                    cvData,
+                    allJobs.map((j) => ({ url: j.url, title: j.title })),
+                );
+            } catch (rankErr) {
+                console.log('[StepInputUrl/featured] ranking failed, using original order:', rankErr);
+            }
+            const orderedUrls = ranked.length
+                ? ranked.map((r) => r.url).filter(Boolean)
+                : allJobs.map((j) => j.url);
+            const lookup = new Map(allJobs.map((j) => [j.url, j]));
+            const topJobs = orderedUrls
+                .map((u) => lookup.get(u))
+                .filter((j): j is typeof allJobs[number] => !!j)
+                .slice(0, MAX_JOBS);
+            setPhaseDetail(`Top ${topJobs.length} by CV fit selected`);
+
+            // Pre-populate JD entries so the user sees the queue immediately.
+            for (const job of topJobs) {
+                addJdEntry({
+                    id: `jd-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                    source: job.url,
+                    label: job.title,
+                    status: 'crawling',
+                    jobTitle: job.title,
+                    company: job.company,
+                });
+            }
+
+            // ── Phase 4-6: crawl JD + extract + score for each job ──
+            await crawlExtractScoreLoop(topJobs.length);
+
+            setPhase('idle');
+            setStep(3);
+        } catch (e: unknown) {
+            const msg = e instanceof Error ? e.message : 'Analysis failed';
+            setError(msg);
+            setPhase('idle');
+            setPhaseDetail('');
+        }
+    };
+
+    // Shared per-entry crawl → extract → score loop. Reads the latest jdEntries
+    // from the store (so it picks up any pre-population done by the caller) and
+    // walks each entry sequentially. Used by both the featured-mode and (later)
+    // the company-first refactor of the URL-paste flow.
+    const crawlExtractScoreLoop = async (queueLen: number) => {
+        setPhase('crawling_job');
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const buildJdFromLd = (ld: any): string => [
+            ld.title && `Job Title: ${ld.title}`,
+            ld.hiringOrganization?.name && `Company: ${ld.hiringOrganization.name}`,
+            ld.jobLocation?.address?.addressLocality && `Location: ${ld.jobLocation.address.addressLocality}`,
+            ld.description && `\nJob Description:\n${ld.description}`,
+            ld.qualifications && `\nQualifications:\n${ld.qualifications}`,
+            ld.jobBenefits && `\nBenefits:\n${ld.jobBenefits}`,
+        ].filter(Boolean).join('\n');
+
+        const entries = useAppStore.getState().jdEntries;
+        let completedCount = 0;
+
+        for (const entry of entries) {
+            const entryId = entry.id;
+            if (entry.status === 'error') { completedCount++; continue; }
+            const jobUrl = entry.source;
+            setPhaseDetail(`Processing job ${completedCount + 1}/${queueLen}: ${jobUrl.slice(0, 60)}...`);
+
+            try {
+                updateJdEntry(entryId, { status: 'crawling' });
+                let jobPageText = '';
+                let jobTitle = '';
+                let company = '';
+
+                try {
+                    const jobPage = await crawlUrl(jobUrl);
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    const ld = jobPage.jsonLd as any;
+                    if (ld?.description) {
+                        jobPageText = buildJdFromLd(ld);
+                        jobTitle = ld.title || '';
+                        company = ld.hiringOrganization?.name || '';
+                    } else if ((jobPage.text?.length ?? 0) >= 500) {
+                        jobPageText = jobPage.text;
+                    }
+                } catch (httpErr) {
+                    console.log('[crawlExtractScoreLoop] HTTP failed:', httpErr);
+                }
+
+                let pwBlocked = false;
+                if (jobPageText.length < 200) {
+                    try {
+                        const pw = await fetchPage(jobUrl);
+                        pwBlocked = !!pw.blocked;
+                        if (pw.success) {
+                            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                            const ld = pw.jsonLd as any;
+                            if (ld?.description) {
+                                jobPageText = buildJdFromLd(ld);
+                                jobTitle = ld.title || '';
+                                company = ld.hiringOrganization?.name || '';
+                            } else if (pw.text.length >= 200) {
+                                jobPageText = pw.text;
+                            }
+                        }
+                    } catch (pwErr) {
+                        console.log('[crawlExtractScoreLoop] Playwright failed:', pwErr);
+                    }
+
+                    if (jobPageText.length < 200 && isExtensionAvailable()) {
+                        setPhaseDetail(`Job ${completedCount + 1}/${queueLen}: ${pwBlocked ? 'site blocks bots → ' : ''}opening via extension...`);
+                        try {
+                            const ext = await extensionCrawl(jobUrl);
+                            if (ext.success) {
+                                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                                const ld = ext.jsonLd as any;
+                                if (ld?.description) {
+                                    jobPageText = buildJdFromLd(ld);
+                                    jobTitle = ld.title || '';
+                                    company = ld.hiringOrganization?.name || '';
+                                } else if (ext.text.length >= 200) {
+                                    jobPageText = ext.text;
+                                }
+                            }
+                        } catch (extErr) {
+                            console.log('[crawlExtractScoreLoop] Extension failed:', extErr);
+                        }
+                    }
+                }
+
+                if (jobPageText.length < 100) {
+                    updateJdEntry(entryId, { status: 'error', error: 'Could not load job page' });
+                    completedCount++;
+                    continue;
+                }
+
+                updateJdEntry(entryId, { status: 'parsing' });
+                let jdData = await extractJdStructured(jobPageText);
+                if (Array.isArray(jdData)) jdData = jdData[0];
+                if (!jdData || (!jdData.must_have?.length && !jdData.responsibilities?.length)) {
+                    updateJdEntry(entryId, { status: 'error', error: 'No JD found on page' });
+                    completedCount++;
+                    continue;
+                }
+
+                updateJdEntry(entryId, { status: 'scoring' });
+                let matchResult = await scoreFit(cvData!, jdData);
+                if (Array.isArray(matchResult)) matchResult = matchResult[0];
+                if (!matchResult?.overall_score) {
+                    updateJdEntry(entryId, { status: 'error', error: 'Scoring failed' });
+                    completedCount++;
+                    continue;
+                }
+
+                const resolvedTitle = jobTitle || entry.jobTitle || '';
+                const resolvedCompany = company || entry.company || '';
+
+                updateJdEntry(entryId, {
+                    status: 'done',
+                    jdData,
+                    matchResult,
+                    jobTitle: resolvedTitle,
+                    company: resolvedCompany,
+                });
+
+                if (completedCount === 0 || !useAppStore.getState().matchResult) {
+                    setJdData(jdData);
+                    setMatchResult(matchResult);
+                }
+
+                addJobRecord({
+                    id: `job-${Date.now()}`,
+                    jobTitle: resolvedTitle,
+                    company: resolvedCompany,
+                    jobUrl,
+                    siteName: getHostname(jobUrl),
+                    overallScore: matchResult.overall_score,
+                    timestamp: Date.now(),
+                    jdData,
+                    matchResult,
+                    status: 'saved',
+                });
+            } catch (err) {
+                updateJdEntry(entryId, {
+                    status: 'error',
+                    error: err instanceof Error ? err.message : 'Unknown error',
+                });
+            }
+            completedCount++;
+        }
+    };
 
     const handleSmartAnalyze = async (overrideUrl?: string) => {
         const trimmed = (overrideUrl ?? url).trim();
@@ -131,6 +383,7 @@ export default function StepInputUrl() {
         setOptimizedCv(null);
         setInferredTitle('');
         clearJdEntries();
+        setFlowMode('url');
 
         try {
             // ─── Phase 1: AI Analyze CV → infer job title + search URL ───
@@ -552,7 +805,8 @@ export default function StepInputUrl() {
     };
 
     const isProcessing = phase !== 'idle';
-    const currentPhaseIdx = PHASE_ORDER.indexOf(phase as Exclude<Phase, 'idle'>);
+    const phaseOrder = flowMode === 'featured' ? PHASE_ORDER_FEATURED : PHASE_ORDER_URL;
+    const currentPhaseIdx = phaseOrder.indexOf(phase as Exclude<Phase, 'idle'>);
 
     return (
         <div className="animate-fade-in" style={{ maxWidth: 660, margin: '0 auto', padding: '40px 20px' }}>
@@ -587,10 +841,10 @@ export default function StepInputUrl() {
                 </div>
             </div>
 
-            {/* Primary CTA: Auto-find from CV */}
+            {/* Primary CTA: Auto-find from CV (featured-companies demo flow) */}
             <button
                 className="btn-primary"
-                onClick={() => handleSmartAnalyze(INTERNAL_SEARCH_SITE)}
+                onClick={handleFeaturedAnalyze}
                 disabled={isProcessing || !cvData}
                 style={{
                     width: '100%',
@@ -681,7 +935,7 @@ export default function StepInputUrl() {
                     padding: '20px 24px', marginBottom: 16,
                     display: 'flex', flexDirection: 'column', gap: 14,
                 }}>
-                    {PHASE_ORDER.map((p, i) => {
+                    {phaseOrder.map((p, i) => {
                         const config = PHASE_CONFIG[p];
                         const isDone = i < currentPhaseIdx;
                         const isActive = i === currentPhaseIdx;
