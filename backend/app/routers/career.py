@@ -23,6 +23,10 @@ from app.services.career_finder import (
 )
 from app.services import company_cache
 from app.services.url_validator import is_allowed_url
+from app.data.featured_companies import FEATURED_COMPANIES
+
+import asyncio
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -149,3 +153,75 @@ async def cache_lookup_by_name(req: NameLookup):
     """Resolve a free-text company name against the cache only."""
     res = await resolve_by_name(req.name)
     return res.__dict__
+
+
+# ── Featured companies (demo flow) ───────────────────────────────────────────
+#
+# Short-term path for the "Find jobs from my CV" button: instead of going
+# through TopCV/VNW, run Stage 4 against a curated list of well-known
+# Vietnamese employers' career pages and aggregate the openings. See
+# `app/data/featured_companies.py`.
+
+# Cache the aggregated result in-process so the demo doesn't pay the Stage 4
+# cost on every CV upload. 30 minutes is short enough that newly-posted jobs
+# show up within the same demo session, long enough to keep clicks snappy.
+_FEATURED_CACHE_TTL_SECONDS = 30 * 60
+_featured_cache: dict[str, object] = {"at": 0.0, "data": None}
+_featured_lock = asyncio.Lock()
+
+
+async def _fetch_jobs_for(career_url: str) -> list[dict]:
+    try:
+        jobs = await extract_jobs_from_career_page(career_url)
+        return [j.__dict__ for j in jobs]
+    except Exception as e:
+        logger.warning(f"[featured] Stage 4 failed for {career_url}: {e}")
+        return []
+
+
+@router.post("/featured-jobs")
+async def featured_jobs(refresh: bool = False):
+    """Aggregate jobs across all FEATURED_COMPANIES (parallel Stage 4).
+
+    Response:
+        {
+            "fetched_at": <unix seconds>,
+            "from_cache": bool,
+            "companies": [
+                {"name": ..., "homepage": ..., "career_url": ..., "jobs": [...]}
+            ]
+        }
+    Pass `?refresh=true` to bust the in-memory TTL cache.
+    """
+    now = time.time()
+    cached = _featured_cache.get("data")
+    cached_at = float(_featured_cache.get("at") or 0)
+    if (not refresh and cached
+            and now - cached_at < _FEATURED_CACHE_TTL_SECONDS):
+        return {"fetched_at": cached_at, "from_cache": True, "companies": cached}
+
+    async with _featured_lock:
+        # Double-check after acquiring the lock — another request may have
+        # populated the cache while we waited.
+        cached = _featured_cache.get("data")
+        cached_at = float(_featured_cache.get("at") or 0)
+        if (not refresh and cached
+                and time.time() - cached_at < _FEATURED_CACHE_TTL_SECONDS):
+            return {"fetched_at": cached_at, "from_cache": True, "companies": cached}
+
+        logger.info(f"[featured] refreshing {len(FEATURED_COMPANIES)} companies")
+        job_lists = await asyncio.gather(
+            *[_fetch_jobs_for(c.career_url) for c in FEATURED_COMPANIES]
+        )
+        companies = []
+        for c, jobs in zip(FEATURED_COMPANIES, job_lists):
+            companies.append({
+                "name": c.name,
+                "homepage": c.homepage,
+                "career_url": c.career_url,
+                "jobs": jobs,
+            })
+        fetched_at = time.time()
+        _featured_cache["data"] = companies
+        _featured_cache["at"] = fetched_at
+        return {"fetched_at": fetched_at, "from_cache": False, "companies": companies}

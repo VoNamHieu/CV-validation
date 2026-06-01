@@ -42,7 +42,7 @@ from app.services.crawler import (
 )
 from app.services.url_validator import is_allowed_url
 from app.services import company_cache
-from app.services.gemini_client import generate_json
+from app.services.gemini_client import generate_json, search_company_website
 
 logger = logging.getLogger(__name__)
 
@@ -325,24 +325,118 @@ async def resolve_from_topcv_or_vnw(url: str, *, use_cache: bool = True) -> Comp
     return resolution
 
 
-async def resolve_by_name(name: str) -> CompanyResolution:
-    """Stage 0b: free-text company name → cache lookup only.
+async def _probe_url_reachable(url: str, timeout: float = 8.0) -> bool:
+    """HEAD-then-GET check that a URL responds 2xx/3xx.
 
-    Returns an empty resolution if the name isn't in the cache yet. Caller can
-    then prompt the user for a TopCV/VNW URL (which feeds the cache).
+    HEAD often gets blocked or 405'd on edge providers; if it's not a clear
+    success we fall back to a GET with redirects so we can confirm the
+    homepage actually resolves before we trust the LLM's URL pick.
     """
-    cached = await company_cache.aget_by_name(name)
-    if cached and cached.website_url:
-        return CompanyResolution(
-            company_name=cached.name,
-            website_url=cached.website_url,
-            source=cached.source or "cache",
-            notes=f"cache_hit age={cached.age_seconds}s",
+    if not is_allowed_url(url):
+        return False
+    headers = {"User-Agent": "Mozilla/5.0"}
+    try:
+        r = await asyncio.to_thread(
+            requests.head, url, allow_redirects=True, timeout=timeout, headers=headers,
         )
+        if r.status_code < 400:
+            return True
+        if r.status_code != 405:
+            return False
+    except Exception:
+        pass
+    try:
+        r = await asyncio.to_thread(
+            requests.get, url, allow_redirects=True, timeout=timeout, headers=headers,
+        )
+        return r.status_code < 400
+    except Exception:
+        return False
+
+
+async def resolve_by_name(name: str, *, use_cache: bool = True) -> CompanyResolution:
+    """Stage 0b: free-text company name → cache → Gemini grounded search.
+
+    1. Cache lookup (fast path, O(1) after first resolve).
+    2. Cache miss → Gemini grounded search (google_search tool) to discover
+       the company's homepage.
+    3. Validate the returned URL: reject blacklisted hosts (LinkedIn, FB,
+       TopCV...), confirm it actually resolves over HTTP.
+    4. Upsert into the cache so future lookups skip the LLM call.
+    """
+    if not name or not name.strip():
+        return CompanyResolution(notes="empty name")
+
+    if use_cache:
+        cached = await company_cache.aget_by_name(name)
+        if cached and cached.website_url:
+            logger.info(f"[cache] HIT name={name!r}")
+            return CompanyResolution(
+                company_name=cached.name,
+                website_url=cached.website_url,
+                source=cached.source or "cache",
+                notes=f"cache_hit age={cached.age_seconds}s",
+            )
+
+    logger.info(f"[gemini_search] cache miss for {name!r} — calling grounded search")
+    search_result = await asyncio.to_thread(search_company_website, name)
+    url = (search_result.get("url") or "").strip()
+    conf = search_result.get("confidence", "none")
+    sources = search_result.get("sources", []) or []
+    search_notes = search_result.get("notes", "")
+
+    if not url:
+        return CompanyResolution(
+            company_name=name,
+            source="grounded_search",
+            notes=f"grounded search returned no URL (confidence={conf}, {search_notes})".strip(),
+        )
+
+    # Reject blacklisted hosts up front — Gemini sometimes returns LinkedIn
+    # despite the prompt telling it not to.
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower().removeprefix("www.")
+    if not host:
+        return CompanyResolution(
+            company_name=name, source="grounded_search",
+            notes=f"grounded search returned URL with no host: {url}",
+        )
+    if host in NON_COMPANY_HOSTS or any(host.endswith("." + s) or host == s for s in NON_COMPANY_HOSTS):
+        return CompanyResolution(
+            company_name=name, source="grounded_search",
+            notes=f"grounded search returned blacklisted host: {host}",
+        )
+
+    if not await _probe_url_reachable(url):
+        return CompanyResolution(
+            company_name=name, source="grounded_search",
+            notes=f"grounded search URL not reachable: {url}",
+        )
+
+    homepage = _apex_url(url) or url
+
+    if use_cache:
+        # source_url has a UNIQUE constraint; use a synthetic, normalized key
+        # so re-resolves for the same name upsert in place instead of stacking.
+        synthetic_source = f"name:{company_cache.normalize_name(name)}"
+        try:
+            await company_cache.aupsert(
+                name=name,
+                website_url=homepage,
+                source="grounded_search",
+                source_url=synthetic_source,
+                notes=("confidence=" + conf
+                       + (" sources=" + ",".join(sources[:3]) if sources else "")),
+            )
+            logger.info(f"[cache] STORED name={name!r} → {homepage}")
+        except Exception as e:
+            logger.warning(f"[cache] upsert failed for name={name!r}: {e}")
+
     return CompanyResolution(
         company_name=name,
-        notes="not in cache — provide a TopCV/VNW URL to populate",
-        source="user_input",
+        website_url=homepage,
+        source="grounded_search",
+        notes=f"confidence={conf}",
     )
 
 
@@ -801,11 +895,12 @@ async def find_careers(input_url: Optional[str] = None,
             result.errors.append("Could not resolve company website from the input URL.")
             return result
     elif company_name:
-        result.stages_run.append("stage0:cache_by_name")
+        result.stages_run.append("stage0:resolve_by_name")
         result.resolution = await resolve_by_name(company_name)
         if not result.resolution.website_url:
             result.errors.append(
-                "Company not in cache. Provide input_url (TopCV/VNW) once to populate it."
+                f"Could not resolve company website for {company_name!r}: "
+                f"{result.resolution.notes or 'unknown'}"
             )
             return result
     else:
