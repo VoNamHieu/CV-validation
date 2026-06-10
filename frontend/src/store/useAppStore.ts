@@ -10,6 +10,7 @@ import type {
   ExperienceDetail, EducationDetail, ProjectDetail,
   CVData, JDData, CategoryScore, MatchResult,
 } from '@/lib/types';
+import type { CvTemplateId } from '@/lib/cv-templates';
 
 // Re-export for backward compatibility
 export type { ExperienceDetail, EducationDetail, ProjectDetail, CVData, JDData, CategoryScore, MatchResult };
@@ -51,6 +52,8 @@ export interface JDEntry {
   optimizedCvFileName?: string;
   jobTitle?: string;
   company?: string;
+  // Which CV template the candidate chose for this job.
+  selectedTemplateId?: CvTemplateId;
 }
 
 type Step = 1 | 2 | 3 | 4;
@@ -113,6 +116,11 @@ interface AppState {
   fullyAutoMode: boolean;
   setFullyAutoMode: (v: boolean) => void;
 
+  // User avatar — global (one photo applies to every template render).
+  // Stored as a small JPEG data URL produced by lib/avatar.ts.
+  userAvatarBase64: string | null;
+  setUserAvatar: (dataUrl: string | null) => void;
+
   // Reset
   resetAll: () => void;
 }
@@ -133,6 +141,7 @@ const initialState = {
   isLoading: false,
   loadingMessage: '',
   fullyAutoMode: false,
+  userAvatarBase64: null as string | null,
 };
 
 export const useAppStore = create<AppState>()(
@@ -195,6 +204,8 @@ export const useAppStore = create<AppState>()(
       setLoading: (loading, message = '') => set({ isLoading: loading, loadingMessage: message }),
 
       setFullyAutoMode: (v) => set({ fullyAutoMode: v }),
+
+      setUserAvatar: (dataUrl) => set({ userAvatarBase64: dataUrl }),
 
       resetAll: () => set(initialState),
     }),
