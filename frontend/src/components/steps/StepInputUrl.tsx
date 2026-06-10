@@ -390,7 +390,7 @@ export default function StepInputUrl() {
                 }
 
                 addJobRecord({
-                    id: `job-${Date.now()}`,
+                    id: `job-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
                     jobTitle: resolvedTitle,
                     company: resolvedCompany,
                     jobUrl,
@@ -815,7 +815,7 @@ export default function StepInputUrl() {
                     }
 
                     addJobRecord({
-                        id: `job-${Date.now()}`,
+                        id: `job-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
                         jobTitle: resolvedTitle,
                         company: resolvedCompany,
                         jobUrl,

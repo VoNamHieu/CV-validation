@@ -49,6 +49,10 @@ class TestIsAllowedUrl:
     def test_blocks_gcp_metadata(self):
         assert is_allowed_url("http://metadata.google.internal") is False
 
+    def test_blocks_integer_encoded_loopback(self):
+        # http://2130706433 == http://127.0.0.1 — classic SSRF bypass
+        assert is_allowed_url("http://2130706433/latest/meta-data/") is False
+
     def test_blocks_internal_domains(self):
         assert is_allowed_url("http://service.internal") is False
 

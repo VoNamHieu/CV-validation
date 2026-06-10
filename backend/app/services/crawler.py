@@ -48,6 +48,8 @@ def extract_json_ld(html: str) -> Optional[dict]:
             data = json.loads(script.string or "")
             items = data if isinstance(data, list) else [data]
             for item in items:
+                if not isinstance(item, dict):
+                    continue
                 if item.get("@type") == "JobPosting":
                     return item
                 # Handle @graph arrays

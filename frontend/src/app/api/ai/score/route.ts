@@ -2,6 +2,35 @@ import { NextRequest, NextResponse } from "next/server";
 import { callAI } from "@/lib/gemini";
 import { safeJsonParse } from "@/lib/safe-json";
 
+type RawCategory = { score?: unknown; reasoning?: unknown; gaps?: unknown };
+
+function normalizeCategory(c: unknown) {
+    const cat = (c && typeof c === "object" ? c : {}) as RawCategory;
+    return {
+        score: typeof cat.score === "number" ? cat.score : 0,
+        reasoning: typeof cat.reasoning === "string" ? cat.reasoning : "",
+        gaps: Array.isArray(cat.gaps) ? cat.gaps.filter((g) => typeof g === "string") : [],
+    };
+}
+
+/**
+ * Guarantee every CategoryScore the UI relies on exists, so a partial/omitted
+ * category in the model output can't crash the report render.
+ */
+function normalizeMatchResult(raw: unknown) {
+    const m = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+    return {
+        overall_score: typeof m.overall_score === "number" ? m.overall_score : 0,
+        must_have_match: normalizeCategory(m.must_have_match),
+        experience_match: normalizeCategory(m.experience_match),
+        domain_match: normalizeCategory(m.domain_match),
+        seniority_match: normalizeCategory(m.seniority_match),
+        nice_to_have_match: normalizeCategory(m.nice_to_have_match),
+        strength_summary: typeof m.strength_summary === "string" ? m.strength_summary : "",
+        risk_flags: Array.isArray(m.risk_flags) ? m.risk_flags.filter((f) => typeof f === "string") : [],
+    };
+}
+
 export async function POST(request: NextRequest) {
     try {
         const { cv, jd } = await request.json();
@@ -46,7 +75,7 @@ Determine a score from 0-100 for each dimension, explain the reasoning briefly, 
         try { parsed = safeJsonParse(result); }
         catch { return NextResponse.json({ detail: "AI returned invalid JSON. Please retry." }, { status: 502 }); }
 
-        return NextResponse.json(parsed);
+        return NextResponse.json(normalizeMatchResult(parsed));
     } catch (e: unknown) {
         const message = e instanceof Error ? e.message : "Failed to score fit";
         return NextResponse.json({ detail: message }, { status: 500 });
