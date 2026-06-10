@@ -39,12 +39,28 @@ export async function POST(request: NextRequest) {
 
         // ── Extract JSON-LD JobPosting (before stripping tags) ──
         let jsonLd: Record<string, unknown> | null = null;
+        const findJobPosting = (node: unknown): Record<string, unknown> | null => {
+            if (Array.isArray(node)) {
+                for (const item of node) {
+                    const found = findJobPosting(item);
+                    if (found) return found;
+                }
+                return null;
+            }
+            if (node && typeof node === 'object') {
+                const obj = node as Record<string, unknown>;
+                if (obj['@type'] === 'JobPosting') return obj;
+                // Many sites wrap entries in an @graph array
+                if (obj['@graph']) return findJobPosting(obj['@graph']);
+            }
+            return null;
+        };
         const ldMatches = html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi);
         for (const m of ldMatches) {
             try {
-                const data = JSON.parse(m[1]);
-                if (data?.['@type'] === 'JobPosting') {
-                    jsonLd = data;
+                const found = findJobPosting(JSON.parse(m[1]));
+                if (found) {
+                    jsonLd = found;
                     break;
                 }
             } catch { /* ignore parse errors */ }

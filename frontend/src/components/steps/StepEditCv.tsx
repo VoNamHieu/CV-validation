@@ -47,9 +47,11 @@ interface BatchProgress {
  * The extension's content-webapp.js posts JOBFIT_EXTENSION_READY on load.
  * We also listen for JOBFIT_AUTO_APPLY_RESPONSE.
  */
+type JobfitWindow = Window & { __jobfitExtensionId?: string };
+
 function isExtensionAvailable(): boolean {
     // Extension sets this on the window when content-webapp.js loads
-    return !!(window as any).__jobfitExtensionId;
+    return !!(window as JobfitWindow).__jobfitExtensionId;
 }
 
 /* ─── XSS-safe HTML escaping ─── */
@@ -166,7 +168,6 @@ export default function StepEditCv() {
     // ── Batch Apply State ──
     const [batchProgress, setBatchProgress] = useState<BatchProgress | null>(null);
     const [batchStarting, setBatchStarting] = useState(false);
-    const progressPollRef = useRef<NodeJS.Timeout | null>(null);
 
     // ── Fully Autonomous Apply State ──
     const [fullAutoStatus, setFullAutoStatus] = useState<FullAutoStatus>('idle');
@@ -176,8 +177,12 @@ export default function StepEditCv() {
     // Listen for extension announcement + progress updates
     useEffect(() => {
         const handler = (event: MessageEvent) => {
+            // Only trust messages this window posted to itself (the content script
+            // relays via window.postMessage). Rejects spoofed cross-frame messages
+            // that could plant a fake extension id or read the user's profile.
+            if (event.source !== window) return;
             if (event.data?.type === 'JOBFIT_EXTENSION_READY' && event.data?.extensionId) {
-                (window as any).__jobfitExtensionId = event.data.extensionId;
+                (window as JobfitWindow).__jobfitExtensionId = event.data.extensionId;
             }
             // Real-time progress updates from extension
             if (event.data?.type === 'JOBFIT_APPLY_PROGRESS') {
@@ -357,15 +362,19 @@ export default function StepEditCv() {
             setAutoApplyStatus('sending');
             setAutoApplyMessage('Đang gửi lệnh Auto Apply...');
 
-            const responsePromise = new Promise<any>((resolve, reject) => {
-                const timeout = setTimeout(() => reject(new Error('Extension timeout')), 10000);
+            const responsePromise = new Promise<{ success?: boolean; error?: string; detail?: string }>((resolve, reject) => {
                 const handler = (event: MessageEvent) => {
+                    if (event.source !== window) return;
                     if (event.data?.type === 'JOBFIT_AUTO_APPLY_RESPONSE') {
                         clearTimeout(timeout);
                         window.removeEventListener('message', handler);
                         resolve(event.data);
                     }
                 };
+                const timeout = setTimeout(() => {
+                    window.removeEventListener('message', handler);
+                    reject(new Error('Extension timeout'));
+                }, 10000);
                 window.addEventListener('message', handler);
             });
 

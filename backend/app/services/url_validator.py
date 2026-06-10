@@ -27,13 +27,22 @@ def is_allowed_url(url: str) -> bool:
         if hostname in ("localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0"):
             return False
 
-        # Block private IP ranges (RFC 1918) and link-local
+        # Block private IP ranges (RFC 1918) and link-local.
+        # Also catch integer-encoded hosts (e.g. http://2130706433 == 127.0.0.1),
+        # which urlparse keeps as a bare digit string that ip_address(str) rejects.
+        ip = None
         try:
             ip = ipaddress.ip_address(hostname)
-            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
-                return False
         except ValueError:
-            pass  # Not an IP — it's a hostname, continue checks
+            if hostname.isdigit():
+                try:
+                    ip = ipaddress.ip_address(int(hostname))
+                except ValueError:
+                    ip = None
+        if ip is not None and (
+            ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
+        ):
+            return False
 
         # Block private IP string patterns (in case ipaddress parsing was skipped)
         if hostname.startswith("10.") or hostname.startswith("192.168."):

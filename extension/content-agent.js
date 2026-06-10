@@ -815,7 +815,17 @@ async function executeSingleInstruction(inst, cvData) {
                 case 'native-select':
                 default:
                     if (el.tagName === 'SELECT') {
-                        el.value = value;
+                        // Match by option value first, then by visible text — the LLM
+                        // often returns the label rather than the underlying value.
+                        const wanted = String(value).trim().toLowerCase();
+                        const opt = [...el.options].find(o =>
+                            o.value.trim().toLowerCase() === wanted ||
+                            o.textContent.trim().toLowerCase() === wanted
+                        ) || [...el.options].find(o =>
+                            o.textContent.trim().toLowerCase().includes(wanted)
+                        );
+                        if (!opt) return false;  // no match — report failure so retry logic kicks in
+                        el.value = opt.value;
                         el.dispatchEvent(new Event('change', { bubbles: true }));
                         return true;
                     }

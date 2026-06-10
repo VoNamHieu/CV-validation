@@ -8,11 +8,12 @@ async def extract_text_from_pdf(file: UploadFile) -> str:
     try:
         content = await file.read()
         doc = fitz.open(stream=content, filetype="pdf")
-        
-        text = ""
-        for page in doc:
-            text += page.get_text()
-            
-        return text
+        try:
+            text = ""
+            for page in doc:
+                text += page.get_text()
+            return text
+        finally:
+            doc.close()
     except Exception as e:
         raise Exception(f"Failed to parse PDF: {str(e)}")

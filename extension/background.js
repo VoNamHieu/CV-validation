@@ -8,6 +8,7 @@ let applyQueue = [];       // [{jobUrl, profile, jobTitle, company}, ...]
 let currentJobIndex = -1;
 let currentTabId = null;
 let isProcessing = false;
+let jobSafetyTimer = null;  // per-job timeout handle, cleared when the job reports back
 const TAB_DELAY_MS = 3000; // Delay between opening tabs
 
 // ─── Restore in-flight state on service-worker wake (MV3 kills idle SWs) ───
@@ -289,8 +290,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'AUTO_APPLY_RESULT') {
         console.log('[JobFit AI] Auto Apply result:', message.result);
 
+        // Ignore stray/late results from tabs that aren't the one we're driving —
+        // otherwise a result from a previous job's tab can corrupt the current entry.
+        if (isProcessing && sender.tab && sender.tab.id !== currentTabId) {
+            sendResponse({ success: false, detail: 'stale tab' });
+            return true;
+        }
+
         // If this is part of a batch, update queue and continue
         if (isProcessing && currentJobIndex >= 0 && currentJobIndex < applyQueue.length) {
+            // This job reported back — cancel its safety timeout so it can't fire
+            // later against a different job.
+            if (jobSafetyTimer) { clearTimeout(jobSafetyTimer); jobSafetyTimer = null; }
             applyQueue[currentJobIndex].status = message.result?.success ? 'done' : 'error';
             applyQueue[currentJobIndex].result = message.result;
             persistState();
@@ -350,13 +361,17 @@ function processNextJob() {
             persistState();
             broadcastProgress();
 
-            // Safety timeout: if content script doesn't report back in 60s, skip
-            setTimeout(() => {
-                if (isProcessing && currentJobIndex < applyQueue.length &&
-                    applyQueue[currentJobIndex]?.status === 'processing') {
-                    console.warn(`[JobFit AI] Batch Apply: timeout for job ${currentJobIndex + 1}, skipping`);
-                    applyQueue[currentJobIndex].status = 'error';
-                    applyQueue[currentJobIndex].result = { success: false, detail: 'Timeout — page did not respond' };
+            // Safety timeout: if content script doesn't report back in 60s, skip.
+            // Capture the index this timer belongs to so a stale timer can't mark
+            // (and skip) a later job once the queue has advanced.
+            const timedJobIndex = currentJobIndex;
+            if (jobSafetyTimer) clearTimeout(jobSafetyTimer);
+            jobSafetyTimer = setTimeout(() => {
+                if (isProcessing && timedJobIndex === currentJobIndex &&
+                    applyQueue[timedJobIndex]?.status === 'processing') {
+                    console.warn(`[JobFit AI] Batch Apply: timeout for job ${timedJobIndex + 1}, skipping`);
+                    applyQueue[timedJobIndex].status = 'error';
+                    applyQueue[timedJobIndex].result = { success: false, detail: 'Timeout — page did not respond' };
                     persistState();
                     broadcastProgress();
                     processNextJob();
