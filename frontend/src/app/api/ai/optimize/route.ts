@@ -44,9 +44,9 @@ const FOCUS_INSTRUCTIONS: Record<OptimizeFocus, string> = {
 
 const LENGTH_INSTRUCTIONS: Record<OptimizeLength, string> = {
     concise:
-        'Keep the summary under 50 words. Each experience description should fit in 3 short bullet lines (separated by "\\n").',
+        'Tight, punchy phrasing — keep each bullet under ~25 words and the summary under ~70 words. PRESERVE every bullet from the source CV: shorten wording, never drop, merge, or summarize bullets together.',
     detailed:
-        'Allow the summary up to 80 words. Each experience description can have up to 6 bullet lines (separated by "\\n").',
+        'Full descriptive phrasing — bullets up to ~40 words, summary up to ~100 words. PRESERVE every bullet from the source CV: you may split one source bullet into two only if that genuinely improves clarity.',
 };
 
 function clampVariantCount(n: unknown): number {
@@ -86,6 +86,22 @@ interface MatchAnalysis {
     domain_match?: CategoryScore;
     seniority_match?: CategoryScore;
     nice_to_have_match?: CategoryScore;
+}
+
+// The LLM's response schema only covers the six "rewriteable" fields
+// (name/summary/skills/experience/education/projects). CVData also carries
+// contact, personal, employment, preferences — which must never be touched
+// by optimization. Merge them back from the original CV so they survive.
+function mergeOptimizedCv(original: unknown, optimized: unknown): unknown {
+    if (!original || typeof original !== 'object') return optimized;
+    if (!optimized || typeof optimized !== 'object') return optimized;
+    const orig = original as Record<string, unknown>;
+    const opt = optimized as Record<string, unknown>;
+    const preserved: Record<string, unknown> = {};
+    for (const key of ['contact', 'personal', 'employment', 'preferences'] as const) {
+        if (orig[key] !== undefined) preserved[key] = orig[key];
+    }
+    return { ...opt, ...preserved };
 }
 
 function collectGaps(match: MatchAnalysis): string[] {
@@ -133,7 +149,10 @@ OPTIMIZATION INSTRUCTIONS:
 3. Apply the variant style and focus consistently across summary and experience descriptions.
 4. Format experience.description and projects.description as bullet lines separated by "\\n". Each bullet on its own line. Do not include leading "-" or "*" — the renderer will add them.
 5. Keep the same structure, job titles, companies, durations, and education entries.
-6. NEVER fabricate companies, tools, metrics, achievements, or skills not present in the original CV.`;
+6. NEVER fabricate companies, tools, metrics, achievements, or skills not present in the original CV.
+7. PRESERVE every experience, education, and project entry from the source CV — never delete, drop, or combine entries. Output arrays must have the same length as the source.
+8. PRESERVE every bullet inside each experience.description and projects.description — rewrite the wording but never drop, merge, or summarize multiple bullets into one. Bullet count out must equal bullet count in.
+9. PRESERVE every skill from the source CV — you may reorder to surface JD-relevant ones first, but never remove a skill.`;
 }
 
 const SYSTEM_PROMPT = `You are a CV optimizer that strictly follows anti-hallucination rules.
@@ -180,7 +199,7 @@ export async function POST(request: NextRequest) {
                     style: cfg.style,
                     focus: cfg.focus,
                     length: cfg.length,
-                    cv: parsed,
+                    cv: mergeOptimizedCv(cv, parsed),
                 };
             })
         );
