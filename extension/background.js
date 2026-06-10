@@ -8,24 +8,56 @@ let applyQueue = [];       // [{jobUrl, profile, jobTitle, company}, ...]
 let currentJobIndex = -1;
 let currentTabId = null;
 let isProcessing = false;
-let jobSafetyTimer = null;  // per-job timeout handle, cleared when the job reports back
+let jobSafetyTimer = null;  // per-job watchdog handle, re-armed by agent heartbeats
+let jobStartedAt = 0;       // when the current job's tab was opened
 const TAB_DELAY_MS = 3000; // Delay between opening tabs
 
+// Watchdog window. One agent iteration can legitimately take a minute+ (LLM
+// call up to 30s, scroll passes, post-action waits), so a fixed short timeout
+// would kill healthy jobs. The agent sends AUTO_APPLY_HEARTBEAT every
+// iteration; the timer only fires if the page goes silent for a full window.
+const JOB_SAFETY_WINDOW_MS = 120000;
+// Absolute ceiling per job — heartbeats stop extending past this point so a
+// looping page can't hold the queue hostage.
+const JOB_HARD_CAP_MS = 15 * 60 * 1000;
+
 // ─── Restore in-flight state on service-worker wake (MV3 kills idle SWs) ───
-chrome.storage.local.get(['applyQueue', 'isProcessing', 'currentJobIndex', 'currentTabId'], (data) => {
+chrome.storage.local.get(['applyQueue', 'isProcessing', 'currentJobIndex', 'currentTabId', 'jobStartedAt'], (data) => {
     if (data.isProcessing && Array.isArray(data.applyQueue) && data.applyQueue.length > 0) {
         applyQueue = data.applyQueue;
         isProcessing = data.isProcessing;
         currentJobIndex = typeof data.currentJobIndex === 'number' ? data.currentJobIndex : -1;
         currentTabId = data.currentTabId ?? null;
+        jobStartedAt = typeof data.jobStartedAt === 'number' ? data.jobStartedAt : Date.now();
         console.log('[JobFit AI] SW woke — restored batch state:', {
             queue: applyQueue.length, currentJobIndex, currentTabId,
         });
+        // The timer died with the old SW. Re-arm it so a tab that crashed
+        // while we slept can't leave the queue stuck forever.
+        if (currentJobIndex >= 0 && applyQueue[currentJobIndex]?.status === 'processing') {
+            armJobSafetyTimer(currentJobIndex);
+        }
     }
 });
 
 function persistState() {
-    chrome.storage.local.set({ applyQueue, isProcessing, currentJobIndex, currentTabId });
+    chrome.storage.local.set({ applyQueue, isProcessing, currentJobIndex, currentTabId, jobStartedAt });
+}
+
+// ─── Per-job watchdog ───
+function armJobSafetyTimer(timedJobIndex) {
+    if (jobSafetyTimer) clearTimeout(jobSafetyTimer);
+    jobSafetyTimer = setTimeout(() => {
+        if (isProcessing && timedJobIndex === currentJobIndex &&
+            applyQueue[timedJobIndex]?.status === 'processing') {
+            console.warn(`[JobFit AI] Batch Apply: timeout for job ${timedJobIndex + 1}, skipping`);
+            applyQueue[timedJobIndex].status = 'error';
+            applyQueue[timedJobIndex].result = { success: false, detail: 'Timeout — page did not respond' };
+            persistState();
+            broadcastProgress();
+            processNextJob();
+        }
+    }, JOB_SAFETY_WINDOW_MS);
 }
 
 // ─── Listen for external messages from JobFit AI web app ───
@@ -47,6 +79,12 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
         const { jobUrl, profile } = message;
         if (!jobUrl || !profile) {
             sendResponse({ success: false, error: 'Missing jobUrl or profile' });
+            return true;
+        }
+        // A single apply mid-batch would overwrite jobfitProfile/pendingAutoApply
+        // in storage and corrupt the job the batch is currently driving.
+        if (isProcessing) {
+            sendResponse({ success: false, error: 'Batch apply đang chạy — hãy chờ xong hoặc hủy batch trước.' });
             return true;
         }
         chrome.storage.local.set({
@@ -268,7 +306,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         applyQueue = [];
         currentJobIndex = -1;
         currentTabId = null;
-        chrome.storage.local.remove(['applyQueue', 'isProcessing', 'currentJobIndex', 'currentTabId']);
+        chrome.storage.local.remove(['applyQueue', 'isProcessing', 'currentJobIndex', 'currentTabId', 'jobStartedAt']);
         broadcastProgress();
         sendResponse({ success: true });
         return true;
@@ -283,6 +321,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             total: applyQueue.length,
             completed: applyQueue.filter(j => j.status === 'done' || j.status === 'error').length,
         });
+        return true;
+    }
+
+    // ── Agent heartbeat: the driven page is alive, extend the watchdog ──
+    if (message.type === 'AUTO_APPLY_HEARTBEAT') {
+        if (isProcessing && sender.tab && sender.tab.id === currentTabId
+            && Date.now() - jobStartedAt < JOB_HARD_CAP_MS) {
+            armJobSafetyTimer(currentJobIndex);
+        }
+        sendResponse({ ok: true });
         return true;
     }
 
@@ -358,31 +406,21 @@ function processNextJob() {
         // Open the job URL in a new tab
         chrome.tabs.create({ url: job.jobUrl, active: true }, (tab) => {
             currentTabId = tab.id;
+            jobStartedAt = Date.now();
             persistState();
             broadcastProgress();
 
-            // Safety timeout: if content script doesn't report back in 60s, skip.
-            // Capture the index this timer belongs to so a stale timer can't mark
-            // (and skip) a later job once the queue has advanced.
-            const timedJobIndex = currentJobIndex;
-            if (jobSafetyTimer) clearTimeout(jobSafetyTimer);
-            jobSafetyTimer = setTimeout(() => {
-                if (isProcessing && timedJobIndex === currentJobIndex &&
-                    applyQueue[timedJobIndex]?.status === 'processing') {
-                    console.warn(`[JobFit AI] Batch Apply: timeout for job ${timedJobIndex + 1}, skipping`);
-                    applyQueue[timedJobIndex].status = 'error';
-                    applyQueue[timedJobIndex].result = { success: false, detail: 'Timeout — page did not respond' };
-                    persistState();
-                    broadcastProgress();
-                    processNextJob();
-                }
-            }, 60000);
+            // Watchdog: skip the job if the page goes silent. The agent's
+            // heartbeats keep re-arming this while it's actively working
+            // (capture the index so a stale timer can't skip a later job).
+            armJobSafetyTimer(currentJobIndex);
         });
     });
 }
 
 // ─── Broadcast progress to all content scripts (web app) ───
 function broadcastProgress() {
+    updateBadge();
     const progress = {
         type: 'JOBFIT_APPLY_PROGRESS',
         isProcessing,
@@ -397,6 +435,12 @@ function broadcastProgress() {
         total: applyQueue.length,
         completed: applyQueue.filter(j => j.status === 'done' || j.status === 'error').length,
         successful: applyQueue.filter(j => j.status === 'done').length,
+        // 'done' splits into two very different outcomes: 'submitted' (a success
+        // signal appeared after the agent acted) vs 'filled' (form filled, the
+        // tab is open awaiting the user's review + manual submit). The web app
+        // must not present 'filled' as a sent application.
+        submitted: applyQueue.filter(j => j.status === 'done' && j.result?.outcome === 'submitted').length,
+        filled: applyQueue.filter(j => j.status === 'done' && j.result?.outcome !== 'submitted').length,
     };
 
     // Send to all tabs that have content scripts
@@ -666,7 +710,7 @@ chrome.runtime.onInstalled.addListener(() => {
     console.log('[JobFit AI] Extension installed!');
     // Clear any stale queue
     chrome.storage.local.remove([
-        'applyQueue', 'isProcessing', 'currentJobIndex', 'currentTabId',
+        'applyQueue', 'isProcessing', 'currentJobIndex', 'currentTabId', 'jobStartedAt',
         'pendingAutoApply', 'autoApplyJobUrl', 'batchMode',
     ]);
 });
