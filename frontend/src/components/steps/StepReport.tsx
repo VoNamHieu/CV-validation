@@ -267,7 +267,7 @@ export default function StepReport() {
     } = useAppStore();
 
     const [expandedId, setExpandedId] = useState<string | null>(null);
-    const [optimizingId, setOptimizingId] = useState<string | null>(null);
+    const [optimizingIds, setOptimizingIds] = useState<Set<string>>(new Set());
 
     const doneEntries = jdEntries.filter(e => e.status === 'done');
     const errorEntries = jdEntries.filter(e => e.status === 'error');
@@ -288,7 +288,7 @@ export default function StepReport() {
 
     const handleOptimize = async (entry: JDEntry) => {
         if (!cvData || !entry.jdData || !entry.matchResult) return;
-        setOptimizingId(entry.id);
+        setOptimizingIds(prev => new Set(prev).add(entry.id));
         try {
             const result = await optimizeCv(cvData, entry.jdData, entry.matchResult);
 
@@ -319,7 +319,11 @@ export default function StepReport() {
         } catch (e) {
             console.error('Optimization failed:', e);
         }
-        setOptimizingId(null);
+        setOptimizingIds(prev => {
+            const next = new Set(prev);
+            next.delete(entry.id);
+            return next;
+        });
     };
 
     // Sort by score descending
@@ -510,13 +514,13 @@ export default function StepReport() {
                                         <button
                                             className="btn-primary"
                                             onClick={(e) => { e.stopPropagation(); handleOptimize(entry); }}
-                                            disabled={optimizingId === entry.id}
+                                            disabled={optimizingIds.has(entry.id)}
                                             style={{
                                                 padding: '6px 14px', fontSize: '0.75rem',
                                                 display: 'flex', alignItems: 'center', gap: 4,
                                             }}
                                         >
-                                            {optimizingId === entry.id ? (
+                                            {optimizingIds.has(entry.id) ? (
                                                 <><SpinnerGap size={12} className="spin" /> ...</>
                                             ) : (
                                                 <><Lightning size={12} weight="fill" /> Optimize</>
@@ -549,7 +553,7 @@ export default function StepReport() {
                                     entry={entry}
                                     cvData={cvData}
                                     onOptimize={() => handleOptimize(entry)}
-                                    optimizing={optimizingId === entry.id}
+                                    optimizing={optimizingIds.has(entry.id)}
                                     avatarBase64={userAvatarBase64}
                                     onTemplateChange={(id) =>
                                         updateJdEntry(entry.id, {
