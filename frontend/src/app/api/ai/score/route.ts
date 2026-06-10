@@ -6,30 +6,79 @@ type RawCategory = { score?: unknown; reasoning?: unknown; gaps?: unknown };
 
 function normalizeCategory(c: unknown) {
     const cat = (c && typeof c === "object" ? c : {}) as RawCategory;
+    const raw = typeof cat.score === "number" && Number.isFinite(cat.score) ? cat.score : 0;
     return {
-        score: typeof cat.score === "number" ? cat.score : 0,
+        score: Math.min(100, Math.max(0, raw)),
         reasoning: typeof cat.reasoning === "string" ? cat.reasoning : "",
         gaps: Array.isArray(cat.gaps) ? cat.gaps.filter((g) => typeof g === "string") : [],
     };
 }
 
+// Category weights for the overall score (must sum to 1).
+const WEIGHTS = {
+    must_have_match: 0.4,
+    experience_match: 0.25,
+    domain_match: 0.15,
+    seniority_match: 0.1,
+    nice_to_have_match: 0.1,
+} as const;
+
 /**
  * Guarantee every CategoryScore the UI relies on exists, so a partial/omitted
  * category in the model output can't crash the report render.
+ *
+ * overall_score is recomputed here from the category scores: the weighted sum
+ * is arithmetic, and the model's own "calculation" can contradict the very
+ * category scores it just produced.
  */
 function normalizeMatchResult(raw: unknown) {
     const m = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
-    return {
-        overall_score: typeof m.overall_score === "number" ? m.overall_score : 0,
+    const categories = {
         must_have_match: normalizeCategory(m.must_have_match),
         experience_match: normalizeCategory(m.experience_match),
         domain_match: normalizeCategory(m.domain_match),
         seniority_match: normalizeCategory(m.seniority_match),
         nice_to_have_match: normalizeCategory(m.nice_to_have_match),
+    };
+    const overall = Math.round(
+        (Object.keys(WEIGHTS) as Array<keyof typeof WEIGHTS>)
+            .reduce((sum, key) => sum + categories[key].score * WEIGHTS[key], 0)
+    );
+    return {
+        overall_score: overall,
+        ...categories,
         strength_summary: typeof m.strength_summary === "string" ? m.strength_summary : "",
         risk_flags: Array.isArray(m.risk_flags) ? m.risk_flags.filter((f) => typeof f === "string") : [],
     };
 }
+
+const CATEGORY_SCHEMA = {
+    type: "OBJECT",
+    properties: {
+        score: { type: "NUMBER" },
+        reasoning: { type: "STRING" },
+        gaps: { type: "ARRAY", items: { type: "STRING" } },
+    },
+    required: ["score", "reasoning", "gaps"],
+};
+
+const MATCH_SCHEMA = {
+    type: "OBJECT",
+    properties: {
+        overall_score: { type: "NUMBER" },
+        must_have_match: CATEGORY_SCHEMA,
+        experience_match: CATEGORY_SCHEMA,
+        domain_match: CATEGORY_SCHEMA,
+        seniority_match: CATEGORY_SCHEMA,
+        nice_to_have_match: CATEGORY_SCHEMA,
+        strength_summary: { type: "STRING" },
+        risk_flags: { type: "ARRAY", items: { type: "STRING" } },
+    },
+    required: [
+        "overall_score", "must_have_match", "experience_match", "domain_match",
+        "seniority_match", "nice_to_have_match", "strength_summary", "risk_flags",
+    ],
+};
 
 export async function POST(request: NextRequest) {
     try {
@@ -69,7 +118,7 @@ ${JSON.stringify(jd, null, 2)}
 
 Determine a score from 0-100 for each dimension, explain the reasoning briefly, list the gaps, and calculate the weighted overall score. Be rigorous and identify any risk flags.`;
 
-        const result = await callAI(systemPrompt, userPrompt);
+        const result = await callAI(systemPrompt, userPrompt, MATCH_SCHEMA);
 
         let parsed;
         try { parsed = safeJsonParse(result); }

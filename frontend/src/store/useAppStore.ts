@@ -222,6 +222,23 @@ export const useAppStore = create<AppState>()(
         if (!state.view) state.view = 'apply';
         return state as AppState;
       },
+      // The crawl→extract→score run itself is volatile (it lives in a React
+      // component), but jdEntries are persisted. After a reload, an entry
+      // still marked in-flight can never progress — it would show a spinner
+      // forever. Surface it as an interrupted error instead.
+      onRehydrateStorage: () => (state) => {
+        if (!state?.jdEntries?.length) return;
+        const inFlight = new Set<JDEntryStatus>(['pending', 'crawling', 'parsing', 'scoring']);
+        if (!state.jdEntries.some((e) => inFlight.has(e.status))) return;
+        const fixed = state.jdEntries.map((e) =>
+          inFlight.has(e.status)
+            ? { ...e, status: 'error' as const, error: 'Interrupted by page reload' }
+            : e,
+        );
+        // Defer: this callback can run synchronously inside create(), before
+        // the exported store binding exists.
+        setTimeout(() => useAppStore.setState({ jdEntries: fixed }), 0);
+      },
     }
   )
 );

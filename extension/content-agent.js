@@ -778,6 +778,14 @@ async function executeSingleInstruction(inst, cvData) {
     const value = inst.value;
     const componentType = inst.componentType || 'native';
 
+    // Never fill credential inputs — profile data must not end up in a
+    // password box, and page text can't talk the planner into it (the server
+    // also filters these, this is the last line of defense).
+    if (el.type === 'password') {
+        console.warn(`[JobFit Agent] Refusing to fill password field: ${inst.selector}`);
+        return false;
+    }
+
     try {
         // File upload
         if (action === 'upload') {
@@ -841,9 +849,10 @@ async function executeSingleInstruction(inst, cvData) {
             await sleep(200);
             // Verify
             if (el.value === value) return true;
-            // Fallback: simulate typing
+            // Fallback: simulate typing. Datepickers routinely reformat what we
+            // type (2024-01-02 → 02/01/2024), so "non-empty" is the honest check.
             await simulateTyping(el, value);
-            return true;
+            return String(el.value || '').trim() !== '';
         }
 
         // Fill / Type (text input, textarea)
@@ -857,7 +866,12 @@ async function executeSingleInstruction(inst, cvData) {
             // Fallback: simulate typing
             console.log('[JobFit Agent] Value did not stick, trying keyboard simulation');
             await simulateTyping(el, value);
-            return true;
+            // Verify again — claiming success here without checking inflates the
+            // `filled` count the planner sees and hides persistently-broken fields.
+            // Input masks may reformat (phone → "(+84) ..."), so accept any
+            // non-empty value as "stuck".
+            if (el.value === value) return true;
+            return String(el.value || '').trim() !== '';
         }
 
         console.warn(`[JobFit Agent] Unknown action: ${action}`);
@@ -1203,6 +1217,12 @@ async function runAgentLoop(profile) {
     let prevUrl = window.location.href;
     const fillAttempts = new Map(); // selector → { count, lastValue }
     const persistentlyUnfilled = new Set();
+    // Completion signals present BEFORE we act. Job pages often contain static
+    // marketing copy that matches the success regexes ("ứng tuyển thành công
+    // trong 1 phút", "Cảm ơn bạn đã quan tâm..."), so only signals that APPEAR
+    // after we actually did something count as a submitted application.
+    let baselineSignals = null;
+    let actionsTaken = 0;
 
     // Load CV data if available
     const cvData = await new Promise(r => {
@@ -1237,17 +1257,24 @@ async function runAgentLoop(profile) {
         let sameStateCount = 0;
 
         for (let i = 0; i < AGENT_MAX_ITERATIONS; i++) {
+            // Keep the background watchdog alive — an iteration can legitimately
+            // take minutes (LLM call + waits), the timer should only fire when
+            // this page goes silent.
+            sendHeartbeat();
+
             // ── 1. OBSERVE ──
             showProgress(i + 1, AGENT_MAX_ITERATIONS, 'Đang phân tích trang...');
             const state = await observePageState();
 
             // ── 2. CHECK TERMINATION ──
-            // Success detected
-            if (state.completionSignals.length > 0) {
+            if (baselineSignals === null) baselineSignals = new Set(state.completionSignals);
+            const newSignals = state.completionSignals.filter(s => !baselineSignals.has(s));
+            // Success = a NEW signal appeared after at least one real action.
+            if (newSignals.length > 0 && actionsTaken > 0) {
                 showProgress(i + 1, AGENT_MAX_ITERATIONS, 'Phát hiện ứng tuyển thành công!');
                 removeProgress();
-                await showConfirmation(state.totalFields, state.totalFields, true);
-                reportResult(true, `Success detected: ${state.completionSignals[0]}`);
+                reportResult(true, `Success detected: ${newSignals[0]}`, 'submitted');
+                showConfirmation(state.totalFields, state.totalFields, true);
                 return;
             }
 
@@ -1344,8 +1371,13 @@ async function runAgentLoop(profile) {
                 const filledCount = history.filter(h => h.plan?.action === 'FILL').reduce(
                     (sum, h) => sum + (h.result?.filled || 0), 0
                 );
-                await showConfirmation(filledCount, state.totalFields, false);
-                reportResult(true, `Completed in ${i + 1} iterations, filled ~${filledCount} fields`);
+                // DONE means "form is filled, awaiting human review & submit" —
+                // the agent never clicks Submit itself. Report 'filled' (not
+                // 'submitted') so the batch UI doesn't claim applications were
+                // sent. Report BEFORE the confirmation overlay: awaiting the
+                // user's click here would stall the whole batch queue.
+                reportResult(true, `Filled ~${filledCount} fields in ${i + 1} iterations — awaiting user submit`, 'filled');
+                showConfirmation(filledCount, state.totalFields, false);
                 return;
             }
 
@@ -1373,11 +1405,13 @@ async function runAgentLoop(profile) {
                 }
                 const filled = await executeFillInstructions(plan.instructions, cvData);
                 actionResult = { filled, total: plan.instructions.length };
+                if (filled > 0) actionsTaken++;
             } else if (plan.action === 'CLICK' && plan.clickTarget) {
                 const target = document.querySelector(plan.clickTarget);
                 if (target) {
                     target.click();
                     actionResult = { clicked: plan.clickTarget };
+                    actionsTaken++;
                 } else {
                     actionResult = { error: `Click target not found: ${plan.clickTarget}` };
                 }
@@ -1471,11 +1505,25 @@ function showConfirmation(filledCount, totalFields, isSuccess) {
 }
 
 // ─── Report result back to background ───
-function reportResult(success, detail) {
+// outcome: 'submitted' (new success signal seen after our actions)
+//        | 'filled'    (form filled, awaiting the user's review + submit)
+//        | 'failed'
+function reportResult(success, detail, outcome) {
     chrome.runtime.sendMessage({
         type: 'AUTO_APPLY_RESULT',
-        result: { success, site: window.location.hostname, url: window.location.href, detail },
+        result: {
+            success,
+            outcome: outcome || (success ? 'filled' : 'failed'),
+            site: window.location.hostname,
+            url: window.location.href,
+            detail,
+        },
     }).catch(() => { });
+}
+
+// ─── Heartbeat: tell background this job is still actively working ───
+function sendHeartbeat() {
+    chrome.runtime.sendMessage({ type: 'AUTO_APPLY_HEARTBEAT' }).catch(() => { });
 }
 
 // ═══════════════════════════════════════════════════════════════════

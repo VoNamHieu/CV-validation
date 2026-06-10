@@ -169,10 +169,37 @@ def _apex_url(url: str) -> str:
     return f"{p.scheme}://{p.hostname}"
 
 
-def _root_domain(hostname: str) -> str:
-    """example.co.uk → example.co.uk; www.acme.com → acme.com."""
-    h = hostname.lower().removeprefix("www.")
+# Multi-label public suffixes. Without these, comparing the last two labels
+# would reduce e.g. fpt.com.vn and evil.com.vn both to "com.vn" and treat any
+# two .com.vn sites as the SAME domain. Not a full Public Suffix List — just
+# the suffixes likely to show up for VN-market companies plus common
+# international ones.
+_MULTI_LABEL_SUFFIXES = {
+    "com.vn", "net.vn", "org.vn", "edu.vn", "gov.vn", "ac.vn", "info.vn",
+    "pro.vn", "int.vn", "biz.vn", "name.vn", "health.vn", "id.vn", "io.vn",
+    "co.uk", "org.uk", "ac.uk", "gov.uk",
+    "com.au", "net.au", "org.au",
+    "co.jp", "or.jp", "ne.jp",
+    "com.sg", "com.my", "co.id", "co.in", "co.th", "co.kr",
+    "com.cn", "com.tw", "com.hk", "com.br", "com.mx",
+}
+
+
+def _registrable_domain(hostname: str) -> str:
+    """acme.com.vn → acme.com.vn; sub.acme.com → acme.com; www.acme.com → acme.com."""
+    h = (hostname or "").lower().removeprefix("www.").rstrip(".")
+    parts = h.split(".")
+    if len(parts) >= 3 and ".".join(parts[-2:]) in _MULTI_LABEL_SUFFIXES:
+        return ".".join(parts[-3:])
+    if len(parts) >= 2:
+        return ".".join(parts[-2:])
     return h
+
+
+def _same_site(host_a: str, host_b: str) -> bool:
+    """True iff both hostnames share the same registrable domain."""
+    a, b = _registrable_domain(host_a), _registrable_domain(host_b)
+    return bool(a) and a == b
 
 
 # ── STAGE 0: RESOLVE INPUT ────────────────────────────────────────────────────
@@ -482,7 +509,7 @@ async def find_career_via_nav(homepage_url: str) -> list[CareerPage]:
             # Stay on the same registrable domain.
             target_host = (urlparse(full).hostname or "").lower().removeprefix("www.")
             base_host = (urlparse(base).hostname or "").lower().removeprefix("www.")
-            if _root_domain(target_host).split(".")[-2:] != _root_domain(base_host).split(".")[-2:]:
+            if not _same_site(target_host, base_host):
                 continue
             if full in seen:
                 continue
@@ -716,7 +743,7 @@ def _collect_link_candidates(html: str, base: str) -> list[dict]:
         if not host or host in NON_COMPANY_HOSTS:
             continue
         # Stay on the same registrable domain (allow career subdomains).
-        if _root_domain(host).split(".")[-2:] != _root_domain(base_host).split(".")[-2:]:
+        if not _same_site(host, base_host):
             continue
         if not parsed.path or parsed.path == "/":
             continue

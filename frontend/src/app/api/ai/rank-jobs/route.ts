@@ -45,6 +45,26 @@ function compactCv(cv: any): string {
         .join("\n");
 }
 
+const RANK_SCHEMA = {
+    type: "OBJECT",
+    properties: {
+        ranked: {
+            type: "ARRAY",
+            items: {
+                type: "OBJECT",
+                properties: {
+                    url: { type: "STRING" },
+                    title: { type: "STRING" },
+                    fit_score: { type: "NUMBER" },
+                    reason: { type: "STRING" },
+                },
+                required: ["url", "fit_score"],
+            },
+        },
+    },
+    required: ["ranked"],
+};
+
 export async function POST(request: NextRequest) {
     try {
         const { cv, jobs } = await request.json();
@@ -99,7 +119,7 @@ ${candidates.map((c, i) => `${i + 1}. [${c.url}] ${c.title || "(no title)"}`).jo
 
 Rank these jobs from best to worst fit for this candidate.`;
 
-        const raw = await callAILight(systemPrompt, userPrompt);
+        const raw = await callAILight(systemPrompt, userPrompt, RANK_SCHEMA);
         let parsed: { ranked?: Array<{ url: string; title?: string; fit_score?: number; reason?: string }> };
         try {
             parsed = safeJsonParse(raw);

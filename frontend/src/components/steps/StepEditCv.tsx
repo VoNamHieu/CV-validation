@@ -30,7 +30,9 @@ interface BatchJobStatus {
     jobTitle: string;
     company: string;
     status: 'pending' | 'processing' | 'done' | 'error';
-    result?: { success: boolean; detail?: string };
+    // outcome: 'submitted' = success signal seen after the agent acted;
+    // 'filled' = form filled, tab left open for the user to review & submit.
+    result?: { success: boolean; detail?: string; outcome?: 'submitted' | 'filled' | 'failed' };
 }
 
 interface BatchProgress {
@@ -40,6 +42,8 @@ interface BatchProgress {
     total: number;
     completed: number;
     successful?: number;
+    submitted?: number;
+    filled?: number;
 }
 
 /**
@@ -193,6 +197,8 @@ export default function StepEditCv() {
                     total: event.data.total ?? 0,
                     completed: event.data.completed ?? 0,
                     successful: event.data.successful ?? 0,
+                    submitted: event.data.submitted ?? 0,
+                    filled: event.data.filled ?? 0,
                 });
                 if (!event.data.isProcessing) {
                     setBatchStarting(false);
@@ -562,6 +568,13 @@ export default function StepEditCv() {
     // Is batch running?
     const isBatchActive = batchStarting || (batchProgress?.isProcessing ?? false);
     const batchDone = batchProgress && !batchProgress.isProcessing && batchProgress.completed > 0;
+    // Compute from the queue (not the top-level counters) so the panel stays
+    // honest even with an older extension build that doesn't send outcome —
+    // a 'done' without outcome was never verified as submitted.
+    const batchSubmitted = batchProgress?.queue.filter(
+        j => j.status === 'done' && j.result?.outcome === 'submitted').length ?? 0;
+    const batchFilled = batchProgress?.queue.filter(
+        j => j.status === 'done' && j.result?.outcome !== 'submitted').length ?? 0;
     const isFullAutoBusy = fullAutoStatus !== 'idle';
 
     // Empty state (placed AFTER all hooks to satisfy rules-of-hooks)
@@ -766,7 +779,7 @@ export default function StepEditCv() {
                             <span style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--text-primary)' }}>
                                 {batchProgress.isProcessing
                                     ? `⚡ Batch Apply — ${batchProgress.completed}/${batchProgress.total} jobs`
-                                    : `✅ Batch Complete — ${batchProgress.successful || 0}/${batchProgress.total} successful`
+                                    : `✅ Hoàn tất — ${batchSubmitted} đã nộp · ${batchFilled} đã điền (chờ bạn nộp)`
                                 }
                             </span>
                         </div>
@@ -781,6 +794,17 @@ export default function StepEditCv() {
                             }} />
                         </div>
                     </div>
+
+                    {/* Agent never clicks Submit — filled tabs await the user */}
+                    {batchDone && batchFilled > 0 && (
+                        <p style={{
+                            fontSize: '0.75rem', color: '#fbbf24', margin: '0 0 10px',
+                            lineHeight: 1.5,
+                        }}>
+                            ⚠️ Agent không tự bấm Nộp. {batchFilled} tab đã điền form vẫn đang mở —
+                            hãy kiểm tra thông tin và bấm nộp thủ công ở từng tab.
+                        </p>
+                    )}
 
                     {/* Job List */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 200, overflowY: 'auto' }}>
@@ -838,7 +862,7 @@ export default function StepEditCv() {
                                 }}>
                                     {job.status === 'pending' && 'Chờ'}
                                     {job.status === 'processing' && 'Đang xử lý...'}
-                                    {job.status === 'done' && 'Thành công'}
+                                    {job.status === 'done' && (job.result?.outcome === 'submitted' ? 'Đã nộp' : 'Đã điền — chờ nộp')}
                                     {job.status === 'error' && (job.result?.detail || 'Lỗi')}
                                 </span>
                             </div>
