@@ -180,6 +180,86 @@ export async function rankJobsByFit(
     return Array.isArray(data?.ranked) ? data.ranked : [];
 }
 
+// ── Tournament ranking for candidate lists larger than one rank-jobs call
+//    can see (the route caps candidates at 30). Jobs are dealt into pools,
+//    pools are ranked in parallel, and the winners meet in a final round
+//    that sees every finalist in a single context. Pool fit_scores only
+//    select finalists — each LLM call grades on its own scale, so scores
+//    are not comparable across pools; the final round decides the order. ──
+const RANK_CALL_MAX = 30; // hard candidate cap enforced by /api/ai/rank-jobs
+const RANK_POOL_SIZE = 25;
+
+export async function rankJobsTournament(
+    cv: unknown,
+    jobs: { url: string; title?: string; company?: string }[],
+): Promise<RankedJob[]> {
+    const seen = new Set<string>();
+    const unique = jobs.filter((j) => {
+        if (!j?.url || seen.has(j.url)) return false;
+        seen.add(j.url);
+        return true;
+    });
+
+    if (unique.length <= RANK_CALL_MAX) {
+        return rankJobsByFit(cv, unique);
+    }
+
+    // Interleave by company so no pool is dominated by a single employer
+    // (the flat list arrives grouped by company). Jobs without a company
+    // group by hostname instead.
+    const groups = new Map<string, typeof unique>();
+    for (const j of unique) {
+        let key = j.company || '';
+        if (!key) {
+            try { key = new URL(j.url).hostname; } catch { key = ''; }
+        }
+        const g = groups.get(key);
+        if (g) g.push(j); else groups.set(key, [j]);
+    }
+    const buckets = [...groups.values()];
+    const interleaved: typeof unique = [];
+    for (let i = 0; interleaved.length < unique.length; i++) {
+        for (const b of buckets) {
+            if (i < b.length) interleaved.push(b[i]);
+        }
+    }
+
+    // Deal into pools round-robin so each pool is a fair cross-section.
+    const poolCount = Math.ceil(unique.length / RANK_POOL_SIZE);
+    const pools: (typeof unique)[] = Array.from({ length: poolCount }, () => []);
+    interleaved.forEach((j, i) => pools[i % poolCount].push(j));
+
+    // Keep the final round under the per-call cap.
+    const finalistsPerPool = Math.max(1, Math.floor(RANK_CALL_MAX / poolCount));
+
+    const settled = await Promise.allSettled(
+        pools.map((p) => rankJobsByFit(cv, p.map(({ url, title }) => ({ url, title })))),
+    );
+    const poolPicks = settled.map((res, i) => {
+        // A failed pool still sends its leading jobs through unranked rather
+        // than knocking its companies out of the running entirely.
+        const picks = res.status === 'fulfilled' && res.value.length ? res.value : pools[i];
+        return picks.slice(0, finalistsPerPool).map((p) => ({ url: p.url, title: p.title }));
+    });
+
+    // Interleave finalists by pool rank (every pool's #1 first, then #2, ...)
+    // so the no-final-round fallback below is still a fair order.
+    const finalists: { url: string; title?: string }[] = [];
+    for (let rank = 0; rank < finalistsPerPool; rank++) {
+        for (const picks of poolPicks) {
+            if (rank < picks.length) finalists.push(picks[rank]);
+        }
+    }
+
+    try {
+        const final = await rankJobsByFit(cv, finalists);
+        if (final.length) return final;
+    } catch {
+        // fall through to the pool-rank order
+    }
+    return finalists.map((f) => ({ url: f.url, title: f.title || '', fit_score: 0, reason: '' }));
+}
+
 // ── Fetch a single page with Playwright via Railway backend ──
 export async function fetchPage(url: string): Promise<{
     success: boolean;

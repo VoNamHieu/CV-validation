@@ -10,7 +10,7 @@ import type { Icon } from '@phosphor-icons/react';
 import { useAppStore } from '@/store/useAppStore';
 import {
     smartSearch, crawlUrl, extractJdStructured, scoreFit, fetchPage,
-    extractJobLinks, rankJobsByFit, extensionCrawl, isExtensionAvailable,
+    extractJobLinks, rankJobsTournament, extensionCrawl, isExtensionAvailable,
     findCareer, getFeaturedJobs, optimizeCv, type JobListing,
 } from '@/lib/api';
 
@@ -190,9 +190,9 @@ export default function StepInputUrl() {
             const MAX_JOBS = 5;
             let ranked: { url: string; title?: string; fit_score?: number }[] = [];
             try {
-                ranked = await rankJobsByFit(
+                ranked = await rankJobsTournament(
                     cvData,
-                    allJobs.map((j) => ({ url: j.url, title: j.title })),
+                    allJobs.map((j) => ({ url: j.url, title: j.title, company: j.company })),
                 );
             } catch (rankErr) {
                 console.log('[StepInputUrl/featured] ranking failed, using original order:', rankErr);
@@ -544,7 +544,7 @@ export default function StepInputUrl() {
             const MAX_JOBS = 5;
             let ranked: { url: string; title?: string; fit_score?: number; reason?: string }[] = [];
             try {
-                ranked = await rankJobsByFit(cvData, candidates);
+                ranked = await rankJobsTournament(cvData, candidates);
             } catch (rankErr) {
                 console.log('[StepInputUrl] Job ranking failed, using site order:', rankErr);
             }
