@@ -71,17 +71,17 @@ function TemplateMiniature({ template }: { template: CvTemplate }) {
     const c = template.accentColor;
 
     if (template.layout === 'single-col') {
-        const isBarStyle = template.id === 'green-header';
+        const isBarStyle = template.id === 'green-header' || template.id === 'navy-header';
         const sectionBg = isBarStyle ? c : '#bbb';
         const sectionFg = isBarStyle ? '#fff' : '#1a1a1a';
         const avatarBg = isBarStyle ? `${c}33` : '#e8e8e8';
         return (
             <svg viewBox="0 0 80 113" style={{ width: '100%', height: '100%', display: 'block', background: '#fff', border: '1px solid #eee' }}>
-                <circle cx="14" cy="18" r="8" fill={avatarBg} />
-                <rect x="26" y="13" width="40" height="3.5" fill="#333" />
-                <rect x="26" y="19" width="30" height="1.8" fill="#888" />
-                <rect x="26" y="22.5" width="34" height="1.8" fill="#888" />
-                <rect x="26" y="26" width="28" height="1.8" fill="#888" />
+                {template.hasPhoto && <circle cx="14" cy="18" r="8" fill={avatarBg} />}
+                <rect x={template.hasPhoto ? 26 : 8} y="13" width="40" height="3.5" fill="#333" />
+                <rect x={template.hasPhoto ? 26 : 8} y="19" width="30" height="1.8" fill="#888" />
+                <rect x={template.hasPhoto ? 26 : 8} y="22.5" width="34" height="1.8" fill="#888" />
+                <rect x={template.hasPhoto ? 26 : 8} y="26" width="28" height="1.8" fill="#888" />
                 <rect x="8" y="36" width="64" height="4.5" fill={sectionBg} />
                 <rect x="10" y="37.5" width="20" height="1.6" fill={sectionFg} opacity={isBarStyle ? 1 : 0} />
                 <rect x="8" y="44" width="62" height="1.6" fill="#ccc" />
@@ -101,13 +101,21 @@ function TemplateMiniature({ template }: { template: CvTemplate }) {
         );
     }
 
-    // sidebar-left layout
+    // sidebar layout — mirrored horizontally when the sidebar sits on the right
     const isLight = template.id === 'light-sidebar';
+    const isRight = template.layout === 'sidebar-right';
     const sidebarBg = isLight ? '#f1f5f7' : c;
     const sidebarFg = isLight ? c : '#fff';
     const avatarFill = isLight ? c : 'rgba(255,255,255,0.25)';
     return (
-        <svg viewBox="0 0 80 113" style={{ width: '100%', height: '100%', display: 'block', background: '#fff', border: '1px solid #eee' }}>
+        <svg
+            viewBox="0 0 80 113"
+            style={{
+                width: '100%', height: '100%', display: 'block',
+                background: '#fff', border: '1px solid #eee',
+                transform: isRight ? 'scaleX(-1)' : undefined,
+            }}
+        >
             <rect x="0" y="0" width="28" height="113" fill={sidebarBg} />
             <circle cx="14" cy="20" r="9" fill={avatarFill} />
             <rect x="4" y="34" width="20" height="2.5" fill={sidebarFg} />

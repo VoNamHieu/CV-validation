@@ -5,9 +5,13 @@ export type CvTemplateId =
     | 'green-header'
     | 'green-sidebar'
     | 'blue-sidebar'
-    | 'light-sidebar';
+    | 'light-sidebar'
+    | 'navy-header'
+    | 'slate-right'
+    | 'elegant-serif'
+    | 'minimal-mono';
 
-export type CvTemplateLayout = 'single-col' | 'sidebar-left';
+export type CvTemplateLayout = 'single-col' | 'sidebar-left' | 'sidebar-right';
 
 export interface RenderOptions {
     avatarBase64?: string;
@@ -19,6 +23,9 @@ export interface CvTemplate {
     description: string;
     accentColor: string;
     layout: CvTemplateLayout;
+    // Whether the template has an image holder (avatar slot). The avatar
+    // uploader in the UI only shows for templates where this is true.
+    hasPhoto: boolean;
     render: (cv: CVData, opts?: RenderOptions) => string;
 }
 

@@ -22,7 +22,7 @@ import {
     EMPTY_CONTACT, EMPTY_PERSONAL, EMPTY_EMPLOYMENT, EMPTY_PREFERENCES,
 } from '@/lib/types';
 import { cvToExtensionProfile } from '@/lib/extension-profile';
-import { renderCvHtml, DEFAULT_TEMPLATE_ID } from '@/lib/cv-templates';
+import { renderCvHtml, getTemplate, DEFAULT_TEMPLATE_ID } from '@/lib/cv-templates';
 import type { CvTemplateId } from '@/lib/cv-templates';
 import { resizeAvatarToDataUrl } from '@/lib/avatar';
 
@@ -101,7 +101,10 @@ export default function StepEditCv() {
     const [optVariantCount, setOptVariantCount] = useState<number>(1);
 
     // ── Template / preview / avatar state ──
-    const [livePreviewOpen, setLivePreviewOpen] = useState(true);
+    // Collapsed by default: the editable document below is the single source
+    // of truth; the template render is only a download preview. Showing both
+    // at once made users think they had two different CVs.
+    const [livePreviewOpen, setLivePreviewOpen] = useState(false);
     const [avatarBusy, setAvatarBusy] = useState(false);
     const [avatarError, setAvatarError] = useState<string | null>(null);
 
@@ -1233,59 +1236,76 @@ export default function StepEditCv() {
             {/* ══════ Template Picker + Avatar + Live Preview ══════ */}
             <div style={{ marginBottom: 12, padding: 12, background: 'var(--bg-card)', borderRadius: 10, border: '1px solid var(--border-subtle)' }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, marginBottom: 10 }}>
-                    {/* Avatar uploader */}
-                    <div style={{ flex: '0 0 auto', textAlign: 'center' }}>
-                        <div style={{
-                            fontSize: '0.72rem', fontWeight: 600,
-                            color: 'var(--text-secondary)', marginBottom: 6,
-                        }}>
-                            Ảnh đại diện
-                        </div>
-                        <label style={{
-                            display: 'block', width: 64, height: 64, borderRadius: '50%',
-                            cursor: avatarBusy ? 'wait' : 'pointer',
-                            border: '2px dashed var(--border-subtle)',
-                            background: userAvatarBase64
-                                ? `center/cover no-repeat url(${userAvatarBase64})`
-                                : 'var(--bg-card)',
-                            position: 'relative', overflow: 'hidden',
-                            transition: 'border-color 0.15s ease',
-                        }}>
-                            {!userAvatarBase64 && (
-                                <span style={{
-                                    position: 'absolute', inset: 0,
-                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                    fontSize: '0.7rem', color: 'var(--text-muted)',
-                                }}>
-                                    {avatarBusy ? '...' : 'Tải lên'}
-                                </span>
+                    {/* Avatar uploader — only for templates that have an image holder */}
+                    {getTemplate(currentEntry.selectedTemplateId).hasPhoto ? (
+                        <div style={{ flex: '0 0 auto', textAlign: 'center' }}>
+                            <div style={{
+                                fontSize: '0.72rem', fontWeight: 600,
+                                color: 'var(--text-secondary)', marginBottom: 6,
+                            }}>
+                                Ảnh đại diện
+                            </div>
+                            <label style={{
+                                display: 'block', width: 64, height: 64, borderRadius: '50%',
+                                cursor: avatarBusy ? 'wait' : 'pointer',
+                                border: '2px dashed var(--border-subtle)',
+                                background: userAvatarBase64
+                                    ? `center/cover no-repeat url(${userAvatarBase64})`
+                                    : 'var(--bg-card)',
+                                position: 'relative', overflow: 'hidden',
+                                transition: 'border-color 0.15s ease',
+                            }}>
+                                {!userAvatarBase64 && (
+                                    <span style={{
+                                        position: 'absolute', inset: 0,
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        fontSize: '0.7rem', color: 'var(--text-muted)',
+                                    }}>
+                                        {avatarBusy ? '...' : 'Tải lên'}
+                                    </span>
+                                )}
+                                <input
+                                    type="file"
+                                    accept="image/*"
+                                    disabled={avatarBusy}
+                                    style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'inherit' }}
+                                    onChange={(e) => {
+                                        const f = e.target.files?.[0] ?? null;
+                                        void handleAvatarPick(f);
+                                        e.target.value = '';
+                                    }}
+                                />
+                            </label>
+                            {userAvatarBase64 && (
+                                <button
+                                    onClick={() => setUserAvatar(null)}
+                                    type="button"
+                                    style={{
+                                        marginTop: 4, fontSize: '0.68rem',
+                                        background: 'none', border: 'none',
+                                        color: 'var(--accent-red)', cursor: 'pointer',
+                                    }}
+                                >
+                                    Xoá
+                                </button>
                             )}
-                            <input
-                                type="file"
-                                accept="image/*"
-                                disabled={avatarBusy}
-                                style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'inherit' }}
-                                onChange={(e) => {
-                                    const f = e.target.files?.[0] ?? null;
-                                    void handleAvatarPick(f);
-                                    e.target.value = '';
-                                }}
-                            />
-                        </label>
-                        {userAvatarBase64 && (
-                            <button
-                                onClick={() => setUserAvatar(null)}
-                                type="button"
-                                style={{
-                                    marginTop: 4, fontSize: '0.68rem',
-                                    background: 'none', border: 'none',
-                                    color: 'var(--accent-red)', cursor: 'pointer',
-                                }}
-                            >
-                                Xoá
-                            </button>
-                        )}
-                    </div>
+                        </div>
+                    ) : (
+                        <div style={{ flex: '0 0 auto', textAlign: 'center', maxWidth: 90 }}>
+                            <div style={{
+                                fontSize: '0.72rem', fontWeight: 600,
+                                color: 'var(--text-secondary)', marginBottom: 6,
+                            }}>
+                                Ảnh đại diện
+                            </div>
+                            <div style={{
+                                fontSize: '0.66rem', color: 'var(--text-muted)',
+                                lineHeight: 1.4,
+                            }}>
+                                Mẫu này không có ô ảnh
+                            </div>
+                        </div>
+                    )}
 
                     {/* Template picker */}
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -1336,7 +1356,7 @@ export default function StepEditCv() {
                     {livePreviewOpen ? <CaretLeft size={12} style={{ transform: 'rotate(-90deg)' }} /> : <CaretRight size={12} style={{ transform: 'rotate(90deg)' }} />}
                     {livePreviewOpen ? 'Ẩn xem trước mẫu' : 'Xem trước mẫu đã chọn'}
                     <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: '0.72rem' }}>
-                        — bản đã lưu sẽ hiển thị; chỉnh sửa và lưu để cập nhật
+                        — đây là CHÍNH CV bên dưới render theo mẫu (bản sẽ xuất PDF), không phải CV thứ hai
                     </span>
                 </button>
 
