@@ -3,7 +3,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import {
     ArrowLeft, Sparkle, Warning, Briefcase,
-    CheckCircle, FilePdf, CaretLeft, CaretRight,
+    CheckCircle, FilePdf, FloppyDisk, CaretLeft, CaretRight,
     RocketLaunch, Lightning, CircleNotch,
     XCircle, Stop, ArrowsClockwise, SlidersHorizontal,
 } from '@phosphor-icons/react';
@@ -101,10 +101,17 @@ export default function StepEditCv() {
     const [optVariantCount, setOptVariantCount] = useState<number>(1);
 
     // ── Template / preview / avatar state ──
-    // Collapsed by default: the editable document below is the single source
-    // of truth; the template render is only a download preview. Showing both
-    // at once made users think they had two different CVs.
-    const [livePreviewOpen, setLivePreviewOpen] = useState(false);
+    // Preview mode and edit mode are mutually exclusive: while the template
+    // preview is open, the editable document is hidden (display:none — still
+    // mounted so in-progress edits survive). editedCv mirrors those edits
+    // so the preview and downloads match what the user sees in the editor.
+    // Defaults to preview: the optimized CV rendered in the chosen template
+    // is what the user lands on; editing is the opt-in mode.
+    const [livePreviewOpen, setLivePreviewOpen] = useState(true);
+    const [editedCv, setEditedCv] = useState<CVData | null>(null);
+    const handleEditedChange = useCallback((cv: CVData) => {
+        setEditedCv(cv);
+    }, []);
     const [avatarBusy, setAvatarBusy] = useState(false);
     const [avatarError, setAvatarError] = useState<string | null>(null);
 
@@ -1327,6 +1334,9 @@ export default function StepEditCv() {
                                     optimizedCvPdfBase64: undefined,
                                     optimizedCvFileName: undefined,
                                 });
+                                // Picking a template implies the user wants to
+                                // see the CV in that template — switch to preview.
+                                setLivePreviewOpen(true);
                             }}
                         />
                     </div>
@@ -1342,7 +1352,7 @@ export default function StepEditCv() {
                     </div>
                 )}
 
-                {/* Live preview toggle + iframe */}
+                {/* Preview/edit mode switch — only one CV is visible at a time */}
                 <button
                     type="button"
                     onClick={() => setLivePreviewOpen(v => !v)}
@@ -1354,45 +1364,71 @@ export default function StepEditCv() {
                     }}
                 >
                     {livePreviewOpen ? <CaretLeft size={12} style={{ transform: 'rotate(-90deg)' }} /> : <CaretRight size={12} style={{ transform: 'rotate(90deg)' }} />}
-                    {livePreviewOpen ? 'Ẩn xem trước mẫu' : 'Xem trước mẫu đã chọn'}
+                    {livePreviewOpen ? 'Quay lại chỉnh sửa nội dung' : 'Xem trước mẫu đã chọn'}
                     <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: '0.72rem' }}>
-                        — đây là CHÍNH CV bên dưới render theo mẫu (bản sẽ xuất PDF), không phải CV thứ hai
+                        {livePreviewOpen
+                            ? '— CV đang hiển thị đúng theo mẫu sẽ xuất PDF'
+                            : '— xem CV render theo mẫu trước khi tải xuống'}
                     </span>
                 </button>
 
                 {livePreviewOpen && (
-                    <div style={{
-                        marginTop: 8, border: '1px solid var(--border-subtle)',
-                        borderRadius: 6, overflow: 'hidden', background: '#fff',
-                    }}>
-                        <iframe
-                            key={`${currentEntry.id}-${currentEntry.selectedTemplateId ?? DEFAULT_TEMPLATE_ID}-${userAvatarBase64?.length ?? 0}`}
-                            title="CV preview"
-                            sandbox=""
-                            srcDoc={renderCvHtml(
-                                currentEntry.optimizedCv!,
-                                currentEntry.selectedTemplateId,
-                                { avatarBase64: userAvatarBase64 ?? undefined },
-                            )}
-                            style={{
-                                display: 'block',
-                                width: '100%',
-                                height: 900,
-                                border: 'none',
-                            }}
-                        />
-                    </div>
+                    <>
+                        <div style={{
+                            display: 'flex', alignItems: 'center',
+                            justifyContent: 'flex-end', gap: 8, marginTop: 8,
+                        }}>
+                            <button
+                                onClick={() => void handleDownload(editedCv ?? currentEntry.optimizedCv!)}
+                                disabled={downloadingPdf}
+                                className="btn-primary"
+                                style={{
+                                    display: 'flex', alignItems: 'center', gap: 5,
+                                    padding: '8px 20px', fontSize: '0.82rem',
+                                    opacity: downloadingPdf ? 0.6 : 1,
+                                }}
+                            >
+                                <FloppyDisk size={14} weight="fill" />
+                                {downloadingPdf ? 'Đang xuất PDF…' : 'Save & Download'}
+                            </button>
+                        </div>
+                        <div style={{
+                            marginTop: 8, border: '1px solid var(--border-subtle)',
+                            borderRadius: 6, overflow: 'hidden', background: '#fff',
+                        }}>
+                            <iframe
+                                key={`${currentEntry.id}-${currentEntry.selectedTemplateId ?? DEFAULT_TEMPLATE_ID}-${userAvatarBase64?.length ?? 0}`}
+                                title="CV preview"
+                                sandbox=""
+                                srcDoc={renderCvHtml(
+                                    editedCv ?? currentEntry.optimizedCv!,
+                                    currentEntry.selectedTemplateId,
+                                    { avatarBase64: userAvatarBase64 ?? undefined },
+                                )}
+                                style={{
+                                    display: 'block',
+                                    width: '100%',
+                                    height: 900,
+                                    border: 'none',
+                                }}
+                            />
+                        </div>
+                    </>
                 )}
             </div>
 
-            {/* ══════ CV Document — ALWAYS VISIBLE ══════ */}
-            <CvDocumentPreview
-                key={`${currentEntry.id}-${currentVariantIdx}`}
-                originalCv={cvData}
-                optimizedCv={currentEntry.optimizedCv!}
-                onSave={handleDownload}
-                keywords={atsKeywords}
-            />
+            {/* ══════ Editable CV document — hidden (not unmounted, so edits
+                 survive) while the template preview above is open ══════ */}
+            <div style={{ display: livePreviewOpen ? 'none' : undefined }}>
+                <CvDocumentPreview
+                    key={`${currentEntry.id}-${currentVariantIdx}`}
+                    originalCv={cvData}
+                    optimizedCv={currentEntry.optimizedCv!}
+                    onSave={handleDownload}
+                    onEditedChange={handleEditedChange}
+                    keywords={atsKeywords}
+                />
+            </div>
 
             {/* Hide scrollbar for tabs */}
             <style>{`

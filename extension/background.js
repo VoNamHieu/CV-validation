@@ -60,7 +60,42 @@ function armJobSafetyTimer(timedJobIndex) {
     }, JOB_SAFETY_WINDOW_MS);
 }
 
+// ─── Single auto-apply (shared by relay + external paths) ───
+function handleAutoApplyStart(message, sendResponse) {
+    const { jobUrl, profile } = message;
+    if (!jobUrl || !profile) {
+        sendResponse({ success: false, error: 'Missing jobUrl or profile' });
+        return true;
+    }
+    // A single apply mid-batch would overwrite jobfitProfile/pendingAutoApply
+    // in storage and corrupt the job the batch is currently driving.
+    if (isProcessing) {
+        sendResponse({ success: false, error: 'Batch apply đang chạy — hãy chờ xong hoặc hủy batch trước.' });
+        return true;
+    }
+    const storage = {
+        jobfitProfile: profile,
+        pendingAutoApply: true,
+        autoApplyJobUrl: jobUrl,
+    };
+    // Per-job CV file from the web app (rendered at Optimize time) so the
+    // agent can satisfy required file-upload fields on single applies too.
+    if (message.cvFileBase64 && message.cvFileName) {
+        storage.cvFileBase64 = message.cvFileBase64;
+        storage.cvFileName = message.cvFileName;
+    }
+    chrome.storage.local.set(storage, () => {
+        chrome.tabs.create({ url: jobUrl, active: true }, (tab) => {
+            console.log('[JobFit AI] Auto Apply: opened tab', tab.id, 'for', jobUrl);
+            sendResponse({ success: true, tabId: tab.id });
+        });
+    });
+    return true;
+}
+
 // ─── Listen for external messages from JobFit AI web app ───
+// NOTE: only reachable if the manifest declares externally_connectable.
+// The supported path is the content-webapp.js relay → onMessage below.
 chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
     if (message.type === 'JOBFIT_EXPORT_PROFILE') {
         const syncedAt = Date.now();
@@ -74,30 +109,8 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
         return true;
     }
 
-    // Single auto-apply (legacy)
     if (message.type === 'AUTO_APPLY_START') {
-        const { jobUrl, profile } = message;
-        if (!jobUrl || !profile) {
-            sendResponse({ success: false, error: 'Missing jobUrl or profile' });
-            return true;
-        }
-        // A single apply mid-batch would overwrite jobfitProfile/pendingAutoApply
-        // in storage and corrupt the job the batch is currently driving.
-        if (isProcessing) {
-            sendResponse({ success: false, error: 'Batch apply đang chạy — hãy chờ xong hoặc hủy batch trước.' });
-            return true;
-        }
-        chrome.storage.local.set({
-            jobfitProfile: profile,
-            pendingAutoApply: true,
-            autoApplyJobUrl: jobUrl,
-        }, () => {
-            chrome.tabs.create({ url: jobUrl, active: true }, (tab) => {
-                console.log('[JobFit AI] Auto Apply: opened tab', tab.id, 'for', jobUrl);
-                sendResponse({ success: true, tabId: tab.id });
-            });
-        });
-        return true;
+        return handleAutoApplyStart(message, sendResponse);
     }
 
     // Ping check
@@ -109,6 +122,14 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
 
 // ─── Listen for internal messages (content scripts + popup) ───
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    // Single auto-apply relayed from the web app via content-webapp.js.
+    // This used to live ONLY in onMessageExternal, which never fires without
+    // externally_connectable in the manifest — so web-app single applies
+    // silently went nowhere.
+    if (message.type === 'AUTO_APPLY_START') {
+        return handleAutoApplyStart(message, sendResponse);
+    }
+
     // ── Profile management ──
     if (message.type === 'GET_PROFILE') {
         chrome.storage.local.get('jobfitProfile', (data) => {

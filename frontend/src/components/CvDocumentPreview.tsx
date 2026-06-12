@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import {
     Plus, X, ArrowCounterClockwise, FloppyDisk, Printer,
     ArrowUp, ArrowDown, Trash,
@@ -413,6 +413,9 @@ interface CvDocumentPreviewProps {
     originalCv: CVData;
     optimizedCv: CVData;
     onSave: (editedCv: CVData) => void;
+    /** Notifies the parent of the latest edited CV so the template preview /
+     *  download can use in-progress edits, not just the saved optimizedCv. */
+    onEditedChange?: (editedCv: CVData) => void;
     keywords?: string[]; // ATS must-have keywords for highlighting
     compact?: boolean;
 }
@@ -422,10 +425,25 @@ const EMPTY_EDUCATION: EducationDetail = { degree: '', institution: '', year: ''
 const EMPTY_PROJECT: ProjectDetail = { name: '', description: '' };
 
 export default function CvDocumentPreview({
-    originalCv, optimizedCv, onSave, keywords, compact = false,
+    originalCv, optimizedCv, onSave, onEditedChange, keywords, compact = false,
 }: CvDocumentPreviewProps) {
     const [edited, setEdited] = useState<CVData>(() => JSON.parse(JSON.stringify(optimizedCv)));
     const [hasChanges, setHasChanges] = useState(false);
+
+    useEffect(() => {
+        onEditedChange?.(edited);
+    }, [edited, onEditedChange]);
+
+    // A genuinely new optimized CV (re-optimize, variant switch) replaces the
+    // edited content — the latest optimization is the default. Unrelated entry
+    // updates (template/avatar changes) keep the same optimizedCv reference,
+    // so in-progress edits survive them.
+    const [syncedCv, setSyncedCv] = useState(optimizedCv);
+    if (syncedCv !== optimizedCv) {
+        setSyncedCv(optimizedCv);
+        setEdited(JSON.parse(JSON.stringify(optimizedCv)));
+        setHasChanges(false);
+    }
 
     const update = useCallback(<K extends keyof CVData>(field: K, value: CVData[K]) => {
         setEdited(prev => ({ ...prev, [field]: value }));
