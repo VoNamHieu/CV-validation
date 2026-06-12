@@ -90,7 +90,8 @@ interface MatchAnalysis {
 
 // The LLM's response schema only covers the six "rewriteable" fields
 // (name/summary/skills/experience/education/projects). CVData also carries
-// contact, personal, employment, preferences — which must never be touched
+// contact, personal, employment, preferences plus the factual sections
+// certifications, languages, awards, activities — which must never be touched
 // by optimization. Merge them back from the original CV so they survive.
 function mergeOptimizedCv(original: unknown, optimized: unknown): unknown {
     if (!original || typeof original !== 'object') return optimized;
@@ -98,7 +99,11 @@ function mergeOptimizedCv(original: unknown, optimized: unknown): unknown {
     const orig = original as Record<string, unknown>;
     const opt = optimized as Record<string, unknown>;
     const preserved: Record<string, unknown> = {};
-    for (const key of ['contact', 'personal', 'employment', 'preferences'] as const) {
+    const PRESERVED_KEYS = [
+        'contact', 'personal', 'employment', 'preferences',
+        'certifications', 'languages', 'awards', 'activities',
+    ] as const;
+    for (const key of PRESERVED_KEYS) {
         if (orig[key] !== undefined) preserved[key] = orig[key];
     }
     return { ...opt, ...preserved };

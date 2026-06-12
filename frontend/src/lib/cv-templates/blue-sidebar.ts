@@ -93,6 +93,30 @@ export function blueSidebarTemplate(cv: CVData, opts?: RenderOptions): string {
         </div>
       </div>
     ` : ''}
+
+    ${cv.languages?.length ? `
+      <div class="sb-section">
+        <h3>Ngoại ngữ</h3>
+        <ul class="sb-skills">
+          ${cv.languages.map(l => `<li>${esc(l.language)}${l.level ? ` — ${esc(l.level)}` : ''}</li>`).join('')}
+        </ul>
+      </div>
+    ` : ''}
+
+    ${cv.certifications?.length ? `
+      <div class="sb-section">
+        <h3>Chứng chỉ</h3>
+        <div class="sb-extras">
+          ${cv.certifications.map(ct => `
+            <div class="row">
+              <div style="font-weight:600; color:#fff;">${esc(ct.name || '')}</div>
+              ${ct.issuer ? `<div style="color:#a8c2dd;">${esc(ct.issuer)}</div>` : ''}
+              ${ct.year ? `<div style="color:#88b0d4; font-size:8.5pt;">${esc(ct.year)}</div>` : ''}
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    ` : ''}
   </div>
 
   <div class="main">
@@ -118,6 +142,28 @@ export function blueSidebarTemplate(cv: CVData, opts?: RenderOptions): string {
         <div class="item">
           <div class="item-title">${esc(pj.name)}</div>
           <div class="item-desc">${descToBullets(pj.description)}</div>
+        </div>
+      `).join('')}
+    ` : ''}
+
+    ${cv.awards?.length ? `
+      <h2>Giải thưởng</h2>
+      ${cv.awards.map(a => `
+        <div class="item">
+          <div class="item-top">
+            <div class="item-title">${esc(a.title)}</div>
+            ${a.year ? `<div class="item-date">${esc(a.year)}</div>` : ''}
+          </div>
+        </div>
+      `).join('')}
+    ` : ''}
+
+    ${cv.activities?.length ? `
+      <h2>Hoạt động</h2>
+      ${cv.activities.map(ac => `
+        <div class="item">
+          <div class="item-title">${esc(ac.name)}</div>
+          <div class="item-desc">${descToBullets(ac.description)}</div>
         </div>
       `).join('')}
     ` : ''}

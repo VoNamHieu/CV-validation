@@ -3,6 +3,7 @@
 
 import type {
     CVData, ContactInfo, PersonalInfo, EmploymentInfo, JobPreferences,
+    CertificationDetail, LanguageDetail, AwardDetail, ActivityDetail,
 } from "@/lib/types";
 import {
     EMPTY_CONTACT, EMPTY_PERSONAL, EMPTY_EMPLOYMENT, EMPTY_PREFERENCES,
@@ -17,6 +18,10 @@ Return ONLY valid JSON matching this exact schema:
   "experience": [{"title": "string", "company": "string", "duration_months": number, "description": "string"}],
   "education": [{"degree": "string", "institution": "string", "year": "string"}],
   "projects": [{"name": "string", "description": "string"}],
+  "certifications": [{"name": "string", "issuer": "string", "year": "string"}],
+  "languages": [{"language": "string", "level": "string (e.g., IELTS 7.0, TOEIC 800, Native, Fluent, Intermediate)"}],
+  "awards": [{"title": "string", "year": "string"}],
+  "activities": [{"name": "string", "description": "string"}],
   "contact": {
     "email": "string",
     "phone": "string",
@@ -50,6 +55,10 @@ Return ONLY valid JSON matching this exact schema:
 }
 
 Rules:
+- COMPLETENESS IS CRITICAL: this output replaces the original CV, so any detail you omit is lost forever. Extract EVERY section and EVERY line of the CV into the schema.
+- For experience[].description, projects[].description, and activities[].description: copy EVERY bullet point and sentence from the source, keeping the original wording (translate nothing, summarize nothing). Output each bullet on its own line, separated by "\\n", without leading "-" or "*" characters. NEVER shorten, merge, drop, or paraphrase bullets — the bullet count in your output must equal the bullet count in the CV.
+- Map CV sections to schema fields: "Certifications" / "Chứng chỉ" / courses → certifications; "Languages" / "Ngoại ngữ" → languages; "Awards" / "Honors" / "Giải thưởng" / "Danh hiệu" → awards; "Activities" / "Volunteering" / "Hoạt động" / "Tình nguyện" / extracurriculars → activities.
+- If the CV contains content that fits no schema field (e.g., interests, references, publications), append it as extra lines to the most closely related description field rather than dropping it — e.g., publications under the related experience or activities entry.
 - Extract contact info (email, phone, address, LinkedIn, GitHub, portfolio URL) from anywhere in the CV — usually the header.
 - If the address looks Vietnamese (e.g., contains "Quan", "Huyen", "Phuong", "Tinh", "TP", "Ha Noi", "Ho Chi Minh", "Da Nang", or similar), split it into address_province / address_district / address_street. Otherwise put the city or region in address_province and leave the rest empty.
 - Set employment.current_title and employment.current_company from the most-recent experience entry (the one marked "Present" / current, or the topmost if dates indicate it is ongoing).
@@ -115,6 +124,35 @@ function normalizeEmployment(raw: Raw, experienceCount: number): EmploymentInfo 
     };
 }
 
+function asObjectArray(v: unknown): Record<string, unknown>[] {
+    if (!Array.isArray(v)) return [];
+    return v.filter((x): x is Record<string, unknown> => !!x && typeof x === "object");
+}
+
+function normalizeCertifications(raw: unknown): CertificationDetail[] {
+    return asObjectArray(raw)
+        .map(r => ({ name: asString(r.name), issuer: asString(r.issuer), year: asString(r.year) }))
+        .filter(c => c.name);
+}
+
+function normalizeLanguages(raw: unknown): LanguageDetail[] {
+    return asObjectArray(raw)
+        .map(r => ({ language: asString(r.language), level: asString(r.level) }))
+        .filter(l => l.language);
+}
+
+function normalizeAwards(raw: unknown): AwardDetail[] {
+    return asObjectArray(raw)
+        .map(r => ({ title: asString(r.title), year: asString(r.year) }))
+        .filter(a => a.title);
+}
+
+function normalizeActivities(raw: unknown): ActivityDetail[] {
+    return asObjectArray(raw)
+        .map(r => ({ name: asString(r.name), description: asString(r.description) }))
+        .filter(a => a.name || a.description);
+}
+
 function normalizePreferences(raw: Raw): JobPreferences {
     const r = (raw ?? {}) as Record<string, unknown>;
     return {
@@ -137,6 +175,10 @@ export function normalizeCVResponse(parsed: unknown): CVData {
         experience: experience as CVData["experience"],
         education: Array.isArray(r.education) ? (r.education as CVData["education"]) : [],
         projects: Array.isArray(r.projects) ? (r.projects as CVData["projects"]) : [],
+        certifications: normalizeCertifications(r.certifications),
+        languages: normalizeLanguages(r.languages),
+        awards: normalizeAwards(r.awards),
+        activities: normalizeActivities(r.activities),
         contact: normalizeContact(r.contact as Raw),
         personal: normalizePersonal(r.personal as Raw),
         employment: normalizeEmployment(r.employment as Raw, experience.length),

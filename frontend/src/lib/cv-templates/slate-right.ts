@@ -77,6 +77,28 @@ export function slateRightTemplate(cv: CVData, opts?: RenderOptions): string {
         </div>
       `).join('')}
     ` : ''}
+
+    ${cv.awards?.length ? `
+      <h2>Giải thưởng</h2>
+      ${cv.awards.map(a => `
+        <div class="item">
+          <div class="item-top">
+            <div class="item-title">${esc(a.title)}</div>
+            <div class="item-date">${esc(a.year)}</div>
+          </div>
+        </div>
+      `).join('')}
+    ` : ''}
+
+    ${cv.activities?.length ? `
+      <h2>Hoạt động</h2>
+      ${cv.activities.map(ac => `
+        <div class="item">
+          <div class="item-title">${esc(ac.name)}</div>
+          <div class="item-desc">${descToBullets(ac.description)}</div>
+        </div>
+      `).join('')}
+    ` : ''}
   </div>
 
   <div class="sidebar">
@@ -111,6 +133,28 @@ export function slateRightTemplate(cv: CVData, opts?: RenderOptions): string {
             <div class="sb-edu-inst">${esc(e.institution || '')}</div>
             <div class="sb-edu-degree">${esc(e.degree || '')}</div>
             <div class="sb-edu-year">${esc(e.year || '')}</div>
+          </div>
+        `).join('')}
+      </div>
+    ` : ''}
+
+    ${cv.languages?.length ? `
+      <div class="sb-section">
+        <h3>Ngoại ngữ</h3>
+        <ul class="sb-skills">
+          ${cv.languages.map(l => `<li>${esc(l.language)}${l.level ? ` — ${esc(l.level)}` : ''}</li>`).join('')}
+        </ul>
+      </div>
+    ` : ''}
+
+    ${cv.certifications?.length ? `
+      <div class="sb-section">
+        <h3>Chứng chỉ</h3>
+        ${cv.certifications.map(ct => `
+          <div class="sb-edu">
+            <div class="sb-edu-inst">${esc(ct.name)}</div>
+            ${ct.issuer ? `<div class="sb-edu-degree">${esc(ct.issuer)}</div>` : ''}
+            ${ct.year ? `<div class="sb-edu-year">${esc(ct.year)}</div>` : ''}
           </div>
         `).join('')}
       </div>

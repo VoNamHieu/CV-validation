@@ -94,5 +94,45 @@ export function elegantSerifTemplate(cv: CVData, opts?: RenderOptions): string {
       </div>
     `).join('')}
   ` : ''}
+
+  ${cv.certifications?.length ? `
+    <h2>Chứng chỉ</h2><div class="h2-deco">◆ ◆ ◆</div>
+    ${cv.certifications.map(ct => `
+      <div class="item">
+        <div class="item-top">
+          <div class="item-title">${esc(ct.name)}</div>
+          <div class="item-date">${esc(ct.year)}</div>
+        </div>
+        ${ct.issuer ? `<div class="item-meta">${esc(ct.issuer)}</div>` : ''}
+      </div>
+    `).join('')}
+  ` : ''}
+
+  ${cv.languages?.length ? `
+    <h2>Ngoại ngữ</h2><div class="h2-deco">◆ ◆ ◆</div>
+    <div class="skills">${cv.languages.map(l => `<span class="skill">${esc(l.language)}${l.level ? ` — ${esc(l.level)}` : ''}</span>`).join('')}</div>
+  ` : ''}
+
+  ${cv.awards?.length ? `
+    <h2>Giải thưởng</h2><div class="h2-deco">◆ ◆ ◆</div>
+    ${cv.awards.map(a => `
+      <div class="item">
+        <div class="item-top">
+          <div class="item-title">${esc(a.title)}</div>
+          <div class="item-date">${esc(a.year)}</div>
+        </div>
+      </div>
+    `).join('')}
+  ` : ''}
+
+  ${cv.activities?.length ? `
+    <h2>Hoạt động</h2><div class="h2-deco">◆ ◆ ◆</div>
+    ${cv.activities.map(ac => `
+      <div class="item">
+        <div class="item-title">${esc(ac.name)}</div>
+        <div class="item-desc">${descToBullets(ac.description)}</div>
+      </div>
+    `).join('')}
+  ` : ''}
 </body></html>`;
 }

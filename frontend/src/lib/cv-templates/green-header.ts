@@ -93,5 +93,45 @@ export function greenHeaderTemplate(cv: CVData, opts?: RenderOptions): string {
       </div>
     `).join('')}
   ` : ''}
+
+  ${cv.certifications?.length ? `
+    <h2>Chứng chỉ</h2>
+    ${cv.certifications.map(ct => `
+      <div class="timeline-row">
+        <div class="timeline-date">${esc(ct.year || '')}</div>
+        <div>
+          <div class="item-title">${esc(ct.name || '')}</div>
+          ${ct.issuer ? `<div class="item-meta">${esc(ct.issuer)}</div>` : ''}
+        </div>
+      </div>
+    `).join('')}
+  ` : ''}
+
+  ${cv.languages?.length ? `<h2>Ngoại ngữ</h2><div class="skills">${cv.languages.map(l => `<span class="skill">${esc(l.language || '')}${l.level ? ` — ${esc(l.level)}` : ''}</span>`).join('')}</div>` : ''}
+
+  ${cv.awards?.length ? `
+    <h2>Giải thưởng</h2>
+    ${cv.awards.map(a => `
+      <div class="timeline-row">
+        <div class="timeline-date">${esc(a.year || '')}</div>
+        <div>
+          <div class="item-title">${esc(a.title || '')}</div>
+        </div>
+      </div>
+    `).join('')}
+  ` : ''}
+
+  ${cv.activities?.length ? `
+    <h2>Hoạt động</h2>
+    ${cv.activities.map(ac => `
+      <div class="timeline-row">
+        <div class="timeline-date"></div>
+        <div>
+          <div class="item-title">${esc(ac.name || '')}</div>
+          <div class="item-desc">${descToBullets(ac.description)}</div>
+        </div>
+      </div>
+    `).join('')}
+  ` : ''}
 </body></html>`;
 }
