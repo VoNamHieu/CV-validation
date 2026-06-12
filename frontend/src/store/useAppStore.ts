@@ -44,6 +44,7 @@ export interface JDEntry {
   source: string; // URL or "text" or "pdf"
   label: string;  // display name (URL hostname or filename)
   status: JDEntryStatus;
+  optimizing?: boolean; // background auto-optimize in flight
   error?: string;
   jdData?: JDData;
   matchResult?: MatchResult;

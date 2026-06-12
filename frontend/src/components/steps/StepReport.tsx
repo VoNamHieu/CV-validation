@@ -263,11 +263,12 @@ function JobDetailPanel({
 
 export default function StepReport() {
     const {
-        cvData, jdEntries, updateJdEntry, setStep, setSelectedJdId, resetAll,
+        cvData, jdEntries, updateJdEntry, setStep, selectedJdId, resetAll,
         userAvatarBase64,
     } = useAppStore();
 
-    const [expandedId, setExpandedId] = useState<string | null>(null);
+    // Auto-expand the job that finished first (set during parallel processing)
+    const [expandedId, setExpandedId] = useState<string | null>(selectedJdId);
     const [optimizingIds, setOptimizingIds] = useState<Set<string>>(new Set());
 
     const doneEntries = jdEntries.filter(e => e.status === 'done');
@@ -521,13 +522,13 @@ export default function StepReport() {
                                         <button
                                             className="btn-primary"
                                             onClick={(e) => { e.stopPropagation(); handleOptimize(entry); }}
-                                            disabled={optimizingIds.has(entry.id)}
+                                            disabled={optimizingIds.has(entry.id) || entry.optimizing}
                                             style={{
                                                 padding: '6px 14px', fontSize: '0.75rem',
                                                 display: 'flex', alignItems: 'center', gap: 4,
                                             }}
                                         >
-                                            {optimizingIds.has(entry.id) ? (
+                                            {(optimizingIds.has(entry.id) || entry.optimizing) ? (
                                                 <><SpinnerGap size={12} className="spin" /> ...</>
                                             ) : (
                                                 <><Lightning size={12} weight="fill" /> Optimize</>
@@ -560,7 +561,7 @@ export default function StepReport() {
                                     entry={entry}
                                     cvData={cvData}
                                     onOptimize={() => handleOptimize(entry)}
-                                    optimizing={optimizingIds.has(entry.id)}
+                                    optimizing={optimizingIds.has(entry.id) || !!entry.optimizing}
                                     avatarBase64={userAvatarBase64}
                                     onTemplateChange={(id) =>
                                         updateJdEntry(entry.id, {
