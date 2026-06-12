@@ -192,6 +192,51 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
 
     # ── Banking / Finance ─────────────────────────────────────────────
     FeaturedCompany(
+        name="Vietcombank",
+        homepage="https://vietcombank.com.vn",
+        career_url="https://careers.vietcombank.com.vn",
+    ),
+    FeaturedCompany(
+        name="BIDV",
+        homepage="https://bidv.com.vn",
+        career_url="https://tuyendung.bidv.com.vn",
+    ),
+    FeaturedCompany(
+        name="VietinBank",
+        homepage="https://vietinbank.vn",
+        career_url="https://tuyendung.vietinbank.vn",
+    ),
+    FeaturedCompany(
+        name="Agribank",
+        homepage="https://agribank.com.vn",
+        career_url="https://tuyendung.agribank.com.vn",
+    ),
+    FeaturedCompany(
+        name="SHB",
+        homepage="https://shb.com.vn",
+        career_url="https://jobs.shb.com.vn",
+    ),
+    FeaturedCompany(
+        name="SeABank",
+        homepage="https://seabank.com.vn",
+        career_url="https://tuyendung.seabank.com.vn",
+    ),
+    FeaturedCompany(
+        name="OCB",
+        homepage="https://ocb.com.vn",
+        career_url="https://tuyendung.ocb.com.vn",
+    ),
+    FeaturedCompany(
+        name="NCB",
+        homepage="https://ncb-bank.vn",
+        career_url="https://tuyendung.ncb-bank.vn",
+    ),
+    FeaturedCompany(
+        name="Eximbank",
+        homepage="https://eximbank.com.vn",
+        career_url="https://tuyendung.eximbank.com.vn",
+    ),
+    FeaturedCompany(
         name="Techcombank",
         homepage="https://www.techcombank.com.vn",
         career_url="https://techcombankjobs.com",
@@ -243,6 +288,76 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     ),
 
     # ── Retail / Consumer ─────────────────────────────────────────────
+    FeaturedCompany(
+        name="Central Retail",
+        homepage="https://centralretail.com.vn",
+        career_url="https://centralretail.talent.vn",
+    ),
+    FeaturedCompany(
+        name="Vinamilk",
+        homepage="https://vinamilk.com.vn",
+        career_url="https://careers.vinamilk.com.vn",
+    ),
+    FeaturedCompany(
+        name="Sabeco",
+        homepage="https://sabeco.com.vn",
+        career_url="https://career.sabeco.com.vn",
+    ),
+    FeaturedCompany(
+        name="Heineken Vietnam",
+        homepage="https://heinekenvietnam.com",
+        career_url="https://careers.heineken-vietnam.com.vn",
+    ),
+    FeaturedCompany(
+        name="Nestlé Vietnam",
+        homepage="https://nestle.com.vn",
+        career_url="https://careers.nestle.com/vietnam",
+    ),
+    FeaturedCompany(
+        name="Coca-Cola",
+        homepage="https://coca-colacompany.com",
+        career_url="https://careers.coca-colacompany.com",
+    ),
+    FeaturedCompany(
+        name="PepsiCo",
+        homepage="https://pepsico.com",
+        career_url="https://careers.pepsico.com",
+    ),
+    FeaturedCompany(
+        name="Ajinomoto Vietnam",
+        homepage="https://ajinomoto.com.vn",
+        career_url="https://career.ajinomoto.com.vn",
+    ),
+    FeaturedCompany(
+        name="Acecook Vietnam",
+        homepage="https://acecookvietnam.vn",
+        career_url="https://career.acecookvietnam.vn",
+    ),
+    FeaturedCompany(
+        name="Vinasoy",
+        homepage="https://vinasoy.com.vn",
+        career_url="https://tuyendung.vinasoy.com.vn",
+    ),
+    FeaturedCompany(
+        name="IKEA",
+        homepage="https://ikea.com",
+        career_url="https://careers.ikea.com",
+    ),
+    FeaturedCompany(
+        name="Decathlon",
+        homepage="https://decathlon.com",
+        career_url="https://careers.decathlon.com",
+    ),
+    FeaturedCompany(
+        name="Adidas",
+        homepage="https://adidas-group.com",
+        career_url="https://careers.adidas-group.com",
+    ),
+    FeaturedCompany(
+        name="Nike",
+        homepage="https://nike.com",
+        career_url="https://careers.nike.com",
+    ),
     FeaturedCompany(
         name="Thế Giới Di Động",
         homepage="https://thegioididong.com",
@@ -296,6 +411,31 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
 
     # ── Logistics ─────────────────────────────────────────────────────
     FeaturedCompany(
+        name="Kuehne+Nagel",
+        homepage="https://kuehne-nagel.com",
+        career_url="https://careers.kuehne-nagel.com",
+    ),
+    FeaturedCompany(
+        name="FedEx",
+        homepage="https://fedex.com",
+        career_url="https://careers.fedex.com",
+    ),
+    FeaturedCompany(
+        name="UPS",
+        homepage="https://ups.com",
+        career_url="https://careers.ups.com",
+    ),
+    FeaturedCompany(
+        name="DB Schenker",
+        homepage="https://dbschenker.com",
+        career_url="https://careers.dbschenker.com",
+    ),
+    FeaturedCompany(
+        name="Expeditors",
+        homepage="https://expeditors.com",
+        career_url="https://careers.expeditors.com",
+    ),
+    FeaturedCompany(
         name="GHTK",
         homepage="https://ghtk.vn",
         career_url="https://ghtk.vn/tuyen-dung",
@@ -316,14 +456,317 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         career_url="https://careers.ahamove.com",
     ),
     FeaturedCompany(
+        name="Avina Logistics",
+        homepage="https://avinalogistics.com",
+        career_url="https://avinalogistics.com/nghe-nghiep/",
+    ),
+    FeaturedCompany(
         name="DHL",
         homepage="https://www.dhl.com",
-        career_url="https://careers.dhl.com",
+        career_url="https://careers.dhl.com/apac/vi",
+    ),
+    FeaturedCompany(
+        name="Nippon Express",
+        homepage="https://www.nipponexpress.com",
+        career_url="https://www.nipponexpress.com/careers/",
+    ),
+    FeaturedCompany(
+        name="DSV",
+        homepage="https://www.dsv.com",
+        career_url="https://www.dsv.com/en/careers?q=%2A",
+    ),
+    FeaturedCompany(
+        name="Hellmann",
+        homepage="https://www.hellmann.com",
+        career_url="https://www.hellmann.com/en/career",
+    ),
+    FeaturedCompany(
+        name="Bee Logistics",
+        homepage="https://beelogistics.com",
+        career_url="https://recruit.beelogistics.com/Customer/Career",
     ),
     FeaturedCompany(
         name="Maersk",
         homepage="https://www.maersk.com",
         career_url="https://www.maersk.com/careers",
+    ),
+
+    # ── International Banking ─────────────────────────────────────────
+    FeaturedCompany(
+        name="DBS",
+        homepage="https://dbs.com",
+        career_url="https://careers.dbs.com",
+    ),
+    FeaturedCompany(
+        name="HSBC",
+        homepage="https://hsbc.com",
+        career_url="https://careers.hsbc.com",
+    ),
+    FeaturedCompany(
+        name="Standard Chartered",
+        homepage="https://sc.com",
+        career_url="https://careers.sc.com",
+    ),
+    FeaturedCompany(
+        name="Citi",
+        homepage="https://citibank.com",
+        career_url="https://careers.citibank.com",
+    ),
+    FeaturedCompany(
+        name="UOB",
+        homepage="https://uobgroup.com",
+        career_url="https://careers.uobgroup.com",
+    ),
+    FeaturedCompany(
+        name="OCBC",
+        homepage="https://ocbc.com",
+        career_url="https://careers.ocbc.com",
+    ),
+
+    # ── Insurance ─────────────────────────────────────────────────────
+    FeaturedCompany(
+        name="Sun Life Vietnam",
+        homepage="https://sunlife.com.vn",
+        career_url="https://careers.sunlife.com/vn",
+    ),
+    FeaturedCompany(
+        name="Manulife",
+        homepage="https://manulife.com.vn",
+        career_url="https://careers.manulife.com",
+    ),
+    FeaturedCompany(
+        name="AIA",
+        homepage="https://aia.com.vn",
+        career_url="https://careers.aia.com",
+    ),
+    FeaturedCompany(
+        name="Prudential",
+        homepage="https://prudential.com.vn",
+        career_url="https://careers.prudential.com",
+    ),
+    FeaturedCompany(
+        name="Chubb",
+        homepage="https://chubb.com",
+        career_url="https://careers.chubb.com",
+    ),
+    FeaturedCompany(
+        name="Bảo Việt",
+        homepage="https://baoviet.com.vn",
+        career_url="https://tuyendung.baoviet.com.vn",
+    ),
+
+    # ── Vingroup ──────────────────────────────────────────────────────
+    FeaturedCompany(
+        name="Vingroup",
+        homepage="https://vingroup.net",
+        career_url="https://careers.vingroup.net",
+    ),
+    FeaturedCompany(
+        name="VinFast",
+        homepage="https://vinfastauto.com",
+        career_url="https://vinfastauto.com/vn_vi/co-hoi-nghe-nghiep",
+    ),
+    FeaturedCompany(
+        name="Vinhomes",
+        homepage="https://vinhomes.vn",
+        career_url="https://careers.vinhomes.vn",
+    ),
+    FeaturedCompany(
+        name="Vinschool",
+        homepage="https://vinschool.edu.vn",
+        career_url="https://careers.vinschool.edu.vn",
+    ),
+    FeaturedCompany(
+        name="Vinmec",
+        homepage="https://vinmec.com",
+        career_url="https://vinmec.com/vie/tuyen-dung",
+    ),
+
+    # ── Electronics ───────────────────────────────────────────────────
+    FeaturedCompany(
+        name="Samsung",
+        homepage="https://samsung.com",
+        career_url="https://careers.samsung.com",
+    ),
+    FeaturedCompany(
+        name="LG",
+        homepage="https://lg.com",
+        career_url="https://careers.lg.com",
+    ),
+    FeaturedCompany(
+        name="Panasonic",
+        homepage="https://panasonic.com",
+        career_url="https://careers.panasonic.com",
+    ),
+    FeaturedCompany(
+        name="Canon",
+        homepage="https://canon.com",
+        career_url="https://careers.canon.com",
+    ),
+    FeaturedCompany(
+        name="Fujitsu",
+        homepage="https://fujitsu.com",
+        career_url="https://careers.fujitsu.com",
+    ),
+    FeaturedCompany(
+        name="Hitachi",
+        homepage="https://hitachi.com",
+        career_url="https://careers.hitachi.com",
+    ),
+    FeaturedCompany(
+        name="Sony",
+        homepage="https://sony.com",
+        career_url="https://careers.sony.com",
+    ),
+
+    # ── Semiconductor ─────────────────────────────────────────────────
+    FeaturedCompany(
+        name="Intel",
+        homepage="https://intel.com",
+        career_url="https://careers.intel.com",
+    ),
+    FeaturedCompany(
+        name="Amkor Technology",
+        homepage="https://amkor.com",
+        career_url="https://careers.amkor.com",
+    ),
+    FeaturedCompany(
+        name="Marvell",
+        homepage="https://marvell.com",
+        career_url="https://careers.marvell.com",
+    ),
+    FeaturedCompany(
+        name="Infineon",
+        homepage="https://infineon.com",
+        career_url="https://careers.infineon.com",
+    ),
+    FeaturedCompany(
+        name="NVIDIA",
+        homepage="https://nvidia.com",
+        career_url="https://careers.nvidia.com",
+    ),
+    FeaturedCompany(
+        name="Qualcomm",
+        homepage="https://qualcomm.com",
+        career_url="https://careers.qualcomm.com",
+    ),
+
+    # ── Industrial / Manufacturing ────────────────────────────────────
+    FeaturedCompany(
+        name="Air Liquide",
+        homepage="https://airliquide.com",
+        career_url="https://careers.airliquide.com",
+    ),
+    FeaturedCompany(
+        name="Siemens",
+        homepage="https://siemens.com",
+        career_url="https://careers.siemens.com",
+    ),
+    FeaturedCompany(
+        name="Schneider Electric",
+        homepage="https://schneider-electric.com",
+        career_url="https://careers.schneider-electric.com",
+    ),
+    FeaturedCompany(
+        name="ABB",
+        homepage="https://abb.com",
+        career_url="https://careers.abb.com",
+    ),
+    FeaturedCompany(
+        name="GE Vernova",
+        homepage="https://gevernova.com",
+        career_url="https://careers.gevernova.com",
+    ),
+    FeaturedCompany(
+        name="3M",
+        homepage="https://3m.com",
+        career_url="https://careers.3m.com",
+    ),
+
+    # ── Tobacco ───────────────────────────────────────────────────────
+    FeaturedCompany(
+        name="JTI",
+        homepage="https://jti.com",
+        career_url="https://careers.jti.com",
+    ),
+    FeaturedCompany(
+        name="BAT",
+        homepage="https://bat.com",
+        career_url="https://careers.bat.com",
+    ),
+    FeaturedCompany(
+        name="Philip Morris",
+        homepage="https://pmi.com",
+        career_url="https://careers.philipmorris.com",
+    ),
+
+    # ── Hospitality ───────────────────────────────────────────────────
+    FeaturedCompany(
+        name="Marriott",
+        homepage="https://marriott.com",
+        career_url="https://careers.marriott.com",
+    ),
+    FeaturedCompany(
+        name="Hilton",
+        homepage="https://hilton.com",
+        career_url="https://careers.hilton.com",
+    ),
+    FeaturedCompany(
+        name="Hyatt",
+        homepage="https://hyatt.com",
+        career_url="https://careers.hyatt.com",
+    ),
+    FeaturedCompany(
+        name="Accor",
+        homepage="https://accor.com",
+        career_url="https://careers.accor.com",
+    ),
+    FeaturedCompany(
+        name="IHG",
+        homepage="https://ihg.com",
+        career_url="https://careers.ihg.com",
+    ),
+
+    # ── Global Tech ───────────────────────────────────────────────────
+    FeaturedCompany(
+        name="Oracle",
+        homepage="https://oracle.com",
+        career_url="https://careers.oracle.com",
+    ),
+    FeaturedCompany(
+        name="Microsoft",
+        homepage="https://microsoft.com",
+        career_url="https://careers.microsoft.com",
+    ),
+    FeaturedCompany(
+        name="Google",
+        homepage="https://google.com",
+        career_url="https://careers.google.com",
+    ),
+    FeaturedCompany(
+        name="IBM",
+        homepage="https://ibm.com",
+        career_url="https://careers.ibm.com",
+    ),
+    FeaturedCompany(
+        name="SAP",
+        homepage="https://sap.com",
+        career_url="https://careers.sap.com",
+    ),
+    FeaturedCompany(
+        name="Salesforce",
+        homepage="https://salesforce.com",
+        career_url="https://careers.salesforce.com",
+    ),
+    FeaturedCompany(
+        name="ServiceNow",
+        homepage="https://servicenow.com",
+        career_url="https://careers.servicenow.com",
+    ),
+    FeaturedCompany(
+        name="Atlassian",
+        homepage="https://atlassian.com",
+        career_url="https://careers.atlassian.com",
     ),
 
     # ── Consulting / Professional Services ───────────────────────────
