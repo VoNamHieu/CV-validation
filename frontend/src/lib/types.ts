@@ -18,6 +18,27 @@ export interface ProjectDetail {
     description: string;
 }
 
+export interface CertificationDetail {
+    name: string;
+    issuer: string;
+    year: string;
+}
+
+export interface LanguageDetail {
+    language: string;
+    level: string;
+}
+
+export interface AwardDetail {
+    title: string;
+    year: string;
+}
+
+export interface ActivityDetail {
+    name: string;
+    description: string;
+}
+
 export interface ContactInfo {
     email: string;
     phone: string;
@@ -59,6 +80,11 @@ export interface CVData {
     experience: ExperienceDetail[];
     education: EducationDetail[];
     projects: ProjectDetail[];
+    // Optional so CVData persisted before these sections existed still type-checks.
+    certifications?: CertificationDetail[];
+    languages?: LanguageDetail[];
+    awards?: AwardDetail[];
+    activities?: ActivityDetail[];
     contact: ContactInfo;
     personal: PersonalInfo;
     employment: EmploymentInfo;

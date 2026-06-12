@@ -22,6 +22,7 @@ import {
     EMPTY_CONTACT, EMPTY_PERSONAL, EMPTY_EMPLOYMENT, EMPTY_PREFERENCES,
 } from '@/lib/types';
 import { cvToExtensionProfile } from '@/lib/extension-profile';
+import { syncProfileToExtension, syncCvFileToExtension } from '@/lib/extension-sync';
 import { renderCvHtml, getTemplate, DEFAULT_TEMPLATE_ID } from '@/lib/cv-templates';
 import type { CvTemplateId } from '@/lib/cv-templates';
 import { resizeAvatarToDataUrl } from '@/lib/avatar';
@@ -310,12 +311,9 @@ export default function StepEditCv() {
         if (!cvData) return;
         const handle = setTimeout(() => {
             const profile = cvToExtensionProfile(cvData);
-            window.postMessage({
-                type: 'JOBFIT_EXPORT_PROFILE',
-                profile,
-                cvData,
-                lastSyncedAt: Date.now(),
-            }, '*');
+            syncProfileToExtension(profile, cvData).then((res) => {
+                if (!res.ok) console.warn('[JobFit] Auto-sync profile → extension failed:', res.error);
+            });
         }, 500);
         return () => clearTimeout(handle);
     }, [cvData]);
@@ -357,7 +355,15 @@ export default function StepEditCv() {
                 window.addEventListener('message', handler);
             });
 
-            window.postMessage({ type: 'JOBFIT_AUTO_APPLY', jobUrl, profile }, '*');
+            window.postMessage({
+                type: 'JOBFIT_AUTO_APPLY',
+                jobUrl,
+                profile,
+                // Cached PDF from Optimize so the agent can satisfy required
+                // CV-upload fields — without it every single apply runs hasCV=false.
+                cvFileBase64: currentEntry?.optimizedCvPdfBase64,
+                cvFileName: currentEntry?.optimizedCvFileName,
+            }, '*');
             const response = await responsePromise;
 
             if (response?.success) {
@@ -608,21 +614,33 @@ export default function StepEditCv() {
                     </button>
                     <button
                         className="btn-secondary"
-                        onClick={() => {
+                        onClick={async () => {
                             // Prefer the currently-selected optimized CV (with personal info edits
                             // applied via the Personal info section) — otherwise fall back to the
                             // base cvData so the extension still gets something.
                             const cv = currentEntry?.optimizedCv ?? cvData;
                             if (!cv) return;
                             const profile = buildProfile(cv);
-                            window.postMessage({
-                                type: 'JOBFIT_EXPORT_PROFILE',
-                                profile,
-                                cvData: cv,
-                            }, '*');
-                            navigator.clipboard.writeText(JSON.stringify(profile, null, 2))
-                                .then(() => alert('✅ Profile resynced to extension.'))
-                                .catch(() => alert('✅ Data sent to extension via postMessage'));
+                            navigator.clipboard.writeText(JSON.stringify(profile, null, 2)).catch(() => { });
+
+                            // Wait for the extension's real ACK — a fire-and-forget
+                            // postMessage shows "synced" even when nothing landed.
+                            const profileRes = await syncProfileToExtension(profile, cv);
+                            let cvFileMsg = '';
+                            if (currentEntry?.optimizedCvPdfBase64 && currentEntry?.optimizedCvFileName) {
+                                const fileRes = await syncCvFileToExtension(
+                                    currentEntry.optimizedCvPdfBase64,
+                                    currentEntry.optimizedCvFileName,
+                                );
+                                cvFileMsg = fileRes.ok
+                                    ? '\n✅ File CV PDF đã sync.'
+                                    : `\n⚠️ File CV PDF sync lỗi: ${fileRes.error}`;
+                            } else {
+                                cvFileMsg = '\nℹ️ Chưa có CV PDF cache — bấm Optimize để render trước.';
+                            }
+                            alert(profileRes.ok
+                                ? `✅ Profile đã sync sang extension.${cvFileMsg}`
+                                : `❌ Sync profile thất bại: ${profileRes.error}`);
                         }}
                         style={{
                             display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem',

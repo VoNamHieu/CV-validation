@@ -13,6 +13,7 @@ import ScoreRing from '@/components/ScoreRing';
 import EditableCvPreview from '@/components/EditableCvPreview';
 import CvTemplatePicker from '@/components/CvTemplatePicker';
 import { optimizeCv } from '@/lib/api';
+import { syncCvFileToExtension } from '@/lib/extension-sync';
 import { renderCvHtml, DEFAULT_TEMPLATE_ID } from '@/lib/cv-templates';
 import type { CvTemplateId } from '@/lib/cv-templates';
 
@@ -310,6 +311,12 @@ export default function StepReport() {
                 if (res.ok) {
                     const { base64, filename: outName } = await res.json() as { base64: string; filename: string };
                     pdfCache = { optimizedCvPdfBase64: base64, optimizedCvFileName: outName };
+                    // Push the PDF into extension storage right away so applies
+                    // launched outside the batch flow (floating button / single
+                    // apply) also have a CV file. Failure is non-fatal.
+                    syncCvFileToExtension(base64, outName).then((r) => {
+                        if (!r.ok) console.warn('[Optimize] CV file sync → extension failed:', r.error);
+                    });
                 }
             } catch (pdfErr) {
                 console.warn('[Optimize] PDF cache render failed (non-fatal):', pdfErr);

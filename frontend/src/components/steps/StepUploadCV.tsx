@@ -8,6 +8,7 @@ import {
 import { useAppStore } from '@/store/useAppStore';
 import { parsePdfWithAI } from '@/lib/api';
 import { cvToExtensionProfile } from '@/lib/extension-profile';
+import { syncProfileToExtension } from '@/lib/extension-sync';
 
 export default function StepUploadCV() {
     const { setCvRawText, setCvData, setStep, cvFileName, setFullyAutoMode } = useAppStore();
@@ -17,6 +18,10 @@ export default function StepUploadCV() {
     const [uploaded, setUploaded] = useState(!!cvFileName);
     const [processing, setProcessing] = useState(false);
     const [processingFile, setProcessingFile] = useState('');
+    // null = not attempted, true = extension ACKed, false = no ACK (not
+    // installed / wrong URL / needs tab refresh after extension reload).
+    const [extSynced, setExtSynced] = useState<boolean | null>(null);
+    const [extSyncError, setExtSyncError] = useState('');
 
     const handleFile = useCallback(async (file: File) => {
         if (!file.name.toLowerCase().endsWith('.pdf')) {
@@ -33,16 +38,14 @@ export default function StepUploadCV() {
 
             // Push extracted profile to the extension immediately so the popup
             // is filled the moment the CV is uploaded — without waiting for
-            // the user to reach Step 4 (Edit CV).
-            try {
-                const profile = cvToExtensionProfile(structured);
-                window.postMessage({
-                    type: 'JOBFIT_EXPORT_PROFILE',
-                    profile,
-                    cvData: structured,
-                    lastSyncedAt: Date.now(),
-                }, '*');
-            } catch { /* extension not installed — non-fatal */ }
+            // the user to reach Step 4 (Edit CV). Awaits the extension's ACK
+            // so a dead relay shows up in the UI instead of failing silently.
+            const profile = cvToExtensionProfile(structured);
+            syncProfileToExtension(profile, structured).then((res) => {
+                setExtSynced(res.ok);
+                setExtSyncError(res.error ?? '');
+                if (!res.ok) console.warn('[JobFit] Profile sync → extension failed:', res.error);
+            });
 
             setUploaded(true);
             setProcessing(false);
@@ -228,6 +231,20 @@ export default function StepUploadCV() {
                         }}>
                             <CheckCircle size={12} weight="fill" /> Parsed & structured
                         </p>
+                        {extSynced !== null && (
+                            <p
+                                title={extSynced ? undefined : extSyncError}
+                                style={{
+                                    color: extSynced ? 'var(--accent-green)' : '#facc15',
+                                    fontSize: '0.75rem',
+                                    display: 'flex', alignItems: 'center', gap: 4, marginTop: 2,
+                                }}
+                            >
+                                {extSynced
+                                    ? <><CheckCircle size={12} weight="fill" /> Đã sync profile sang extension</>
+                                    : <><WarningCircle size={12} weight="fill" /> Extension chưa nhận data — {extSyncError}</>}
+                            </p>
+                        )}
                     </div>
                     <button
                         aria-label="Remove uploaded CV"

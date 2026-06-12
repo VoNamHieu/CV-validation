@@ -12,6 +12,44 @@ const FIELD_IDS = [
     'desiredLocations', 'desiredSalary', 'coverLetter', 'appUrl'
 ];
 
+// ─── Normalize synced values into the fixed <select> options ───
+// CV extraction often returns English ("Male", "Vietnamese", "Single") while
+// the selects only have Vietnamese options — assigning a non-existent option
+// value leaves the select BLANK and the data silently disappears.
+const SELECT_VALUE_MAPS = {
+    gender: {
+        'male': 'Nam', 'm': 'Nam', 'nam': 'Nam',
+        'female': 'Nữ', 'f': 'Nữ', 'nữ': 'Nữ', 'nu': 'Nữ',
+    },
+    nationality: {
+        'vietnamese': 'Người Việt Nam', 'vietnam': 'Người Việt Nam',
+        'việt nam': 'Người Việt Nam', 'viet nam': 'Người Việt Nam',
+        'người việt nam': 'Người Việt Nam',
+    },
+    maritalStatus: {
+        'single': 'Độc thân', 'độc thân': 'Độc thân', 'doc than': 'Độc thân',
+        'married': 'Đã kết hôn', 'đã kết hôn': 'Đã kết hôn', 'da ket hon': 'Đã kết hôn',
+    },
+};
+
+function setFieldValue(el, id, rawValue) {
+    let value = String(rawValue);
+    if (el.tagName === 'SELECT' && value) {
+        const map = SELECT_VALUE_MAPS[id];
+        if (map && map[value.trim().toLowerCase()]) {
+            value = map[value.trim().toLowerCase()];
+        }
+        // Still no matching option → add it dynamically instead of dropping data.
+        if (![...el.options].some(o => o.value === value)) {
+            const opt = document.createElement('option');
+            opt.value = value;
+            opt.textContent = value;
+            el.appendChild(opt);
+        }
+    }
+    el.value = value;
+}
+
 // ─── Load profile from storage ───
 function loadProfile() {
     chrome.storage.local.get(['jobfitProfile', 'jobfitProfileSyncedAt'], (data) => {
@@ -40,7 +78,7 @@ function loadProfile() {
             }
 
             if (value !== undefined && value !== null) {
-                el.value = String(value);
+                setFieldValue(el, id, value);
             }
         }
 
