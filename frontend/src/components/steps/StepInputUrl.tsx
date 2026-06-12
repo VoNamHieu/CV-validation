@@ -13,6 +13,7 @@ import {
     extractJobLinks, rankJobsTournament, extensionCrawl, isExtensionAvailable,
     findCareer, getFeaturedJobs, optimizeCv, type JobListing,
 } from '@/lib/api';
+import { buildCvPdfCache } from '@/lib/cv-pdf-cache';
 
 type Phase = 'idle' | 'analyzing_cv' | 'searching' | 'extracting_links'
     | 'ranking' | 'crawling_job';
@@ -499,7 +500,19 @@ export default function StepInputUrl() {
                     try {
                         let optimized = await withRetry(() => optimizeCv(cvData!, jdData, matchResult));
                         if (Array.isArray(optimized)) optimized = optimized[0];
-                        updateJdEntry(entryId, { optimizing: false, optimizedCv: optimized || undefined });
+                        if (optimized) {
+                            // Eager PDF render + extension sync, same as a manual
+                            // Optimize click — batch apply gets the file for free.
+                            const state = useAppStore.getState();
+                            const pdfCache = await buildCvPdfCache(optimized, {
+                                jobTitle: resolvedTitle,
+                                templateId: state.jdEntries.find((e) => e.id === entryId)?.selectedTemplateId,
+                                avatarBase64: state.userAvatarBase64,
+                            });
+                            updateJdEntry(entryId, { optimizing: false, optimizedCv: optimized, ...pdfCache });
+                        } else {
+                            updateJdEntry(entryId, { optimizing: false });
+                        }
                     } catch (optErr) {
                         console.log('[runJobPipeline] Auto-optimize failed (manual optimize still possible):', optErr);
                         updateJdEntry(entryId, { optimizing: false });

@@ -13,7 +13,7 @@ import ScoreRing from '@/components/ScoreRing';
 import EditableCvPreview from '@/components/EditableCvPreview';
 import CvTemplatePicker from '@/components/CvTemplatePicker';
 import { optimizeCv } from '@/lib/api';
-import { syncCvFileToExtension } from '@/lib/extension-sync';
+import { buildCvPdfCache } from '@/lib/cv-pdf-cache';
 import { renderCvHtml, DEFAULT_TEMPLATE_ID } from '@/lib/cv-templates';
 import type { CvTemplateId } from '@/lib/cv-templates';
 
@@ -294,34 +294,11 @@ export default function StepReport() {
         try {
             const result = await optimizeCv(cvData, entry.jdData, entry.matchResult);
 
-            // Render PDF eagerly so the extension can upload it during auto-apply
-            // without paying the render cost per job. Render failure is non-fatal —
-            // the batch flow will fall back to rendering on demand.
-            let pdfCache: { optimizedCvPdfBase64?: string; optimizedCvFileName?: string } = {};
-            try {
-                const html = renderCvHtml(result, entry.selectedTemplateId, {
-                    avatarBase64: userAvatarBase64 ?? undefined,
-                });
-                const safeTitle = (entry.jobTitle || 'job').replace(/\s+/g, '_').slice(0, 40);
-                const filename = `${result.name.replace(/\s+/g, '_')}_${safeTitle}.pdf`;
-                const res = await fetch('/api/render-cv-pdf', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ html, filename }),
-                });
-                if (res.ok) {
-                    const { base64, filename: outName } = await res.json() as { base64: string; filename: string };
-                    pdfCache = { optimizedCvPdfBase64: base64, optimizedCvFileName: outName };
-                    // Push the PDF into extension storage right away so applies
-                    // launched outside the batch flow (floating button / single
-                    // apply) also have a CV file. Failure is non-fatal.
-                    syncCvFileToExtension(base64, outName).then((r) => {
-                        if (!r.ok) console.warn('[Optimize] CV file sync → extension failed:', r.error);
-                    });
-                }
-            } catch (pdfErr) {
-                console.warn('[Optimize] PDF cache render failed (non-fatal):', pdfErr);
-            }
+            const pdfCache = await buildCvPdfCache(result, {
+                jobTitle: entry.jobTitle,
+                templateId: entry.selectedTemplateId,
+                avatarBase64: userAvatarBase64,
+            });
 
             updateJdEntry(entry.id, { optimizedCv: result, ...pdfCache });
         } catch (e) {
