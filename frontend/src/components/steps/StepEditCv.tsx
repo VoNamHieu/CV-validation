@@ -9,6 +9,9 @@ import {
 } from '@phosphor-icons/react';
 import { useAppStore } from '@/store/useAppStore';
 import CvDocumentPreview from '@/components/CvDocumentPreview';
+import EditableTemplateFrame from '@/components/EditableTemplateFrame';
+import { applyCvFieldEdit } from '@/lib/cv-inline-edit';
+import { diffCvChanges, type CvImprovement } from '@/lib/cv-improvements';
 import CvTemplatePicker from '@/components/CvTemplatePicker';
 import ScoreRing from '@/components/ScoreRing';
 import { optimizeCvVariants } from '@/lib/api';
@@ -168,6 +171,14 @@ export default function StepEditCv() {
     const currentEntry = sortedEntries[selectedIdx];
     const score = currentEntry?.matchResult?.overall_score ?? 0;
 
+    // Switching jobs must show THAT job's optimized CV immediately — without
+    // this, the previous entry's in-progress edits (editedCv) keep winning the
+    // `editedCv ?? optimizedCv` fallback and every job looks identical.
+    const currentEntryId = currentEntry?.id;
+    useEffect(() => {
+        setEditedCv(null);
+    }, [currentEntryId]);
+
     // ATS keywords drawn from the JD must-have list (used by CvDocumentPreview to highlight)
     const atsKeywords = useMemo(
         () => (currentEntry?.jdData?.must_have ?? []).filter(Boolean),
@@ -201,6 +212,7 @@ export default function StepEditCv() {
             // Invalidate the cached PDF — content changed, so the batch loop will re-render.
             updateJdEntry(currentEntry.id, {
                 optimizedCv: data.variants[0].cv,
+                optimizedCvImprovements: data.variants[0].improvements,
                 optimizedCvPdfBase64: undefined,
                 optimizedCvFileName: undefined,
             });
@@ -219,10 +231,28 @@ export default function StepEditCv() {
         setVariantIdxByEntry(prev => ({ ...prev, [currentEntry.id]: idx }));
         updateJdEntry(currentEntry.id, {
             optimizedCv: v.cv,
+            optimizedCvImprovements: v.improvements,
             optimizedCvPdfBase64: undefined,
             optimizedCvFileName: undefined,
         });
     }, [currentEntry, currentVariants, updateJdEntry]);
+
+    /* ─── Inline edits made directly on the rendered template preview ───
+       Committed into both editedCv (what the preview/download shows) and the
+       entry's optimizedCv so the editable document view and the cached PDF
+       stay in sync. */
+    const handleTemplateFieldEdit = useCallback((path: string, text: string) => {
+        if (!currentEntry?.optimizedCv) return;
+        const base = editedCv ?? currentEntry.optimizedCv;
+        const next = applyCvFieldEdit(base, path, text);
+        if (next === base) return;
+        setEditedCv(next);
+        updateJdEntry(currentEntry.id, {
+            optimizedCv: next,
+            optimizedCvPdfBase64: undefined,
+            optimizedCvFileName: undefined,
+        });
+    }, [currentEntry, editedCv, updateJdEntry]);
 
     const [downloadingPdf, setDownloadingPdf] = useState(false);
     const handleDownload = async (editedCv: CVData) => {
@@ -1370,6 +1400,17 @@ export default function StepEditCv() {
                     </div>
                 )}
 
+                {/* What the optimizer changed for THIS job — and an honest
+                    warning when the content is still identical to the base CV */}
+                <ImprovementsPanel
+                    originalCv={cvData}
+                    optimizedCv={editedCv ?? currentEntry.optimizedCv!}
+                    improvements={currentEntry.optimizedCvImprovements}
+                    jobTitle={currentEntry.jobTitle || currentEntry.company || currentEntry.label}
+                    onReoptimize={() => void handleReoptimize()}
+                    reoptimizing={reoptimizing}
+                />
+
                 {/* Preview/edit mode switch — only one CV is visible at a time */}
                 <button
                     type="button"
@@ -1411,24 +1452,23 @@ export default function StepEditCv() {
                             </button>
                         </div>
                         <div style={{
+                            marginTop: 8, fontSize: '0.74rem', color: 'var(--text-muted)',
+                        }}>
+                            ✏️ Click vào nội dung trên CV để sửa trực tiếp — Enter để lưu, Esc để huỷ.
+                        </div>
+                        <div style={{
                             marginTop: 8, border: '1px solid var(--border-subtle)',
                             borderRadius: 6, overflow: 'hidden', background: '#fff',
                         }}>
-                            <iframe
+                            <EditableTemplateFrame
                                 key={`${currentEntry.id}-${currentEntry.selectedTemplateId ?? DEFAULT_TEMPLATE_ID}-${userAvatarBase64?.length ?? 0}`}
-                                title="CV preview"
-                                sandbox=""
-                                srcDoc={renderCvHtml(
+                                html={renderCvHtml(
                                     editedCv ?? currentEntry.optimizedCv!,
                                     currentEntry.selectedTemplateId,
                                     { avatarBase64: userAvatarBase64 ?? undefined },
                                 )}
-                                style={{
-                                    display: 'block',
-                                    width: '100%',
-                                    height: 900,
-                                    border: 'none',
-                                }}
+                                onFieldEdit={handleTemplateFieldEdit}
+                                height={900}
                             />
                         </div>
                     </>
@@ -1452,6 +1492,120 @@ export default function StepEditCv() {
             <style>{`
                 div::-webkit-scrollbar { display: none; }
             `}</style>
+        </div>
+    );
+}
+
+/* ─── Improvements panel — explains what was tailored for the current job ───
+   Primary source: the optimizer's own change list (optimizedCvImprovements).
+   Ground truth: a deterministic diff vs the base CV — when that diff is empty
+   the CV was NOT actually tailored, and the panel says so instead of letting
+   identical content masquerade as "optimized". */
+function ImprovementsPanel({
+    originalCv, optimizedCv, improvements, jobTitle, onReoptimize, reoptimizing,
+}: {
+    originalCv: CVData;
+    optimizedCv: CVData;
+    improvements?: CvImprovement[];
+    jobTitle?: string;
+    onReoptimize: () => void;
+    reoptimizing: boolean;
+}) {
+    const [open, setOpen] = useState(true);
+    const diff = useMemo(
+        () => diffCvChanges(originalCv, optimizedCv),
+        [originalCv, optimizedCv],
+    );
+    const unchanged = diff.length === 0;
+    const hasLlmExplanation = !unchanged && (improvements?.length ?? 0) > 0;
+
+    return (
+        <div style={{
+            marginBottom: 10, borderRadius: 8,
+            border: `1px solid ${unchanged ? 'rgba(245,158,11,0.45)' : 'var(--border-subtle)'}`,
+            background: unchanged ? 'rgba(245,158,11,0.06)' : 'var(--bg-secondary)',
+        }}>
+            <button
+                type="button"
+                onClick={() => setOpen(v => !v)}
+                style={{
+                    display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    padding: '10px 12px', textAlign: 'left',
+                }}
+            >
+                {unchanged
+                    ? <Warning size={15} weight="fill" style={{ color: '#f59e0b', flexShrink: 0 }} />
+                    : <Sparkle size={15} weight="fill" style={{ color: 'var(--accent-blue)', flexShrink: 0 }} />}
+                <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)', flex: 1, minWidth: 0 }}>
+                    {unchanged
+                        ? 'CV này chưa được tinh chỉnh theo job — nội dung giống hệt CV gốc'
+                        : `Đã tối ưu cho ${jobTitle || 'job này'}`}
+                    {!unchanged && (
+                        <span style={{ color: 'var(--text-muted)', fontWeight: 400, marginLeft: 6, fontSize: '0.72rem' }}>
+                            {hasLlmExplanation ? `${improvements!.length} thay đổi` : `${diff.length} thay đổi`}
+                        </span>
+                    )}
+                </span>
+                <CaretRight size={12} style={{
+                    color: 'var(--text-muted)', flexShrink: 0,
+                    transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s',
+                }} />
+            </button>
+
+            {open && (
+                <div style={{ padding: '0 12px 12px 35px' }}>
+                    {unchanged ? (
+                        <div>
+                            <p style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', lineHeight: 1.55, margin: '0 0 8px' }}>
+                                Bản tối ưu tự động chưa tạo ra khác biệt nào so với CV gốc
+                                (hoặc đã bị chỉnh tay về như cũ). Bấm tối ưu lại để CV
+                                được viết lại theo đúng JD của job này.
+                            </p>
+                            <button
+                                type="button"
+                                onClick={onReoptimize}
+                                disabled={reoptimizing}
+                                className="btn-secondary"
+                                style={{
+                                    display: 'inline-flex', alignItems: 'center', gap: 5,
+                                    fontSize: '0.76rem', padding: '5px 12px',
+                                    opacity: reoptimizing ? 0.6 : 1,
+                                }}
+                            >
+                                {reoptimizing
+                                    ? <><CircleNotch size={12} className="animate-spin" /> Đang tối ưu…</>
+                                    : <><ArrowsClockwise size={12} /> Tối ưu lại cho job này</>}
+                            </button>
+                        </div>
+                    ) : hasLlmExplanation ? (
+                        <ul style={{ margin: 0, paddingLeft: 16, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            {improvements!.map((imp, i) => (
+                                <li key={i} style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                                    <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{imp.section}: </span>
+                                    {imp.change}
+                                    {imp.reason && (
+                                        <span style={{ color: 'var(--text-muted)' }}> — {imp.reason}</span>
+                                    )}
+                                </li>
+                            ))}
+                        </ul>
+                    ) : (
+                        <>
+                            <ul style={{ margin: 0, paddingLeft: 16, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                {diff.map((line, i) => (
+                                    <li key={i} style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                                        {line}
+                                    </li>
+                                ))}
+                            </ul>
+                            <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 6 }}>
+                                So sánh tự động với CV gốc — tối ưu lại để nhận giải thích chi tiết từng thay đổi.
+                            </div>
+                        </>
+                    )}
+                </div>
+            )}
         </div>
     );
 }

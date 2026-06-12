@@ -1,5 +1,6 @@
 // All API calls use Next.js API routes (relative paths)
 import type { CVData } from './types';
+import type { CvImprovement } from './cv-improvements';
 
 export type OptimizeStyle = 'formal' | 'direct' | 'impact-driven' | 'storytelling';
 export type OptimizeFocus = 'balanced' | 'technical' | 'leadership' | 'metrics' | 'ats-keyword';
@@ -19,6 +20,8 @@ export interface OptimizeVariant {
     focus: OptimizeFocus;
     length: OptimizeLength;
     cv: CVData;
+    // Model-stated explanation of what was changed for this job (Vietnamese).
+    improvements?: CvImprovement[];
 }
 
 export interface OptimizeResponse {
@@ -99,17 +102,6 @@ export async function optimizeCvVariants(
         throw new Error(err.detail || 'Failed to optimize CV');
     }
     return res.json();
-}
-
-/** Backwards-compatible single-variant optimize. Returns first variant's CV. */
-export async function optimizeCv(
-    cv: unknown,
-    jd: unknown,
-    match: unknown,
-    options?: OptimizeOptions,
-): Promise<CVData> {
-    const data = await optimizeCvVariants(cv, jd, match, options);
-    return data.variants[0].cv;
 }
 
 export async function crawlUrl(url: string, keepLinks = false): Promise<{ text: string; textWithLinks?: string; jsonLd?: Record<string, unknown> | null; source_url?: string }> {

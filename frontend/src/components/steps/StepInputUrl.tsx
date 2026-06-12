@@ -11,7 +11,7 @@ import { useAppStore, type JDEntry } from '@/store/useAppStore';
 import {
     smartSearch, crawlUrl, extractJdStructured, scoreFit, fetchPage,
     extractJobLinks, rankJobsTournament, extensionCrawl, isExtensionAvailable,
-    findCareer, getFeaturedJobs, optimizeCv, type JobListing,
+    findCareer, getFeaturedJobs, optimizeCvVariants, type JobListing,
 } from '@/lib/api';
 import { buildCvPdfCache } from '@/lib/cv-pdf-cache';
 
@@ -498,18 +498,23 @@ export default function StepInputUrl() {
                 if (autoOptimize) {
                     updateJdEntry(entryId, { optimizing: true });
                     try {
-                        let optimized = await withRetry(() => optimizeCv(cvData!, jdData, matchResult));
-                        if (Array.isArray(optimized)) optimized = optimized[0];
-                        if (optimized) {
+                        const data = await withRetry(() => optimizeCvVariants(cvData!, jdData, matchResult));
+                        const variant = data.variants[0];
+                        if (variant?.cv) {
                             // Eager PDF render + extension sync, same as a manual
                             // Optimize click — batch apply gets the file for free.
                             const state = useAppStore.getState();
-                            const pdfCache = await buildCvPdfCache(optimized, {
+                            const pdfCache = await buildCvPdfCache(variant.cv, {
                                 jobTitle: resolvedTitle,
                                 templateId: state.jdEntries.find((e) => e.id === entryId)?.selectedTemplateId,
                                 avatarBase64: state.userAvatarBase64,
                             });
-                            updateJdEntry(entryId, { optimizing: false, optimizedCv: optimized, ...pdfCache });
+                            updateJdEntry(entryId, {
+                                optimizing: false,
+                                optimizedCv: variant.cv,
+                                optimizedCvImprovements: variant.improvements,
+                                ...pdfCache,
+                            });
                         } else {
                             updateJdEntry(entryId, { optimizing: false });
                         }

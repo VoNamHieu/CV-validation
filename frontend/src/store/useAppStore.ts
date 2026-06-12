@@ -11,6 +11,7 @@ import type {
   CVData, JDData, CategoryScore, MatchResult,
 } from '@/lib/types';
 import type { CvTemplateId } from '@/lib/cv-templates';
+import type { CvImprovement } from '@/lib/cv-improvements';
 
 // Re-export for backward compatibility
 export type { ExperienceDetail, EducationDetail, ProjectDetail, CVData, JDData, CategoryScore, MatchResult };
@@ -49,6 +50,8 @@ export interface JDEntry {
   jdData?: JDData;
   matchResult?: MatchResult;
   optimizedCv?: CVData;
+  // Why/what the optimizer changed for this job — shown in the editor.
+  optimizedCvImprovements?: CvImprovement[];
   optimizedCvPdfBase64?: string;
   optimizedCvFileName?: string;
   jobTitle?: string;

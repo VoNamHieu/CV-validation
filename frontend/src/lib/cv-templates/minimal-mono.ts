@@ -31,82 +31,82 @@ export function minimalMonoTemplate(cv: CVData): string {
   .summary { color: #333; font-size: 10pt; line-height: 1.75; }
 </style>
 </head><body>
-  <div class="name">${esc(cv.name || '')}</div>
-  ${emp.current_title ? `<div class="title">${esc(emp.current_title)}</div>` : ''}
+  <div class="name" data-f="name">${esc(cv.name || '')}</div>
+  ${emp.current_title ? `<div class="title" data-f="employment.current_title">${esc(emp.current_title)}</div>` : ''}
   <div class="contact-row">
     ${[
-      c.phone ? esc(c.phone) : '',
-      c.email ? esc(c.email) : '',
-      c.linkedin ? esc(c.linkedin) : '',
-      c.github ? esc(c.github) : '',
+      c.phone ? `<span data-f="contact.phone">${esc(c.phone)}</span>` : '',
+      c.email ? `<span data-f="contact.email">${esc(c.email)}</span>` : '',
+      c.linkedin ? `<span data-f="contact.linkedin">${esc(c.linkedin)}</span>` : '',
+      c.github ? `<span data-f="contact.github">${esc(c.github)}</span>` : '',
       addr ? esc(addr) : '',
-      p.date_of_birth ? esc(p.date_of_birth) : '',
+      p.date_of_birth ? `<span data-f="personal.date_of_birth">${esc(p.date_of_birth)}</span>` : '',
     ].filter(Boolean).join('<span class="sep"> | </span>')}
   </div>
 
-  ${cv.summary ? `<h2>Mục tiêu nghề nghiệp</h2><p class="summary">${esc(cv.summary)}</p>` : ''}
+  ${cv.summary ? `<h2>Mục tiêu nghề nghiệp</h2><p class="summary" data-f="summary">${esc(cv.summary)}</p>` : ''}
 
   ${cv.experience?.length ? `
     <h2>Kinh nghiệm làm việc</h2>
-    ${cv.experience.map(e => `
+    ${cv.experience.map((e, i) => `
       <div class="item">
         <div class="item-top">
-          <div class="item-title">${esc(e.title)}</div>
-          <div class="item-date">${esc(dateRangeLabel(e))}</div>
+          <div class="item-title" data-f="experience.${i}.title">${esc(e.title)}</div>
+          <div class="item-date" data-f="experience.${i}.daterange">${esc(dateRangeLabel(e))}</div>
         </div>
-        <div class="item-meta">${esc(e.company)}</div>
-        <div class="item-desc">${descToBullets(e.description)}</div>
+        <div class="item-meta" data-f="experience.${i}.company">${esc(e.company)}</div>
+        <div class="item-desc">${descToBullets(e.description, `experience.${i}.description`)}</div>
       </div>
     `).join('')}
   ` : ''}
 
   ${cv.education?.length ? `
     <h2>Học vấn</h2>
-    ${cv.education.map(e => `
+    ${cv.education.map((e, i) => `
       <div class="item">
         <div class="item-top">
-          <div class="item-title">${esc(e.institution || '')}</div>
-          <div class="item-date">${esc(e.year || '')}</div>
+          <div class="item-title" data-f="education.${i}.institution">${esc(e.institution || '')}</div>
+          <div class="item-date" data-f="education.${i}.year">${esc(e.year || '')}</div>
         </div>
-        <div class="item-meta">${esc(e.degree || '')}</div>
+        <div class="item-meta" data-f="education.${i}.degree">${esc(e.degree || '')}</div>
       </div>
     `).join('')}
   ` : ''}
 
-  ${cv.skills?.length ? `<h2>Kỹ năng</h2><p class="skills">${cv.skills.map(s => esc(s)).join(' · ')}</p>` : ''}
+  ${cv.skills?.length ? `<h2>Kỹ năng</h2><p class="skills">${cv.skills.map((s, i) => `<span data-f="skills.${i}">${esc(s)}</span>`).join(' · ')}</p>` : ''}
 
   ${cv.projects?.length ? `
     <h2>Dự án</h2>
-    ${cv.projects.map(pj => `
+    ${cv.projects.map((pj, i) => `
       <div class="item">
-        <div class="item-title">${esc(pj.name)}</div>
-        <div class="item-desc">${descToBullets(pj.description)}</div>
+        <div class="item-title" data-f="projects.${i}.name">${esc(pj.name)}</div>
+        <div class="item-desc">${descToBullets(pj.description, `projects.${i}.description`)}</div>
       </div>
     `).join('')}
   ` : ''}
 
   ${cv.certifications?.length ? `
     <h2>Chứng chỉ</h2>
-    ${cv.certifications.map(ct => `
+    ${cv.certifications.map((ct, i) => `
       <div class="item">
         <div class="item-top">
-          <div class="item-title">${esc(ct.name)}</div>
-          <div class="item-date">${esc(ct.year)}</div>
+          <div class="item-title" data-f="certifications.${i}.name">${esc(ct.name)}</div>
+          <div class="item-date" data-f="certifications.${i}.year">${esc(ct.year)}</div>
         </div>
-        ${ct.issuer ? `<div class="item-meta">${esc(ct.issuer)}</div>` : ''}
+        ${ct.issuer ? `<div class="item-meta" data-f="certifications.${i}.issuer">${esc(ct.issuer)}</div>` : ''}
       </div>
     `).join('')}
   ` : ''}
 
-  ${cv.languages?.length ? `<h2>Ngoại ngữ</h2><p class="skills">${cv.languages.map(l => `${esc(l.language)}${l.level ? ` — ${esc(l.level)}` : ''}`).join(' · ')}</p>` : ''}
+  ${cv.languages?.length ? `<h2>Ngoại ngữ</h2><p class="skills">${cv.languages.map((l, i) => `<span data-f="languages.${i}">${esc(l.language)}${l.level ? ` — ${esc(l.level)}` : ''}</span>`).join(' · ')}</p>` : ''}
 
   ${cv.awards?.length ? `
     <h2>Giải thưởng</h2>
-    ${cv.awards.map(a => `
+    ${cv.awards.map((a, i) => `
       <div class="item">
         <div class="item-top">
-          <div class="item-title">${esc(a.title)}</div>
-          <div class="item-date">${esc(a.year)}</div>
+          <div class="item-title" data-f="awards.${i}.title">${esc(a.title)}</div>
+          <div class="item-date" data-f="awards.${i}.year">${esc(a.year)}</div>
         </div>
       </div>
     `).join('')}
@@ -114,10 +114,10 @@ export function minimalMonoTemplate(cv: CVData): string {
 
   ${cv.activities?.length ? `
     <h2>Hoạt động</h2>
-    ${cv.activities.map(ac => `
+    ${cv.activities.map((ac, i) => `
       <div class="item">
-        <div class="item-title">${esc(ac.name)}</div>
-        <div class="item-desc">${descToBullets(ac.description)}</div>
+        <div class="item-title" data-f="activities.${i}.name">${esc(ac.name)}</div>
+        <div class="item-desc">${descToBullets(ac.description, `activities.${i}.description`)}</div>
       </div>
     `).join('')}
   ` : ''}

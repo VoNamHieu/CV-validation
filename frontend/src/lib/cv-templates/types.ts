@@ -39,11 +39,15 @@ export function esc(str: string | undefined | null): string {
         .replace(/'/g, '&#039;');
 }
 
-export function descToBullets(desc: string | undefined | null): string {
+// `path` marks the element as inline-editable in the live preview (data-f is
+// the CVData field path the edited text is written back to). It is inert in
+// the exported PDF.
+export function descToBullets(desc: string | undefined | null, path?: string): string {
+    const attr = path ? ` data-f="${esc(path)}"` : '';
     const lines = (desc ?? '').split('\n').map(l => l.trim()).filter(Boolean);
     if (lines.length === 0) return '';
-    if (lines.length === 1) return `<p>${esc(lines[0])}</p>`;
-    return `<ul>${lines.map(l => `<li>${esc(l)}</li>`).join('')}</ul>`;
+    if (lines.length === 1) return `<p${attr}>${esc(lines[0])}</p>`;
+    return `<ul${attr}>${lines.map(l => `<li>${esc(l)}</li>`).join('')}</ul>`;
 }
 
 export function durationLabel(months: number | undefined | null): string {

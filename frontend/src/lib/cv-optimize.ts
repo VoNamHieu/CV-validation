@@ -42,8 +42,16 @@ export const OPTIMIZE_RESPONSE_SCHEMA: Record<string, unknown> = {
                 required: ["name", "description"],
             },
         },
+        improvements: {
+            type: "ARRAY",
+            items: {
+                type: "OBJECT",
+                properties: { section: STR, change: STR, reason: STR },
+                required: ["section", "change", "reason"],
+            },
+        },
     },
-    required: ["name", "summary", "skills", "experience", "education", "projects"],
+    required: ["name", "summary", "skills", "experience", "education", "projects", "improvements"],
 };
 
 type Rec = Record<string, unknown>;

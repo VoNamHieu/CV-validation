@@ -53,19 +53,19 @@ export function blueSidebarTemplate(cv: CVData, opts?: RenderOptions): string {
 <div class="layout">
   <div class="sidebar">
     <div class="avatar-wrap"><div class="avatar">${avatar}</div></div>
-    <div class="sb-name">${esc(cv.name || '')}</div>
-    ${emp.current_title ? `<div class="sb-title">${esc(emp.current_title)}</div>` : ''}
+    <div class="sb-name" data-f="name">${esc(cv.name || '')}</div>
+    ${emp.current_title ? `<div class="sb-title" data-f="employment.current_title">${esc(emp.current_title)}</div>` : ''}
 
     <div class="sb-section">
       <h3>Liên hệ</h3>
       <div class="sb-contact">
-        ${c.phone ? `<div><span class="ico">☎</span>${esc(c.phone)}</div>` : ''}
-        ${c.email ? `<div><span class="ico">✉</span>${esc(c.email)}</div>` : ''}
-        ${c.linkedin ? `<div><span class="ico">in</span>${esc(c.linkedin)}</div>` : ''}
-        ${c.github ? `<div><span class="ico">gh</span>${esc(c.github)}</div>` : ''}
-        ${c.portfolio ? `<div><span class="ico">⚲</span>${esc(c.portfolio)}</div>` : ''}
+        ${c.phone ? `<div><span class="ico">☎</span><span data-f="contact.phone">${esc(c.phone)}</span></div>` : ''}
+        ${c.email ? `<div><span class="ico">✉</span><span data-f="contact.email">${esc(c.email)}</span></div>` : ''}
+        ${c.linkedin ? `<div><span class="ico">in</span><span data-f="contact.linkedin">${esc(c.linkedin)}</span></div>` : ''}
+        ${c.github ? `<div><span class="ico">gh</span><span data-f="contact.github">${esc(c.github)}</span></div>` : ''}
+        ${c.portfolio ? `<div><span class="ico">⚲</span><span data-f="contact.portfolio">${esc(c.portfolio)}</span></div>` : ''}
         ${addr ? `<div><span class="ico">⌖</span>${esc(addr)}</div>` : ''}
-        ${p.date_of_birth ? `<div><span class="ico">◷</span>${esc(p.date_of_birth)}</div>` : ''}
+        ${p.date_of_birth ? `<div><span class="ico">◷</span><span data-f="personal.date_of_birth">${esc(p.date_of_birth)}</span></div>` : ''}
         ${p.gender ? `<div><span class="ico">⚥</span>${esc(p.gender)}</div>` : ''}
       </div>
     </div>
@@ -74,7 +74,7 @@ export function blueSidebarTemplate(cv: CVData, opts?: RenderOptions): string {
       <div class="sb-section">
         <h3>Kỹ năng</h3>
         <ul class="sb-skills">
-          ${cv.skills.map(s => `<li>${esc(s)}</li>`).join('')}
+          ${cv.skills.map((s, i) => `<li data-f="skills.${i}">${esc(s)}</li>`).join('')}
         </ul>
       </div>
     ` : ''}
@@ -83,11 +83,11 @@ export function blueSidebarTemplate(cv: CVData, opts?: RenderOptions): string {
       <div class="sb-section">
         <h3>Học vấn</h3>
         <div class="sb-extras">
-          ${cv.education.map(e => `
+          ${cv.education.map((e, i) => `
             <div class="row">
-              <div style="font-weight:600; color:#fff;">${esc(e.institution || '')}</div>
-              <div style="color:#a8c2dd;">${esc(e.degree || '')}</div>
-              <div style="color:#88b0d4; font-size:8.5pt;">${esc(e.year || '')}</div>
+              <div style="font-weight:600; color:#fff;" data-f="education.${i}.institution">${esc(e.institution || '')}</div>
+              <div style="color:#a8c2dd;" data-f="education.${i}.degree">${esc(e.degree || '')}</div>
+              <div style="color:#88b0d4; font-size:8.5pt;" data-f="education.${i}.year">${esc(e.year || '')}</div>
             </div>
           `).join('')}
         </div>
@@ -98,7 +98,7 @@ export function blueSidebarTemplate(cv: CVData, opts?: RenderOptions): string {
       <div class="sb-section">
         <h3>Ngoại ngữ</h3>
         <ul class="sb-skills">
-          ${cv.languages.map(l => `<li>${esc(l.language)}${l.level ? ` — ${esc(l.level)}` : ''}</li>`).join('')}
+          ${cv.languages.map((l, i) => `<li data-f="languages.${i}">${esc(l.language)}${l.level ? ` — ${esc(l.level)}` : ''}</li>`).join('')}
         </ul>
       </div>
     ` : ''}
@@ -107,11 +107,11 @@ export function blueSidebarTemplate(cv: CVData, opts?: RenderOptions): string {
       <div class="sb-section">
         <h3>Chứng chỉ</h3>
         <div class="sb-extras">
-          ${cv.certifications.map(ct => `
+          ${cv.certifications.map((ct, i) => `
             <div class="row">
-              <div style="font-weight:600; color:#fff;">${esc(ct.name || '')}</div>
-              ${ct.issuer ? `<div style="color:#a8c2dd;">${esc(ct.issuer)}</div>` : ''}
-              ${ct.year ? `<div style="color:#88b0d4; font-size:8.5pt;">${esc(ct.year)}</div>` : ''}
+              <div style="font-weight:600; color:#fff;" data-f="certifications.${i}.name">${esc(ct.name || '')}</div>
+              ${ct.issuer ? `<div style="color:#a8c2dd;" data-f="certifications.${i}.issuer">${esc(ct.issuer)}</div>` : ''}
+              ${ct.year ? `<div style="color:#88b0d4; font-size:8.5pt;" data-f="certifications.${i}.year">${esc(ct.year)}</div>` : ''}
             </div>
           `).join('')}
         </div>
@@ -120,39 +120,39 @@ export function blueSidebarTemplate(cv: CVData, opts?: RenderOptions): string {
   </div>
 
   <div class="main">
-    ${cv.summary ? `<h2>Mục tiêu nghề nghiệp</h2><div class="summary">${esc(cv.summary)}</div>` : ''}
+    ${cv.summary ? `<h2>Mục tiêu nghề nghiệp</h2><div class="summary" data-f="summary">${esc(cv.summary)}</div>` : ''}
 
     ${cv.experience?.length ? `
       <h2>Kinh nghiệm làm việc</h2>
-      ${cv.experience.map(e => `
+      ${cv.experience.map((e, i) => `
         <div class="item">
           <div class="item-top">
-            <div class="item-title">${esc(e.title)}</div>
-            <div class="item-date">${esc(dateRangeLabel(e))}</div>
+            <div class="item-title" data-f="experience.${i}.title">${esc(e.title)}</div>
+            <div class="item-date" data-f="experience.${i}.daterange">${esc(dateRangeLabel(e))}</div>
           </div>
-          <div class="item-meta">${esc(e.company)}</div>
-          <div class="item-desc">${descToBullets(e.description)}</div>
+          <div class="item-meta" data-f="experience.${i}.company">${esc(e.company)}</div>
+          <div class="item-desc">${descToBullets(e.description, `experience.${i}.description`)}</div>
         </div>
       `).join('')}
     ` : ''}
 
     ${cv.projects?.length ? `
       <h2>Dự án</h2>
-      ${cv.projects.map(pj => `
+      ${cv.projects.map((pj, i) => `
         <div class="item">
-          <div class="item-title">${esc(pj.name)}</div>
-          <div class="item-desc">${descToBullets(pj.description)}</div>
+          <div class="item-title" data-f="projects.${i}.name">${esc(pj.name)}</div>
+          <div class="item-desc">${descToBullets(pj.description, `projects.${i}.description`)}</div>
         </div>
       `).join('')}
     ` : ''}
 
     ${cv.awards?.length ? `
       <h2>Giải thưởng</h2>
-      ${cv.awards.map(a => `
+      ${cv.awards.map((a, i) => `
         <div class="item">
           <div class="item-top">
-            <div class="item-title">${esc(a.title)}</div>
-            ${a.year ? `<div class="item-date">${esc(a.year)}</div>` : ''}
+            <div class="item-title" data-f="awards.${i}.title">${esc(a.title)}</div>
+            ${a.year ? `<div class="item-date" data-f="awards.${i}.year">${esc(a.year)}</div>` : ''}
           </div>
         </div>
       `).join('')}
@@ -160,10 +160,10 @@ export function blueSidebarTemplate(cv: CVData, opts?: RenderOptions): string {
 
     ${cv.activities?.length ? `
       <h2>Hoạt động</h2>
-      ${cv.activities.map(ac => `
+      ${cv.activities.map((ac, i) => `
         <div class="item">
-          <div class="item-title">${esc(ac.name)}</div>
-          <div class="item-desc">${descToBullets(ac.description)}</div>
+          <div class="item-title" data-f="activities.${i}.name">${esc(ac.name)}</div>
+          <div class="item-desc">${descToBullets(ac.description, `activities.${i}.description`)}</div>
         </div>
       `).join('')}
     ` : ''}

@@ -12,7 +12,7 @@ import type { CVData, JDData, MatchResult, CategoryScore } from '@/lib/types';
 import ScoreRing from '@/components/ScoreRing';
 import EditableCvPreview from '@/components/EditableCvPreview';
 import CvTemplatePicker from '@/components/CvTemplatePicker';
-import { optimizeCv } from '@/lib/api';
+import { optimizeCvVariants } from '@/lib/api';
 import { buildCvPdfCache } from '@/lib/cv-pdf-cache';
 import { renderCvHtml, DEFAULT_TEMPLATE_ID } from '@/lib/cv-templates';
 import type { CvTemplateId } from '@/lib/cv-templates';
@@ -292,7 +292,9 @@ export default function StepReport() {
         if (!cvData || !entry.jdData || !entry.matchResult) return;
         setOptimizingIds(prev => new Set(prev).add(entry.id));
         try {
-            const result = await optimizeCv(cvData, entry.jdData, entry.matchResult);
+            const data = await optimizeCvVariants(cvData, entry.jdData, entry.matchResult);
+            const variant = data.variants[0];
+            const result = variant.cv;
 
             const pdfCache = await buildCvPdfCache(result, {
                 jobTitle: entry.jobTitle,
@@ -300,7 +302,11 @@ export default function StepReport() {
                 avatarBase64: userAvatarBase64,
             });
 
-            updateJdEntry(entry.id, { optimizedCv: result, ...pdfCache });
+            updateJdEntry(entry.id, {
+                optimizedCv: result,
+                optimizedCvImprovements: variant.improvements,
+                ...pdfCache,
+            });
         } catch (e) {
             console.error('Optimization failed:', e);
         }

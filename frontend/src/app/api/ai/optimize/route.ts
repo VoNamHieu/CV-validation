@@ -148,8 +148,15 @@ Return ONLY valid JSON matching this exact schema:
   "skills": ["string"],
   "experience": [{"title": "string", "company": "string", "duration_months": number, "description": "string"}],
   "education": [{"degree": "string", "institution": "string", "year": "string"}],
-  "projects": [{"name": "string", "description": "string"}]
+  "projects": [{"name": "string", "description": "string"}],
+  "improvements": [{"section": "string", "change": "string", "reason": "string"}]
 }
+
+improvements = a list of EVERY concrete change you made, written in VIETNAMESE for the candidate to read:
+- "section": where the change is ("Mục tiêu nghề nghiệp", "Kinh nghiệm: <company>", "Kỹ năng", "Dự án: <name>").
+- "change": what you rewrote/reordered, specific (quote the keyword or bullet topic, not generic phrases).
+- "reason": why it helps for THIS job description (name the JD requirement/keyword it targets).
+Only list changes you actually made. If you made no change to the CV, return an empty improvements array.
 
 STRICT GUARDRAILS:
 1. Only use information explicitly found in the original CV.
@@ -179,9 +186,12 @@ export async function POST(request: NextRequest) {
                 const raw = await callAI(SYSTEM_PROMPT, userPrompt, OPTIMIZE_RESPONSE_SCHEMA);
                 const parsed = safeJsonParse(raw);
                 if (!parsed) throw new Error(`Variant "${cfg.label}" returned invalid JSON`);
+                // improvements is explanation metadata, not CV content — split
+                // it off before the repair pass builds the CV object.
+                const { improvements, ...optimizedCv } = parsed as Record<string, unknown>;
                 // Deterministic guard: restore any entries/bullets/skills the
                 // model dropped despite the PRESERVE rules in the prompt.
-                const { cv: repairedCv, repairs } = repairOptimizedCv(cv, parsed);
+                const { cv: repairedCv, repairs } = repairOptimizedCv(cv, optimizedCv);
                 if (repairs.length) {
                     console.warn(`[optimize] Variant "${cfg.label}" dropped content, repaired:`, repairs);
                 }
@@ -191,6 +201,7 @@ export async function POST(request: NextRequest) {
                     focus: cfg.focus,
                     length: cfg.length,
                     cv: repairedCv,
+                    improvements: Array.isArray(improvements) ? improvements : [],
                 };
             })
         );
