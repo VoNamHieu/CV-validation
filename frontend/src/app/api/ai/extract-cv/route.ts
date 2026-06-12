@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { callAI } from "@/lib/gemini";
 import { safeJsonParse } from "@/lib/safe-json";
 import { MAX_INPUT_TEXT_LENGTH } from "@/lib/validation";
-import { CV_EXTRACTION_SYSTEM_PROMPT, normalizeCVResponse } from "@/lib/cv-extraction-schema";
+import {
+    CV_EXTRACTION_SYSTEM_PROMPT, normalizeCVResponse, CV_EXTRACTION_RESPONSE_SCHEMA,
+} from "@/lib/cv-extraction-schema";
 
 export async function POST(request: NextRequest) {
     try {
@@ -17,7 +19,7 @@ export async function POST(request: NextRequest) {
 
         const userPrompt = `Extract the following information from this CV text:\n\n${text}`;
 
-        const result = await callAI(CV_EXTRACTION_SYSTEM_PROMPT, userPrompt);
+        const result = await callAI(CV_EXTRACTION_SYSTEM_PROMPT, userPrompt, CV_EXTRACTION_RESPONSE_SCHEMA);
 
         let parsed;
         try { parsed = safeJsonParse(result); }

@@ -1,5 +1,5 @@
 import type { CVData } from '@/lib/types';
-import { esc, descToBullets, durationLabel, joinAddress } from './types';
+import { esc, descToBullets, dateRangeLabel, joinAddress } from './types';
 
 // Text-only template — intentionally has NO image holder (hasPhoto: false),
 // so RenderOptions.avatarBase64 is ignored. Best for ATS-strict applications.
@@ -52,7 +52,7 @@ export function minimalMonoTemplate(cv: CVData): string {
       <div class="item">
         <div class="item-top">
           <div class="item-title">${esc(e.title)}</div>
-          <div class="item-date">${esc(durationLabel(e.duration_months))}</div>
+          <div class="item-date">${esc(dateRangeLabel(e))}</div>
         </div>
         <div class="item-meta">${esc(e.company)}</div>
         <div class="item-desc">${descToBullets(e.description)}</div>

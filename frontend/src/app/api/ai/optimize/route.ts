@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { callAI } from "@/lib/gemini";
 import { safeJsonParse } from "@/lib/safe-json";
+import { OPTIMIZE_RESPONSE_SCHEMA, repairOptimizedCv } from "@/lib/cv-optimize";
 
 type OptimizeStyle = 'formal' | 'direct' | 'impact-driven' | 'storytelling';
 type OptimizeFocus = 'balanced' | 'technical' | 'leadership' | 'metrics' | 'ats-keyword';
@@ -86,27 +87,6 @@ interface MatchAnalysis {
     domain_match?: CategoryScore;
     seniority_match?: CategoryScore;
     nice_to_have_match?: CategoryScore;
-}
-
-// The LLM's response schema only covers the six "rewriteable" fields
-// (name/summary/skills/experience/education/projects). CVData also carries
-// contact, personal, employment, preferences plus the factual sections
-// certifications, languages, awards, activities — which must never be touched
-// by optimization. Merge them back from the original CV so they survive.
-function mergeOptimizedCv(original: unknown, optimized: unknown): unknown {
-    if (!original || typeof original !== 'object') return optimized;
-    if (!optimized || typeof optimized !== 'object') return optimized;
-    const orig = original as Record<string, unknown>;
-    const opt = optimized as Record<string, unknown>;
-    const preserved: Record<string, unknown> = {};
-    const PRESERVED_KEYS = [
-        'contact', 'personal', 'employment', 'preferences',
-        'certifications', 'languages', 'awards', 'activities',
-    ] as const;
-    for (const key of PRESERVED_KEYS) {
-        if (orig[key] !== undefined) preserved[key] = orig[key];
-    }
-    return { ...opt, ...preserved };
 }
 
 function collectGaps(match: MatchAnalysis): string[] {
@@ -196,15 +176,21 @@ export async function POST(request: NextRequest) {
         const variantResults = await Promise.all(
             configs.map(async (cfg) => {
                 const userPrompt = buildUserPrompt(cv, jd, match, cfg, useGaps);
-                const raw = await callAI(SYSTEM_PROMPT, userPrompt);
+                const raw = await callAI(SYSTEM_PROMPT, userPrompt, OPTIMIZE_RESPONSE_SCHEMA);
                 const parsed = safeJsonParse(raw);
                 if (!parsed) throw new Error(`Variant "${cfg.label}" returned invalid JSON`);
+                // Deterministic guard: restore any entries/bullets/skills the
+                // model dropped despite the PRESERVE rules in the prompt.
+                const { cv: repairedCv, repairs } = repairOptimizedCv(cv, parsed);
+                if (repairs.length) {
+                    console.warn(`[optimize] Variant "${cfg.label}" dropped content, repaired:`, repairs);
+                }
                 return {
                     label: cfg.label,
                     style: cfg.style,
                     focus: cfg.focus,
                     length: cfg.length,
-                    cv: mergeOptimizedCv(cv, parsed),
+                    cv: repairedCv,
                 };
             })
         );

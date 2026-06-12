@@ -1,6 +1,6 @@
 import type { CVData } from '@/lib/types';
 import type { RenderOptions } from './types';
-import { esc, descToBullets, durationLabel, avatarInner, joinAddress } from './types';
+import { esc, descToBullets, dateRangeLabel, avatarInner, joinAddress } from './types';
 
 export function lightSidebarTemplate(cv: CVData, opts?: RenderOptions): string {
     const c = cv.contact ?? {} as Partial<NonNullable<CVData['contact']>>;
@@ -127,7 +127,7 @@ export function lightSidebarTemplate(cv: CVData, opts?: RenderOptions): string {
         <div class="item">
           <div class="item-top">
             <div class="item-title">${esc(e.title)}</div>
-            <div class="item-date">${esc(durationLabel(e.duration_months))}</div>
+            <div class="item-date">${esc(dateRangeLabel(e))}</div>
           </div>
           <div class="item-meta">${esc(e.company)}</div>
           <div class="item-desc">${descToBullets(e.description)}</div>

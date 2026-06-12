@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { callAIWithPdf } from "@/lib/gemini";
 import { safeJsonParse } from "@/lib/safe-json";
 import { MAX_PDF_BASE64_LENGTH } from "@/lib/validation";
-import { CV_EXTRACTION_SYSTEM_PROMPT, normalizeCVResponse } from "@/lib/cv-extraction-schema";
+import {
+    CV_EXTRACTION_SYSTEM_PROMPT, normalizeCVResponse,
+    CV_EXTRACTION_RESPONSE_SCHEMA, JD_EXTRACTION_RESPONSE_SCHEMA,
+} from "@/lib/cv-extraction-schema";
 
 export async function POST(request: NextRequest) {
     try {
@@ -35,7 +38,8 @@ Return ONLY valid JSON matching this exact schema:
             ? "Extract all structured information from this CV/Resume PDF."
             : "Extract the key requirements, nice-to-haves, responsibilities, seniority, and domain from this Job Description PDF.";
 
-        const result = await callAIWithPdf(systemPrompt, userPrompt, pdf_base64);
+        const responseSchema = isCV ? CV_EXTRACTION_RESPONSE_SCHEMA : JD_EXTRACTION_RESPONSE_SCHEMA;
+        const result = await callAIWithPdf(systemPrompt, userPrompt, pdf_base64, responseSchema);
 
         let parsed;
         try {

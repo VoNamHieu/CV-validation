@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { callAI } from "@/lib/gemini";
 import { safeJsonParse } from "@/lib/safe-json";
 import { MAX_INPUT_TEXT_LENGTH } from "@/lib/validation";
+import { JD_EXTRACTION_RESPONSE_SCHEMA } from "@/lib/cv-extraction-schema";
 
 export async function POST(request: NextRequest) {
     try {
@@ -26,7 +27,7 @@ Return ONLY valid JSON matching this exact schema:
 
         const userPrompt = `Extract the key requirements, nice-to-haves, responsibilities, seniority, and domain from this Job Description:\n\n${text}`;
 
-        const result = await callAI(systemPrompt, userPrompt);
+        const result = await callAI(systemPrompt, userPrompt, JD_EXTRACTION_RESPONSE_SCHEMA);
 
         let parsed;
         try { parsed = safeJsonParse(result); }

@@ -4,6 +4,10 @@ export interface ExperienceDetail {
     title: string;
     company: string;
     duration_months: number;
+    // Verbatim dates from the CV (e.g., "03/2021", "Jan 2021", "Hiện tại").
+    // Optional so CVData persisted before these fields existed still type-checks.
+    start_date?: string;
+    end_date?: string;
     description: string;
 }
 

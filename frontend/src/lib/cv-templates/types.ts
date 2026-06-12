@@ -56,6 +56,27 @@ export function durationLabel(months: number | undefined | null): string {
     return `${y} năm ${rem} tháng`;
 }
 
+/**
+ * Date label for an experience entry: prefers the verbatim dates from the CV
+ * ("03/2021 – Hiện tại"), falls back to the computed duration ("2 năm 3 tháng")
+ * for data extracted before start/end dates existed.
+ */
+export function dateRangeLabel(e: {
+    start_date?: string;
+    end_date?: string;
+    duration_months?: number | null;
+}): string {
+    const norm = (s: string | undefined) => {
+        const t = (s ?? '').trim();
+        return /^(present|current|now|nay|hiện tại)$/i.test(t) ? 'Hiện tại' : t;
+    };
+    const start = norm(e.start_date);
+    const end = norm(e.end_date);
+    if (start && end) return `${start} – ${end}`;
+    if (start || end) return start || end;
+    return durationLabel(e.duration_months);
+}
+
 export function initials(name: string | undefined | null): string {
     const n = (name ?? '').trim();
     if (!n) return '?';

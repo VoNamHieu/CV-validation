@@ -1,6 +1,6 @@
 import type { CVData } from '@/lib/types';
 import type { RenderOptions } from './types';
-import { esc, descToBullets, durationLabel, avatarInner, joinAddress } from './types';
+import { esc, descToBullets, dateRangeLabel, avatarInner, joinAddress } from './types';
 
 export function navyHeaderTemplate(cv: CVData, opts?: RenderOptions): string {
     const c = cv.contact ?? {} as Partial<NonNullable<CVData['contact']>>;
@@ -58,7 +58,7 @@ export function navyHeaderTemplate(cv: CVData, opts?: RenderOptions): string {
       <h2>Kinh nghiệm làm việc</h2>
       ${cv.experience.map(e => `
         <div class="timeline-row">
-          <div class="timeline-date">${esc(durationLabel(e.duration_months))}</div>
+          <div class="timeline-date">${esc(dateRangeLabel(e))}</div>
           <div>
             <div class="item-title">${esc(e.title)}</div>
             <div class="item-meta">${esc(e.company)}</div>
