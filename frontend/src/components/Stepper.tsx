@@ -1,12 +1,11 @@
 'use client';
 
-import { Check, Upload, Globe, ChartBar, PencilSimple } from '@phosphor-icons/react';
+import { Check, Upload, Globe, PencilSimple } from '@phosphor-icons/react';
 
 const steps = [
     { num: 1, label: 'Upload CV', icon: Upload },
     { num: 2, label: 'Find Jobs', icon: Globe },
-    { num: 3, label: 'Report', icon: ChartBar },
-    { num: 4, label: 'Edit CV', icon: PencilSimple },
+    { num: 3, label: 'Edit CV', icon: PencilSimple },
 ];
 
 interface StepperProps {

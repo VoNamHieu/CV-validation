@@ -13,6 +13,7 @@ interface OptimizeOptions {
     length?: OptimizeLength;
     variants?: number; // 1-3
     useGaps?: boolean;
+    notes?: string; // candidate's own emphasis points (re-optimize)
 }
 
 interface VariantConfig {
@@ -110,6 +111,7 @@ function buildUserPrompt(
     match: unknown,
     cfg: VariantConfig,
     useGaps: boolean,
+    notes: string,
 ): string {
     const gaps = useGaps ? collectGaps(match as MatchAnalysis) : [];
     return `Optimize this CV for the given job description.
@@ -127,6 +129,7 @@ ${JSON.stringify(jd, null, 2)}
 MATCH ANALYSIS (JSON):
 ${JSON.stringify(match, null, 2)}
 ${gaps.length > 0 ? `\nKNOWN GAPS — address each by reframing existing CV content (never by fabrication):\n${gaps.map(g => `  - ${g}`).join('\n')}` : ''}
+${notes ? `\nCANDIDATE PRIORITIES — the candidate explicitly asked you to emphasize or incorporate the following. Treat these as high priority and surface them where the source CV genuinely supports them. NEVER fabricate experience, skills, or metrics to satisfy a request — if the CV does not support a point, leave it out:\n${notes}` : ''}
 
 OPTIMIZATION INSTRUCTIONS:
 1. Rephrase the summary to align with JD must-have keywords that are actually supported by the source CV.
@@ -177,12 +180,13 @@ export async function POST(request: NextRequest) {
 
         const opts: OptimizeOptions = options ?? {};
         const useGaps = opts.useGaps !== false;
+        const notes = typeof opts.notes === 'string' ? opts.notes.trim().slice(0, 2000) : '';
         const configs = buildVariants(opts);
 
         // Run variants in parallel — Gemini main+fallback handles overload.
         const variantResults = await Promise.all(
             configs.map(async (cfg) => {
-                const userPrompt = buildUserPrompt(cv, jd, match, cfg, useGaps);
+                const userPrompt = buildUserPrompt(cv, jd, match, cfg, useGaps, notes);
                 const raw = await callAI(SYSTEM_PROMPT, userPrompt, OPTIMIZE_RESPONSE_SCHEMA);
                 const parsed = safeJsonParse(raw);
                 if (!parsed) throw new Error(`Variant "${cfg.label}" returned invalid JSON`);

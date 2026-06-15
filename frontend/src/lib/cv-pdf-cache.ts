@@ -1,5 +1,6 @@
 import { renderCvHtml } from '@/lib/cv-templates';
 import type { CvTemplateId } from '@/lib/cv-templates';
+import { renderCvPdf } from '@/lib/api';
 import { syncCvFileToExtension } from '@/lib/extension-sync';
 import type { CVData } from '@/lib/types';
 
@@ -22,13 +23,7 @@ export async function buildCvPdfCache(
         });
         const safeTitle = (opts.jobTitle || 'job').replace(/\s+/g, '_').slice(0, 40);
         const filename = `${cv.name.replace(/\s+/g, '_')}_${safeTitle}.pdf`;
-        const res = await fetch('/api/render-cv-pdf', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ html, filename }),
-        });
-        if (!res.ok) return {};
-        const { base64, filename: outName } = await res.json() as { base64: string; filename: string };
+        const { base64, filename: outName } = await renderCvPdf(html, filename);
         syncCvFileToExtension(base64, outName).then((r) => {
             if (!r.ok) console.warn('[buildCvPdfCache] CV file sync → extension failed:', r.error);
         });

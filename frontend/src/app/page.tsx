@@ -6,7 +6,6 @@ import Sidebar, { SIDEBAR_WIDTH } from '@/components/Sidebar';
 import Stepper from '@/components/Stepper';
 import StepUploadCV from '@/components/steps/StepUploadCV';
 import StepInputUrl from '@/components/steps/StepInputUrl';
-import StepReport from '@/components/steps/StepReport';
 import StepEditCv from '@/components/steps/StepEditCv';
 import HistoryView from '@/components/views/HistoryView';
 
@@ -54,8 +53,7 @@ export default function Home() {
               <Stepper currentStep={currentStep} />
               {currentStep === 1 && <StepUploadCV />}
               {currentStep === 2 && <StepInputUrl />}
-              {currentStep === 3 && <StepReport />}
-              {currentStep === 4 && <StepEditCv />}
+              {currentStep === 3 && <StepEditCv />}
             </>
           )}
           {view === 'history' && <HistoryView />}

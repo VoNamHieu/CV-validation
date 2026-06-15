@@ -12,6 +12,9 @@ export interface OptimizeOptions {
     length?: OptimizeLength;
     variants?: number;
     useGaps?: boolean;
+    // Free-text points the candidate wants emphasized/incorporated on re-optimize.
+    // Honored without fabrication — reframes existing CV content only.
+    notes?: string;
 }
 
 export interface OptimizeVariant {
@@ -360,6 +363,50 @@ export function isExtensionAvailable(): boolean {
     if (typeof window === 'undefined') return false;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return !!(window as any).__jobfitExtensionId;
+}
+
+// ── Render an optimized-CV's HTML to a PDF (base64) via the backend.
+//    The backend drives a single shared Chromium, so transient overload/crash
+//    500s happen under concurrent load. Retry those silently with backoff so a
+//    blip never surfaces to the user; 4xx (bad/oversized html) fail fast since
+//    a retry can't fix them. Used by every render call site (eager per-job
+//    cache, manual download, batch apply) — keep the retry in one place. ──
+export interface RenderedPdf {
+    base64: string;
+    filename: string;
+    sizeBytes?: number;
+}
+
+export async function renderCvPdf(
+    html: string,
+    filename: string,
+    attempts = 3,
+): Promise<RenderedPdf> {
+    let lastErr: unknown;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+        let res: Response | null = null;
+        try {
+            res = await fetch('/api/render-cv-pdf', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ html, filename }),
+            });
+        } catch (e) {
+            lastErr = e; // network error — transient, retry
+        }
+        if (res) {
+            if (res.ok) return (await res.json()) as RenderedPdf;
+            const err = await res.json().catch(() => ({}));
+            const message = err.detail || `HTTP ${res.status}`;
+            // 4xx (bad/oversized html) won't succeed on retry — fail fast.
+            if (res.status < 500 && res.status !== 429) throw new Error(message);
+            lastErr = new Error(message); // 5xx / 429 — transient
+        }
+        if (attempt < attempts) {
+            await new Promise((r) => setTimeout(r, 700 * attempt)); // 700ms, 1400ms
+        }
+    }
+    throw lastErr instanceof Error ? lastErr : new Error('Failed to render PDF');
 }
 
 // ── Crawl a URL by opening it in a background tab via the Chrome extension.

@@ -228,8 +228,8 @@ export default function StepInputUrl() {
             });
 
             // ── Full-auto extension: CVs were already tailored inside the
-            //    parallel pipeline — jump to step 4 where the batch-apply
-            //    auto-trigger takes over. ──
+            //    parallel pipeline — jump to the editor (step 3) where the
+            //    batch-apply auto-trigger takes over. ──
             if (isFullAuto) {
                 const done = useAppStore.getState().jdEntries.filter(
                     (e) => e.status === 'done' && e.jdData && e.matchResult,
@@ -241,14 +241,15 @@ export default function StepInputUrl() {
                 setPhaseDetail(`Optimized ${optimizedCount}/${done.length} CVs. Handing off to extension...`);
                 if (runRef.current === runId) {
                     setPhase('idle');
-                    setStep(4);
+                    setStep(3);
                 }
                 return;
             }
 
             if (runRef.current === runId) {
                 setPhase('idle');
-                // No job succeeded → still show the report so errors are visible
+                // Even if no job succeeded, advance to the editor — its empty
+                // state explains there were no optimized CVs and offers a way back.
                 if (!navigated) setStep(3);
             }
         } catch (e: unknown) {
@@ -725,7 +726,8 @@ export default function StepInputUrl() {
 
             if (runRef.current === runId) {
                 setPhase('idle');
-                // No job succeeded → still show the report so errors are visible
+                // Even if no job succeeded, advance to the editor — its empty
+                // state explains there were no optimized CVs and offers a way back.
                 if (!navigated) setStep(3);
             }
         } catch (e: unknown) {
