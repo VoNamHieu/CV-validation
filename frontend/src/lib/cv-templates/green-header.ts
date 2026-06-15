@@ -14,8 +14,8 @@ export function greenHeaderTemplate(cv: CVData, opts?: RenderOptions): string {
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: 'Helvetica Neue', Arial, sans-serif; color: #2a3535; padding: 32px 44px; line-height: 1.6; font-size: 10.5pt; }
-  .header { display: grid; grid-template-columns: 110px 1fr; gap: 24px; align-items: center; margin-bottom: 14px; }
-  .avatar { width: 100px; height: 100px; border-radius: 50%; background: linear-gradient(135deg, #c8e6c9, #a5d6a7); display: flex; align-items: center; justify-content: center; font-size: 42pt; color: #1b5e20; font-weight: 700; overflow: hidden; }
+  .header { display: grid; grid-template-columns: 120px 1fr; gap: 24px; align-items: center; margin-bottom: 14px; }
+  .avatar { width: 116px; height: 116px; border-radius: 50%; background: linear-gradient(135deg, #c8e6c9, #a5d6a7); display: flex; align-items: center; justify-content: center; font-size: 46pt; color: #1b5e20; font-weight: 700; overflow: hidden; }
   .name { font-size: 23pt; font-weight: 700; color: #1a1a1a; margin-bottom: 4px; }
   .title { font-size: 11pt; color: #2e7d32; font-weight: 600; margin-bottom: 10px; }
   .contact-row { display: flex; flex-wrap: wrap; gap: 5px 18px; font-size: 9.5pt; color: #444; }

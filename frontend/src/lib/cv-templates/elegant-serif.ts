@@ -15,7 +15,7 @@ export function elegantSerifTemplate(cv: CVData, opts?: RenderOptions): string {
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: Georgia, 'Times New Roman', serif; color: #2e2a24; padding: 38px 50px; line-height: 1.6; font-size: 10.5pt; background: #fffdf9; }
   .header { text-align: center; margin-bottom: 22px; }
-  .avatar { width: 100px; height: 100px; border-radius: 50%; background: #f0e8da; display: inline-flex; align-items: center; justify-content: center; font-size: 40pt; color: #b08d4f; font-weight: 700; border: 3px solid #b08d4f; overflow: hidden; margin-bottom: 12px; }
+  .avatar { width: 116px; height: 116px; border-radius: 50%; background: #f0e8da; display: inline-flex; align-items: center; justify-content: center; font-size: 46pt; color: #b08d4f; font-weight: 700; border: 3px solid #b08d4f; overflow: hidden; margin-bottom: 12px; }
   .name { font-size: 24pt; font-weight: 700; color: #1f1b14; letter-spacing: 1px; margin-bottom: 4px; }
   .title { font-size: 11pt; color: #b08d4f; font-style: italic; margin-bottom: 10px; }
   .contact-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 16px; font-size: 9.5pt; color: #5a5246; }

@@ -14,8 +14,8 @@ export function classicTemplate(cv: CVData, opts?: RenderOptions): string {
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: 'Helvetica Neue', Arial, sans-serif; color: #2a2a2a; padding: 36px 44px; line-height: 1.55; font-size: 10.5pt; }
-  .header { display: grid; grid-template-columns: 96px 1fr; gap: 24px; align-items: center; margin-bottom: 22px; }
-  .avatar { width: 92px; height: 92px; border-radius: 50%; background: #e8e8e8; display: flex; align-items: center; justify-content: center; font-size: 38pt; color: #999; font-weight: 600; overflow: hidden; }
+  .header { display: grid; grid-template-columns: 120px 1fr; gap: 24px; align-items: center; margin-bottom: 22px; }
+  .avatar { width: 116px; height: 116px; border-radius: 50%; background: #e8e8e8; display: flex; align-items: center; justify-content: center; font-size: 46pt; color: #999; font-weight: 600; overflow: hidden; }
   .name { font-size: 22pt; font-weight: 700; color: #1a1a1a; margin-bottom: 4px; }
   .title { font-size: 11pt; color: #555; margin-bottom: 8px; font-style: italic; }
   .contact-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 22px; font-size: 9.5pt; color: #444; }

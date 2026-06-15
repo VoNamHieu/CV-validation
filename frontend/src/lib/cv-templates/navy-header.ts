@@ -14,8 +14,8 @@ export function navyHeaderTemplate(cv: CVData, opts?: RenderOptions): string {
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: 'Helvetica Neue', Arial, sans-serif; color: #2a2a2a; line-height: 1.6; font-size: 10.5pt; }
-  .band { background: #1f2a44; color: #e6eaf2; padding: 30px 44px; display: grid; grid-template-columns: 110px 1fr; gap: 26px; align-items: center; }
-  .avatar { width: 104px; height: 104px; border-radius: 50%; background: linear-gradient(135deg, #33415e, #4a5d85); display: flex; align-items: center; justify-content: center; font-size: 42pt; color: #fff; font-weight: 700; border: 3px solid rgba(255,255,255,0.25); overflow: hidden; }
+  .band { background: #1f2a44; color: #e6eaf2; padding: 30px 44px; display: grid; grid-template-columns: 124px 1fr; gap: 26px; align-items: center; }
+  .avatar { width: 116px; height: 116px; border-radius: 50%; background: linear-gradient(135deg, #33415e, #4a5d85); display: flex; align-items: center; justify-content: center; font-size: 46pt; color: #fff; font-weight: 700; border: 3px solid rgba(255,255,255,0.25); overflow: hidden; }
   .name { font-size: 23pt; font-weight: 700; color: #fff; margin-bottom: 4px; }
   .title { font-size: 11pt; color: #9db2d9; font-weight: 600; margin-bottom: 10px; }
   .contact-row { display: flex; flex-wrap: wrap; gap: 5px 18px; font-size: 9.5pt; color: #c4cee2; }
