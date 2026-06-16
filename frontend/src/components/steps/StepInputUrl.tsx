@@ -13,6 +13,7 @@ import {
     extractJobLinks, rankJobsTournament, extensionCrawl, isExtensionAvailable,
     findCareer, getFeaturedJobs, optimizeCvVariants, type JobListing,
 } from '@/lib/api';
+import { buildSearchUrl, matchesCity, titleMatchScore, cityLabel } from '@/lib/job-targeting';
 import { buildCvPdfCache } from '@/lib/cv-pdf-cache';
 
 type Phase = 'idle' | 'analyzing_cv' | 'searching' | 'extracting_links'
@@ -111,6 +112,7 @@ export default function StepInputUrl() {
         setStep, cvData, setJdData, setMatchResult,
         clearJdEntries, addJdEntry, updateJdEntry, setOptimizedCv, addJobRecord,
         setView, jobHistory, fullyAutoMode, setFullyAutoMode, setSelectedJdId,
+        targetJobTitle, targetLocation,
     } = useAppStore();
 
     const [url, setUrl] = useState('');
@@ -150,27 +152,36 @@ export default function StepInputUrl() {
         const runId = ++runRef.current;
 
         try {
-            // ── Phase 1: read CV → inferred role (display only; ranker uses the full CV) ──
+            // ── Phase 1: confirmed target role (from step 1 — no LLM round-trip). ──
+            const targetTitle = (
+                targetJobTitle
+                || cvData.desired_job_title
+                || cvData.employment?.current_title
+                || ''
+            ).trim();
+            const cityKey = targetLocation;
+            const cityName = cityLabel(cityKey);
             setPhase('analyzing_cv');
-            setPhaseDetail('Reading your CV to understand what job you want...');
-            let cvSearch = await smartSearch(cvData, 'https://example.com/');
-            if (Array.isArray(cvSearch)) cvSearch = cvSearch[0];
-            const inferred = cvSearch?.inferred_job_title || '';
-            setInferredTitle(inferred);
+            setInferredTitle(targetTitle);
+            setPhaseDetail(targetTitle
+                ? `Matching openings to "${targetTitle}"${cityName ? ` in ${cityName}` : ''}...`
+                : 'Matching openings to your CV...');
 
             // ── Phase 2 (presented as "searching"): pull aggregated jobs. ──
             setPhase('searching');
-            setPhaseDetail(inferred
-                ? `Scanning live openings for "${inferred}"...`
+            setPhaseDetail(targetTitle
+                ? `Scanning live openings for "${targetTitle}"...`
                 : 'Scanning live openings...');
             const featured = await getFeaturedJobs();
-            const allJobs: { url: string; title: string; company: string; careerUrl: string }[] = [];
+            type FeaturedJob = { url: string; title: string; company: string; careerUrl: string; location: string };
+            const allJobs: FeaturedJob[] = [];
             for (const c of featured.companies) {
                 for (const j of c.jobs) {
                     if (!j.url || !j.title) continue;
                     allJobs.push({
                         url: j.url, title: j.title,
                         company: c.name, careerUrl: c.career_url,
+                        location: j.location || '',
                     });
                 }
             }
@@ -178,35 +189,66 @@ export default function StepInputUrl() {
                 throw new Error('No matching openings found right now. Try again in a moment.');
             }
 
-            // ── Phase 3 (presented as "compiling listings"): handoff to ranker. ──
+            // ── Phase 3 (presented as "compiling listings"): HARD-pair by title,
+            //    then by city. Title match is strict — only openings sharing the
+            //    target role survive. If the curated list has none at all, fall
+            //    back to the full list so the user isn't stranded. ──
             setPhase('extracting_links');
-            setPhaseDetail(`Found ${allJobs.length} openings — preparing them for AI ranking...`);
+            const titleScored = allJobs
+                .map((job) => ({ job, score: titleMatchScore(targetTitle, job.title) }))
+                .filter((x) => x.score > 0);
+            const titleStranded = titleScored.length === 0;
+            const titlePool = titleStranded
+                ? allJobs.map((job) => ({ job, score: 0 }))
+                : titleScored;
 
-            // ── Phase 4: rank by CV fit ──
+            // City pairing: keep in-city matches; if none, stay strict on title
+            // but surface this role in other cities (each marked "off-city").
+            let pool = titlePool;
+            let offCity = false;
+            if (cityKey) {
+                const inCity = titlePool.filter((x) => matchesCity(x.job.location, cityKey));
+                if (inCity.length) pool = inCity;
+                else offCity = true;
+            }
+            const poolJobs = pool.map((x) => x.job);
+            setPhaseDetail(
+                titleStranded
+                    ? 'No exact title match — ranking all openings by CV fit...'
+                    : offCity
+                        ? `No "${targetTitle}" in ${cityName} — showing this role in other cities...`
+                        : `${poolJobs.length} "${targetTitle}"${cityName ? ` in ${cityName}` : ''} openings — ranking by CV fit...`,
+            );
+
+            // ── Phase 4: rank the paired pool by CV fit ──
             setPhase('ranking');
-            setPhaseDetail(`Ranking ${allJobs.length} jobs by fit to your CV...`);
+            setPhaseDetail(`Ranking ${poolJobs.length} jobs by fit to your CV...`);
             const MAX_JOBS = 5;
             let ranked: { url: string; title?: string; fit_score?: number }[] = [];
             try {
                 ranked = await rankJobsTournament(
                     cvData,
-                    allJobs.map((j) => ({ url: j.url, title: j.title, company: j.company })),
+                    poolJobs.map((j) => ({ url: j.url, title: j.title, company: j.company })),
                 );
             } catch (rankErr) {
                 console.log('[StepInputUrl/featured] ranking failed, using original order:', rankErr);
             }
             const orderedUrls = ranked.length
                 ? ranked.map((r) => r.url).filter(Boolean)
-                : allJobs.map((j) => j.url);
-            const lookup = new Map(allJobs.map((j) => [j.url, j]));
+                : poolJobs.map((j) => j.url);
+            const lookup = new Map(poolJobs.map((j) => [j.url, j]));
             const topJobs = orderedUrls
                 .map((u) => lookup.get(u))
-                .filter((j): j is typeof allJobs[number] => !!j)
+                .filter((j): j is FeaturedJob => !!j)
                 .slice(0, MAX_JOBS);
             setPhaseDetail(`Top ${topJobs.length} by CV fit selected`);
 
             // Pre-populate JD entries so the user sees the queue immediately.
+            // Mark any opening outside the chosen city so the editor can label it.
             for (const job of topJobs) {
+                // Only flag as off-city when the listing has a known location that
+                // doesn't match — an empty location is "unknown", not "elsewhere".
+                const off = !!cityKey && !!job.location && !matchesCity(job.location, cityKey);
                 addJdEntry({
                     id: `jd-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
                     source: job.url,
@@ -214,6 +256,8 @@ export default function StepInputUrl() {
                     status: 'crawling',
                     jobTitle: job.title,
                     company: job.company,
+                    location: job.location || undefined,
+                    locationNote: off ? `Khác ${cityName}` : undefined,
                 });
             }
 
@@ -223,7 +267,7 @@ export default function StepInputUrl() {
             const { navigated } = await runJobPipeline({
                 queueLen: topJobs.length,
                 runId,
-                fallbackTitle: inferred,
+                fallbackTitle: targetTitle,
                 navigateOnFirstDone: !isFullAuto,
             });
 
@@ -568,12 +612,28 @@ export default function StepInputUrl() {
         const runId = ++runRef.current;
 
         try {
-            // ─── Phase 1: AI Analyze CV → infer job title + search URL ───
+            // ─── Phase 1: build the search URL from the confirmed target role
+            //     (set on the upload step) — pure template lookup, no LLM. ───
+            const targetTitle = (
+                targetJobTitle || cvData.desired_job_title || cvData.employment?.current_title || ''
+            ).trim();
+            if (!targetTitle) throw new Error('Add a target role on the upload step first.');
             setPhase('analyzing_cv');
-            setPhaseDetail('Reading your CV to understand what job you want...');
-            let searchResult = await smartSearch(cvData, trimmed);
-            if (Array.isArray(searchResult)) searchResult = searchResult[0];
-            if (!searchResult?.search_url) throw new Error('AI could not generate a search URL.');
+            // Known site → instant template URL. Unknown site → fall back to the
+            // LLM, anchored to the confirmed role so it can't pick a different one.
+            const built = buildSearchUrl(trimmed, targetTitle, targetLocation);
+            let searchResult: { inferred_job_title: string; search_keyword: string; search_url: string } = built;
+            if (!built.known) {
+                setPhaseDetail('Preparing search for this site...');
+                let r = await smartSearch(cvData, trimmed, targetTitle);
+                if (Array.isArray(r)) r = r[0];
+                if (!r?.search_url) throw new Error('AI could not generate a search URL for this site.');
+                searchResult = {
+                    inferred_job_title: r.inferred_job_title || targetTitle,
+                    search_keyword: r.search_keyword || '',
+                    search_url: r.search_url,
+                };
+            }
             setInferredTitle(searchResult.inferred_job_title);
             setPhaseDetail(`Looking for: "${searchResult.inferred_job_title}"`);
 

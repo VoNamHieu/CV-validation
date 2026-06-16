@@ -14,6 +14,7 @@ Return ONLY valid JSON matching this exact schema:
 {
   "name": "string",
   "summary": "string",
+  "desired_job_title": "string (the single job title this candidate is most likely searching for next)",
   "skills": ["string"],
   "experience": [{"title": "string", "company": "string", "start_date": "string", "end_date": "string", "duration_months": number, "description": "string"}],
   "education": [{"degree": "string", "institution": "string", "year": "string"}],
@@ -55,6 +56,7 @@ Return ONLY valid JSON matching this exact schema:
 }
 
 Rules:
+- desired_job_title: infer the ONE specific role this candidate is targeting next, from their most-recent title, level, skills, and summary. Be specific ("Frontend Engineer", "Data Analyst"), not vague ("Developer"). If the CV states a clear objective/target role, use that. Never leave it empty when any experience exists.
 - COMPLETENESS IS CRITICAL: this output replaces the original CV, so any detail you omit is lost forever. Extract EVERY section and EVERY line of the CV into the schema.
 - For experience[].description, projects[].description, and activities[].description: copy EVERY bullet point and sentence from the source, keeping the original wording (translate nothing, summarize nothing). Output each bullet on its own line, separated by "\\n", without leading "-" or "*" characters. NEVER shorten, merge, drop, or paraphrase bullets — the bullet count in your output must equal the bullet count in the CV.
 - Map CV sections to schema fields: "Certifications" / "Chứng chỉ" / courses → certifications; "Languages" / "Ngoại ngữ" → languages; "Awards" / "Honors" / "Giải thưởng" / "Danh hiệu" → awards; "Activities" / "Volunteering" / "Hoạt động" / "Tình nguyện" / extracurriculars → activities.
@@ -195,6 +197,7 @@ export const CV_EXTRACTION_RESPONSE_SCHEMA: Record<string, unknown> = {
     properties: {
         name: STR,
         summary: STR,
+        desired_job_title: STR,
         skills: STR_ARRAY,
         experience: objArray({
             title: STR, company: STR, start_date: STR, end_date: STR,
@@ -236,7 +239,7 @@ export const CV_EXTRACTION_RESPONSE_SCHEMA: Record<string, unknown> = {
             required: ["desired_locations", "desired_salary"],
         },
     },
-    required: ["name", "summary", "skills", "experience", "education", "projects",
+    required: ["name", "summary", "desired_job_title", "skills", "experience", "education", "projects",
         "certifications", "languages", "awards", "activities",
         "contact", "personal", "employment", "preferences"],
 };
@@ -262,6 +265,7 @@ export function normalizeCVResponse(parsed: unknown): CVData {
     return {
         name: asString(r.name),
         summary: asString(r.summary),
+        desired_job_title: asString(r.desired_job_title),
         skills: Array.isArray(r.skills) ? (r.skills as string[]).filter(s => typeof s === "string") : [],
         experience,
         education: Array.isArray(r.education) ? (r.education as CVData["education"]) : [],

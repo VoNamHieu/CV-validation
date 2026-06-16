@@ -56,6 +56,11 @@ export interface JDEntry {
   optimizedCvFileName?: string;
   jobTitle?: string;
   company?: string;
+  // Job's free-text location (from the listing), used for city matching.
+  location?: string;
+  // Set when this job matched the target title but NOT the chosen city — the
+  // UI labels it "khác thành phố" so the user knows it's an off-city result.
+  locationNote?: string;
   // Which CV template the candidate chose for this job.
   selectedTemplateId?: CvTemplateId;
 }
@@ -78,6 +83,14 @@ interface AppState {
   cvData: CVData | null;
   setCvRawText: (text: string, fileName: string) => void;
   setCvData: (data: CVData) => void;
+
+  // Job targeting — confirmed on the upload step, consumed by the job finder.
+  // targetJobTitle defaults to the AI-inferred desired_job_title but the user
+  // can override it. targetLocation is a CITY_OPTIONS key ('' = freestyle).
+  targetJobTitle: string;
+  targetLocation: string;
+  setTargetJobTitle: (title: string) => void;
+  setTargetLocation: (cityKey: string) => void;
 
   // Single JD (legacy, still used for text/pdf input)
   jdRawText: string;
@@ -135,6 +148,8 @@ const initialState = {
   cvRawText: '',
   cvFileName: '',
   cvData: null,
+  targetJobTitle: '',
+  targetLocation: '',
   jdRawText: '',
   jdData: null,
   matchResult: null,
@@ -158,6 +173,9 @@ export const useAppStore = create<AppState>()(
 
       setCvRawText: (text, fileName) => set({ cvRawText: text, cvFileName: fileName }),
       setCvData: (data) => set({ cvData: data }),
+
+      setTargetJobTitle: (title) => set({ targetJobTitle: title }),
+      setTargetLocation: (cityKey) => set({ targetLocation: cityKey }),
 
       setJdRawText: (text) => set({ jdRawText: text }),
       setJdData: (data) => set({ jdData: data }),
