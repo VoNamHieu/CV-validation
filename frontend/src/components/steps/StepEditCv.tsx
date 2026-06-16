@@ -998,6 +998,17 @@ export default function StepEditCv() {
                                     }}>
                                         {entry.company || entry.label}
                                     </p>
+                                    {entry.locationNote && (
+                                        <span style={{
+                                            display: 'inline-block', marginTop: 3,
+                                            fontSize: '0.62rem', fontWeight: 600,
+                                            padding: '1px 7px', borderRadius: 10,
+                                            background: 'rgba(245,158,11,0.14)',
+                                            color: '#f59e0b',
+                                        }}>
+                                            {entry.locationNote}
+                                        </span>
+                                    )}
                                 </div>
 
                                 {isActive && (

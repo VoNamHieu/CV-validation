@@ -4,14 +4,19 @@ import { useCallback, useRef, useState } from 'react';
 import {
     UploadSimple, FileText, X, SpinnerGap, Brain,
     CheckCircle, Sparkle, ArrowRight, WarningCircle, Lightning,
+    Target, MapPin,
 } from '@phosphor-icons/react';
 import { useAppStore } from '@/store/useAppStore';
 import { parsePdfWithAI } from '@/lib/api';
 import { cvToExtensionProfile } from '@/lib/extension-profile';
 import { syncProfileToExtension } from '@/lib/extension-sync';
+import { CITY_OPTIONS } from '@/lib/job-targeting';
 
 export default function StepUploadCV() {
-    const { setCvRawText, setCvData, setStep, cvFileName, setFullyAutoMode } = useAppStore();
+    const {
+        setCvRawText, setCvData, setStep, cvFileName, setFullyAutoMode,
+        targetJobTitle, setTargetJobTitle, targetLocation, setTargetLocation,
+    } = useAppStore();
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [dragOver, setDragOver] = useState(false);
     const [error, setError] = useState('');
@@ -36,6 +41,15 @@ export default function StepUploadCV() {
             setCvRawText('(parsed from PDF)', file.name);
             setCvData(structured);
 
+            // Seed the target role from the AI-inferred desired title (falling
+            // back to the most-recent title) so the user just confirms/tweaks it
+            // — no second LLM round-trip on the next step.
+            setTargetJobTitle(
+                structured.desired_job_title?.trim()
+                || structured.employment?.current_title?.trim()
+                || ''
+            );
+
             // Push extracted profile to the extension immediately so the popup
             // is filled the moment the CV is uploaded — without waiting for
             // the user to reach Step 4 (Edit CV). Awaits the extension's ACK
@@ -54,7 +68,7 @@ export default function StepUploadCV() {
             setProcessing(false);
             setProcessingFile('');
         }
-    }, [setCvRawText, setCvData]);
+    }, [setCvRawText, setCvData, setTargetJobTitle]);
 
     const onDrop = useCallback((e: React.DragEvent) => {
         e.preventDefault();
@@ -260,6 +274,74 @@ export default function StepUploadCV() {
                     >
                         <X size={15} />
                     </button>
+                </div>
+            )}
+
+            {/* Target role + location — confirm before finding jobs.
+                Title is pre-filled from the AI-inferred desired role; the user
+                can edit it or pick a city. No city = freestyle (any location). */}
+            {uploaded && !processing && (
+                <div className="glass-card" style={{ padding: '20px 24px', marginTop: 16 }}>
+                    <label style={{
+                        display: 'flex', alignItems: 'center', gap: 6,
+                        fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-muted)',
+                        textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10,
+                    }}>
+                        <Target size={14} weight="duotone" style={{ color: 'var(--accent-purple)' }} />
+                        Target role
+                    </label>
+                    <div style={{ position: 'relative', marginBottom: 20 }}>
+                        <div style={{
+                            position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)',
+                            color: 'var(--text-muted)', pointerEvents: 'none',
+                        }}>
+                            <Brain size={16} weight="duotone" />
+                        </div>
+                        <input
+                            className="input-field"
+                            type="text"
+                            value={targetJobTitle}
+                            onChange={(e) => setTargetJobTitle(e.target.value)}
+                            placeholder="e.g. Frontend Engineer"
+                            style={{ paddingLeft: 42, height: 48, fontSize: '0.92rem', width: '100%', borderRadius: 'var(--radius-lg)' }}
+                        />
+                    </div>
+
+                    <label style={{
+                        display: 'flex', alignItems: 'center', gap: 6,
+                        fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-muted)',
+                        textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10,
+                    }}>
+                        <MapPin size={14} weight="duotone" style={{ color: 'var(--accent-blue)' }} />
+                        Location <span style={{ textTransform: 'none', fontWeight: 400, letterSpacing: 0 }}>· optional</span>
+                    </label>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        {CITY_OPTIONS.map((c) => {
+                            const active = targetLocation === c.key;
+                            return (
+                                <button
+                                    key={c.key}
+                                    type="button"
+                                    onClick={() => setTargetLocation(active ? '' : c.key)}
+                                    style={{
+                                        padding: '8px 16px', borderRadius: 20, cursor: 'pointer',
+                                        fontSize: '0.83rem', fontWeight: active ? 600 : 400,
+                                        border: `1px solid ${active ? 'var(--accent-blue)' : 'var(--border-default)'}`,
+                                        background: active ? 'rgba(59,130,246,0.12)' : 'var(--bg-secondary)',
+                                        color: active ? 'var(--accent-blue)' : 'var(--text-secondary)',
+                                        transition: 'all 0.18s ease',
+                                    }}
+                                >
+                                    {c.label}
+                                </button>
+                            );
+                        })}
+                    </div>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 10 }}>
+                        {targetLocation
+                            ? 'Jobs are matched to this role and city. No exact-city match → we still show this role elsewhere.'
+                            : 'No city selected — jobs are matched to this role in any location.'}
+                    </p>
                 </div>
             )}
 

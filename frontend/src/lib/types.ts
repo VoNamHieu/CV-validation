@@ -80,6 +80,9 @@ export interface JobPreferences {
 export interface CVData {
     name: string;
     summary: string;
+    // AI-inferred target role (filled during CV extraction). Optional so CVData
+    // persisted before this field existed still type-checks.
+    desired_job_title?: string;
     skills: string[];
     experience: ExperienceDetail[];
     education: EducationDetail[];

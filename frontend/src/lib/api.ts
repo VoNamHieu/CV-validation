@@ -120,12 +120,15 @@ export async function crawlUrl(url: string, keepLinks = false): Promise<{ text: 
     return res.json();
 }
 
-// ── Smart Search: AI infers job title from CV + generates search URL ──
-export async function smartSearch(cv: unknown, siteUrl: string) {
+// ── Smart Search: generate a site-specific search URL for an arbitrary job
+//    site. Used only as the fallback for sites not in the buildSearchUrl
+//    template table. Pass `jobTitle` (the role confirmed on the upload step)
+//    so the URL respects the user's choice instead of re-inferring from the CV.
+export async function smartSearch(cv: unknown, siteUrl: string, jobTitle?: string) {
     const res = await fetch('/api/ai/smart-search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cv, siteUrl }),
+        body: JSON.stringify({ cv, siteUrl, jobTitle }),
     });
     if (!res.ok) {
         const err = await res.json();

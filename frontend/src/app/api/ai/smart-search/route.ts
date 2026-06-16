@@ -8,7 +8,7 @@ import { safeJsonParse } from "@/lib/safe-json";
  */
 export async function POST(request: NextRequest) {
     try {
-        const { cv, siteUrl } = await request.json();
+        const { cv, siteUrl, jobTitle } = await request.json();
 
         if (!cv || !siteUrl) {
             return NextResponse.json(
@@ -17,8 +17,14 @@ export async function POST(request: NextRequest) {
             );
         }
 
+        // The role is normally confirmed by the user on the upload step and
+        // passed in here; only fall back to inferring it from the CV if absent.
+        const confirmedTitle = typeof jobTitle === "string" ? jobTitle.trim() : "";
+
         const systemPrompt = `You are an expert job search assistant. Given a candidate's CV data and a job website URL, you must:
-1. Analyze the CV to determine the most suitable job title / search keyword (in the language most appropriate for the job site).
+1. ${confirmedTitle
+                ? `Use the candidate's confirmed target role: "${confirmedTitle}". Do NOT pick a different role — translate it to the language most appropriate for the job site if needed, but keep the same role.`
+                : `Analyze the CV to determine the most suitable job title / search keyword (in the language most appropriate for the job site).`}
 2. Generate a search URL for that specific job website.
 
 IMPORTANT RULES:
@@ -44,7 +50,7 @@ Return ONLY valid JSON matching this schema:
 }`;
 
         const userPrompt = `Analyze this CV and generate a search URL for the job site.
-
+${confirmedTitle ? `\nCONFIRMED TARGET ROLE (use this exact role): ${confirmedTitle}\n` : ""}
 CANDIDATE CV (JSON):
 ${JSON.stringify(cv, null, 2)}
 
