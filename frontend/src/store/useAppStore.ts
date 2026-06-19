@@ -239,6 +239,23 @@ export const useAppStore = create<AppState>()(
       partialize: (state) => {
         const rest: Partial<AppState> = { ...state };
         delete (rest as { fullyAutoMode?: boolean }).fullyAutoMode;
+        // Drop the heaviest field from persistence: each optimized CV caches its
+        // rendered PDF as base64 (~100–500KB each). Persisting these across many
+        // entries overflows the ~5MB localStorage quota — the write throws, the
+        // in-memory store keeps the CV (so the editor still shows it this session)
+        // but disk holds a stale snapshot WITHOUT it. On the next reload the entry
+        // rehydrates as done-but-not-optimized → sortedEntries is empty → the
+        // editor flaps to "No Optimized CVs Yet". The PDF is re-rendered on demand
+        // (cache miss) in the download / batch-apply path, so memory-only is safe.
+        if (Array.isArray(rest.jdEntries)) {
+          rest.jdEntries = rest.jdEntries.map((e) => {
+            if (!e.optimizedCvPdfBase64 && !e.optimizedCvFileName) return e;
+            const slim = { ...e };
+            delete slim.optimizedCvPdfBase64;
+            delete slim.optimizedCvFileName;
+            return slim;
+          });
+        }
         return rest;
       },
       // Defaults missing fields on persisted records from older versions.
@@ -262,12 +279,21 @@ export const useAppStore = create<AppState>()(
       onRehydrateStorage: () => (state) => {
         if (!state?.jdEntries?.length) return;
         const inFlight = new Set<JDEntryStatus>(['pending', 'crawling', 'parsing', 'scoring']);
-        if (!state.jdEntries.some((e) => inFlight.has(e.status))) return;
-        const fixed = state.jdEntries.map((e) =>
-          inFlight.has(e.status)
-            ? { ...e, status: 'error' as const, error: 'Interrupted by page reload' }
-            : e,
-        );
+        // A reload interrupts two kinds of in-flight work that would otherwise
+        // hang forever after rehydration:
+        //  - status still in a crawl/score phase → mark as an interrupted error.
+        //  - `optimizing: true` left over (its status is already 'done') → clear
+        //    it, else the editor's jobsInFlight check stays true and shows the
+        //    "Optimizing your CVs…" spinner permanently.
+        const needsFix = state.jdEntries.some((e) => inFlight.has(e.status) || e.optimizing);
+        if (!needsFix) return;
+        const fixed = state.jdEntries.map((e) => {
+          if (inFlight.has(e.status)) {
+            return { ...e, optimizing: false, status: 'error' as const, error: 'Interrupted by page reload' };
+          }
+          if (e.optimizing) return { ...e, optimizing: false };
+          return e;
+        });
         // Defer: this callback can run synchronously inside create(), before
         // the exported store binding exists.
         setTimeout(() => useAppStore.setState({ jdEntries: fixed }), 0);
