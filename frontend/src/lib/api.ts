@@ -366,6 +366,10 @@ export interface FeaturedCompanyJobs {
 export interface FeaturedJobsResult {
     fetched_at: number;
     from_cache: boolean;
+    // True while the backend is still building its cache (first run / cold
+    // start). companies is empty (or stale) — poll again shortly.
+    warming?: boolean;
+    stale?: boolean;
     companies: FeaturedCompanyJobs[];
 }
 
@@ -377,6 +381,32 @@ export async function getFeaturedJobs(opts: { refresh?: boolean } = {}): Promise
         throw new Error(err.detail || 'Failed to load featured jobs');
     }
     return res.json();
+}
+
+/**
+ * Featured jobs with warm-up polling. The backend now warms its cache out of
+ * band and returns {warming:true, companies:[]} until the first crawl finishes,
+ * so we poll short requests instead of blocking on one long one (which used to
+ * 500/timeout). Resolves as soon as companies are available, the backend
+ * reports it's no longer warming, or maxWaitMs elapses.
+ */
+export async function getFeaturedJobsWarm(
+    onWaiting?: (attempt: number) => void,
+    opts: { maxWaitMs?: number; pollMs?: number } = {},
+): Promise<FeaturedJobsResult> {
+    const maxWaitMs = opts.maxWaitMs ?? 180_000;
+    const pollMs = opts.pollMs ?? 4_000;
+    const deadline = Date.now() + maxWaitMs;
+    let attempt = 0;
+    for (;;) {
+        const res = await getFeaturedJobs();
+        if (res.companies.length > 0) return res;   // got data (fresh or stale)
+        if (!res.warming) return res;               // genuinely empty, not warming
+        if (Date.now() >= deadline) return res;     // gave up waiting
+        attempt++;
+        onWaiting?.(attempt);
+        await new Promise((r) => setTimeout(r, pollMs));
+    }
 }
 
 // ── Extension presence check ──
