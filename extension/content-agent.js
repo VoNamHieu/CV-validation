@@ -39,6 +39,26 @@ const APPLY_BUTTON_TEXTS = [
     'ứng tuyển', 'nộp đơn', 'nộp hồ sơ', 'ứng tuyển ngay',
 ];
 
+// Hosts where the agent must never appear. Social / search / media / mail
+// sites routinely render multi-input login, signup, and search forms that
+// falsely trip the job-page heuristics (this is why the button showed up on
+// Instagram). Real job sites (LinkedIn, etc.) are deliberately NOT listed.
+const DENY_HOST_SUFFIXES = [
+    'instagram.com', 'facebook.com', 'fb.com', 'messenger.com', 'whatsapp.com',
+    'twitter.com', 'x.com', 'threads.net', 'tiktok.com', 'reddit.com',
+    'pinterest.com', 'snapchat.com', 'youtube.com', 'netflix.com', 'twitch.tv',
+    'spotify.com', 'google.com', 'bing.com', 'duckduckgo.com', 'yahoo.com',
+    'gmail.com', 'outlook.com', 'telegram.org', 'discord.com',
+];
+
+// Words that confirm a page is really about a job/application. Used to validate
+// a form-only match — a bare login/contact/search form is not enough on its own.
+const JOB_CONTEXT_KEYWORDS = [
+    'job', 'career', 'vacancy', 'position', 'recruit', 'hiring', 'employment',
+    'apply', 'application', 'resume', 'cover letter',
+    'tuyển dụng', 'việc làm', 'ứng tuyển', 'vị trí', 'tuyển',
+];
+
 // ─── Helpers ───
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -1575,10 +1595,39 @@ function hasApplicationForm() {
 }
 
 /**
- * Returns true once any of the signals fire (URL, apply button, form).
+ * True if the current host is a known non-job site (social, search, media).
+ */
+function isDeniedHost() {
+    const host = window.location.hostname.toLowerCase();
+    return DENY_HOST_SUFFIXES.some(s => host === s || host.endsWith('.' + s));
+}
+
+/**
+ * Cheap check that the page's own copy (title + top headings) talks about a
+ * job/application — used to qualify a form-only match. Scanning just the title
+ * and h1/h2 keeps false positives low versus reading the whole body.
+ */
+function pageMentionsJobContext() {
+    const parts = [document.title || ''];
+    document.querySelectorAll('h1, h2').forEach(h => parts.push(h.textContent || ''));
+    const text = parts.join(' ').toLowerCase();
+    return JOB_CONTEXT_KEYWORDS.some(k => text.includes(k));
+}
+
+/**
+ * Decide whether to surface the agent on this page.
+ *
+ * A form alone is a weak signal — login, signup, search, and contact forms are
+ * everywhere — so it only counts when the page text also reads like a job/apply
+ * page. URL keywords and a real "Apply" button stay strong enough on their own.
+ * Known non-job hosts are rejected outright.
  */
 function isLikelyJobPage() {
-    return urlLooksLikeJobPage() || hasVisibleApplyButton() || hasApplicationForm();
+    if (isDeniedHost()) return false;
+    if (urlLooksLikeJobPage()) return true;
+    if (hasVisibleApplyButton()) return true;
+    if (hasApplicationForm() && pageMentionsJobContext()) return true;
+    return false;
 }
 
 /**
