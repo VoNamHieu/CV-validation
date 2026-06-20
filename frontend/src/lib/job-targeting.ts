@@ -120,3 +120,47 @@ export function buildSearchUrl(siteUrl: string, jobTitle: string, cityKey = ''):
 
     return { inferred_job_title: title, search_keyword: keyword, search_url, known };
 }
+
+// ── Experience-gap rule ────────────────────────────────────────────────────
+// A job may require at most this many years ABOVE the candidate's experience
+// and still be shown. Jobs that out-reach further are dropped.
+export const MAX_EXPERIENCE_GAP_YEARS = 1;
+
+/**
+ * Minimum years of experience a JD asks for. Prefers the numeric
+ * required_years_min the extractor now returns; falls back to parsing the
+ * seniority_expected text ("3+ years", "ít nhất 3 năm", "Senior"). Returns null
+ * when the JD gives no usable signal — callers must NOT filter in that case.
+ */
+export function requiredYearsFromJd(
+    jd: { required_years_min?: number; seniority_expected?: string },
+): number | null {
+    if (typeof jd.required_years_min === 'number' && jd.required_years_min > 0) {
+        return jd.required_years_min;
+    }
+    const s = (jd.seniority_expected || '').toLowerCase();
+    // Numeric: "3+ years", "3-5 years", "ít nhất 3 năm", "3 nam"
+    const m = s.match(/(\d+(?:\.\d+)?)\s*(?:years?|năm|nam|yrs?)/);
+    if (m) return Math.round(parseFloat(m[1]));
+    // Word-level seniority fallback
+    if (/(intern|fresher|thực tập|sinh viên)/.test(s)) return 0;
+    if (/(junior|entry|fresh|mới ra trường)/.test(s)) return 1;
+    if (/(mid|middle|intermediate|trung cấp)/.test(s)) return 3;
+    if (/(senior|sr\.?|cao cấp)/.test(s)) return 5;
+    if (/(lead|principal|manager|head|trưởng|quản lý|giám đốc)/.test(s)) return 7;
+    return null;
+}
+
+/**
+ * Whether a job out-reaches the candidate by more than the allowed gap.
+ * Unknown requirement (null) → never filtered. Over-qualified candidate → kept.
+ */
+export function experienceGapExceeds(
+    jd: { required_years_min?: number; seniority_expected?: string },
+    candidateYears: number,
+    maxGap = MAX_EXPERIENCE_GAP_YEARS,
+): { exceeds: boolean; required: number | null } {
+    const required = requiredYearsFromJd(jd);
+    if (required == null) return { exceeds: false, required: null };
+    return { exceeds: required - (candidateYears || 0) > maxGap, required };
+}

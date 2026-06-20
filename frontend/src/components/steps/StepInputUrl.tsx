@@ -4,16 +4,16 @@ import { useEffect, useRef, useState } from 'react';
 import {
     ArrowLeft, Globe, SpinnerGap, MagnifyingGlass, Sparkle,
     Brain, LinkSimple, Lightning, MagicWand, CheckCircle,
-    Briefcase, ArrowRight,
+    Briefcase, ArrowRight, Buildings,
 } from '@phosphor-icons/react';
 import type { Icon } from '@phosphor-icons/react';
 import { useAppStore, type JDEntry } from '@/store/useAppStore';
 import {
     smartSearch, crawlUrl, extractJdStructured, scoreFit, fetchPage,
     extractJobLinks, rankJobsTournament, extensionCrawl, isExtensionAvailable,
-    findCareer, getFeaturedJobsWarm, optimizeCvVariants, type JobListing,
+    findCareer, getFeaturedJobsWarm, discoverJobsWarm, optimizeCvVariants, type JobListing,
 } from '@/lib/api';
-import { buildSearchUrl, matchesCity, titleMatchScore, cityLabel } from '@/lib/job-targeting';
+import { buildSearchUrl, matchesCity, titleMatchScore, cityLabel, experienceGapExceeds } from '@/lib/job-targeting';
 import { buildCvPdfCache } from '@/lib/cv-pdf-cache';
 
 type Phase = 'idle' | 'analyzing_cv' | 'searching' | 'extracting_links'
@@ -140,7 +140,7 @@ export default function StepInputUrl() {
     // ─── Auto-find flow ("Find jobs from my CV"): backend serves jobs from a
     //     curated list of VN employers, but UI presents this as a general AI
     //     search. No phase label or detail string may name the source list. ───
-    const handleFeaturedAnalyze = async () => {
+    const handleFeaturedAnalyze = async (mode: 'featured' | 'ground' = 'featured') => {
         if (!cvData) { setError('Please upload your CV first.'); return; }
 
         const isFullAuto = useAppStore.getState().fullyAutoMode;
@@ -174,14 +174,22 @@ export default function StepInputUrl() {
                 : 'Scanning live openings...');
             // Poll while the backend warms its cache (first run / cold start)
             // instead of blocking on one long request that times out.
-            const featured = await getFeaturedJobsWarm((attempt) => {
+            const onWaiting = (attempt: number) => {
                 if (runRef.current !== runId) return;
                 setPhaseDetail(
                     targetTitle
                         ? `Preparing live openings for "${targetTitle}"… (${attempt})`
                         : `Preparing live openings… (${attempt})`,
                 );
-            });
+            };
+            if (mode === 'ground' && !targetTitle) {
+                throw new Error('Ground search needs a target role — set one on the upload step.');
+            }
+            // 'ground' = grounded web search by role (dynamic companies);
+            // 'featured' = curated company list.
+            const featured = mode === 'ground'
+                ? await discoverJobsWarm(targetTitle, cityName, onWaiting)
+                : await getFeaturedJobsWarm(onWaiting);
             type FeaturedJob = { url: string; title: string; company: string; careerUrl: string; location: string };
             const allJobs: FeaturedJob[] = [];
             for (const c of featured.companies) {
@@ -496,6 +504,21 @@ export default function StepInputUrl() {
                 if (Array.isArray(jdData)) jdData = jdData[0];
                 if (!jdData || (!jdData.must_have?.length && !jdData.responsibilities?.length)) {
                     updateJdEntry(entryId, { status: 'error', error: 'No JD found on page' });
+                    return;
+                }
+
+                // ── Experience-gap rule ──
+                // Drop jobs that out-reach the candidate by more than 1 year
+                // (e.g. JD wants 5y, candidate has 2y). Done before scoring so we
+                // don't spend Gemini calls on jobs the user can't realistically land.
+                const candidateYears = cvData!.employment?.years_of_experience ?? 0;
+                const gap = experienceGapExceeds(jdData, candidateYears);
+                if (gap.exceeds) {
+                    updateJdEntry(entryId, {
+                        status: 'error',
+                        jdData,
+                        error: `Cần ~${gap.required} năm kinh nghiệm, bạn có ${candidateYears} — chênh quá 1 năm`,
+                    });
                     return;
                 }
 
@@ -856,32 +879,51 @@ export default function StepInputUrl() {
                 </div>
             </div>
 
-            {/* Primary CTA: Auto-find from CV (featured-companies demo flow) */}
-            <button
-                className="btn-primary"
-                onClick={handleFeaturedAnalyze}
-                disabled={isProcessing || !cvData}
-                style={{
-                    width: '100%',
-                    height: 56,
-                    fontSize: '1rem',
-                    fontWeight: 600,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
-                    marginBottom: 16,
-                    borderRadius: 'var(--radius-lg)',
-                }}
-            >
-                {isProcessing ? (
-                    <>
-                        <SpinnerGap size={18} style={{ animation: 'spin 1s linear infinite' }} />
-                        Processing...
-                    </>
-                ) : (
-                    <>
-                        <Sparkle size={18} weight="fill" /> Find jobs from my CV
-                    </>
-                )}
-            </button>
+            {/* Primary CTAs: two discovery modes to compare side by side.
+                - Featured Companies: curated list (fast, cached).
+                - Ground Search: grounded web search by role (dynamic). */}
+            <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
+                <button
+                    className="btn-primary"
+                    onClick={() => handleFeaturedAnalyze('featured')}
+                    disabled={isProcessing || !cvData}
+                    style={{
+                        flex: 1,
+                        height: 56,
+                        fontSize: '0.98rem',
+                        fontWeight: 600,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                        borderRadius: 'var(--radius-lg)',
+                    }}
+                >
+                    {isProcessing ? (
+                        <>
+                            <SpinnerGap size={18} style={{ animation: 'spin 1s linear infinite' }} />
+                            Processing...
+                        </>
+                    ) : (
+                        <>
+                            <Buildings size={18} weight="fill" /> Featured Companies
+                        </>
+                    )}
+                </button>
+                <button
+                    className="btn-secondary"
+                    onClick={() => handleFeaturedAnalyze('ground')}
+                    disabled={isProcessing || !cvData}
+                    title="Find companies hiring for your role via live web search"
+                    style={{
+                        flex: 1,
+                        height: 56,
+                        fontSize: '0.98rem',
+                        fontWeight: 600,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                        borderRadius: 'var(--radius-lg)',
+                    }}
+                >
+                    <MagnifyingGlass size={18} weight="bold" /> Ground Search
+                </button>
+            </div>
 
             {/* Divider */}
             <div style={{

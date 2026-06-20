@@ -251,9 +251,10 @@ export const JD_EXTRACTION_RESPONSE_SCHEMA: Record<string, unknown> = {
         nice_to_have: STR_ARRAY,
         responsibilities: STR_ARRAY,
         seniority_expected: STR,
+        required_years_min: NUM,
         domain: STR,
     },
-    required: ["must_have", "nice_to_have", "responsibilities", "seniority_expected", "domain"],
+    required: ["must_have", "nice_to_have", "responsibilities", "seniority_expected", "required_years_min", "domain"],
 };
 
 // Coerce whatever the LLM returns into a fully-populated CVData with all

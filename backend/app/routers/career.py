@@ -23,6 +23,7 @@ from app.services.career_finder import (
 )
 from app.services import company_cache
 from app.services import cache
+from app.services.gemini_client import discover_companies_for_role
 from app.services.url_validator import is_allowed_url
 from app.data.featured_companies import FEATURED_COMPANIES
 
@@ -361,5 +362,127 @@ async def featured_jobs(refresh: bool = False):
             f"[featured] still warming after {_FEATURED_COLD_WAIT_S}s — "
             "returning warming response (crawl continues in background)"
         )
+        return {"fetched_at": 0, "from_cache": bool(fallback),
+                "stale": bool(fallback), "warming": True, "companies": fallback}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  DYNAMIC DISCOVERY — grounded search by role → career pipeline
+#  Alternative to the curated featured list: ask Gemini (google_search) which
+#  companies are hiring for the candidate's role, then run Stage 1–4 on each.
+#  Mirrors the featured-jobs caching (per role+location key) + warming contract.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_DISCOVER_TTL_SECONDS = 30 * 60
+_DISCOVER_REDIS_TTL_SECONDS = 24 * 60 * 60
+_DISCOVER_FANOUT = max(1, int(os.getenv("DISCOVER_FANOUT", "6")))
+_discover_sema = asyncio.Semaphore(_DISCOVER_FANOUT)
+_discover_mem: dict[str, dict] = {}            # cache key → {"at", "companies"}
+_discover_tasks: dict[str, asyncio.Task] = {}  # cache key → in-flight refresh
+
+
+def _discover_key(role: str, location: str) -> str:
+    return f"discover:v1:{role.strip().lower()}:{location.strip().lower()}"
+
+
+async def _discover_one(company: dict) -> dict:
+    """Run the career pipeline (Stage 1–4) on one discovered company homepage."""
+    async with _discover_sema:
+        url = company.get("url") or ""
+        try:
+            result = await find_careers(homepage_url=url)
+            return {
+                "name": company.get("name") or result.resolution.company_name or "",
+                "homepage": url,
+                "career_url": result.chosen_career.url if result.chosen_career else url,
+                "jobs": [j.__dict__ for j in result.jobs],
+            }
+        except Exception as e:
+            logger.warning(f"[discover] pipeline failed for {url}: {e}")
+            return {"name": company.get("name", ""), "homepage": url, "career_url": "", "jobs": []}
+
+
+async def _refresh_discover(role: str, location: str, limit: int, key: str) -> list[dict]:
+    t0 = time.time()
+    logger.info(f"[discover] START role={role!r} loc={location!r} limit={limit}")
+    # Grounded search is a blocking SDK call → run off the event loop.
+    found = await asyncio.to_thread(discover_companies_for_role, role, location, limit)
+
+    # Validate + dedupe the URLs Gemini returned before crawling anything.
+    seen: set[str] = set()
+    inputs: list[dict] = []
+    for c in found:
+        url = (c.get("url") or "").strip()
+        if not url or not is_allowed_url(url) or url in seen:
+            continue
+        seen.add(url)
+        inputs.append({"name": c.get("name", ""), "url": url})
+    logger.info(f"[discover] grounded search → {len(found)} raw, {len(inputs)} valid companies")
+
+    company_lists = await asyncio.gather(*[_discover_one(c) for c in inputs])
+    companies = [c for c in company_lists if c]
+
+    now = time.time()
+    _discover_mem[key] = {"at": now, "companies": companies}
+    await cache.set_json(key, {"at": now, "companies": companies}, _DISCOVER_REDIS_TTL_SECONDS)
+    total_jobs = sum(len(c["jobs"]) for c in companies)
+    logger.info(
+        f"[discover] DONE in {now - t0:.1f}s — {len(companies)} companies, {total_jobs} jobs"
+    )
+    return companies
+
+
+@router.post("/discover")
+async def discover_jobs(role: str = "", location: str = "", limit: int = 8, refresh: bool = False):
+    """Find companies hiring for `role` (grounded search) and list their jobs.
+
+    Same response contract as /career/featured-jobs (companies + warming flag),
+    cached per (role, location) so repeated searches are instant.
+    """
+    role = (role or "").strip()
+    if not role:
+        raise HTTPException(status_code=422, detail="role is required")
+    location = (location or "").strip()
+    limit = max(1, min(int(limit or 8), 15))
+    key = _discover_key(role, location)
+    now = time.time()
+
+    # L1 fresh
+    mem = _discover_mem.get(key)
+    if not refresh and mem and now - float(mem["at"]) < _DISCOVER_TTL_SECONDS:
+        logger.info(f"[discover] serving L1 fresh ({key})")
+        return {"fetched_at": mem["at"], "from_cache": True, "stale": False,
+                "warming": False, "companies": mem["companies"]}
+
+    # L2 (Redis)
+    remote = await cache.get_json(key)
+    if remote and float(remote.get("at") or 0) > (float(mem["at"]) if mem else 0):
+        _discover_mem[key] = remote
+        mem = remote
+    if not refresh and mem and now - float(mem["at"]) < _DISCOVER_TTL_SECONDS:
+        logger.info(f"[discover] serving L2 fresh ({key})")
+        return {"fetched_at": mem["at"], "from_cache": True, "stale": False,
+                "warming": False, "companies": mem["companies"]}
+
+    # Kick off (or join) the per-key refresh task.
+    task = _discover_tasks.get(key)
+    if task is None or task.done():
+        task = asyncio.create_task(_refresh_discover(role, location, limit, key))
+        _discover_tasks[key] = task
+
+    # Stale-while-revalidate.
+    if not refresh and mem and mem.get("companies"):
+        logger.info(f"[discover] serving STALE while revalidating ({key})")
+        return {"fetched_at": mem["at"], "from_cache": True, "stale": True,
+                "warming": False, "companies": mem["companies"]}
+
+    # Cold: brief wait, then a warming response so the client polls.
+    fallback = mem.get("companies") if mem else []
+    try:
+        companies = await asyncio.wait_for(asyncio.shield(task), timeout=_FEATURED_COLD_WAIT_S)
+        return {"fetched_at": float((_discover_mem.get(key) or {}).get("at") or time.time()),
+                "from_cache": False, "stale": False, "warming": False, "companies": companies}
+    except asyncio.TimeoutError:
+        logger.info(f"[discover] still warming after {_FEATURED_COLD_WAIT_S}s ({key})")
         return {"fetched_at": 0, "from_cache": bool(fallback),
                 "stale": bool(fallback), "warming": True, "companies": fallback}

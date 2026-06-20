@@ -212,3 +212,83 @@ Rules:
         "notes": str(last_err)[:200] if last_err else "all models failed",
         "raw": "",
     }
+
+
+def _extract_json_array(text: str) -> Optional[list]:
+    """Pull the first `[...]` block out of a free-text response (same fencing
+    issue as _extract_json_object, but for a JSON array)."""
+    if not text:
+        return None
+    t = text.strip()
+    if t.startswith("```"):
+        t = re.sub(r"^```(?:json)?\s*\n?", "", t)
+        t = re.sub(r"\n?```\s*$", "", t)
+    m = re.search(r"\[[\s\S]*\]", t)
+    if not m:
+        return None
+    try:
+        return json.loads(m.group(0))
+    except Exception:
+        return None
+
+
+def discover_companies_for_role(role: str, location: str = "", limit: int = 8) -> list[dict]:
+    """Grounded search for companies currently hiring for a role.
+
+    Returns a list of {"name": str, "url": homepage} (empty on failure). The
+    caller is expected to validate URLs and run the career-page pipeline on each.
+    """
+    if not role or not role.strip():
+        return []
+
+    from google.genai import types
+
+    client = get_raw_client()
+    loc = f" in {location}" if location and location.strip() else ""
+    prompt = f"""Find up to {limit} real companies that are currently hiring for "{role}" roles{loc}.
+Use web search.
+
+Return ONLY a JSON array (no markdown, no text outside the JSON) of objects with this EXACT shape:
+[{{"name": "<company name>", "url": "<company official homepage root URL>"}}]
+
+Rules:
+- url MUST be the company's OWN root domain (e.g. https://acme.com), NOT a job board, LinkedIn, Facebook, news site, or aggregator (TopCV, VietnamWorks, ITviec, CareerBuilder, Indeed, Glassdoor).
+- Only include real, currently-operating companies whose homepage you can identify.
+- Prefer companies likely to have their own careers page.
+- Return at most {limit} entries; if unsure, return fewer rather than guessing."""
+
+    last_err: Exception | None = None
+    for model in (FALLBACK_MODEL, MAIN_MODEL):
+        try:
+            logger.info(f"[gemini_discover] {model} ← role={role!r} loc={location!r} limit={limit}")
+            response = client.models.generate_content(
+                model=model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    tools=[types.Tool(google_search=types.GoogleSearch())],
+                ),
+            )
+            raw_text = (response.text or "").strip()
+            arr = _extract_json_array(raw_text)
+            if not isinstance(arr, list):
+                logger.warning(f"[gemini_discover] {model} returned no array: {raw_text[:200]!r}")
+                return []
+            out: list[dict] = []
+            for item in arr:
+                if not isinstance(item, dict):
+                    continue
+                name = (item.get("name") or "").strip()
+                url = (item.get("url") or "").strip()
+                if url:
+                    out.append({"name": name, "url": url})
+            logger.info(f"[gemini_discover] {model} → {len(out)} companies")
+            return out[:limit]
+        except Exception as e:
+            last_err = e
+            if is_overloaded(e):
+                logger.warning(f"[gemini_discover] {model} overloaded, trying next model")
+                continue
+            logger.warning(f"[gemini_discover] {model} failed: {e}")
+            return []
+    logger.warning(f"[gemini_discover] all models failed: {last_err}")
+    return []

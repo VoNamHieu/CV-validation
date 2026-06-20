@@ -22,10 +22,16 @@ Return ONLY valid JSON matching this exact schema:
   "nice_to_have": ["string"],
   "responsibilities": ["string"],
   "seniority_expected": "string (e.g., Junior, Mid-level, Senior, Executive)",
+  "required_years_min": number,
   "domain": "string (e.g., Fintech, E-commerce, Healthcare)"
-}`;
+}
 
-        const userPrompt = `Extract the key requirements, nice-to-haves, responsibilities, seniority, and domain from this Job Description:\n\n${text}`;
+required_years_min = the MINIMUM years of professional experience the JD asks for, as a plain integer:
+- "3+ years", "at least 3 years", "ít nhất 3 năm", "3-5 years" → 3 (take the lower bound).
+- If no number is stated, infer from seniority: Intern/Fresher → 0, Junior → 1, Mid-level → 3, Senior → 5, Lead/Manager → 7.
+- If experience is not mentioned and seniority is unclear, use 0.`;
+
+        const userPrompt = `Extract the key requirements, nice-to-haves, responsibilities, seniority, minimum required years of experience, and domain from this Job Description:\n\n${text}`;
 
         const result = await callAI(systemPrompt, userPrompt, JD_EXTRACTION_RESPONSE_SCHEMA);
 
