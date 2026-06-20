@@ -580,8 +580,11 @@ export default function StepInputUrl() {
                     status: 'saved',
                 });
 
-                // ── First job scored → open the report/edit page right away ──
-                if (navigateOnFirstDone && !navigated && runRef.current === runId) {
+                // ── Open the editor on first SCORED job only when we're NOT
+                //    auto-optimizing. With auto-optimize on, we wait until the
+                //    first CV is actually optimized (below) so the user lands on
+                //    a ready editor instead of an empty "optimizing…" screen. ──
+                if (navigateOnFirstDone && !navigated && !autoOptimize && runRef.current === runId) {
                     navigated = true;
                     setSelectedJdId(entryId);
                     setPhase('idle');
@@ -610,6 +613,13 @@ export default function StepInputUrl() {
                                 optimizedCvImprovements: variant.improvements,
                                 ...pdfCache,
                             });
+                            // First CV optimized → NOW open the editor on it.
+                            if (navigateOnFirstDone && !navigated && runRef.current === runId) {
+                                navigated = true;
+                                setSelectedJdId(entryId);
+                                setPhase('idle');
+                                setStep(3);
+                            }
                         } else {
                             updateJdEntry(entryId, { optimizing: false });
                         }

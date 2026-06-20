@@ -308,7 +308,11 @@ def discover_jobs_for_role(role: str, location: str = "", limit: int = 8) -> lis
     from google.genai import types
 
     client = get_raw_client()
-    loc = f" in {location}" if location and location.strip() else ""
+    # This product targets the Vietnam job market — always anchor the search to
+    # Vietnam (a specific city when given) so grounded search doesn't return
+    # roles abroad.
+    country = os.getenv("DISCOVER_COUNTRY", "Vietnam")
+    loc = f" in {location}, {country}" if location and location.strip() else f" in {country}"
     want = max(limit * 2, limit)
     prompt = f"""Find up to {want} CURRENT, real job openings for "{role}"{loc}. Use web search.
 
@@ -316,6 +320,7 @@ Return ONLY a JSON array (no markdown, no text outside the JSON) of objects with
 [{{"title": "<the posted job title>", "company": "<the hiring company's real name>", "url": "<the job posting URL>"}}]
 
 Rules:
+- LOCATION IS MANDATORY: only include roles based IN {country}. The hiring company must be a {country} company or have a {country} office/branch where this role works. Exclude any opening located outside {country}.
 - Every entry MUST include the hiring company's real name (not a job board's name).
 - Prefer openings posted recently and genuinely matching the role.
 - Do NOT invent companies or titles; only include postings you actually find.
