@@ -9,6 +9,7 @@ requests>=2.31
 beautifulsoup4>=4.12
 playwright>=1.40
 python-multipart>=0.0.12
+redis>=5.0
 
 # ── Test dependencies ──
 pytest>=8.0
