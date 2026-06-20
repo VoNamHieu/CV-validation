@@ -394,12 +394,51 @@ export async function getFeaturedJobsWarm(
     onWaiting?: (attempt: number) => void,
     opts: { maxWaitMs?: number; pollMs?: number } = {},
 ): Promise<FeaturedJobsResult> {
+    return pollWarm(() => getFeaturedJobs(), onWaiting, opts);
+}
+
+// ── Dynamic discovery (grounded search by role) ──
+// Asks the backend to find companies hiring for `role` via grounded web search,
+// then lists their jobs. Same response shape + warming contract as featured.
+export async function discoverJobs(
+    role: string,
+    location = '',
+    opts: { limit?: number; refresh?: boolean } = {},
+): Promise<FeaturedJobsResult> {
+    const qs = new URLSearchParams({ role });
+    if (location) qs.set('location', location);
+    if (opts.limit) qs.set('limit', String(opts.limit));
+    if (opts.refresh) qs.set('refresh', 'true');
+    const res = await fetch(`/api/career/discover?${qs.toString()}`, { method: 'POST' });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || 'Failed to discover jobs');
+    }
+    return res.json();
+}
+
+export async function discoverJobsWarm(
+    role: string,
+    location = '',
+    onWaiting?: (attempt: number) => void,
+    opts: { limit?: number; maxWaitMs?: number; pollMs?: number } = {},
+): Promise<FeaturedJobsResult> {
+    return pollWarm(() => discoverJobs(role, location, { limit: opts.limit }), onWaiting, opts);
+}
+
+// Shared warm-up poller: calls `fetchOnce` until it returns companies, reports
+// it's no longer warming, or maxWaitMs elapses.
+async function pollWarm(
+    fetchOnce: () => Promise<FeaturedJobsResult>,
+    onWaiting?: (attempt: number) => void,
+    opts: { maxWaitMs?: number; pollMs?: number } = {},
+): Promise<FeaturedJobsResult> {
     const maxWaitMs = opts.maxWaitMs ?? 180_000;
     const pollMs = opts.pollMs ?? 4_000;
     const deadline = Date.now() + maxWaitMs;
     let attempt = 0;
     for (;;) {
-        const res = await getFeaturedJobs();
+        const res = await fetchOnce();
         if (res.companies.length > 0) return res;   // got data (fresh or stale)
         if (!res.warming) return res;               // genuinely empty, not warming
         if (Date.now() >= deadline) return res;     // gave up waiting
