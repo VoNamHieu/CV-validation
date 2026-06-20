@@ -17,6 +17,10 @@ from app.services.browser_pool import close_browser
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    # Warm the featured-jobs cache out-of-band at startup so the 150-page crawl
+    # never has to finish inside a user request (which was timing out → 500).
+    # awaits only a fast cache check; the crawl itself runs in the background.
+    await career.warm_featured_cache()
     # Browser is launched lazily on first use (see browser_pool.get_browser);
     # only need to clean it up on shutdown.
     yield

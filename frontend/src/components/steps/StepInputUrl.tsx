@@ -11,7 +11,7 @@ import { useAppStore, type JDEntry } from '@/store/useAppStore';
 import {
     smartSearch, crawlUrl, extractJdStructured, scoreFit, fetchPage,
     extractJobLinks, rankJobsTournament, extensionCrawl, isExtensionAvailable,
-    findCareer, getFeaturedJobs, optimizeCvVariants, type JobListing,
+    findCareer, getFeaturedJobsWarm, optimizeCvVariants, type JobListing,
 } from '@/lib/api';
 import { buildSearchUrl, matchesCity, titleMatchScore, cityLabel } from '@/lib/job-targeting';
 import { buildCvPdfCache } from '@/lib/cv-pdf-cache';
@@ -172,7 +172,16 @@ export default function StepInputUrl() {
             setPhaseDetail(targetTitle
                 ? `Scanning live openings for "${targetTitle}"...`
                 : 'Scanning live openings...');
-            const featured = await getFeaturedJobs();
+            // Poll while the backend warms its cache (first run / cold start)
+            // instead of blocking on one long request that times out.
+            const featured = await getFeaturedJobsWarm((attempt) => {
+                if (runRef.current !== runId) return;
+                setPhaseDetail(
+                    targetTitle
+                        ? `Preparing live openings for "${targetTitle}"… (${attempt})`
+                        : `Preparing live openings… (${attempt})`,
+                );
+            });
             type FeaturedJob = { url: string; title: string; company: string; careerUrl: string; location: string };
             const allJobs: FeaturedJob[] = [];
             for (const c of featured.companies) {

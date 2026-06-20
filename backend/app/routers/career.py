@@ -184,6 +184,10 @@ _featured_cache: dict[str, object] = {"at": 0.0, "data": None}
 _FEATURED_FANOUT = max(1, int(os.getenv("FEATURED_FANOUT", "8")))
 _featured_sema = asyncio.Semaphore(_FEATURED_FANOUT)
 
+# Tuning / debug knobs.
+_FEATURED_SLOW_S = float(os.getenv("FEATURED_SLOW_S", "15"))        # log per-company crawls slower than this
+_FEATURED_COLD_WAIT_S = float(os.getenv("FEATURED_COLD_WAIT_S", "12"))  # max block on a fully-cold cache before returning "warming"
+
 # A single in-flight refresh shared by all callers. Without this, every cold-cache
 # request would launch its own 150-company crawl, multiplying the load.
 _featured_refresh_task: "asyncio.Task | None" = None
@@ -193,11 +197,17 @@ async def _fetch_jobs_for(career_url: str) -> list[dict]:
     # The semaphore caps how many career pages crawl at the same time; the rest
     # await their turn instead of all hitting the browser at once.
     async with _featured_sema:
+        t0 = time.time()
         try:
             jobs = await extract_jobs_from_career_page(career_url)
+            elapsed = time.time() - t0
+            # Slow pages are the ones that fell back to Playwright/LLM — surfacing
+            # them tells us where the cold-crawl time actually goes.
+            if elapsed > _FEATURED_SLOW_S:
+                logger.warning(f"[featured] SLOW {elapsed:.1f}s ({len(jobs)} jobs) — {career_url}")
             return [j.__dict__ for j in jobs]
         except Exception as e:
-            logger.warning(f"[featured] Stage 4 failed for {career_url}: {e}")
+            logger.warning(f"[featured] Stage 4 failed after {time.time() - t0:.1f}s for {career_url}: {e}")
             return []
 
 
@@ -208,9 +218,10 @@ async def _refresh_featured() -> list[dict]:
     caller awaits it under asyncio.shield so a client disconnect/timeout doesn't
     cancel a refresh that's almost done — the cache still warms for the next hit.
     """
+    t0 = time.time()
     logger.info(
-        f"[featured] refreshing {len(FEATURED_COMPANIES)} companies "
-        f"(max {_FEATURED_FANOUT} concurrent)"
+        f"[featured] refresh START — {len(FEATURED_COMPANIES)} companies, "
+        f"max {_FEATURED_FANOUT} concurrent"
     )
     job_lists = await asyncio.gather(
         *[_fetch_jobs_for(c.career_url) for c in FEATURED_COMPANIES]
@@ -232,6 +243,12 @@ async def _refresh_featured() -> list[dict]:
         _FEATURED_CACHE_KEY,
         {"at": now, "companies": companies},
         _FEATURED_REDIS_TTL_SECONDS,
+    )
+    total_jobs = sum(len(j) for j in job_lists)
+    empty = sum(1 for j in job_lists if not j)
+    logger.info(
+        f"[featured] refresh DONE in {now - t0:.1f}s — "
+        f"{len(companies)} companies, {total_jobs} jobs, {empty} empty/failed"
     )
     return companies
 
@@ -258,24 +275,47 @@ def _ensure_refresh_task() -> asyncio.Task:
     """Return the shared refresh task, starting one if none is running."""
     global _featured_refresh_task
     if _featured_refresh_task is None or _featured_refresh_task.done():
+        logger.info("[featured] starting background refresh task")
         _featured_refresh_task = asyncio.create_task(_refresh_featured())
     return _featured_refresh_task
+
+
+async def warm_featured_cache() -> None:
+    """Kick the crawl at app startup if the cache isn't fresh.
+
+    Running it here (not on a user request) is what breaks the failure loop:
+    the 150-page crawl no longer has to finish inside one request's timeout, and
+    on Railway it isn't cancelled the moment the client gives up. Once it
+    completes, Redis keeps the result so later cold starts serve instantly.
+    """
+    try:
+        entry = await _read_featured_entry()
+        if entry and time.time() - float(entry["at"]) < _FEATURED_CACHE_TTL_SECONDS:
+            logger.info("[featured] warm-up skipped — cache already fresh")
+            return
+        logger.info("[featured] warm-up: triggering background refresh at startup")
+        _ensure_refresh_task()
+    except Exception as e:  # never let warm-up break startup
+        logger.warning(f"[featured] warm-up failed (non-fatal): {e}")
 
 
 @router.post("/featured-jobs")
 async def featured_jobs(refresh: bool = False):
     """Aggregate jobs across all FEATURED_COMPANIES (parallel Stage 4).
 
+    Never blocks on the full crawl: it serves cached data (fresh or stale) when
+    available, and otherwise returns {"warming": true, "companies": []} fast so
+    the client can poll instead of hanging until its request times out.
+
     Response:
         {
             "fetched_at": <unix seconds>,
             "from_cache": bool,
-            "stale": bool,            # served stale while a refresh runs
-            "companies": [
-                {"name": ..., "homepage": ..., "career_url": ..., "jobs": [...]}
-            ]
+            "stale": bool,     # served stale while a refresh runs
+            "warming": bool,   # no data yet; crawl in progress, poll again
+            "companies": [ {"name", "homepage", "career_url", "jobs": [...]} ]
         }
-    Pass `?refresh=true` to force a fresh crawl (waits for it).
+    Pass `?refresh=true` to force a fresh crawl.
     """
     now = time.time()
 
@@ -283,33 +323,43 @@ async def featured_jobs(refresh: bool = False):
     mem_data = _featured_cache.get("data")
     mem_at = float(_featured_cache.get("at") or 0)
     if not refresh and mem_data and now - mem_at < _FEATURED_CACHE_TTL_SECONDS:
+        logger.info("[featured] serving L1 fresh")
         return {"fetched_at": mem_at, "from_cache": True, "stale": False,
-                "companies": mem_data}
+                "warming": False, "companies": mem_data}
 
     entry = await _read_featured_entry()
 
     # Fresh entry (possibly from Redis after a cold start) → serve it.
     if not refresh and entry and now - float(entry["at"]) < _FEATURED_CACHE_TTL_SECONDS:
+        logger.info("[featured] serving L2 (Redis) fresh")
         return {"fetched_at": entry["at"], "from_cache": True, "stale": False,
-                "companies": entry["companies"]}
+                "warming": False, "companies": entry["companies"]}
 
     # Need a refresh. Kick off (or join) the single shared crawl task.
     task = _ensure_refresh_task()
 
-    # Stale-while-revalidate: if we have ANY data (even expired), return it now
-    # and let the refresh finish in the background. This is what keeps cold start
-    # fast — waking from sleep reads Redis and answers instantly instead of
-    # blocking the user on a 150-page re-crawl.
+    # Stale-while-revalidate: serve any data we have (even expired) immediately.
     if not refresh and entry and entry.get("companies"):
+        logger.info("[featured] serving STALE while revalidating")
         return {"fetched_at": entry["at"], "from_cache": True, "stale": True,
-                "companies": entry["companies"]}
+                "warming": False, "companies": entry["companies"]}
 
-    # No data at all (very first run) or forced refresh → must wait. shield so a
-    # client timeout doesn't cancel the crawl; the cache still warms.
-    companies = await asyncio.shield(task)
-    return {
-        "fetched_at": float(_featured_cache.get("at") or time.time()),
-        "from_cache": False,
-        "stale": False,
-        "companies": companies,
-    }
+    # Fully cold (first ever run) or forced refresh. Wait only briefly — if the
+    # crawl is nearly done we return real data, otherwise we hand back a warming
+    # response so the client polls instead of blocking to its 120s timeout.
+    fallback = entry.get("companies") if entry else []
+    try:
+        companies = await asyncio.wait_for(
+            asyncio.shield(task), timeout=_FEATURED_COLD_WAIT_S
+        )
+        logger.info("[featured] cold crawl finished within wait window")
+        return {"fetched_at": float(_featured_cache.get("at") or time.time()),
+                "from_cache": False, "stale": False, "warming": False,
+                "companies": companies}
+    except asyncio.TimeoutError:
+        logger.info(
+            f"[featured] still warming after {_FEATURED_COLD_WAIT_S}s — "
+            "returning warming response (crawl continues in background)"
+        )
+        return {"fetched_at": 0, "from_cache": bool(fallback),
+                "stale": bool(fallback), "warming": True, "companies": fallback}
