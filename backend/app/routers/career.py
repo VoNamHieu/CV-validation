@@ -389,16 +389,23 @@ async def _discover_one(company: dict) -> dict:
     """Run the career pipeline (Stage 1–4) on one discovered company homepage."""
     async with _discover_sema:
         url = company.get("url") or ""
+        t0 = time.time()
         try:
             result = await find_careers(homepage_url=url)
+            jobs = [j.__dict__ for j in result.jobs]
+            career_url = result.chosen_career.url if result.chosen_career else url
+            logger.info(
+                f"[discover] {url} → {len(jobs)} jobs in {time.time() - t0:.1f}s "
+                f"(career_url={career_url}, stages={result.stages_run})"
+            )
             return {
                 "name": company.get("name") or result.resolution.company_name or "",
                 "homepage": url,
-                "career_url": result.chosen_career.url if result.chosen_career else url,
-                "jobs": [j.__dict__ for j in result.jobs],
+                "career_url": career_url,
+                "jobs": jobs,
             }
         except Exception as e:
-            logger.warning(f"[discover] pipeline failed for {url}: {e}")
+            logger.warning(f"[discover] pipeline failed for {url} after {time.time() - t0:.1f}s: {e}")
             return {"name": company.get("name", ""), "homepage": url, "career_url": "", "jobs": []}
 
 
@@ -417,7 +424,14 @@ async def _refresh_discover(role: str, location: str, limit: int, key: str) -> l
             continue
         seen.add(url)
         inputs.append({"name": c.get("name", ""), "url": url})
-    logger.info(f"[discover] grounded search → {len(found)} raw, {len(inputs)} valid companies")
+    logger.info(
+        f"[discover] grounded search → {len(found)} raw, {len(inputs)} valid companies: "
+        f"{[c['url'] for c in inputs]}"
+    )
+    if found and not inputs:
+        # Everything got filtered out — log the rejects so we can see why
+        # (aggregator/blocked hosts, malformed URLs, dupes).
+        logger.warning(f"[discover] ALL {len(found)} grounded results rejected: {found}")
 
     company_lists = await asyncio.gather(*[_discover_one(c) for c in inputs])
     companies = [c for c in company_lists if c]

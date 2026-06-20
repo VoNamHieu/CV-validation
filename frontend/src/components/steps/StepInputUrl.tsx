@@ -202,8 +202,26 @@ export default function StepInputUrl() {
                     });
                 }
             }
+
+            // ── Debug: surface exactly what the discovery returned ──
+            const dbgTag = mode === 'ground' ? '[ground-search]' : '[featured]';
+            console.groupCollapsed(`${dbgTag} role=${targetTitle || '(none)'} city=${cityName || '(any)'} → ${featured.companies.length} companies, ${allJobs.length} jobs${featured.warming ? ' (WARMING/timed-out)' : ''}`);
+            console.log('response flags:', { warming: featured.warming, stale: featured.stale, from_cache: featured.from_cache, fetched_at: featured.fetched_at });
+            console.table(featured.companies.map((c) => ({
+                company: c.name, jobs: c.jobs.length, career_url: c.career_url, homepage: c.homepage,
+            })));
+            console.groupEnd();
+
             if (allJobs.length === 0) {
-                throw new Error('No matching openings found right now. Try again in a moment.');
+                // Distinguish the failure modes so it's clear what to fix.
+                const why = featured.warming
+                    ? 'still preparing (timed out) — try again in a moment'
+                    : featured.companies.length === 0
+                        ? (mode === 'ground'
+                            ? `grounded search found no companies for "${targetTitle}"`
+                            : 'no companies available')
+                        : `${featured.companies.length} companies found but none list any openings right now`;
+                throw new Error(`No matching openings: ${why}.`);
             }
 
             // ── Phase 3 (presented as "compiling listings"): HARD-pair by title,
