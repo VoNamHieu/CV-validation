@@ -409,7 +409,11 @@ export default function StepEditCv() {
             return;
         }
 
-        // Build jobs array from all optimized entries that have a source URL
+        // Build jobs array from all optimized entries that have a source URL.
+        // Attach THIS job's cached PDF so file-upload fields get the right CV
+        // (job A → CV A). The PDF is cached at Optimize time; if it's missing
+        // (e.g. dropped after a reload) the job still applies text-only — use
+        // "Fully Auto Apply All" to render missing PDFs on the fly.
         const jobs = sortedEntries
             .filter(e => e.optimizedCv && e.source)
             .map(entry => ({
@@ -417,11 +421,20 @@ export default function StepEditCv() {
                 jobTitle: entry.jobTitle || 'Unknown',
                 company: entry.company || entry.label || '',
                 profile: buildProfile(entry.optimizedCv!),
+                cvFileBase64: entry.optimizedCvPdfBase64,
+                cvFileName: entry.optimizedCvFileName,
             }));
 
         if (jobs.length === 0) {
             setAutoApplyMessage('Không có job nào có URL để apply.');
             return;
+        }
+
+        const withFile = jobs.filter(j => j.cvFileBase64).length;
+        if (withFile < jobs.length) {
+            setAutoApplyMessage(
+                `${withFile}/${jobs.length} job có sẵn CV PDF. Các job thiếu file sẽ apply text-only — dùng "Fully Auto Apply All" để render đủ.`,
+            );
         }
 
         setBatchStarting(true);
