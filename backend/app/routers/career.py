@@ -23,7 +23,7 @@ from app.services.career_finder import (
 )
 from app.services import company_cache
 from app.services import cache
-from app.services.gemini_client import discover_companies_for_role
+from app.services.gemini_client import discover_jobs_for_role
 from app.services.url_validator import is_allowed_url
 from app.data.featured_companies import FEATURED_COMPANIES
 
@@ -385,56 +385,81 @@ def _discover_key(role: str, location: str) -> str:
     return f"discover:v1:{role.strip().lower()}:{location.strip().lower()}"
 
 
-async def _discover_one(company: dict) -> dict:
-    """Run the career pipeline (Stage 1–4) on one discovered company homepage."""
+async def _discover_company(company: dict) -> dict:
+    """Resolve one discovered company to its OFFICIAL career page and list jobs.
+
+    `company` = {"name", "titles"} where titles are the openings grounded search
+    surfaced for it. We resolve the company's own site (Stage 0 grounded resolve)
+    and extract jobs from its official career page (Stage 1–4). If official
+    extraction finds nothing, we fall back to the grounded titles but point the
+    apply link at the official career page — the aggregator posting URL is never
+    surfaced.
+    """
     async with _discover_sema:
-        url = company.get("url") or ""
+        name = company.get("name") or ""
+        titles = company.get("titles") or []
         t0 = time.time()
         try:
-            result = await find_careers(homepage_url=url)
+            result = await find_careers(company_name=name)
+            homepage = result.resolution.website_url or ""
+            career_url = result.chosen_career.url if result.chosen_career else homepage
             jobs = [j.__dict__ for j in result.jobs]
-            career_url = result.chosen_career.url if result.chosen_career else url
+
+            # Fallback: official page yielded no jobs but grounded search knew of
+            # openings — surface them, applying at the official career page.
+            if not jobs and career_url:
+                seen_t: set[str] = set()
+                for t in titles:
+                    tl = t.lower()
+                    if tl in seen_t:
+                        continue
+                    seen_t.add(tl)
+                    jobs.append({"title": t, "url": career_url, "location": ""})
+
             logger.info(
-                f"[discover] {url} → {len(jobs)} jobs in {time.time() - t0:.1f}s "
-                f"(career_url={career_url}, stages={result.stages_run})"
+                f"[discover] {name!r} → official={career_url or '∅'}, "
+                f"{len(jobs)} jobs in {time.time() - t0:.1f}s (stages={result.stages_run})"
             )
             return {
-                "name": company.get("name") or result.resolution.company_name or "",
-                "homepage": url,
+                "name": name or result.resolution.company_name or "",
+                "homepage": homepage or career_url,
                 "career_url": career_url,
                 "jobs": jobs,
             }
         except Exception as e:
-            logger.warning(f"[discover] pipeline failed for {url} after {time.time() - t0:.1f}s: {e}")
-            return {"name": company.get("name", ""), "homepage": url, "career_url": "", "jobs": []}
+            logger.warning(f"[discover] resolve failed for {name!r} after {time.time() - t0:.1f}s: {e}")
+            return {"name": name, "homepage": "", "career_url": "", "jobs": []}
 
 
 async def _refresh_discover(role: str, location: str, limit: int, key: str) -> list[dict]:
     t0 = time.time()
     logger.info(f"[discover] START role={role!r} loc={location!r} limit={limit}")
-    # Grounded search is a blocking SDK call → run off the event loop.
-    found = await asyncio.to_thread(discover_companies_for_role, role, location, limit)
+    # Job-first: grounded search for actual openings, then derive companies.
+    # Blocking SDK call → run off the event loop.
+    found = await asyncio.to_thread(discover_jobs_for_role, role, location, limit)
 
-    # Validate + dedupe the URLs Gemini returned before crawling anything.
-    seen: set[str] = set()
-    inputs: list[dict] = []
-    for c in found:
-        url = (c.get("url") or "").strip()
-        if not url or not is_allowed_url(url) or url in seen:
+    # Group postings by hiring company (dedup), keep their titles.
+    by_company: dict[str, dict] = {}
+    for j in found:
+        comp = (j.get("company") or "").strip()
+        if not comp:
             continue
-        seen.add(url)
-        inputs.append({"name": c.get("name", ""), "url": url})
+        bucket = by_company.setdefault(comp.lower(), {"name": comp, "titles": []})
+        title = (j.get("title") or "").strip()
+        if title:
+            bucket["titles"].append(title)
+    inputs = list(by_company.values())[:limit]
     logger.info(
-        f"[discover] grounded search → {len(found)} raw, {len(inputs)} valid companies: "
-        f"{[c['url'] for c in inputs]}"
+        f"[discover] grounded jobs → {len(found)} postings across "
+        f"{len(by_company)} companies; resolving {len(inputs)}: "
+        f"{[c['name'] for c in inputs]}"
     )
     if found and not inputs:
-        # Everything got filtered out — log the rejects so we can see why
-        # (aggregator/blocked hosts, malformed URLs, dupes).
-        logger.warning(f"[discover] ALL {len(found)} grounded results rejected: {found}")
+        logger.warning(f"[discover] {len(found)} postings had no usable company name: {found}")
 
-    company_lists = await asyncio.gather(*[_discover_one(c) for c in inputs])
-    companies = [c for c in company_lists if c]
+    company_lists = await asyncio.gather(*[_discover_company(c) for c in inputs])
+    # Keep only companies we could surface at least one official-linked job for.
+    companies = [c for c in company_lists if c and c["jobs"]]
 
     now = time.time()
     _discover_mem[key] = {"at": now, "companies": companies}

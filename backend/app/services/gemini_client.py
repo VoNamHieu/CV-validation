@@ -292,3 +292,68 @@ Rules:
             return []
     logger.warning(f"[gemini_discover] all models failed: {last_err}")
     return []
+
+
+def discover_jobs_for_role(role: str, location: str = "", limit: int = 8) -> list[dict]:
+    """Grounded search for CURRENT job openings for a role (job-first).
+
+    Returns a list of {"title", "company", "url"} — actual postings. The caller
+    derives the hiring company from each, resolves its OFFICIAL career page, and
+    scores the opening there (the posting URL itself may be an aggregator and is
+    used only as a discovery signal, never surfaced to the user).
+    """
+    if not role or not role.strip():
+        return []
+
+    from google.genai import types
+
+    client = get_raw_client()
+    loc = f" in {location}" if location and location.strip() else ""
+    want = max(limit * 2, limit)
+    prompt = f"""Find up to {want} CURRENT, real job openings for "{role}"{loc}. Use web search.
+
+Return ONLY a JSON array (no markdown, no text outside the JSON) of objects with this EXACT shape:
+[{{"title": "<the posted job title>", "company": "<the hiring company's real name>", "url": "<the job posting URL>"}}]
+
+Rules:
+- Every entry MUST include the hiring company's real name (not a job board's name).
+- Prefer openings posted recently and genuinely matching the role.
+- Do NOT invent companies or titles; only include postings you actually find.
+- Return at most {want} entries."""
+
+    last_err: Exception | None = None
+    for model in (FALLBACK_MODEL, MAIN_MODEL):
+        try:
+            logger.info(f"[gemini_jobsearch] {model} ← role={role!r} loc={location!r} want={want}")
+            response = client.models.generate_content(
+                model=model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    tools=[types.Tool(google_search=types.GoogleSearch())],
+                ),
+            )
+            raw_text = (response.text or "").strip()
+            arr = _extract_json_array(raw_text)
+            if not isinstance(arr, list):
+                logger.warning(f"[gemini_jobsearch] {model} returned no array: {raw_text[:200]!r}")
+                return []
+            out: list[dict] = []
+            for item in arr:
+                if not isinstance(item, dict):
+                    continue
+                title = (item.get("title") or "").strip()
+                company = (item.get("company") or "").strip()
+                url = (item.get("url") or "").strip()
+                if title and company:
+                    out.append({"title": title, "company": company, "url": url})
+            logger.info(f"[gemini_jobsearch] {model} → {len(out)} postings")
+            return out
+        except Exception as e:
+            last_err = e
+            if is_overloaded(e):
+                logger.warning(f"[gemini_jobsearch] {model} overloaded, trying next model")
+                continue
+            logger.warning(f"[gemini_jobsearch] {model} failed: {e}")
+            return []
+    logger.warning(f"[gemini_jobsearch] all models failed: {last_err}")
+    return []
