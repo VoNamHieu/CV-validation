@@ -63,6 +63,7 @@ class JDSchema(BaseModel):
     nice_to_have: List[str] = Field(default_factory=list, description="Bonus skills, tools, or experiences")
     responsibilities: List[str] = Field(default_factory=list, description="Key duties expected in the role")
     seniority_expected: str = Field(default="", description="e.g., Junior, Mid-level, Senior, Executive")
+    required_years_min: int = Field(default=0, description="Minimum years of professional experience required (0 = unstated)")
     domain: str = Field(default="", description="e.g., Fintech, E-commerce, Healthcare")
 
 class CategoryScore(BaseModel):

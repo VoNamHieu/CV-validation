@@ -13,7 +13,7 @@ import {
     extractJobLinks, rankJobsTournament, extensionCrawl, isExtensionAvailable,
     findCareer, getFeaturedJobsWarm, optimizeCvVariants, type JobListing,
 } from '@/lib/api';
-import { buildSearchUrl, matchesCity, titleMatchScore, cityLabel } from '@/lib/job-targeting';
+import { buildSearchUrl, matchesCity, titleMatchScore, cityLabel, experienceGapExceeds } from '@/lib/job-targeting';
 import { buildCvPdfCache } from '@/lib/cv-pdf-cache';
 
 type Phase = 'idle' | 'analyzing_cv' | 'searching' | 'extracting_links'
@@ -496,6 +496,21 @@ export default function StepInputUrl() {
                 if (Array.isArray(jdData)) jdData = jdData[0];
                 if (!jdData || (!jdData.must_have?.length && !jdData.responsibilities?.length)) {
                     updateJdEntry(entryId, { status: 'error', error: 'No JD found on page' });
+                    return;
+                }
+
+                // ── Experience-gap rule ──
+                // Drop jobs that out-reach the candidate by more than 1 year
+                // (e.g. JD wants 5y, candidate has 2y). Done before scoring so we
+                // don't spend Gemini calls on jobs the user can't realistically land.
+                const candidateYears = cvData!.employment?.years_of_experience ?? 0;
+                const gap = experienceGapExceeds(jdData, candidateYears);
+                if (gap.exceeds) {
+                    updateJdEntry(entryId, {
+                        status: 'error',
+                        jdData,
+                        error: `Cần ~${gap.required} năm kinh nghiệm, bạn có ${candidateYears} — chênh quá 1 năm`,
+                    });
                     return;
                 }
 

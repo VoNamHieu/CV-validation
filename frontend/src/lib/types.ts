@@ -123,6 +123,9 @@ export interface JDData {
     nice_to_have: string[];
     responsibilities: string[];
     seniority_expected: string;
+    // Minimum years of professional experience the JD requires (0 = unstated).
+    // Used to drop jobs that out-reach the candidate by more than 1 year.
+    required_years_min?: number;
     domain: string;
 }
 
