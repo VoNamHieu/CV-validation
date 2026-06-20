@@ -88,6 +88,14 @@ export default function StepEditCv() {
             .sort((a, b) => (b.matchResult?.overall_score ?? 0) - (a.matchResult?.overall_score ?? 0));
     }, [jdEntries]);
 
+    // Jobs are still crawling/scoring/optimizing — the editor opens on the first
+    // scored job before its CV is tailored, so `sortedEntries` is briefly empty
+    // while work continues in the background. Track that so the empty state can
+    // show "optimizing…" instead of a false "no jobs" message.
+    const jobsInFlight = useMemo(() => jdEntries.some(
+        e => e.optimizing || (e.status !== 'done' && e.status !== 'error'),
+    ), [jdEntries]);
+
     // Open on the job the user clicked through from the report (selectedJdId);
     // fall back to the top-scored CV when there's no selection or it has no
     // optimized CV yet.
@@ -552,8 +560,32 @@ export default function StepEditCv() {
         j => j.status === 'done' && j.result?.outcome !== 'submitted').length ?? 0;
     const isFullAutoBusy = fullAutoStatus !== 'idle';
 
-    // Empty state (placed AFTER all hooks to satisfy rules-of-hooks)
+    // Empty state (placed AFTER all hooks to satisfy rules-of-hooks).
+    // While jobs are still in flight, show a loading state instead of the
+    // "no jobs" message — the editor opens on the first scored job before its
+    // CV is optimized, so `sortedEntries` is transiently empty.
     if (!cvData || sortedEntries.length === 0 || !currentEntry) {
+        if (jobsInFlight) {
+            return (
+                <div className="animate-fade-in" style={{ maxWidth: 600, margin: '0 auto', padding: '60px 20px', textAlign: 'center' }}>
+                    <div style={{
+                        width: 72, height: 72, borderRadius: 20,
+                        background: 'var(--gradient-hero-subtle)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        margin: '0 auto 24px',
+                        border: '1px solid var(--border-subtle)',
+                    }}>
+                        <CircleNotch size={28} className="spin" style={{ color: 'var(--accent-blue)' }} />
+                    </div>
+                    <h3 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: 8 }}>
+                        Optimizing your CVs…
+                    </h3>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: 24, lineHeight: 1.6 }}>
+                        Jobs are matched — we're tailoring a CV for each one. They'll appear here as they finish.
+                    </p>
+                </div>
+            );
+        }
         return (
             <div className="animate-fade-in" style={{ maxWidth: 600, margin: '0 auto', padding: '60px 20px', textAlign: 'center' }}>
                 <div style={{
