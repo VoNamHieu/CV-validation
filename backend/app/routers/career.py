@@ -22,6 +22,7 @@ from app.services.career_finder import (
     extract_jobs_from_career_page,
 )
 from app.services import company_cache
+from app.services import cache
 from app.services.url_validator import is_allowed_url
 from app.data.featured_companies import FEATURED_COMPANIES
 
@@ -163,10 +164,16 @@ async def cache_lookup_by_name(req: NameLookup):
 # Vietnamese employers' career pages and aggregate the openings. See
 # `app/data/featured_companies.py`.
 
-# Cache the aggregated result in-process so the demo doesn't pay the Stage 4
-# cost on every CV upload. 30 minutes is short enough that newly-posted jobs
-# show up within the same demo session, long enough to keep clicks snappy.
-_FEATURED_CACHE_TTL_SECONDS = 30 * 60
+# Two-tier cache for the aggregated Stage-4 result:
+#   L1 = in-process dict      → fastest, but lost when the dyno sleeps/restarts.
+#   L2 = Redis (REDIS_URL)    → survives cold starts, so waking from sleep reads
+#                               the last crawl instead of re-crawling 150 pages.
+# Freshness is judged by the embedded timestamp, NOT the Redis TTL: Redis keeps
+# the entry far longer (REDIS_TTL) so stale data is still available to serve
+# immediately while a refresh runs in the background (stale-while-revalidate).
+_FEATURED_CACHE_TTL_SECONDS = 30 * 60          # how long a result counts as fresh
+_FEATURED_REDIS_TTL_SECONDS = 24 * 60 * 60     # how long stale data survives in Redis
+_FEATURED_CACHE_KEY = "featured-jobs:v1"
 _featured_cache: dict[str, object] = {"at": 0.0, "data": None}
 
 # Bound the Stage-4 fan-out. Fetching all ~150 featured companies at once opened
@@ -195,7 +202,7 @@ async def _fetch_jobs_for(career_url: str) -> list[dict]:
 
 
 async def _refresh_featured() -> list[dict]:
-    """Crawl every featured company (concurrency-capped) and store in the cache.
+    """Crawl every featured company (concurrency-capped) and store in L1 + Redis.
 
     Run as one shared task so concurrent callers join the same crawl, and the
     caller awaits it under asyncio.shield so a client disconnect/timeout doesn't
@@ -217,9 +224,42 @@ async def _refresh_featured() -> list[dict]:
         }
         for c, jobs in zip(FEATURED_COMPANIES, job_lists)
     ]
+    now = time.time()
     _featured_cache["data"] = companies
-    _featured_cache["at"] = time.time()
+    _featured_cache["at"] = now
+    # Persist to Redis so a future cold start serves this instead of re-crawling.
+    await cache.set_json(
+        _FEATURED_CACHE_KEY,
+        {"at": now, "companies": companies},
+        _FEATURED_REDIS_TTL_SECONDS,
+    )
     return companies
+
+
+async def _read_featured_entry() -> "dict | None":
+    """Best available cached entry as {"at", "companies"}, or None.
+
+    Prefers the in-process L1 cache; falls back to Redis (L2) and warms L1 from
+    it so the next same-process hit skips the round-trip.
+    """
+    mem_data = _featured_cache.get("data")
+    mem_at = float(_featured_cache.get("at") or 0)
+    best = {"at": mem_at, "companies": mem_data} if mem_data else None
+
+    remote = await cache.get_json(_FEATURED_CACHE_KEY)
+    if remote and float(remote.get("at") or 0) > (best["at"] if best else 0):
+        best = remote
+        _featured_cache["data"] = remote.get("companies")
+        _featured_cache["at"] = remote.get("at")
+    return best
+
+
+def _ensure_refresh_task() -> asyncio.Task:
+    """Return the shared refresh task, starting one if none is running."""
+    global _featured_refresh_task
+    if _featured_refresh_task is None or _featured_refresh_task.done():
+        _featured_refresh_task = asyncio.create_task(_refresh_featured())
+    return _featured_refresh_task
 
 
 @router.post("/featured-jobs")
@@ -230,32 +270,46 @@ async def featured_jobs(refresh: bool = False):
         {
             "fetched_at": <unix seconds>,
             "from_cache": bool,
+            "stale": bool,            # served stale while a refresh runs
             "companies": [
                 {"name": ..., "homepage": ..., "career_url": ..., "jobs": [...]}
             ]
         }
-    Pass `?refresh=true` to bust the in-memory TTL cache.
+    Pass `?refresh=true` to force a fresh crawl (waits for it).
     """
-    global _featured_refresh_task
-
     now = time.time()
-    cached = _featured_cache.get("data")
-    cached_at = float(_featured_cache.get("at") or 0)
-    if (not refresh and cached
-            and now - cached_at < _FEATURED_CACHE_TTL_SECONDS):
-        return {"fetched_at": cached_at, "from_cache": True, "companies": cached}
 
-    # Join the in-flight refresh if one exists, otherwise start one. Sharing a
-    # single task dedupes concurrent cold-cache requests.
-    if _featured_refresh_task is None or _featured_refresh_task.done():
-        _featured_refresh_task = asyncio.create_task(_refresh_featured())
-    task = _featured_refresh_task
+    # Fast path: fresh L1 cache, no Redis round-trip.
+    mem_data = _featured_cache.get("data")
+    mem_at = float(_featured_cache.get("at") or 0)
+    if not refresh and mem_data and now - mem_at < _FEATURED_CACHE_TTL_SECONDS:
+        return {"fetched_at": mem_at, "from_cache": True, "stale": False,
+                "companies": mem_data}
 
-    # shield: if THIS request is cancelled (client timeout/disconnect) the crawl
-    # keeps running and still populates the cache for the next request.
+    entry = await _read_featured_entry()
+
+    # Fresh entry (possibly from Redis after a cold start) → serve it.
+    if not refresh and entry and now - float(entry["at"]) < _FEATURED_CACHE_TTL_SECONDS:
+        return {"fetched_at": entry["at"], "from_cache": True, "stale": False,
+                "companies": entry["companies"]}
+
+    # Need a refresh. Kick off (or join) the single shared crawl task.
+    task = _ensure_refresh_task()
+
+    # Stale-while-revalidate: if we have ANY data (even expired), return it now
+    # and let the refresh finish in the background. This is what keeps cold start
+    # fast — waking from sleep reads Redis and answers instantly instead of
+    # blocking the user on a 150-page re-crawl.
+    if not refresh and entry and entry.get("companies"):
+        return {"fetched_at": entry["at"], "from_cache": True, "stale": True,
+                "companies": entry["companies"]}
+
+    # No data at all (very first run) or forced refresh → must wait. shield so a
+    # client timeout doesn't cancel the crawl; the cache still warms.
     companies = await asyncio.shield(task)
     return {
         "fetched_at": float(_featured_cache.get("at") or time.time()),
         "from_cache": False,
+        "stale": False,
         "companies": companies,
     }
