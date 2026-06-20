@@ -172,9 +172,14 @@ async def cache_lookup_by_name(req: NameLookup):
 # Freshness is judged by the embedded timestamp, NOT the Redis TTL: Redis keeps
 # the entry far longer (REDIS_TTL) so stale data is still available to serve
 # immediately while a refresh runs in the background (stale-while-revalidate).
+# Bump CACHE_VERSION (env) to invalidate ALL server caches after a deploy: the
+# keys change namespace so old Redis entries are ignored. Set it to e.g. the
+# Railway commit SHA ($RAILWAY_GIT_COMMIT_SHA) for automatic per-deploy busting,
+# or just increment a number when you want a manual flush.
+_CACHE_VERSION = os.getenv("CACHE_VERSION", "1")
 _FEATURED_CACHE_TTL_SECONDS = 30 * 60          # how long a result counts as fresh
 _FEATURED_REDIS_TTL_SECONDS = 24 * 60 * 60     # how long stale data survives in Redis
-_FEATURED_CACHE_KEY = "featured-jobs:v1"
+_FEATURED_CACHE_KEY = f"featured-jobs:v{_CACHE_VERSION}"
 _featured_cache: dict[str, object] = {"at": 0.0, "data": None}
 
 # Bound the Stage-4 fan-out. Fetching all ~150 featured companies at once opened
@@ -382,7 +387,7 @@ _discover_tasks: dict[str, asyncio.Task] = {}  # cache key → in-flight refresh
 
 
 def _discover_key(role: str, location: str) -> str:
-    return f"discover:v1:{role.strip().lower()}:{location.strip().lower()}"
+    return f"discover:v{_CACHE_VERSION}:{role.strip().lower()}:{location.strip().lower()}"
 
 
 async def _discover_company(company: dict) -> dict:
