@@ -26,6 +26,7 @@ from app.services.url_validator import is_allowed_url
 from app.data.featured_companies import FEATURED_COMPANIES
 
 import asyncio
+import os
 import time
 
 logger = logging.getLogger(__name__)
@@ -167,16 +168,58 @@ async def cache_lookup_by_name(req: NameLookup):
 # show up within the same demo session, long enough to keep clicks snappy.
 _FEATURED_CACHE_TTL_SECONDS = 30 * 60
 _featured_cache: dict[str, object] = {"at": 0.0, "data": None}
-_featured_lock = asyncio.Lock()
+
+# Bound the Stage-4 fan-out. Fetching all ~150 featured companies at once opened
+# ~150 Chromium contexts (and as many Gemini fallback calls) against the single
+# shared browser → OOM → Railway returns 502 (the bug behind the empty
+# "Find Jobs" page). Process at most this many concurrently. Raise once the dyno
+# has more RAM. Override with FEATURED_FANOUT env if needed.
+_FEATURED_FANOUT = max(1, int(os.getenv("FEATURED_FANOUT", "8")))
+_featured_sema = asyncio.Semaphore(_FEATURED_FANOUT)
+
+# A single in-flight refresh shared by all callers. Without this, every cold-cache
+# request would launch its own 150-company crawl, multiplying the load.
+_featured_refresh_task: "asyncio.Task | None" = None
 
 
 async def _fetch_jobs_for(career_url: str) -> list[dict]:
-    try:
-        jobs = await extract_jobs_from_career_page(career_url)
-        return [j.__dict__ for j in jobs]
-    except Exception as e:
-        logger.warning(f"[featured] Stage 4 failed for {career_url}: {e}")
-        return []
+    # The semaphore caps how many career pages crawl at the same time; the rest
+    # await their turn instead of all hitting the browser at once.
+    async with _featured_sema:
+        try:
+            jobs = await extract_jobs_from_career_page(career_url)
+            return [j.__dict__ for j in jobs]
+        except Exception as e:
+            logger.warning(f"[featured] Stage 4 failed for {career_url}: {e}")
+            return []
+
+
+async def _refresh_featured() -> list[dict]:
+    """Crawl every featured company (concurrency-capped) and store in the cache.
+
+    Run as one shared task so concurrent callers join the same crawl, and the
+    caller awaits it under asyncio.shield so a client disconnect/timeout doesn't
+    cancel a refresh that's almost done — the cache still warms for the next hit.
+    """
+    logger.info(
+        f"[featured] refreshing {len(FEATURED_COMPANIES)} companies "
+        f"(max {_FEATURED_FANOUT} concurrent)"
+    )
+    job_lists = await asyncio.gather(
+        *[_fetch_jobs_for(c.career_url) for c in FEATURED_COMPANIES]
+    )
+    companies = [
+        {
+            "name": c.name,
+            "homepage": c.homepage,
+            "career_url": c.career_url,
+            "jobs": jobs,
+        }
+        for c, jobs in zip(FEATURED_COMPANIES, job_lists)
+    ]
+    _featured_cache["data"] = companies
+    _featured_cache["at"] = time.time()
+    return companies
 
 
 @router.post("/featured-jobs")
@@ -193,6 +236,8 @@ async def featured_jobs(refresh: bool = False):
         }
     Pass `?refresh=true` to bust the in-memory TTL cache.
     """
+    global _featured_refresh_task
+
     now = time.time()
     cached = _featured_cache.get("data")
     cached_at = float(_featured_cache.get("at") or 0)
@@ -200,28 +245,17 @@ async def featured_jobs(refresh: bool = False):
             and now - cached_at < _FEATURED_CACHE_TTL_SECONDS):
         return {"fetched_at": cached_at, "from_cache": True, "companies": cached}
 
-    async with _featured_lock:
-        # Double-check after acquiring the lock — another request may have
-        # populated the cache while we waited.
-        cached = _featured_cache.get("data")
-        cached_at = float(_featured_cache.get("at") or 0)
-        if (not refresh and cached
-                and time.time() - cached_at < _FEATURED_CACHE_TTL_SECONDS):
-            return {"fetched_at": cached_at, "from_cache": True, "companies": cached}
+    # Join the in-flight refresh if one exists, otherwise start one. Sharing a
+    # single task dedupes concurrent cold-cache requests.
+    if _featured_refresh_task is None or _featured_refresh_task.done():
+        _featured_refresh_task = asyncio.create_task(_refresh_featured())
+    task = _featured_refresh_task
 
-        logger.info(f"[featured] refreshing {len(FEATURED_COMPANIES)} companies")
-        job_lists = await asyncio.gather(
-            *[_fetch_jobs_for(c.career_url) for c in FEATURED_COMPANIES]
-        )
-        companies = []
-        for c, jobs in zip(FEATURED_COMPANIES, job_lists):
-            companies.append({
-                "name": c.name,
-                "homepage": c.homepage,
-                "career_url": c.career_url,
-                "jobs": jobs,
-            })
-        fetched_at = time.time()
-        _featured_cache["data"] = companies
-        _featured_cache["at"] = fetched_at
-        return {"fetched_at": fetched_at, "from_cache": False, "companies": companies}
+    # shield: if THIS request is cancelled (client timeout/disconnect) the crawl
+    # keeps running and still populates the cache for the next request.
+    companies = await asyncio.shield(task)
+    return {
+        "fetched_at": float(_featured_cache.get("at") or time.time()),
+        "from_cache": False,
+        "companies": companies,
+    }
