@@ -190,13 +190,18 @@ export default function StepInputUrl() {
             const featured = mode === 'ground'
                 ? await discoverJobsWarm(targetTitle, cityName, onWaiting)
                 : await getFeaturedJobsWarm(onWaiting);
-            type FeaturedJob = { url: string; title: string; company: string; careerUrl: string; location: string };
+            type FeaturedJob = { url: string; applyUrl: string; title: string; company: string; careerUrl: string; location: string };
             const allJobs: FeaturedJob[] = [];
             for (const c of featured.companies) {
                 for (const j of c.jobs) {
                     if (!j.url || !j.title) continue;
                     allJobs.push({
-                        url: j.url, title: j.title,
+                        url: j.url,
+                        // Apply target: backend sets apply_url to the official
+                        // posting/career page when the JD URL is an aggregator;
+                        // otherwise the job's own (official) URL.
+                        applyUrl: j.apply_url || j.url,
+                        title: j.title,
                         company: c.name, careerUrl: c.career_url,
                         location: j.location || '',
                     });
@@ -287,6 +292,7 @@ export default function StepInputUrl() {
                 addJdEntry({
                     id: `jd-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
                     source: job.url,
+                    applyUrl: job.applyUrl,
                     label: job.title,
                     status: 'crawling',
                     jobTitle: job.title,

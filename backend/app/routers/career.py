@@ -30,6 +30,7 @@ from app.data.featured_companies import FEATURED_COMPANIES
 import asyncio
 import os
 import time
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -176,7 +177,7 @@ async def cache_lookup_by_name(req: NameLookup):
 # keys change namespace so old Redis entries are ignored. Set it to e.g. the
 # Railway commit SHA ($RAILWAY_GIT_COMMIT_SHA) for automatic per-deploy busting,
 # or just increment a number when you want a manual flush.
-_CACHE_VERSION = os.getenv("CACHE_VERSION", "2")
+_CACHE_VERSION = os.getenv("CACHE_VERSION", "3")
 _FEATURED_CACHE_TTL_SECONDS = 30 * 60          # how long a result counts as fresh
 _FEATURED_REDIS_TTL_SECONDS = 24 * 60 * 60     # how long stale data survives in Redis
 _FEATURED_CACHE_KEY = f"featured-jobs:v{_CACHE_VERSION}"
@@ -391,49 +392,57 @@ def _discover_key(role: str, location: str) -> str:
 
 
 async def _discover_company(company: dict) -> dict:
-    """Resolve one discovered company to its OFFICIAL career page and list jobs.
+    """Build a company entry from grounded postings + its official career page.
 
-    `company` = {"name", "titles"} where titles are the openings grounded search
-    surfaced for it. We resolve the company's own site (Stage 0 grounded resolve)
-    and extract jobs from its official career page (Stage 1–4). If official
-    extraction finds nothing, we fall back to the grounded titles but point the
-    apply link at the official career page — the aggregator posting URL is never
-    surfaced.
+    `company` = {"name", "postings": [{title, url}]}. The grounded postings are
+    the role-specific openings — we keep them as the jobs (their URL is the real
+    JD page used for scoring, even when it's an aggregator). We separately resolve
+    the company's OWN site for display, and set each job's apply_url to the
+    official posting when it lives on that domain, otherwise to the official
+    career page — so an aggregator URL is crawled but never surfaced as the apply
+    target.
     """
     async with _discover_sema:
         name = company.get("name") or ""
-        titles = company.get("titles") or []
+        postings = company.get("postings") or []
         t0 = time.time()
+
+        # Resolve the official site for display + apply (best-effort; ignore its
+        # job listing — the grounded postings are more role-relevant).
+        homepage = ""
+        career_url = ""
         try:
             result = await find_careers(company_name=name)
             homepage = result.resolution.website_url or ""
             career_url = result.chosen_career.url if result.chosen_career else homepage
-            jobs = [j.__dict__ for j in result.jobs]
-
-            # Fallback: official page yielded no jobs but grounded search knew of
-            # openings — surface them, applying at the official career page.
-            if not jobs and career_url:
-                seen_t: set[str] = set()
-                for t in titles:
-                    tl = t.lower()
-                    if tl in seen_t:
-                        continue
-                    seen_t.add(tl)
-                    jobs.append({"title": t, "url": career_url, "location": ""})
-
-            logger.info(
-                f"[discover] {name!r} → official={career_url or '∅'}, "
-                f"{len(jobs)} jobs in {time.time() - t0:.1f}s (stages={result.stages_run})"
-            )
-            return {
-                "name": name or result.resolution.company_name or "",
-                "homepage": homepage or career_url,
-                "career_url": career_url,
-                "jobs": jobs,
-            }
         except Exception as e:
-            logger.warning(f"[discover] resolve failed for {name!r} after {time.time() - t0:.1f}s: {e}")
-            return {"name": name, "homepage": "", "career_url": "", "jobs": []}
+            logger.warning(f"[discover] official resolve failed for {name!r}: {e}")
+
+        career_host = urlparse(career_url).netloc.lower() if career_url else ""
+        jobs: list[dict] = []
+        seen: set[str] = set()
+        for p in postings:
+            url = (p.get("url") or "").strip()
+            title = (p.get("title") or "").strip()
+            if not url or not title or url in seen:
+                continue
+            seen.add(url)
+            phost = urlparse(url).netloc.lower()
+            # Apply at the posting if it's on the company's own domain; otherwise
+            # send the user to the official career page (never the aggregator).
+            apply_url = url if (career_host and phost == career_host) else (career_url or url)
+            jobs.append({"title": title, "url": url, "apply_url": apply_url, "location": ""})
+
+        logger.info(
+            f"[discover] {name!r} → {len(jobs)} postings, official={career_url or '∅'} "
+            f"in {time.time() - t0:.1f}s"
+        )
+        return {
+            "name": name,
+            "homepage": homepage or career_url,
+            "career_url": career_url,
+            "jobs": jobs,
+        }
 
 
 async def _refresh_discover(role: str, location: str, limit: int, key: str) -> list[dict]:
@@ -443,16 +452,15 @@ async def _refresh_discover(role: str, location: str, limit: int, key: str) -> l
     # Blocking SDK call → run off the event loop.
     found = await asyncio.to_thread(discover_jobs_for_role, role, location, limit)
 
-    # Group postings by hiring company (dedup), keep their titles.
+    # Group postings by hiring company (dedup), keeping each posting's title+URL.
     by_company: dict[str, dict] = {}
     for j in found:
         comp = (j.get("company") or "").strip()
-        if not comp:
-            continue
-        bucket = by_company.setdefault(comp.lower(), {"name": comp, "titles": []})
         title = (j.get("title") or "").strip()
-        if title:
-            bucket["titles"].append(title)
+        if not comp or not title:
+            continue
+        bucket = by_company.setdefault(comp.lower(), {"name": comp, "postings": []})
+        bucket["postings"].append({"title": title, "url": (j.get("url") or "").strip()})
     inputs = list(by_company.values())[:limit]
     logger.info(
         f"[discover] grounded jobs → {len(found)} postings across "

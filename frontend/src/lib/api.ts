@@ -326,7 +326,8 @@ export interface CareerPage {
 
 export interface JobListing {
     title: string;
-    url: string;
+    url: string;            // the JD page to crawl/score (may be an aggregator)
+    apply_url?: string;     // official link to send the user to (never aggregator)
     location: string;
 }
 

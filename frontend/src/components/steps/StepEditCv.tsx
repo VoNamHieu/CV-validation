@@ -332,7 +332,9 @@ export default function StepEditCv() {
     /* ─── Single Auto Apply (legacy) ─── */
     const triggerAutoApply = async () => {
         const cv = currentEntry?.optimizedCv;
-        const jobUrl = currentEntry?.source;
+        // Apply at the official link when set (the source may be an aggregator JD
+        // we only crawled for scoring).
+        const jobUrl = currentEntry?.applyUrl || currentEntry?.source;
         if (!cv || !jobUrl) {
             setAutoApplyStatus('error');
             setAutoApplyMessage('Thiếu dữ liệu CV hoặc Job URL.');
@@ -417,7 +419,7 @@ export default function StepEditCv() {
         const jobs = sortedEntries
             .filter(e => e.optimizedCv && e.source)
             .map(entry => ({
-                jobUrl: entry.source!,
+                jobUrl: entry.applyUrl || entry.source!,
                 jobTitle: entry.jobTitle || 'Unknown',
                 company: entry.company || entry.label || '',
                 profile: buildProfile(entry.optimizedCv!),
@@ -500,7 +502,7 @@ export default function StepEditCv() {
                     outFilename = data.filename;
                 }
                 jobs.push({
-                    jobUrl: entry.source!,
+                    jobUrl: entry.applyUrl || entry.source!,
                     jobTitle: entry.jobTitle || 'Unknown',
                     company: entry.company || entry.label || '',
                     profile: buildProfile(cv),
@@ -512,7 +514,7 @@ export default function StepEditCv() {
                 // so the agent can still try to fill text fields.
                 console.warn('[FullAuto] PDF render failed for', entry.jobTitle, err);
                 jobs.push({
-                    jobUrl: entry.source!,
+                    jobUrl: entry.applyUrl || entry.source!,
                     jobTitle: entry.jobTitle || 'Unknown',
                     company: entry.company || entry.label || '',
                     profile: buildProfile(cv),
