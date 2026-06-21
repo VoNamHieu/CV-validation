@@ -391,6 +391,21 @@ def _discover_key(role: str, location: str) -> str:
     return f"discover:v{_CACHE_VERSION}:{role.strip().lower()}:{location.strip().lower()}"
 
 
+# Job boards / aggregators — a posting on one of these is NOT an official link,
+# so we crawl it for the JD but resolve the company's own page for applying.
+_AGGREGATOR_HOSTS = (
+    "linkedin.com", "topcv.vn", "vietnamworks.com", "indeed.com", "glassdoor.com",
+    "jobstreet.vn", "jobstreet.com", "careerbuilder.vn", "careerviet.vn", "itviec.com",
+    "ybox.vn", "timviecnhanh.com", "jobsgo.vn", "123job.vn", "vieclam24h.vn",
+    "joboko.com", "mywork.com.vn", "topdev.vn",
+)
+
+
+def _is_aggregator(host: str) -> bool:
+    host = (host or "").lower()
+    return any(host == a or host.endswith("." + a) for a in _AGGREGATOR_HOSTS)
+
+
 async def _discover_company(company: dict) -> dict:
     """Build a company entry from grounded postings + its official career page.
 
@@ -407,19 +422,8 @@ async def _discover_company(company: dict) -> dict:
         postings = company.get("postings") or []
         t0 = time.time()
 
-        # Resolve the official site for display + apply (best-effort; ignore its
-        # job listing — the grounded postings are more role-relevant).
-        homepage = ""
-        career_url = ""
-        try:
-            result = await find_careers(company_name=name)
-            homepage = result.resolution.website_url or ""
-            career_url = result.chosen_career.url if result.chosen_career else homepage
-        except Exception as e:
-            logger.warning(f"[discover] official resolve failed for {name!r}: {e}")
-
-        career_host = urlparse(career_url).netloc.lower() if career_url else ""
-        jobs: list[dict] = []
+        # Dedupe postings.
+        uniq: list[dict] = []
         seen: set[str] = set()
         for p in postings:
             url = (p.get("url") or "").strip()
@@ -427,15 +431,39 @@ async def _discover_company(company: dict) -> dict:
             if not url or not title or url in seen:
                 continue
             seen.add(url)
-            phost = urlparse(url).netloc.lower()
-            # Apply at the posting if it's on the company's own domain; otherwise
-            # send the user to the official career page (never the aggregator).
-            apply_url = url if (career_host and phost == career_host) else (career_url or url)
-            jobs.append({"title": title, "url": url, "apply_url": apply_url, "location": ""})
+            uniq.append({"title": title, "url": url})
+
+        # Only resolve the company's official site when a posting lives on an
+        # aggregator (so we have a non-aggregator apply link). Official postings
+        # are applied to directly — which also skips a slow per-company crawl.
+        need_official = (not uniq) or any(_is_aggregator(urlparse(p["url"]).netloc) for p in uniq)
+        homepage = ""
+        career_url = ""
+        if need_official:
+            try:
+                result = await find_careers(company_name=name)
+                homepage = result.resolution.website_url or ""
+                career_url = result.chosen_career.url if result.chosen_career else homepage
+            except Exception as e:
+                logger.warning(f"[discover] official resolve failed for {name!r}: {e}")
+
+        jobs: list[dict] = []
+        for p in uniq:
+            url = p["url"]
+            host = urlparse(url).netloc
+            if _is_aggregator(host):
+                # Never surface the aggregator URL — apply at the official page.
+                apply_url = career_url or homepage or url
+            else:
+                # Posting is on the company's own site → apply there directly.
+                apply_url = url
+                if not career_url:
+                    career_url = f"{urlparse(url).scheme}://{host}"
+            jobs.append({"title": p["title"], "url": url, "apply_url": apply_url, "location": ""})
 
         logger.info(
             f"[discover] {name!r} → {len(jobs)} postings, official={career_url or '∅'} "
-            f"in {time.time() - t0:.1f}s"
+            f"(resolved={need_official}) in {time.time() - t0:.1f}s"
         )
         return {
             "name": name,

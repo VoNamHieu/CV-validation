@@ -321,9 +321,10 @@ Return ONLY a JSON array (no markdown, no text outside the JSON) of objects with
 
 Rules:
 - LOCATION IS MANDATORY: only include roles based IN {country}. The hiring company must be a {country} company or have a {country} office/branch where this role works. Exclude any opening located outside {country}.
+- URL PREFERENCE: strongly prefer the posting URL on the company's OWN website / careers page (e.g. https://company.com/careers/...). Only use a job-board URL (LinkedIn, TopCV, VietnamWorks, Indeed, ITviec, CareerBuilder) if the company has no own posting you can find.
+- The title MUST genuinely match "{role}" — do not include unrelated roles.
 - Every entry MUST include the hiring company's real name (not a job board's name).
-- Prefer openings posted recently and genuinely matching the role.
-- Do NOT invent companies or titles; only include postings you actually find.
+- Do NOT invent companies, titles, or URLs; only include postings you actually find.
 - Return at most {want} entries."""
 
     last_err: Exception | None = None
