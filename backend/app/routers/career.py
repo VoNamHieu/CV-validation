@@ -579,3 +579,80 @@ async def discover_jobs(role: str = "", roles: str = "", domain: str = "",
         logger.info(f"[discover] still warming after {_FEATURED_COLD_WAIT_S}s ({key})")
         return {"fetched_at": 0, "from_cache": bool(fallback),
                 "stale": bool(fallback), "warming": True, "companies": fallback}
+
+
+@router.get("/indeed-test")
+async def indeed_test(q: str = "product manager", l: str = "Hà Nội", cc: str = "vn"):
+    """DIAGNOSTIC (temporary): can THIS host scrape Indeed? Deploy to Railway and
+    open /career/indeed-test to see whether the datacenter IP is blocked, how
+    many real jobs come back, and whether a JD can be pulled from JSON-LD.
+    Remove once we've decided on the discovery source."""
+    from urllib.parse import quote
+    from bs4 import BeautifulSoup
+    from app.services.browser_pool import get_browser
+    from app.services.crawler import crawl_url
+
+    search_url = f"https://{cc}.indeed.com/jobs?q={quote(q)}&l={quote(l)}"
+    report: dict = {"search_url": search_url}
+    block_markers = ["captcha", "verify you are human", "cf-challenge", "px-captcha",
+                     "unusual traffic", "just a moment", "additional verification", "hcaptcha"]
+
+    browser = await get_browser()
+    ctx = await browser.new_context(
+        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
+        locale="vi-VN",
+    )
+    jobs: list[dict] = []
+    try:
+        page = await ctx.new_page()
+        resp = await page.goto(search_url, timeout=40000, wait_until="domcontentloaded")
+        await page.wait_for_timeout(3500)
+        html = await page.content()
+        txt = await page.evaluate("document.body ? document.body.innerText : ''")
+        title = await page.title()
+        report["status"] = resp.status if resp else None
+        report["final_url"] = page.url
+        report["page_title"] = title
+        report["body_len"] = len(txt)
+        report["blocked"] = any(m in (title + txt[:3000]).lower() for m in block_markers)
+
+        soup = BeautifulSoup(html, "html.parser")
+        seen: set[str] = set()
+        for c in soup.select("div.job_seen_beacon, td.resultContent, [data-jk]"):
+            jk = c.get("data-jk")
+            if not jk:
+                inner = c.select_one("[data-jk]")
+                jk = inner.get("data-jk") if inner else None
+            title_el = c.select_one("h2.jobTitle span, h2 span, a.jcs-JobTitle")
+            comp = c.select_one("[data-testid='company-name'], span.companyName")
+            t = title_el.get_text(strip=True) if title_el else ""
+            if t and t not in seen:
+                seen.add(t)
+                jobs.append({
+                    "title": t,
+                    "company": comp.get_text(strip=True) if comp else "",
+                    "jk": jk,
+                })
+        report["job_count"] = len(jobs)
+        report["jobs_sample"] = jobs[:8]
+    except Exception as e:
+        report["error"] = str(e)[:200]
+    finally:
+        try:
+            await ctx.close()
+        except Exception:
+            pass
+
+    # Try pulling one JD (proves end-to-end: search → job page → JD via JSON-LD).
+    jk = next((j["jk"] for j in jobs if j.get("jk")), None)
+    if jk:
+        jd_url = f"https://{cc}.indeed.com/viewjob?jk={jk}"
+        report["jd_url"] = jd_url
+        try:
+            res = await crawl_url(jd_url)
+            report["jd_len"] = res.cleaned_text_length
+            report["jd_sample"] = (res.cleaned_text or "")[:400]
+        except Exception as e:
+            report["jd_error"] = str(e)[:200]
+
+    return report
