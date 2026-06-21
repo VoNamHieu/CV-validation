@@ -23,7 +23,7 @@ from app.services.career_finder import (
 )
 from app.services import company_cache
 from app.services import cache
-from app.services.gemini_client import discover_jobs_for_role
+from app.services.gemini_client import discover_jobs_for_profile
 from app.services.url_validator import is_allowed_url
 from app.data.featured_companies import FEATURED_COMPANIES
 
@@ -387,8 +387,10 @@ _discover_mem: dict[str, dict] = {}            # cache key → {"at", "companies
 _discover_tasks: dict[str, asyncio.Task] = {}  # cache key → in-flight refresh
 
 
-def _discover_key(role: str, location: str) -> str:
-    return f"discover:v{_CACHE_VERSION}:{role.strip().lower()}:{location.strip().lower()}"
+def _discover_key(roles: list[str], domains: list[str], location: str) -> str:
+    r = ",".join(sorted(x.strip().lower() for x in roles if x.strip()))
+    d = ",".join(sorted(x.strip().lower() for x in domains if x.strip()))
+    return f"discover:v{_CACHE_VERSION}:{r}|{d}|{location.strip().lower()}"
 
 
 # Job boards / aggregators — a posting on one of these is NOT an official link,
@@ -473,12 +475,13 @@ async def _discover_company(company: dict) -> dict:
         }
 
 
-async def _refresh_discover(role: str, location: str, limit: int, key: str) -> list[dict]:
+async def _refresh_discover(roles: list[str], domains: list[str], strengths: list[str],
+                            location: str, limit: int, key: str) -> list[dict]:
     t0 = time.time()
-    logger.info(f"[discover] START role={role!r} loc={location!r} limit={limit}")
+    logger.info(f"[discover] START roles={roles} domains={domains} loc={location!r} limit={limit}")
     # Job-first: grounded search for actual openings, then derive companies.
     # Blocking SDK call → run off the event loop.
-    found = await asyncio.to_thread(discover_jobs_for_role, role, location, limit)
+    found = await asyncio.to_thread(discover_jobs_for_profile, roles, domains, strengths, location, limit)
 
     # Group postings by hiring company (dedup), keeping each posting's title+URL.
     by_company: dict[str, dict] = {}
@@ -513,18 +516,26 @@ async def _refresh_discover(role: str, location: str, limit: int, key: str) -> l
 
 
 @router.post("/discover")
-async def discover_jobs(role: str = "", location: str = "", limit: int = 8, refresh: bool = False):
-    """Find companies hiring for `role` (grounded search) and list their jobs.
+async def discover_jobs(role: str = "", roles: str = "", domain: str = "",
+                        strengths: str = "", location: str = "", limit: int = 8,
+                        refresh: bool = False):
+    """Find openings fitting a candidate profile (grounded search) + list jobs.
 
-    Same response contract as /career/featured-jobs (companies + warming flag),
-    cached per (role, location) so repeated searches are instant.
+    Accepts a multi-signal profile (comma-separated): `roles` (target + adjacent),
+    `domain`(s), `strengths`. `role` is kept for backward compatibility. Same
+    response contract as /career/featured-jobs, cached per (roles, domains, loc).
     """
-    role = (role or "").strip()
-    if not role:
-        raise HTTPException(status_code=422, detail="role is required")
+    def _split(s: str) -> list[str]:
+        return [x.strip() for x in (s or "").split(",") if x.strip()]
+
+    role_list = _split(roles) or _split(role)
+    if not role_list:
+        raise HTTPException(status_code=422, detail="role(s) required")
+    domain_list = _split(domain)
+    strength_list = _split(strengths)
     location = (location or "").strip()
     limit = max(1, min(int(limit or 8), 15))
-    key = _discover_key(role, location)
+    key = _discover_key(role_list, domain_list, location)
     now = time.time()
 
     # L1 fresh
@@ -547,7 +558,9 @@ async def discover_jobs(role: str = "", location: str = "", limit: int = 8, refr
     # Kick off (or join) the per-key refresh task.
     task = _discover_tasks.get(key)
     if task is None or task.done():
-        task = asyncio.create_task(_refresh_discover(role, location, limit, key))
+        task = asyncio.create_task(
+            _refresh_discover(role_list, domain_list, strength_list, location, limit, key)
+        )
         _discover_tasks[key] = task
 
     # Stale-while-revalidate.
