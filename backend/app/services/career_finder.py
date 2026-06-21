@@ -837,7 +837,7 @@ Rules:
     return results
 
 
-async def extract_jobs_from_career_page(career_url: str) -> list[JobListing]:
+async def extract_jobs_from_career_page(career_url: str, _depth: int = 0) -> list[JobListing]:
     """Stage 4: list job postings on the discovered career page.
 
     Strategy:
@@ -845,6 +845,8 @@ async def extract_jobs_from_career_page(career_url: str) -> list[JobListing]:
       2. If the heuristic returns < _MIN_JOBS_BEFORE_LLM jobs (common on SPA
          career pages that don't follow URL conventions), ask the LLM to pick
          job links out of the candidate inventory. The LLM may not invent URLs.
+      3. If still empty, follow a "view all jobs / job search" link from the page
+         (many career_urls point at a marketing landing, not the listing).
     """
     import asyncio as _asyncio
     from app.services.ats_adapters import fetch_ats_jobs
@@ -927,7 +929,51 @@ async def extract_jobs_from_career_page(career_url: str) -> list[JobListing]:
                                        location=(s.get("location") or "")[:120]))
         except Exception as e:
             logger.info(f"[stage4] SPA sniff failed for {career_url}: {e}")
+
+    # Still nothing + we're on the first hop → the career_url may be a marketing
+    # landing. Follow its "view all jobs / job search" link once and retry.
+    if not jobs and _depth == 0:
+        listing = _find_listing_link(soup, base, career_url)
+        if listing:
+            logger.info(f"[stage4] no jobs on {career_url} — following listing link {listing}")
+            return await extract_jobs_from_career_page(listing, _depth=1)
     return jobs
+
+
+# Anchor text/href that signals a "see all openings / job search" listing page.
+_LISTING_HREF_RX = re.compile(
+    r"(all-?jobs|view-?all|job-?search|search-?jobs?|job-?list|tim-kiem-viec|viec-lam|"
+    r"tuyen-dung|vacanc|openings?|/positions?|/jobs?(/|$|\?))", re.I)
+_LISTING_TEXT_RX = re.compile(
+    r"(all jobs|view all|search jobs?|job search|all openings?|see (all )?(jobs|openings)|"
+    r"tất cả|tìm việc|tìm kiếm việc|việc làm|vị trí (đang )?tuyển|xem (tất cả|thêm))", re.I)
+
+
+def _find_listing_link(soup, base: str, current_url: str) -> Optional[str]:
+    """Pick the best 'all jobs / job search' link on a landing page."""
+    cur = current_url.rstrip("/")
+    best = None
+    best_score = 0
+    cur_host = urlparse(current_url).netloc
+    for a in soup.find_all("a", href=True):
+        href = (a["href"] or "").strip()
+        if not href or href.startswith(("#", "mailto:", "tel:", "javascript:")):
+            continue
+        full = urljoin(base + "/", href)
+        if full.rstrip("/") == cur or urlparse(full).netloc != cur_host:
+            continue
+        text = a.get_text(" ", strip=True)
+        score = 0
+        if _LISTING_HREF_RX.search(urlparse(full).path):
+            score += 2
+        if text and _LISTING_TEXT_RX.search(text):
+            score += 2
+        # prefer explicit "all/search" over a single job link
+        if re.search(r"(all|search|list|tim-kiem|tất cả|tìm)", (full + " " + text), re.I):
+            score += 1
+        if score > best_score:
+            best_score, best = score, full
+    return best if best_score >= 2 else None
 
 
 # ── ORCHESTRATOR ──────────────────────────────────────────────────────────────
