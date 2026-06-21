@@ -11,7 +11,8 @@ import { useAppStore, type JDEntry } from '@/store/useAppStore';
 import {
     smartSearch, crawlUrl, extractJdStructured, scoreFit, fetchPage,
     extractJobLinks, rankJobsTournament, extensionCrawl, isExtensionAvailable,
-    findCareer, getFeaturedJobsWarm, discoverJobsWarm, optimizeCvVariants, type JobListing,
+    findCareer, getFeaturedJobsWarm, discoverJobsWarm, inferSearchProfile,
+    optimizeCvVariants, type JobListing,
 } from '@/lib/api';
 import { buildSearchUrl, matchesCity, titleMatchScore, cityLabel, experienceGapExceeds } from '@/lib/job-targeting';
 import { buildCvPdfCache } from '@/lib/cv-pdf-cache';
@@ -182,21 +183,49 @@ export default function StepInputUrl() {
                         : `Preparing live openings… (${attempt})`,
                 );
             };
-            if (mode === 'ground' && !targetTitle) {
-                throw new Error('Ground search needs a target role — set one on the upload step.');
-            }
-            // 'ground' = grounded web search by role (dynamic companies);
+            // 'ground' = grounded web search across the candidate's whole fit
+            // (roles + adjacent + domains + strengths), inferred from the CV.
             // 'featured' = curated company list.
-            const featured = mode === 'ground'
-                ? await discoverJobsWarm(targetTitle, cityName, onWaiting)
-                : await getFeaturedJobsWarm(onWaiting);
-            type FeaturedJob = { url: string; title: string; company: string; careerUrl: string; location: string };
+            let featured;
+            if (mode === 'ground') {
+                setPhase('analyzing_cv');
+                setPhaseDetail('Reading your CV to understand your fit…');
+                let roles = targetTitle ? [targetTitle] : [];
+                let domains: string[] = [];
+                let strengths: string[] = [];
+                try {
+                    const profile = await inferSearchProfile(cvData);
+                    // Lead with the user's confirmed title, then adjacent roles.
+                    roles = Array.from(new Set([...roles, ...(profile.target_roles || [])]
+                        .map((s) => s.trim()).filter(Boolean)));
+                    domains = profile.domains || [];
+                    strengths = profile.strengths || [];
+                } catch (e) {
+                    console.warn('[ground-search] profile inference failed, using title only:', e);
+                }
+                if (roles.length === 0) {
+                    throw new Error('Ground search needs a target role — set one on the upload step.');
+                }
+                setInferredTitle(roles[0]);
+                setPhase('searching');
+                setPhaseDetail(`Searching: ${roles.slice(0, 3).join(', ')}${domains.length ? ` · ${domains.slice(0, 2).join(', ')}` : ''}`);
+                console.log('[ground-search] profile:', { roles, domains, strengths, city: cityName || '(any)' });
+                featured = await discoverJobsWarm({ roles, domains, strengths }, cityName, onWaiting);
+            } else {
+                featured = await getFeaturedJobsWarm(onWaiting);
+            }
+            type FeaturedJob = { url: string; applyUrl: string; title: string; company: string; careerUrl: string; location: string };
             const allJobs: FeaturedJob[] = [];
             for (const c of featured.companies) {
                 for (const j of c.jobs) {
                     if (!j.url || !j.title) continue;
                     allJobs.push({
-                        url: j.url, title: j.title,
+                        url: j.url,
+                        // Apply target: backend sets apply_url to the official
+                        // posting/career page when the JD URL is an aggregator;
+                        // otherwise the job's own (official) URL.
+                        applyUrl: j.apply_url || j.url,
+                        title: j.title,
                         company: c.name, careerUrl: c.career_url,
                         location: j.location || '',
                     });
@@ -287,6 +316,7 @@ export default function StepInputUrl() {
                 addJdEntry({
                     id: `jd-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
                     source: job.url,
+                    applyUrl: job.applyUrl,
                     label: job.title,
                     status: 'crawling',
                     jobTitle: job.title,

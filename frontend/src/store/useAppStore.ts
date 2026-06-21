@@ -42,7 +42,11 @@ export type JDEntryStatus = 'pending' | 'crawling' | 'parsing' | 'scoring' | 'do
 
 export interface JDEntry {
   id: string;
-  source: string; // URL or "text" or "pdf"
+  source: string; // URL or "text" or "pdf" — the JD page crawled/scored
+  // Official link to send the user to when applying (e.g. company career page).
+  // Falls back to `source` when unset. Lets us crawl an aggregator JD for
+  // scoring without ever surfacing that aggregator URL as the apply target.
+  applyUrl?: string;
   label: string;  // display name (URL hostname or filename)
   status: JDEntryStatus;
   optimizing?: boolean; // background auto-optimize in flight

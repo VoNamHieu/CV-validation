@@ -244,6 +244,20 @@ export const CV_EXTRACTION_RESPONSE_SCHEMA: Record<string, unknown> = {
         "contact", "personal", "employment", "preferences"],
 };
 
+// Profile used to drive a "find suitable jobs" search — inferred from the CV
+// (not a single literal title). roles includes the target + adjacent roles the
+// CV genuinely supports; domains/strengths broaden + sharpen the search.
+export const SEARCH_PROFILE_RESPONSE_SCHEMA: Record<string, unknown> = {
+    type: "OBJECT",
+    properties: {
+        target_roles: STR_ARRAY,
+        domains: STR_ARRAY,
+        strengths: STR_ARRAY,
+        seniority: STR,
+    },
+    required: ["target_roles", "domains", "strengths", "seniority"],
+};
+
 export const JD_EXTRACTION_RESPONSE_SCHEMA: Record<string, unknown> = {
     type: "OBJECT",
     properties: {

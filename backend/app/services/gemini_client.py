@@ -294,42 +294,54 @@ Rules:
     return []
 
 
-def discover_jobs_for_role(role: str, location: str = "", limit: int = 8) -> list[dict]:
-    """Grounded search for CURRENT job openings for a role (job-first).
+def discover_jobs_for_profile(
+    roles: list[str],
+    domains: list[str] | None = None,
+    strengths: list[str] | None = None,
+    location: str = "",
+    limit: int = 8,
+) -> list[dict]:
+    """Grounded search for openings that fit a candidate PROFILE (job-first).
 
-    Returns a list of {"title", "company", "url"} — actual postings. The caller
-    derives the hiring company from each, resolves its OFFICIAL career page, and
-    scores the opening there (the posting URL itself may be an aggregator and is
-    used only as a discovery signal, never surfaced to the user).
+    Instead of a single literal title, search across the candidate's realistic
+    target roles (incl. adjacent ones), preferred domain(s) and key strengths, so
+    "find suitable jobs" actually covers the candidate's fit — not one keyword.
+    Returns a list of {"title", "company", "url"} (actual postings).
     """
-    if not role or not role.strip():
+    roles = [r.strip() for r in (roles or []) if r and r.strip()][:4]
+    if not roles:
         return []
+    domains = [d.strip() for d in (domains or []) if d and d.strip()][:3]
+    strengths = [s.strip() for s in (strengths or []) if s and s.strip()][:6]
 
     from google.genai import types
 
     client = get_raw_client()
-    # This product targets the Vietnam job market — always anchor the search to
-    # Vietnam (a specific city when given) so grounded search doesn't return
-    # roles abroad.
+    # This product targets the Vietnam job market — always anchor to Vietnam (a
+    # specific city when given) so grounded search doesn't return roles abroad.
     country = os.getenv("DISCOVER_COUNTRY", "Vietnam")
     loc = f" in {location}, {country}" if location and location.strip() else f" in {country}"
     want = max(limit * 2, limit)
-    prompt = f"""Find up to {want} CURRENT, real job openings for "{role}"{loc}. Use web search.
+    roles_str = ", ".join(f'"{r}"' for r in roles)
+    domain_line = (f"\n- DOMAIN FIT: prefer companies in these domains: {', '.join(domains)}." if domains else "")
+    strengths_line = (f"\n- The candidate's key strengths: {', '.join(strengths)} — favour roles that use them." if strengths else "")
+    prompt = f"""Find up to {want} CURRENT, real job openings{loc} that fit a candidate suited to ANY of these roles: {roles_str}. Use web search.
 
 Return ONLY a JSON array (no markdown, no text outside the JSON) of objects with this EXACT shape:
 [{{"title": "<the posted job title>", "company": "<the hiring company's real name>", "url": "<the job posting URL>"}}]
 
 Rules:
 - LOCATION IS MANDATORY: only include roles based IN {country}. The hiring company must be a {country} company or have a {country} office/branch where this role works. Exclude any opening located outside {country}.
+- ROLE FIT: the title must plausibly match one of the target roles above (adjacent/related titles are fine; unrelated roles are NOT).{domain_line}{strengths_line}
+- URL PREFERENCE: strongly prefer the posting URL on the company's OWN website / careers page (e.g. https://company.com/careers/...). Only use a job-board URL (LinkedIn, TopCV, VietnamWorks, Indeed, ITviec, CareerBuilder) if the company has no own posting you can find.
 - Every entry MUST include the hiring company's real name (not a job board's name).
-- Prefer openings posted recently and genuinely matching the role.
-- Do NOT invent companies or titles; only include postings you actually find.
+- Do NOT invent companies, titles, or URLs; only include postings you actually find.
 - Return at most {want} entries."""
 
     last_err: Exception | None = None
     for model in (FALLBACK_MODEL, MAIN_MODEL):
         try:
-            logger.info(f"[gemini_jobsearch] {model} ← role={role!r} loc={location!r} want={want}")
+            logger.info(f"[gemini_jobsearch] {model} ← roles={roles} domains={domains} loc={location!r} want={want}")
             response = client.models.generate_content(
                 model=model,
                 contents=prompt,

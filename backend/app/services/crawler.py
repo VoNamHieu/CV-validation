@@ -96,6 +96,28 @@ def parse_job_from_json_ld(data: dict) -> dict:
     }
 
 
+def _jsonld_jd_text(html: str) -> str:
+    """Full JD text from a JobPosting JSON-LD block (title + company + full
+    description, HTML stripped). Many ATS (Recruitee, Greenhouse, Lever, Workday)
+    embed this even when the visible DOM is an empty SPA shell — so it's the most
+    reliable JD source for those sites."""
+    data = extract_json_ld(html)
+    if not isinstance(data, dict):
+        return ""
+    parts: list[str] = []
+    if data.get("title"):
+        parts.append(str(data["title"]))
+    org = data.get("hiringOrganization", {})
+    if isinstance(org, dict) and org.get("name"):
+        parts.append(str(org["name"]))
+    desc = data.get("description") or ""
+    if desc:
+        if "<" in desc and ">" in desc:  # description is usually HTML
+            desc = BeautifulSoup(desc, "html.parser").get_text(separator="\n", strip=True)
+        parts.append(desc)
+    return "\n".join(p for p in parts if p).strip()
+
+
 # ── HTTP FETCH ────────────────────────────────────────────────────────────────
 
 def try_http_fetch(url: str) -> tuple[bool, str]:
@@ -186,9 +208,9 @@ async def _wait_for_content(page, timeout_ms: int = 8000) -> None:
                 pass
     except Exception:
         pass
-    # Final small grace period — some SPAs fetch JSON after content is visible.
+    # Grace period — many SPAs fetch the JD JSON after first paint.
     try:
-        await page.wait_for_load_state("networkidle", timeout=2500)
+        await page.wait_for_load_state("networkidle", timeout=5000)
     except Exception:
         pass
 
@@ -281,44 +303,51 @@ async def crawl_url(url: str) -> CrawlResult:
 
     # Step 1: HTTP fetch
     http_ok, http_data = try_http_fetch(url)
+    raw_html = http_data if http_ok else ""
+    result.http_success = http_ok
+    tried_pw = False
 
-    raw_html = ""
-
-    if http_ok:
-        result.http_success = True
-        raw_html = http_data
-
-        # Check if Playwright is needed
-        if detect_needs_playwright(http_data):
-            result.needs_playwright = True
-            pw_ok, pw_data = await try_playwright_fetch(url)
-            if pw_ok:
-                raw_html = pw_data
-            # If Playwright fails, continue with HTTP data
-    else:
-        result.http_success = False
+    if (not http_ok) or detect_needs_playwright(http_data):
         result.needs_playwright = True
-
-        # Try Playwright as fallback
         pw_ok, pw_data = await try_playwright_fetch(url)
+        tried_pw = True
         if pw_ok:
             raw_html = pw_data
-        else:
+        elif not http_ok:
             result.error = f"HTTP failed: {http_data} | Playwright failed: {pw_data}"
             result.latency_ms = int((time.time() - start) * 1000)
             return result
 
-    result.raw_html_length = len(raw_html)
+    cleaned = clean_html(raw_html)
 
-    # Step 2: JSON-LD check
+    # SPA escape hatch: a big HTML shell with almost no visible text means the
+    # JD is rendered client-side (Recruitee, custom React/Next career portals).
+    # detect_needs_playwright misses these — render once with Playwright.
+    if len(cleaned) < 400 and not tried_pw:
+        result.needs_playwright = True
+        pw_ok, pw_data = await try_playwright_fetch(url)
+        tried_pw = True
+        if pw_ok:
+            raw_html = pw_data
+            c2 = clean_html(raw_html)
+            if len(c2) > len(cleaned):
+                cleaned = c2
+
+    # JSON-LD (for structured display fields).
     json_ld = extract_json_ld(raw_html)
     if json_ld:
         result.has_json_ld = True
         result.json_ld_data = parse_job_from_json_ld(json_ld)
 
-    # Step 3: Clean HTML
-    result.cleaned_text = clean_html(raw_html)
-    result.cleaned_text_length = len(result.cleaned_text)
+    # Still thin → fall back to the embedded JobPosting JSON-LD description, which
+    # ATS shells expose even when the DOM text is empty.
+    if len(cleaned) < 400:
+        jd_text = _jsonld_jd_text(raw_html)
+        if len(jd_text) > len(cleaned):
+            cleaned = jd_text
 
+    result.raw_html_length = len(raw_html)
+    result.cleaned_text = cleaned
+    result.cleaned_text_length = len(cleaned)
     result.latency_ms = int((time.time() - start) * 1000)
     return result

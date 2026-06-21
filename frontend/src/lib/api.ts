@@ -326,7 +326,8 @@ export interface CareerPage {
 
 export interface JobListing {
     title: string;
-    url: string;
+    url: string;            // the JD page to crawl/score (may be an aggregator)
+    apply_url?: string;     // official link to send the user to (never aggregator)
     location: string;
 }
 
@@ -397,15 +398,44 @@ export async function getFeaturedJobsWarm(
     return pollWarm(() => getFeaturedJobs(), onWaiting, opts);
 }
 
-// ── Dynamic discovery (grounded search by role) ──
-// Asks the backend to find companies hiring for `role` via grounded web search,
-// then lists their jobs. Same response shape + warming contract as featured.
+// ── Search profile inferred from the CV (roles + domains + strengths) ──
+export interface SearchProfile {
+    target_roles: string[];
+    domains: string[];
+    strengths: string[];
+    seniority: string;
+}
+
+export async function inferSearchProfile(cv: unknown): Promise<SearchProfile> {
+    const res = await fetch('/api/ai/search-profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cv }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || 'Failed to infer search profile');
+    }
+    return res.json();
+}
+
+// ── Dynamic discovery (grounded search by candidate profile) ──
+// Finds openings fitting the candidate's roles/domains/strengths via grounded
+// web search, then lists their jobs. Same response shape + warming contract.
+export interface DiscoverProfile {
+    roles: string[];
+    domains?: string[];
+    strengths?: string[];
+}
+
 export async function discoverJobs(
-    role: string,
+    profile: DiscoverProfile,
     location = '',
     opts: { limit?: number; refresh?: boolean } = {},
 ): Promise<FeaturedJobsResult> {
-    const qs = new URLSearchParams({ role });
+    const qs = new URLSearchParams({ roles: profile.roles.join(',') });
+    if (profile.domains?.length) qs.set('domain', profile.domains.join(','));
+    if (profile.strengths?.length) qs.set('strengths', profile.strengths.join(','));
     if (location) qs.set('location', location);
     if (opts.limit) qs.set('limit', String(opts.limit));
     if (opts.refresh) qs.set('refresh', 'true');
@@ -418,12 +448,12 @@ export async function discoverJobs(
 }
 
 export async function discoverJobsWarm(
-    role: string,
+    profile: DiscoverProfile,
     location = '',
     onWaiting?: (attempt: number) => void,
     opts: { limit?: number; maxWaitMs?: number; pollMs?: number } = {},
 ): Promise<FeaturedJobsResult> {
-    return pollWarm(() => discoverJobs(role, location, { limit: opts.limit }), onWaiting, opts);
+    return pollWarm(() => discoverJobs(profile, location, { limit: opts.limit }), onWaiting, opts);
 }
 
 // Shared warm-up poller: calls `fetchOnce` until it returns companies, reports

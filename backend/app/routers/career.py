@@ -23,13 +23,14 @@ from app.services.career_finder import (
 )
 from app.services import company_cache
 from app.services import cache
-from app.services.gemini_client import discover_jobs_for_role
+from app.services.gemini_client import discover_jobs_for_profile
 from app.services.url_validator import is_allowed_url
 from app.data.featured_companies import FEATURED_COMPANIES
 
 import asyncio
 import os
 import time
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -176,7 +177,7 @@ async def cache_lookup_by_name(req: NameLookup):
 # keys change namespace so old Redis entries are ignored. Set it to e.g. the
 # Railway commit SHA ($RAILWAY_GIT_COMMIT_SHA) for automatic per-deploy busting,
 # or just increment a number when you want a manual flush.
-_CACHE_VERSION = os.getenv("CACHE_VERSION", "2")
+_CACHE_VERSION = os.getenv("CACHE_VERSION", "3")
 _FEATURED_CACHE_TTL_SECONDS = 30 * 60          # how long a result counts as fresh
 _FEATURED_REDIS_TTL_SECONDS = 24 * 60 * 60     # how long stale data survives in Redis
 _FEATURED_CACHE_KEY = f"featured-jobs:v{_CACHE_VERSION}"
@@ -386,73 +387,111 @@ _discover_mem: dict[str, dict] = {}            # cache key → {"at", "companies
 _discover_tasks: dict[str, asyncio.Task] = {}  # cache key → in-flight refresh
 
 
-def _discover_key(role: str, location: str) -> str:
-    return f"discover:v{_CACHE_VERSION}:{role.strip().lower()}:{location.strip().lower()}"
+def _discover_key(roles: list[str], domains: list[str], location: str) -> str:
+    r = ",".join(sorted(x.strip().lower() for x in roles if x.strip()))
+    d = ",".join(sorted(x.strip().lower() for x in domains if x.strip()))
+    return f"discover:v{_CACHE_VERSION}:{r}|{d}|{location.strip().lower()}"
+
+
+# Job boards / aggregators — a posting on one of these is NOT an official link,
+# so we crawl it for the JD but resolve the company's own page for applying.
+_AGGREGATOR_HOSTS = (
+    "linkedin.com", "topcv.vn", "vietnamworks.com", "indeed.com", "glassdoor.com",
+    "jobstreet.vn", "jobstreet.com", "careerbuilder.vn", "careerviet.vn", "itviec.com",
+    "ybox.vn", "timviecnhanh.com", "jobsgo.vn", "123job.vn", "vieclam24h.vn",
+    "joboko.com", "mywork.com.vn", "topdev.vn",
+)
+
+
+def _is_aggregator(host: str) -> bool:
+    host = (host or "").lower()
+    return any(host == a or host.endswith("." + a) for a in _AGGREGATOR_HOSTS)
 
 
 async def _discover_company(company: dict) -> dict:
-    """Resolve one discovered company to its OFFICIAL career page and list jobs.
+    """Build a company entry from grounded postings + its official career page.
 
-    `company` = {"name", "titles"} where titles are the openings grounded search
-    surfaced for it. We resolve the company's own site (Stage 0 grounded resolve)
-    and extract jobs from its official career page (Stage 1–4). If official
-    extraction finds nothing, we fall back to the grounded titles but point the
-    apply link at the official career page — the aggregator posting URL is never
-    surfaced.
+    `company` = {"name", "postings": [{title, url}]}. The grounded postings are
+    the role-specific openings — we keep them as the jobs (their URL is the real
+    JD page used for scoring, even when it's an aggregator). We separately resolve
+    the company's OWN site for display, and set each job's apply_url to the
+    official posting when it lives on that domain, otherwise to the official
+    career page — so an aggregator URL is crawled but never surfaced as the apply
+    target.
     """
     async with _discover_sema:
         name = company.get("name") or ""
-        titles = company.get("titles") or []
+        postings = company.get("postings") or []
         t0 = time.time()
-        try:
-            result = await find_careers(company_name=name)
-            homepage = result.resolution.website_url or ""
-            career_url = result.chosen_career.url if result.chosen_career else homepage
-            jobs = [j.__dict__ for j in result.jobs]
 
-            # Fallback: official page yielded no jobs but grounded search knew of
-            # openings — surface them, applying at the official career page.
-            if not jobs and career_url:
-                seen_t: set[str] = set()
-                for t in titles:
-                    tl = t.lower()
-                    if tl in seen_t:
-                        continue
-                    seen_t.add(tl)
-                    jobs.append({"title": t, "url": career_url, "location": ""})
+        # Dedupe postings.
+        uniq: list[dict] = []
+        seen: set[str] = set()
+        for p in postings:
+            url = (p.get("url") or "").strip()
+            title = (p.get("title") or "").strip()
+            if not url or not title or url in seen:
+                continue
+            seen.add(url)
+            uniq.append({"title": title, "url": url})
 
-            logger.info(
-                f"[discover] {name!r} → official={career_url or '∅'}, "
-                f"{len(jobs)} jobs in {time.time() - t0:.1f}s (stages={result.stages_run})"
-            )
-            return {
-                "name": name or result.resolution.company_name or "",
-                "homepage": homepage or career_url,
-                "career_url": career_url,
-                "jobs": jobs,
-            }
-        except Exception as e:
-            logger.warning(f"[discover] resolve failed for {name!r} after {time.time() - t0:.1f}s: {e}")
-            return {"name": name, "homepage": "", "career_url": "", "jobs": []}
+        # Only resolve the company's official site when a posting lives on an
+        # aggregator (so we have a non-aggregator apply link). Official postings
+        # are applied to directly — which also skips a slow per-company crawl.
+        need_official = (not uniq) or any(_is_aggregator(urlparse(p["url"]).netloc) for p in uniq)
+        homepage = ""
+        career_url = ""
+        if need_official:
+            try:
+                result = await find_careers(company_name=name)
+                homepage = result.resolution.website_url or ""
+                career_url = result.chosen_career.url if result.chosen_career else homepage
+            except Exception as e:
+                logger.warning(f"[discover] official resolve failed for {name!r}: {e}")
+
+        jobs: list[dict] = []
+        for p in uniq:
+            url = p["url"]
+            host = urlparse(url).netloc
+            if _is_aggregator(host):
+                # Never surface the aggregator URL — apply at the official page.
+                apply_url = career_url or homepage or url
+            else:
+                # Posting is on the company's own site → apply there directly.
+                apply_url = url
+                if not career_url:
+                    career_url = f"{urlparse(url).scheme}://{host}"
+            jobs.append({"title": p["title"], "url": url, "apply_url": apply_url, "location": ""})
+
+        logger.info(
+            f"[discover] {name!r} → {len(jobs)} postings, official={career_url or '∅'} "
+            f"(resolved={need_official}) in {time.time() - t0:.1f}s"
+        )
+        return {
+            "name": name,
+            "homepage": homepage or career_url,
+            "career_url": career_url,
+            "jobs": jobs,
+        }
 
 
-async def _refresh_discover(role: str, location: str, limit: int, key: str) -> list[dict]:
+async def _refresh_discover(roles: list[str], domains: list[str], strengths: list[str],
+                            location: str, limit: int, key: str) -> list[dict]:
     t0 = time.time()
-    logger.info(f"[discover] START role={role!r} loc={location!r} limit={limit}")
+    logger.info(f"[discover] START roles={roles} domains={domains} loc={location!r} limit={limit}")
     # Job-first: grounded search for actual openings, then derive companies.
     # Blocking SDK call → run off the event loop.
-    found = await asyncio.to_thread(discover_jobs_for_role, role, location, limit)
+    found = await asyncio.to_thread(discover_jobs_for_profile, roles, domains, strengths, location, limit)
 
-    # Group postings by hiring company (dedup), keep their titles.
+    # Group postings by hiring company (dedup), keeping each posting's title+URL.
     by_company: dict[str, dict] = {}
     for j in found:
         comp = (j.get("company") or "").strip()
-        if not comp:
-            continue
-        bucket = by_company.setdefault(comp.lower(), {"name": comp, "titles": []})
         title = (j.get("title") or "").strip()
-        if title:
-            bucket["titles"].append(title)
+        if not comp or not title:
+            continue
+        bucket = by_company.setdefault(comp.lower(), {"name": comp, "postings": []})
+        bucket["postings"].append({"title": title, "url": (j.get("url") or "").strip()})
     inputs = list(by_company.values())[:limit]
     logger.info(
         f"[discover] grounded jobs → {len(found)} postings across "
@@ -477,18 +516,26 @@ async def _refresh_discover(role: str, location: str, limit: int, key: str) -> l
 
 
 @router.post("/discover")
-async def discover_jobs(role: str = "", location: str = "", limit: int = 8, refresh: bool = False):
-    """Find companies hiring for `role` (grounded search) and list their jobs.
+async def discover_jobs(role: str = "", roles: str = "", domain: str = "",
+                        strengths: str = "", location: str = "", limit: int = 8,
+                        refresh: bool = False):
+    """Find openings fitting a candidate profile (grounded search) + list jobs.
 
-    Same response contract as /career/featured-jobs (companies + warming flag),
-    cached per (role, location) so repeated searches are instant.
+    Accepts a multi-signal profile (comma-separated): `roles` (target + adjacent),
+    `domain`(s), `strengths`. `role` is kept for backward compatibility. Same
+    response contract as /career/featured-jobs, cached per (roles, domains, loc).
     """
-    role = (role or "").strip()
-    if not role:
-        raise HTTPException(status_code=422, detail="role is required")
+    def _split(s: str) -> list[str]:
+        return [x.strip() for x in (s or "").split(",") if x.strip()]
+
+    role_list = _split(roles) or _split(role)
+    if not role_list:
+        raise HTTPException(status_code=422, detail="role(s) required")
+    domain_list = _split(domain)
+    strength_list = _split(strengths)
     location = (location or "").strip()
     limit = max(1, min(int(limit or 8), 15))
-    key = _discover_key(role, location)
+    key = _discover_key(role_list, domain_list, location)
     now = time.time()
 
     # L1 fresh
@@ -511,7 +558,9 @@ async def discover_jobs(role: str = "", location: str = "", limit: int = 8, refr
     # Kick off (or join) the per-key refresh task.
     task = _discover_tasks.get(key)
     if task is None or task.done():
-        task = asyncio.create_task(_refresh_discover(role, location, limit, key))
+        task = asyncio.create_task(
+            _refresh_discover(role_list, domain_list, strength_list, location, limit, key)
+        )
         _discover_tasks[key] = task
 
     # Stale-while-revalidate.
@@ -530,3 +579,80 @@ async def discover_jobs(role: str = "", location: str = "", limit: int = 8, refr
         logger.info(f"[discover] still warming after {_FEATURED_COLD_WAIT_S}s ({key})")
         return {"fetched_at": 0, "from_cache": bool(fallback),
                 "stale": bool(fallback), "warming": True, "companies": fallback}
+
+
+@router.get("/indeed-test")
+async def indeed_test(q: str = "product manager", l: str = "Hà Nội", cc: str = "vn"):
+    """DIAGNOSTIC (temporary): can THIS host scrape Indeed? Deploy to Railway and
+    open /career/indeed-test to see whether the datacenter IP is blocked, how
+    many real jobs come back, and whether a JD can be pulled from JSON-LD.
+    Remove once we've decided on the discovery source."""
+    from urllib.parse import quote
+    from bs4 import BeautifulSoup
+    from app.services.browser_pool import get_browser
+    from app.services.crawler import crawl_url
+
+    search_url = f"https://{cc}.indeed.com/jobs?q={quote(q)}&l={quote(l)}"
+    report: dict = {"search_url": search_url}
+    block_markers = ["captcha", "verify you are human", "cf-challenge", "px-captcha",
+                     "unusual traffic", "just a moment", "additional verification", "hcaptcha"]
+
+    browser = await get_browser()
+    ctx = await browser.new_context(
+        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
+        locale="vi-VN",
+    )
+    jobs: list[dict] = []
+    try:
+        page = await ctx.new_page()
+        resp = await page.goto(search_url, timeout=40000, wait_until="domcontentloaded")
+        await page.wait_for_timeout(3500)
+        html = await page.content()
+        txt = await page.evaluate("document.body ? document.body.innerText : ''")
+        title = await page.title()
+        report["status"] = resp.status if resp else None
+        report["final_url"] = page.url
+        report["page_title"] = title
+        report["body_len"] = len(txt)
+        report["blocked"] = any(m in (title + txt[:3000]).lower() for m in block_markers)
+
+        soup = BeautifulSoup(html, "html.parser")
+        seen: set[str] = set()
+        for c in soup.select("div.job_seen_beacon, td.resultContent, [data-jk]"):
+            jk = c.get("data-jk")
+            if not jk:
+                inner = c.select_one("[data-jk]")
+                jk = inner.get("data-jk") if inner else None
+            title_el = c.select_one("h2.jobTitle span, h2 span, a.jcs-JobTitle")
+            comp = c.select_one("[data-testid='company-name'], span.companyName")
+            t = title_el.get_text(strip=True) if title_el else ""
+            if t and t not in seen:
+                seen.add(t)
+                jobs.append({
+                    "title": t,
+                    "company": comp.get_text(strip=True) if comp else "",
+                    "jk": jk,
+                })
+        report["job_count"] = len(jobs)
+        report["jobs_sample"] = jobs[:8]
+    except Exception as e:
+        report["error"] = str(e)[:200]
+    finally:
+        try:
+            await ctx.close()
+        except Exception:
+            pass
+
+    # Try pulling one JD (proves end-to-end: search → job page → JD via JSON-LD).
+    jk = next((j["jk"] for j in jobs if j.get("jk")), None)
+    if jk:
+        jd_url = f"https://{cc}.indeed.com/viewjob?jk={jk}"
+        report["jd_url"] = jd_url
+        try:
+            res = await crawl_url(jd_url)
+            report["jd_len"] = res.cleaned_text_length
+            report["jd_sample"] = (res.cleaned_text or "")[:400]
+        except Exception as e:
+            report["jd_error"] = str(e)[:200]
+
+    return report
