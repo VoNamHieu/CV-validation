@@ -180,9 +180,98 @@ _FETCHERS = {
 }
 
 
+# ── base.vn (a.k.a. talent.vn) — popular VN ATS for banks/retail ──────────────
+# Server-renders the full job list as a JSON blob ("openings":[...]) right in the
+# page HTML — each opening carries name + content (the JD). No API key, no JS.
+
+import json as _json  # noqa: E402
+
+_HTML_HEADERS = {"User-Agent": _HEADERS["User-Agent"], "Accept": "text/html,*/*"}
+
+
+def _parse_openings(html: str) -> list:
+    """Extract the `openings` JSON array embedded in a base.vn page."""
+    i = html.find('"openings":')
+    if i < 0:
+        return []
+    j = html.find("[", i)
+    if j < 0:
+        return []
+    depth = 0
+    in_str = esc = False
+    for k in range(j, len(html)):
+        ch = html[k]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+        else:
+            if ch == '"':
+                in_str = True
+            elif ch == "[":
+                depth += 1
+            elif ch == "]":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        return _json.loads(html[j:k + 1])
+                    except Exception:
+                        return []
+    return []
+
+
+def _is_basevn(career_url: str, html: str | None) -> bool:
+    host = (urlparse(career_url).netloc or "").lower()
+    if host.endswith(".talent.vn"):
+        return True
+    return bool(html) and ('base.vn/hiring' in html or '"openings":[' in html)
+
+
+def _basevn(career_url: str, html: str | None) -> list[dict]:
+    if not html:
+        try:
+            r = requests.get(career_url, headers=_HTML_HEADERS, timeout=_TIMEOUT, allow_redirects=True)
+            html = r.text if r.status_code == 200 else ""
+            career_url = r.url
+        except Exception:
+            html = ""
+    if not html:
+        return []
+    p = urlparse(career_url)
+    origin = f"{p.scheme}://{p.netloc}"
+    out = []
+    for o in _parse_openings(html):
+        if not isinstance(o, dict):
+            continue
+        name = (o.get("name") or "").strip()
+        code = o.get("codename") or o.get("id") or ""
+        if not name or not code:
+            continue
+        out.append({
+            "title": name,
+            "url": f"{origin}/job/{code}",
+            "location": "",
+            "description": _strip_html(o.get("content", "")),
+        })
+    logger.info(f"[ats] base.vn → {len(out)} jobs ({origin})")
+    return out
+
+
 def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
     """Detect the ATS (from URL, then embedded in HTML) and fetch its jobs.
     Returns [] when no ATS is detected or the API yields nothing."""
+    # base.vn (talent.vn) parses the page JSON rather than calling a slug API.
+    if _is_basevn(career_url, html):
+        try:
+            jobs = [j for j in _basevn(career_url, html) if j.get("title") and j.get("url")]
+            if jobs:
+                return jobs
+        except Exception as e:
+            logger.info(f"[ats] base.vn failed for {career_url}: {str(e)[:80]}")
+
     hit = detect_ats(career_url) or (detect_ats_in_html(html) if html else None)
     if not hit:
         return []
