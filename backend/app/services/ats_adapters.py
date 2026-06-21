@@ -253,13 +253,14 @@ def _workday(career_url: str) -> list[dict]:
             if s and not re.match(r"^[a-z]{2}(-[A-Za-z]{2})?$", s)]
     site = segs[0] if segs else "External"
     base = f"https://{tenant}.{wd}.myworkdayjobs.com"
-    api = f"{base}/wday/cxs/{tenant}/{site}/jobs"
+    cxs = f"{base}/wday/cxs/{tenant}/{site}"
     country = os.getenv("DISCOVER_COUNTRY", "Vietnam")
     out = []
     try:
         # searchText narrows to the country server-side (big global tenants have
         # thousands of jobs); then keep only ones whose location is really VN.
-        r = requests.post(api, headers=_JSON_POST, timeout=_TIMEOUT,
+        # NOTE: cxs caps limit at 20 (else HTTP 400).
+        r = requests.post(f"{cxs}/jobs", headers=_JSON_POST, timeout=_TIMEOUT,
                           json={"limit": 20, "offset": 0, "searchText": country, "appliedFacets": {}})
         if r.status_code == 200:
             for j in (r.json() or {}).get("jobPostings", []):
@@ -268,11 +269,65 @@ def _workday(career_url: str) -> list[dict]:
                     continue
                 ext = j.get("externalPath", "") or ""
                 out.append({"title": j.get("title", ""), "url": base + ext if ext else base,
-                            "location": loc, "description": ""})
+                            "location": loc, "description": "", "_ext": ext})
     except Exception as e:
         logger.info(f"[ats] workday {tenant} failed: {str(e)[:80]}")
+
+    # Fetch each VN job's full JD from the cxs detail endpoint (bounded).
+    for job in out[:12]:
+        ext = job.pop("_ext", "")
+        if not ext:
+            continue
+        try:
+            dr = requests.get(f"{cxs}{ext}", headers=_JSON_POST, timeout=_TIMEOUT)
+            if dr.status_code == 200:
+                info = (dr.json() or {}).get("jobPostingInfo", {})
+                job["description"] = _strip_html(info.get("jobDescription", ""))
+        except Exception:
+            pass
+    for job in out:
+        job.pop("_ext", None)
     logger.info(f"[ats] workday:{tenant}/{site} → {len(out)} VN jobs")
     return out
+
+
+# ── SuccessFactors (SAP) Career Site Builder — server-renders job tiles ──────
+# No clean JSON API, but /search/ (and the /tile-search-results/ fragment) return
+# SSR HTML with <a href="/job/..."> tiles, and each /job/ page is itself SSR — so
+# we parse the tiles here and let the normal crawler read the JD from the page.
+
+def _is_successfactors(career_url: str, html: str | None) -> bool:
+    if not html:
+        return False
+    h = html.lower()
+    return any(s in h for s in ("successfactors", "sapsf", "data-careersite",
+                                "/tile-search-results/", "careersite"))
+
+
+def _successfactors(career_url: str, html: str | None) -> list[dict]:
+    from bs4 import BeautifulSoup
+    p = urlparse(career_url)
+    origin = f"{p.scheme}://{p.netloc}"
+    # No locationsearch: VN-domestic SF sites tag locations as "Hà Nội" etc., so
+    # locationsearch=Vietnam returns nothing. Return all tiles; the downstream
+    # role/city filter narrows. (Most SF sites in the featured list are VN banks.)
+    try:
+        r = requests.get(f"{origin}/search/?q=", headers=_HTML_HEADERS, timeout=_TIMEOUT)
+        if r.status_code != 200:
+            return []
+        soup = BeautifulSoup(r.text, "html.parser")
+    except Exception:
+        return []
+    out, seen = [], set()
+    for a in soup.select('a[href^="/job/"]'):
+        href = a.get("href", "")
+        title = a.get_text(" ", strip=True)
+        if not href or not title or len(title) < 4 or href in seen:
+            continue
+        seen.add(href)
+        out.append({"title": title[:200], "url": origin + href, "location": "", "description": ""})
+    logger.info(f"[ats] successfactors → {len(out)} jobs ({origin})")
+    return out[:50]
 
 
 def _is_basevn(career_url: str, html: str | None) -> bool:
@@ -332,6 +387,15 @@ def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
                 return jobs
         except Exception as e:
             logger.info(f"[ats] base.vn failed for {career_url}: {str(e)[:80]}")
+
+    # SuccessFactors (SAP) — parse the SSR /search/ job tiles.
+    if _is_successfactors(career_url, html):
+        try:
+            jobs = [j for j in _successfactors(career_url, html) if j.get("title") and j.get("url")]
+            if jobs:
+                return jobs
+        except Exception as e:
+            logger.info(f"[ats] successfactors failed for {career_url}: {str(e)[:80]}")
 
     hit = detect_ats(career_url) or (detect_ats_in_html(html) if html else None)
     if not hit:
