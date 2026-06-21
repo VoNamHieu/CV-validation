@@ -177,7 +177,7 @@ async def cache_lookup_by_name(req: NameLookup):
 # keys change namespace so old Redis entries are ignored. Set it to e.g. the
 # Railway commit SHA ($RAILWAY_GIT_COMMIT_SHA) for automatic per-deploy busting,
 # or just increment a number when you want a manual flush.
-_CACHE_VERSION = os.getenv("CACHE_VERSION", "8")
+_CACHE_VERSION = os.getenv("CACHE_VERSION", "9")
 _FEATURED_CACHE_TTL_SECONDS = 30 * 60          # how long a result counts as fresh
 _FEATURED_REDIS_TTL_SECONDS = 24 * 60 * 60     # how long stale data survives in Redis
 _FEATURED_CACHE_KEY = f"featured-jobs:v{_CACHE_VERSION}"

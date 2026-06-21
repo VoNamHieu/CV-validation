@@ -63,7 +63,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Sea",
         homepage="https://www.sea.com",
-        career_url="https://www.sea.com/careers",
+        career_url="https://career.sea.com/jobs",
     ),
     FeaturedCompany(
         name="TikTok",
