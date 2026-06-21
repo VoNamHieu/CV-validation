@@ -104,8 +104,83 @@ def _parse_api(api_url: str, origin: str) -> list[dict]:
     return out
 
 
+# Keys (beyond title) that mark a list as real job postings — used to pick the
+# job list out of a Next.js __NEXT_DATA__ tree without grabbing menus/banners.
+_JOB_SIGNAL_KEYS = {
+    "location", "locations", "locationstext", "city", "department", "departments",
+    "category", "categories", "employmenttype", "employment_type", "dateposted",
+    "jobid", "job_id", "requisitionid", "requisition_id", "team", "function",
+    "workplace", "seniority", "salary", "postingdate", "jobtitle", "positiontitle",
+    "joblocation", "applyurl", "joburl", "contracttype",
+}
+
+
+def _looks_like_job_list(items) -> bool:
+    dicts = [x for x in items if isinstance(x, dict)][:5]
+    if len(dicts) < 1:
+        return False
+    has_title = sum(1 for d in dicts if any(k.lower() in _TITLE_KEYS for k in d))
+    has_signal = sum(1 for d in dicts if any(k.lower() in _JOB_SIGNAL_KEYS for k in d))
+    avg_keys = sum(len(d) for d in dicts) / len(dicts)
+    # Real postings carry a title, at least one job-specific field, and several
+    # fields overall (menus/categories/addresses are thin title-only lists).
+    return has_title >= 1 and has_signal >= 1 and avg_keys >= 4
+
+
+def _walk_best_job_list(o):
+    best: list = []
+
+    def walk(x):
+        nonlocal best
+        if isinstance(x, list):
+            if _looks_like_job_list(x) and len(x) > len(best):
+                best = x
+            for i in x[:5]:
+                walk(i)
+        elif isinstance(x, dict):
+            for v in x.values():
+                walk(v)
+    walk(o)
+    return best
+
+
+def next_data_jobs(career_url: str) -> list[dict]:
+    """Next.js SSG sites embed the job list in __NEXT_DATA__ — parse it from the
+    SSR HTML (no render), choosing the list that actually looks like postings."""
+    import json
+    from urllib.parse import urlparse
+    try:
+        r = requests.get(career_url, headers={"User-Agent": "Mozilla/5.0 Chrome/120"}, timeout=_TIMEOUT)
+        m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', r.text, re.S)
+        if not m:
+            return []
+        items = _walk_best_job_list(json.loads(m.group(1)))
+    except Exception:
+        return []
+    p = urlparse(career_url)
+    jobs = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        title = _first(it, _TITLE_KEYS)
+        if not title or len(title) < 3:
+            continue
+        url = _first(it, _URL_KEYS)
+        if url and url.startswith("/"):
+            url = f"{p.scheme}://{p.netloc}" + url
+        if not url:
+            jid = it.get("id") or it.get("jobId") or it.get("slug")
+            url = f"{p.scheme}://{p.netloc}/job/{jid}" if jid else f"{p.scheme}://{p.netloc}"
+        jobs.append({"title": title[:200], "url": url,
+                     "location": _first(it, _LOC_KEYS)[:120],
+                     "description": _strip(_first(it, _DESC_KEYS))})
+    return jobs
+
+
 async def sniff_jobs(career_url: str) -> list[dict]:
-    """Render the SPA, capture its job-list JSON endpoint(s), re-fetch + parse."""
+    """Render the SPA, capture its job-list JSON endpoint(s), re-fetch + parse.
+    First tries __NEXT_DATA__ (cheap, no render) for Next.js SSG sites."""
+    import asyncio
     try:
         from app.services.browser_pool import get_browser
         from urllib.parse import urlparse
@@ -113,6 +188,15 @@ async def sniff_jobs(career_url: str) -> list[dict]:
         return []
     p = urlparse(career_url)
     origin = f"{p.scheme}://{p.netloc}"
+
+    try:
+        nd = await asyncio.to_thread(next_data_jobs, career_url)
+        if nd:
+            logger.info(f"[spa_sniff] {origin} → {len(nd)} jobs via __NEXT_DATA__")
+            return nd
+    except Exception:
+        pass
+
     candidates: list[str] = []
 
     browser = await get_browser()
