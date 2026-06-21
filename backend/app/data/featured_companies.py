@@ -28,7 +28,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="VNG",
         homepage="https://vng.com.vn",
-        career_url="https://careers.vng.com.vn",
+        career_url="https://career.vng.com.vn/",
     ),
     FeaturedCompany(
         name="Tiki",
@@ -58,7 +58,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Lazada",
         homepage="https://www.lazada.vn",
-        career_url="https://jobs.lazada.com",
+        career_url="https://www.lazada.com/en/careers/",
     ),
     FeaturedCompany(
         name="Sea",
@@ -172,7 +172,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Rikkeisoft",
         homepage="https://rikkeisoft.com",
-        career_url="https://careers.rikkeisoft.com",
+        career_url="https://tuyendung.rikkeisoft.com/",
     ),
     FeaturedCompany(
         name="CMC Global",
@@ -194,7 +194,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Vietcombank",
         homepage="https://vietcombank.com.vn",
-        career_url="https://careers.vietcombank.com.vn",
+        career_url="https://tuyendung.vietcombank.com.vn/viewalljobs/",
     ),
     FeaturedCompany(
         name="BIDV",
@@ -254,12 +254,12 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="TPBank",
         homepage="https://tpbank.com.vn",
-        career_url="https://tuyendung.tpbank.com.vn",
+        career_url="https://tuyendung.tpb.vn/vi/jobs",
     ),
     FeaturedCompany(
         name="ACB",
         homepage="https://acb.com.vn",
-        career_url="https://tuyendung.acb.com.vn",
+        career_url="https://www.acbjobs.com.vn/alljobs",
     ),
     FeaturedCompany(
         name="HDBank",
@@ -306,7 +306,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Heineken Vietnam",
         homepage="https://heinekenvietnam.com",
-        career_url="https://careers.heineken-vietnam.com.vn",
+        career_url="https://careers.theheinekencompany.com/Tieng-Viet/Job-Listing?operatings_company%5B0%5D=524",
     ),
     FeaturedCompany(
         name="Nestlé Vietnam",
