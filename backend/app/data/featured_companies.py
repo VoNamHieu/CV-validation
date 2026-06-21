@@ -491,6 +491,16 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         career_url="https://www.hellmann.com/en/career",
     ),
     FeaturedCompany(
+        name="Viettel Post",
+        homepage="https://viettelpost.com.vn",
+        career_url="https://viettelpost.com.vn/tuyen-dung/",
+    ),
+    FeaturedCompany(
+        name="Gemadept",
+        homepage="https://www.gemadept.com.vn",
+        career_url="https://www.gemadept.com.vn/tuyen-dung/",
+    ),
+    FeaturedCompany(
         name="Bee Logistics",
         homepage="https://beelogistics.com",
         career_url="https://recruit.beelogistics.com/Customer/Career",
