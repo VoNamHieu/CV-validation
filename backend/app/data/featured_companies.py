@@ -311,7 +311,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Nestlé Vietnam",
         homepage="https://nestle.com.vn",
-        career_url="https://careers.nestle.com/vietnam",
+        career_url="https://www.nestle.com/jobs/search-jobs?keyword=&country=VN",
     ),
     FeaturedCompany(
         name="Coca-Cola",
@@ -341,7 +341,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="IKEA",
         homepage="https://ikea.com",
-        career_url="https://careers.ikea.com",
+        career_url="https://jobs.ikea.com/en",
     ),
     FeaturedCompany(
         name="Decathlon",
@@ -423,7 +423,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="UPS",
         homepage="https://ups.com",
-        career_url="https://careers.ups.com",
+        career_url="https://www.jobs-ups.com/apac/vi/",
     ),
     FeaturedCompany(
         name="DB Schenker",
@@ -500,12 +500,12 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="HSBC",
         homepage="https://hsbc.com",
-        career_url="https://careers.hsbc.com",
+        career_url="https://portal.careers.hsbc.com/careers?location=vietnam",
     ),
     FeaturedCompany(
         name="Standard Chartered",
         homepage="https://sc.com",
-        career_url="https://careers.sc.com",
+        career_url="https://jobs.standardchartered.com/Home?utm_source=careersite",
     ),
     FeaturedCompany(
         name="Citi",
@@ -520,14 +520,14 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="OCBC",
         homepage="https://ocbc.com",
-        career_url="https://careers.ocbc.com",
+        career_url="https://ocbc.wd102.myworkdayjobs.com/External",
     ),
 
     # ── Insurance ─────────────────────────────────────────────────────
     FeaturedCompany(
         name="Sun Life Vietnam",
         homepage="https://sunlife.com.vn",
-        career_url="https://careers.sunlife.com/vn",
+        career_url="https://www.sunlife.com.vn/vn/ve-chung-toi/tro-thanh-nhan-vien/vi-tri-tuyen-dung/",
     ),
     FeaturedCompany(
         name="Manulife",
@@ -537,7 +537,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="AIA",
         homepage="https://aia.com.vn",
-        career_url="https://careers.aia.com",
+        career_url="https://aia.wd3.myworkdayjobs.com/External",
     ),
     FeaturedCompany(
         name="Prudential",
@@ -586,7 +586,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Samsung",
         homepage="https://samsung.com",
-        career_url="https://careers.samsung.com",
+        career_url="https://www.samsungcareers.com.vn/#/jobs-list",
     ),
     FeaturedCompany(
         name="LG",
@@ -670,7 +670,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="ABB",
         homepage="https://abb.com",
-        career_url="https://careers.abb.com",
+        career_url="https://careers.abb/global/en/home",
     ),
     FeaturedCompany(
         name="GE Vernova",
@@ -680,7 +680,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="3M",
         homepage="https://3m.com",
-        career_url="https://careers.3m.com",
+        career_url="https://3m.wd1.myworkdayjobs.com/en-US/Search",
     ),
 
     # ── Tobacco ───────────────────────────────────────────────────────
@@ -751,7 +751,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="SAP",
         homepage="https://sap.com",
-        career_url="https://careers.sap.com",
+        career_url="https://jobs.sap.com/go/SAP_Labs_Vietnam/9283701/",
     ),
     FeaturedCompany(
         name="Salesforce",
@@ -766,7 +766,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Atlassian",
         homepage="https://atlassian.com",
-        career_url="https://careers.atlassian.com",
+        career_url="https://www.atlassian.com/company/careers/all-jobs",
     ),
 
     # ── Consulting / Professional Services ───────────────────────────

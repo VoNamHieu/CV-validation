@@ -11,6 +11,7 @@ Returns plain dicts: {"title", "url", "location", "description"}.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from urllib.parse import urlparse
 
@@ -223,6 +224,57 @@ def _parse_openings(html: str) -> list:
     return []
 
 
+# ── Workday — dominant enterprise ATS (multinationals). Public cxs JSON API. ──
+# Workday's cxs WAF is picky: it 400s the full realistic UA + multi-type Accept.
+# A short UA + clean application/json gets through.
+_JSON_POST = {"User-Agent": "Mozilla/5.0 Chrome/120", "Accept": "application/json",
+              "Content-Type": "application/json"}
+_VN_MARKERS = ("vietnam", "viet nam", "việt nam", "hanoi", "ha noi", "hà nội",
+               "ho chi minh", "hồ chí minh", "hcmc", "da nang", "đà nẵng",
+               "hai phong", "can tho", ", vn")
+_WD_RX = re.compile(r"https?://([^.]+)\.(wd\d+)\.myworkdayjobs\.com(/[^?]*)?", re.I)
+
+
+def _is_vn_loc(loc: str) -> bool:
+    l = (loc or "").lower()
+    return any(m in l for m in _VN_MARKERS)
+
+
+def _is_workday(url: str) -> bool:
+    return bool(_WD_RX.match(url or ""))
+
+
+def _workday(career_url: str) -> list[dict]:
+    m = _WD_RX.match(career_url)
+    if not m:
+        return []
+    tenant, wd, path = m.group(1), m.group(2), (m.group(3) or "")
+    segs = [s for s in path.strip("/").split("/")
+            if s and not re.match(r"^[a-z]{2}(-[A-Za-z]{2})?$", s)]
+    site = segs[0] if segs else "External"
+    base = f"https://{tenant}.{wd}.myworkdayjobs.com"
+    api = f"{base}/wday/cxs/{tenant}/{site}/jobs"
+    country = os.getenv("DISCOVER_COUNTRY", "Vietnam")
+    out = []
+    try:
+        # searchText narrows to the country server-side (big global tenants have
+        # thousands of jobs); then keep only ones whose location is really VN.
+        r = requests.post(api, headers=_JSON_POST, timeout=_TIMEOUT,
+                          json={"limit": 20, "offset": 0, "searchText": country, "appliedFacets": {}})
+        if r.status_code == 200:
+            for j in (r.json() or {}).get("jobPostings", []):
+                loc = j.get("locationsText", "") or ""
+                if not _is_vn_loc(loc):
+                    continue
+                ext = j.get("externalPath", "") or ""
+                out.append({"title": j.get("title", ""), "url": base + ext if ext else base,
+                            "location": loc, "description": ""})
+    except Exception as e:
+        logger.info(f"[ats] workday {tenant} failed: {str(e)[:80]}")
+    logger.info(f"[ats] workday:{tenant}/{site} → {len(out)} VN jobs")
+    return out
+
+
 def _is_basevn(career_url: str, html: str | None) -> bool:
     host = (urlparse(career_url).netloc or "").lower()
     if host.endswith(".talent.vn"):
@@ -263,6 +315,15 @@ def _basevn(career_url: str, html: str | None) -> list[dict]:
 def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
     """Detect the ATS (from URL, then embedded in HTML) and fetch its jobs.
     Returns [] when no ATS is detected or the API yields nothing."""
+    # Workday — parse tenant/site from the URL and hit its cxs JSON API.
+    if _is_workday(career_url):
+        try:
+            jobs = [j for j in _workday(career_url) if j.get("title") and j.get("url")]
+            if jobs:
+                return jobs
+        except Exception as e:
+            logger.info(f"[ats] workday failed for {career_url}: {str(e)[:80]}")
+
     # base.vn (talent.vn) parses the page JSON rather than calling a slug API.
     if _is_basevn(career_url, html):
         try:
