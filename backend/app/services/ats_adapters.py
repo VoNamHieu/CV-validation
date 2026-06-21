@@ -1,0 +1,199 @@
+"""Pull jobs from companies' own ATS via their PUBLIC JSON APIs.
+
+Many career pages are SPA/ATS shells that scraping can't read — but the ATS
+(Lever, Greenhouse, Ashby, Recruitee, SmartRecruiters) exposes a free public
+JSON feed with full job data incl. descriptions. No API key, no payment. We
+detect the ATS from the career URL or from ATS signals embedded in the career
+page HTML, then hit its API.
+
+Returns plain dicts: {"title", "url", "location", "description"}.
+"""
+from __future__ import annotations
+
+import logging
+import re
+from urllib.parse import urlparse
+
+import requests
+
+logger = logging.getLogger(__name__)
+
+_TIMEOUT = 12
+_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+}
+
+
+def _get_json(url: str):
+    try:
+        r = requests.get(url, headers=_HEADERS, timeout=_TIMEOUT)
+        if r.status_code == 200 and r.text:
+            return r.json()
+        logger.info(f"[ats] {url} → HTTP {r.status_code}")
+    except Exception as e:
+        logger.info(f"[ats] {url} failed: {str(e)[:80]}")
+    return None
+
+
+# ── Detection ───────────────────────────────────────────────────────────────
+
+def detect_ats(url: str) -> tuple[str, str] | None:
+    """(ats, slug) from an ATS-hosted career URL, else None."""
+    try:
+        p = urlparse(url)
+    except Exception:
+        return None
+    host = (p.netloc or "").lower()
+    segs = [s for s in (p.path or "").split("/") if s]
+    seg0 = segs[0] if segs else ""
+
+    if "lever.co" in host and seg0:
+        return ("lever", seg0)
+    if "greenhouse.io" in host and seg0:
+        return ("greenhouse", seg0)
+    if "ashbyhq.com" in host and seg0:
+        return ("ashby", seg0)
+    if "smartrecruiters.com" in host and seg0:
+        return ("smartrecruiters", seg0)
+    if host.endswith(".recruitee.com"):
+        sub = host.split(".")[0]
+        if sub not in ("www", "recruitee"):
+            return ("recruitee", sub)
+    return None
+
+
+_HTML_SIGNALS = [
+    ("greenhouse", re.compile(r"(?:boards|job-boards)\.greenhouse\.io/(?:embed/job_board\?for=)?([a-z0-9_-]+)", re.I)),
+    ("greenhouse", re.compile(r"boards-api\.greenhouse\.io/v1/boards/([a-z0-9_-]+)", re.I)),
+    ("lever", re.compile(r"(?:jobs|hire)\.lever\.co/([a-z0-9_-]+)", re.I)),
+    ("lever", re.compile(r"api\.lever\.co/v0/postings/([a-z0-9_-]+)", re.I)),
+    ("ashby", re.compile(r"(?:jobs\.ashbyhq\.com|api\.ashbyhq\.com/posting-api/job-board)/([a-z0-9_-]+)", re.I)),
+    ("recruitee", re.compile(r"([a-z0-9_-]+)\.recruitee\.com", re.I)),
+    ("smartrecruiters", re.compile(r"(?:careers|jobs)\.smartrecruiters\.com/([a-z0-9_-]+)", re.I)),
+    ("smartrecruiters", re.compile(r"api\.smartrecruiters\.com/v1/companies/([a-z0-9_-]+)", re.I)),
+]
+
+
+def detect_ats_in_html(html: str) -> tuple[str, str] | None:
+    """Find an ATS the career page embeds (iframe/script/link), with its slug."""
+    if not html:
+        return None
+    for ats, rx in _HTML_SIGNALS:
+        m = rx.search(html)
+        if m:
+            slug = m.group(1)
+            if slug.lower() not in ("www", "recruitee", "embed", "v1", "v0"):
+                return (ats, slug)
+    return None
+
+
+# ── Per-ATS fetchers ──────────────────────────────────────────────────────────
+
+def _strip_html(s: str) -> str:
+    if not s:
+        return ""
+    if "<" in s and ">" in s:
+        from bs4 import BeautifulSoup
+        return BeautifulSoup(s, "html.parser").get_text(separator="\n", strip=True)
+    return s
+
+
+def _lever(slug: str) -> list[dict]:
+    data = _get_json(f"https://api.lever.co/v0/postings/{slug}?mode=json")
+    if not isinstance(data, list):  # error responses come back as a dict
+        return []
+    out = []
+    for j in data:
+        cats = j.get("categories") or {}
+        out.append({
+            "title": j.get("text", ""),
+            "url": j.get("hostedUrl", ""),
+            "location": cats.get("location", "") or "",
+            "description": j.get("descriptionPlain") or _strip_html(j.get("description", "")),
+        })
+    return out
+
+
+def _greenhouse(slug: str) -> list[dict]:
+    data = _get_json(f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=true")
+    out = []
+    for j in (data or {}).get("jobs", []):
+        loc = j.get("location") or {}
+        out.append({
+            "title": j.get("title", ""),
+            "url": j.get("absolute_url", ""),
+            "location": loc.get("name", "") if isinstance(loc, dict) else "",
+            "description": _strip_html(j.get("content", "")),
+        })
+    return out
+
+
+def _ashby(slug: str) -> list[dict]:
+    data = _get_json(f"https://api.ashbyhq.com/posting-api/job-board/{slug}")
+    out = []
+    for j in (data or {}).get("jobs", []):
+        out.append({
+            "title": j.get("title", ""),
+            "url": j.get("jobUrl", "") or j.get("applyUrl", ""),
+            "location": j.get("location", "") or "",
+            "description": j.get("descriptionPlain") or _strip_html(j.get("descriptionHtml", "")),
+        })
+    return out
+
+
+def _recruitee(slug: str) -> list[dict]:
+    data = _get_json(f"https://{slug}.recruitee.com/api/offers/")
+    out = []
+    for o in (data or {}).get("offers", []):
+        out.append({
+            "title": o.get("title", ""),
+            "url": o.get("careers_url") or o.get("url", ""),
+            "location": o.get("city", "") or o.get("location", "") or "",
+            "description": _strip_html(o.get("description", "")),
+        })
+    return out
+
+
+def _smartrecruiters(slug: str) -> list[dict]:
+    data = _get_json(f"https://api.smartrecruiters.com/v1/companies/{slug}/postings?limit=100")
+    out = []
+    for j in (data or {}).get("content", []):
+        loc = j.get("location") or {}
+        jid = j.get("id", "")
+        out.append({
+            "title": j.get("name", ""),
+            "url": f"https://jobs.smartrecruiters.com/{slug}/{jid}" if jid else "",
+            "location": loc.get("city", "") if isinstance(loc, dict) else "",
+            "description": "",  # SmartRecruiters JD needs a per-posting call; skip for now
+        })
+    return out
+
+
+_FETCHERS = {
+    "lever": _lever,
+    "greenhouse": _greenhouse,
+    "ashby": _ashby,
+    "recruitee": _recruitee,
+    "smartrecruiters": _smartrecruiters,
+}
+
+
+def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
+    """Detect the ATS (from URL, then embedded in HTML) and fetch its jobs.
+    Returns [] when no ATS is detected or the API yields nothing."""
+    hit = detect_ats(career_url) or (detect_ats_in_html(html) if html else None)
+    if not hit:
+        return []
+    ats, slug = hit
+    fetcher = _FETCHERS.get(ats)
+    if not fetcher:
+        return []
+    try:
+        jobs = [j for j in fetcher(slug) if j.get("title") and j.get("url")]
+    except Exception as e:  # never let a quirky ATS response break the pipeline
+        logger.info(f"[ats] {ats}:{slug} fetch failed: {str(e)[:80]}")
+        return []
+    logger.info(f"[ats] {ats}:{slug} → {len(jobs)} jobs ({career_url})")
+    return jobs

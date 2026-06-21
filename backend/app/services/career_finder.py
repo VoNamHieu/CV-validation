@@ -846,9 +846,36 @@ async def extract_jobs_from_career_page(career_url: str) -> list[JobListing]:
          career pages that don't follow URL conventions), ask the LLM to pick
          job links out of the candidate inventory. The LLM may not invent URLs.
     """
+    import asyncio as _asyncio
+    from app.services.ats_adapters import fetch_ats_jobs
+
+    def _as_listings(ats_jobs):
+        return [
+            JobListing(title=j["title"][:200], url=j["url"], location=(j.get("location") or "")[:120])
+            for j in ats_jobs[:50]
+        ]
+
+    # Fast path 1: career URL is itself a known ATS host → hit its public JSON
+    # API directly, no page fetch (avoids slow SPA renders entirely).
+    try:
+        ats_jobs = await _asyncio.to_thread(fetch_ats_jobs, career_url, None)
+        if ats_jobs:
+            return _as_listings(ats_jobs)
+    except Exception as e:
+        logger.info(f"[stage4] ATS(url) skipped for {career_url}: {e}")
+
     ok, html, _ = await _fetch_html(career_url)
     if not ok:
         return []
+
+    # Fast path 2: the career page EMBEDS an ATS (iframe/script) → use its API.
+    try:
+        ats_jobs = await _asyncio.to_thread(fetch_ats_jobs, career_url, html)
+        if ats_jobs:
+            return _as_listings(ats_jobs)
+    except Exception as e:
+        logger.info(f"[stage4] ATS(html) skipped for {career_url}: {e}")
+
     soup = BeautifulSoup(html, "html.parser")
     base = _apex_url(career_url) or career_url
 
