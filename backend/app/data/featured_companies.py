@@ -418,7 +418,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="FedEx",
         homepage="https://fedex.com",
-        career_url="https://careers.fedex.com",
+        career_url="https://careers.fedex.com/vi/jobs?location_name=Vietnam&location_type=4",
     ),
     FeaturedCompany(
         name="UPS",
@@ -473,7 +473,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="DHL",
         homepage="https://www.dhl.com",
-        career_url="https://careers.dhl.com/apac/vi",
+        career_url="https://careers.dhl.com/global/en/search-results?keywords=&location=Vietnam",
     ),
     FeaturedCompany(
         name="Nippon Express",
@@ -508,7 +508,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Maersk",
         homepage="https://www.maersk.com",
-        career_url="https://www.maersk.com/careers",
+        career_url="https://www.maersk.com/careers/vacancies?searchText=&city=",
     ),
 
     # ── International Banking ─────────────────────────────────────────

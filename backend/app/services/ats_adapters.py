@@ -370,14 +370,23 @@ def _basevn(career_url: str, html: str | None) -> list[dict]:
 def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
     """Detect the ATS (from URL, then embedded in HTML) and fetch its jobs.
     Returns [] when no ATS is detected or the API yields nothing."""
-    # Workday — parse tenant/site from the URL and hit its cxs JSON API.
-    if _is_workday(career_url):
+    # Workday — parse tenant/site from the URL (or a myworkdayjobs URL embedded
+    # in the page HTML, e.g. Maersk) and hit its cxs JSON API.
+    wd_url = career_url if _is_workday(career_url) else None
+    if not wd_url and html:
+        # Un-escape JSON-encoded URLs (/ / \/) so embedded Workday links
+        # like Maersk's "https://maersk.wd3.myworkdayjobs.com/PT_Careers" match.
+        unesc = html.replace("\\u002f", "/").replace("\\u002F", "/").replace("\\/", "/")
+        m = re.search(r"https?://[a-z0-9-]+\.wd\d+\.myworkdayjobs\.com/[A-Za-z0-9_\-]+", unesc, re.I)
+        if m:
+            wd_url = m.group(0)
+    if wd_url:
         try:
-            jobs = [j for j in _workday(career_url) if j.get("title") and j.get("url")]
+            jobs = [j for j in _workday(wd_url) if j.get("title") and j.get("url")]
             if jobs:
                 return jobs
         except Exception as e:
-            logger.info(f"[ats] workday failed for {career_url}: {str(e)[:80]}")
+            logger.info(f"[ats] workday failed for {wd_url}: {str(e)[:80]}")
 
     # base.vn (talent.vn) parses the page JSON rather than calling a slug API.
     if _is_basevn(career_url, html):
