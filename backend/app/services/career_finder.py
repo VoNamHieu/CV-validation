@@ -915,6 +915,18 @@ async def extract_jobs_from_career_page(career_url: str) -> list[JobListing]:
         if lj.url not in merged_urls:
             jobs.append(lj)
             merged_urls.add(lj.url)
+
+    # Last resort: a custom SPA whose jobs come from an internal JSON API the
+    # static/rendered HTML doesn't expose. Render + sniff that API generically.
+    if not jobs:
+        try:
+            from app.services.spa_sniff import sniff_jobs
+            sniffed = await sniff_jobs(career_url)
+            for s in sniffed[:50]:
+                jobs.append(JobListing(title=s["title"][:200], url=s["url"],
+                                       location=(s.get("location") or "")[:120]))
+        except Exception as e:
+            logger.info(f"[stage4] SPA sniff failed for {career_url}: {e}")
     return jobs
 
 
