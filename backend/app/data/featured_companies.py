@@ -28,7 +28,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="VNG",
         homepage="https://vng.com.vn",
-        career_url="https://career.vng.com.vn/",
+        career_url="https://career.vng.com.vn/vi/tim-kiem-viec-lam",
     ),
     FeaturedCompany(
         name="Tiki",

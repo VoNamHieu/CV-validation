@@ -77,14 +77,7 @@ def _strip(s: str) -> str:
     return s
 
 
-def _parse_api(api_url: str, origin: str) -> list[dict]:
-    try:
-        r = requests.get(api_url, headers=_HEADERS, timeout=_TIMEOUT)
-        if r.status_code != 200 or "json" not in r.headers.get("content-type", ""):
-            return []
-        items = _find_job_list(r.json())
-    except Exception:
-        return []
+def _items_to_jobs(items, origin: str) -> list[dict]:
     out = []
     for it in items:
         if not isinstance(it, dict):
@@ -158,23 +151,7 @@ def next_data_jobs(career_url: str) -> list[dict]:
     except Exception:
         return []
     p = urlparse(career_url)
-    jobs = []
-    for it in items:
-        if not isinstance(it, dict):
-            continue
-        title = _first(it, _TITLE_KEYS)
-        if not title or len(title) < 3:
-            continue
-        url = _first(it, _URL_KEYS)
-        if url and url.startswith("/"):
-            url = f"{p.scheme}://{p.netloc}" + url
-        if not url:
-            jid = it.get("id") or it.get("jobId") or it.get("slug")
-            url = f"{p.scheme}://{p.netloc}/job/{jid}" if jid else f"{p.scheme}://{p.netloc}"
-        jobs.append({"title": title[:200], "url": url,
-                     "location": _first(it, _LOC_KEYS)[:120],
-                     "description": _strip(_first(it, _DESC_KEYS))})
-    return jobs
+    return _items_to_jobs(items, f"{p.scheme}://{p.netloc}")
 
 
 async def sniff_jobs(career_url: str) -> list[dict]:
@@ -197,20 +174,31 @@ async def sniff_jobs(career_url: str) -> list[dict]:
     except Exception:
         pass
 
-    candidates: list[str] = []
-
+    import json
     browser = await get_browser()
     ctx = await browser.new_context(locale="vi-VN", user_agent="Mozilla/5.0 Chrome/120")
     page = await ctx.new_page()
 
-    def on_resp(r):
+    read_tasks: list = []
+
+    async def _read(resp):
         try:
-            if r.request.method != "GET":
-                return
+            return resp.url, await resp.text()
+        except Exception:
+            return resp.url, ""
+
+    def on_resp(r):
+        # Capture any JSON the page fetches that could be a job list — covers
+        # GET, POST and GraphQL (read the body directly, no re-fetch/replay).
+        try:
             u = r.url
             ct = r.headers.get("content-type", "")
-            if "json" in ct and _JOB_URL_RX.search(u) and not any(n in u.lower() for n in _NOISE):
-                candidates.append(u)
+            if "json" not in ct or any(n in u.lower() for n in _NOISE):
+                return
+            ul = u.lower()
+            if _JOB_URL_RX.search(u) or "graphql" in ul or "/api/" in ul:
+                if len(read_tasks) < 30:
+                    read_tasks.append(asyncio.ensure_future(_read(r)))
         except Exception:
             pass
     page.on("response", on_resp)
@@ -221,15 +209,26 @@ async def sniff_jobs(career_url: str) -> list[dict]:
         except Exception:
             pass
         await page.wait_for_timeout(2000)
+        bodies = []
+        if read_tasks:
+            done = await asyncio.gather(*read_tasks, return_exceptions=True)
+            bodies = [d for d in done if isinstance(d, tuple) and d[1]]
     except Exception as e:
         logger.info(f"[spa_sniff] render failed {career_url}: {str(e)[:60]}")
+        bodies = []
     finally:
         await ctx.close()
 
     best: list[dict] = []
-    for cu in dict.fromkeys(candidates):  # de-dup, keep order
-        jobs = _parse_api(cu, origin)
+    best_src = ""
+    for url, body in bodies:
+        try:
+            data = json.loads(body)
+        except Exception:
+            continue
+        jobs = _items_to_jobs(_find_job_list(data), origin)
         if len(jobs) > len(best):
-            best = jobs
-            logger.info(f"[spa_sniff] {origin} → {len(jobs)} jobs via {cu[:70]}")
+            best, best_src = jobs, url
+    if best:
+        logger.info(f"[spa_sniff] {origin} → {len(best)} jobs via {best_src[:70]}")
     return best
