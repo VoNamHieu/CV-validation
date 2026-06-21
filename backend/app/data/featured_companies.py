@@ -441,6 +441,16 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         career_url="https://ghtk.vn/tuyen-dung",
     ),
     FeaturedCompany(
+        name="One Mount Group",
+        homepage="https://onemount.com",
+        career_url="https://careers.onemount.com/job-list",
+    ),
+    FeaturedCompany(
+        name="Golden Gate Group",
+        homepage="https://ggg.com.vn",
+        career_url="https://ggg.talent.vn/",
+    ),
+    FeaturedCompany(
         name="GHN",
         homepage="https://ghn.vn",
         career_url="https://ghn.vn/blogs/tuyen-dung",
