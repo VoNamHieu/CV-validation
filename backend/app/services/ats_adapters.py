@@ -367,6 +367,69 @@ def _basevn(career_url: str, html: str | None) -> list[dict]:
     return out
 
 
+# ── Eightfold AI ("pcsx") — Microsoft, NVIDIA, etc. ─────────────────────────
+# Public GET JSON: /api/pcsx/search?domain=<registrable-domain>&location=<loc>.
+# Response: {"data": {"positions": [{name, locations[], id, positionUrl, ...}]}}.
+# Job detail page = /careers?pid=<id>&domain=<domain>. The `domain` param is the
+# tenant's registrable domain (microsoft.com, nvidia.com), derivable from host.
+_EIGHTFOLD_MARKERS = ("eightfold", "/api/pcsx/", '"pcsx"', "pcsx/search")
+
+
+def _is_eightfold(career_url: str, html: str | None) -> bool:
+    if html and any(m in html.lower() for m in _EIGHTFOLD_MARKERS):
+        return True
+    host = (urlparse(career_url).netloc or "").lower()
+    return host.startswith("apply.careers.") or host.startswith("jobs.") and "/careers" in (career_url or "")
+
+
+def _registrable_domain(host: str) -> str:
+    host = (host or "").lower().split(":")[0]
+    parts = host.split(".")
+    # handle 2-level public suffixes (.com.vn, .co.uk) → keep 3 labels
+    if len(parts) >= 3 and parts[-2] in ("com", "co", "net", "org", "edu", "gov"):
+        return ".".join(parts[-3:])
+    return ".".join(parts[-2:]) if len(parts) >= 2 else host
+
+
+def _eightfold(career_url: str) -> list[dict]:
+    p = urlparse(career_url)
+    origin = f"{p.scheme}://{p.netloc}"
+    domain = _registrable_domain(p.netloc)
+    country = os.getenv("DISCOVER_COUNTRY", "Vietnam")
+    out, seen = [], set()
+    for start in (0, 10, 20):
+        try:
+            r = requests.get(f"{origin}/api/pcsx/search", headers=_JSON_POST, timeout=_TIMEOUT,
+                             params={"domain": domain, "query": "", "location": country,
+                                     "start": start, "sort_by": "relevance", "num": 10})
+            if r.status_code != 200:
+                break
+            data = (r.json() or {}).get("data", {}) or {}
+            positions = data.get("positions", []) or []
+            if not positions:
+                break
+            for j in positions:
+                jid = j.get("id")
+                title = (j.get("name") or "").strip()
+                if not title or jid in seen:
+                    continue
+                seen.add(jid)
+                locs = j.get("locations") or []
+                loc = ", ".join(locs) if isinstance(locs, list) else str(locs)
+                if not _is_vn_loc(loc):
+                    continue
+                url = j.get("positionUrl") or f"{origin}/careers?pid={jid}&domain={domain}"
+                out.append({"title": title[:200], "url": url,
+                            "location": loc[:120], "description": ""})
+            if len(positions) < 10 or len(out) >= 25:
+                break
+        except Exception as e:
+            logger.info(f"[ats] eightfold {domain} page {start} failed: {str(e)[:80]}")
+            break
+    logger.info(f"[ats] eightfold:{domain} → {len(out)} VN jobs ({origin})")
+    return out
+
+
 def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
     """Detect the ATS (from URL, then embedded in HTML) and fetch its jobs.
     Returns [] when no ATS is detected or the API yields nothing."""
@@ -396,6 +459,15 @@ def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
                 return jobs
         except Exception as e:
             logger.info(f"[ats] base.vn failed for {career_url}: {str(e)[:80]}")
+
+    # Eightfold AI (pcsx) — public search JSON, filtered to VN locations.
+    if _is_eightfold(career_url, html):
+        try:
+            jobs = [j for j in _eightfold(career_url) if j.get("title") and j.get("url")]
+            if jobs:
+                return jobs
+        except Exception as e:
+            logger.info(f"[ats] eightfold failed for {career_url}: {str(e)[:80]}")
 
     # SuccessFactors (SAP) — parse the SSR /search/ job tiles.
     if _is_successfactors(career_url, html):

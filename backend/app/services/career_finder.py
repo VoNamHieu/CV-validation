@@ -717,6 +717,10 @@ _CTA_BLACKLIST = {
     "ung tuyen", "ung tuyen ngay",
     "xem chi tiet", "chi tiet", "video", "tin tuc", "dang ky", "dang ky ngay",
     "nop don", "nop ho so", "view detail", "view details", "kham pha",
+    # listing-page nav/section headings (not jobs)
+    "tuyen dung", "viec lam", "co hoi nghe nghiep", "co hoi viec lam",
+    "quy trinh tuyen dung", "job search", "search jobs", "tat ca viec lam",
+    "vi sao nen gia nhap", "moi truong lam viec", "phuc loi", "van hoa",
 }
 
 
