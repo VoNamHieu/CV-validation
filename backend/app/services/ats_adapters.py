@@ -521,6 +521,51 @@ def _phenom_services(career_url: str) -> list[dict]:
     return out
 
 
+# ── Oracle Cloud HCM / Fusion (Hilton, …) — public recruiting REST ──────────
+# Oracle Fusion candidate-experience sites (*.oraclecloud.com/hcmUI/Candidate
+# Experience/.../sites/<SITE>/) expose a public REST API:
+#   GET {host}/hcmRestApi/resources/latest/recruitingCEJobRequisitions
+#       ?onlyData=true&finder=findReqs;siteNumber=<SITE>,keyword=Vietnam,limit=50
+#   → {items:[{requisitionList:[{Id, Title, PrimaryLocation, ...}]}]}
+# Detail = {host}/hcmUI/CandidateExperience/en/sites/<SITE>/job/<Id>.
+def _is_oracle_hcm(career_url: str) -> bool:
+    p = urlparse(career_url or "")
+    return "oraclecloud.com" in (p.netloc or "").lower() and "/sites/" in (p.path or "")
+
+
+def _oracle_hcm(career_url: str) -> list[dict]:
+    p = urlparse(career_url)
+    origin = f"{p.scheme}://{p.netloc}"
+    m = re.search(r"/sites/([A-Za-z0-9_]+)", p.path)
+    site = m.group(1) if m else "CX_1"
+    country = os.getenv("DISCOVER_COUNTRY", "Vietnam")
+    ep = f"{origin}/hcmRestApi/resources/latest/recruitingCEJobRequisitions"
+    finder = f"findReqs;siteNumber={site},facetsList=LOCATIONS;limit=50,keyword={country}"
+    out = []
+    try:
+        r = requests.get(ep, headers=_JSON_POST, timeout=_TIMEOUT,
+                         params={"onlyData": "true",
+                                 "expand": "requisitionList.secondaryLocations", "finder": finder})
+        if r.status_code != 200 or "json" not in r.headers.get("content-type", ""):
+            return []
+        items = (r.json() or {}).get("items", [])
+        rl = items[0].get("requisitionList", []) if items else []
+        for it in rl:
+            title = (it.get("Title") or "").strip()
+            loc = it.get("PrimaryLocation") or ""
+            if not title or not _is_vn_loc(loc):
+                continue
+            jid = it.get("Id")
+            url = (f"{origin}/hcmUI/CandidateExperience/en/sites/{site}/job/{jid}"
+                   if jid else career_url)
+            out.append({"title": title[:200], "url": url, "location": str(loc)[:120],
+                        "description": _strip_html(it.get("ShortDescriptionStr", ""))})
+    except Exception as e:
+        logger.info(f"[ats] oracle-hcm {origin} failed: {str(e)[:80]}")
+    logger.info(f"[ats] oracle-hcm:{site} → {len(out)} VN jobs ({origin})")
+    return out
+
+
 # ── TikTok / ByteDance (lifeattiktok.com) — public job-search API ───────────
 # careers.tiktok.com / lifeattiktok.com render via JS, but expose a clean POST:
 #   POST api.lifeattiktok.com/api/v1/public/supplier/search/job/posts
@@ -645,6 +690,15 @@ def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
                 return jobs
         except Exception as e:
             logger.info(f"[ats] workatsea failed for {career_url}: {str(e)[:80]}")
+
+    # Oracle Cloud HCM / Fusion — public recruiting REST API.
+    if _is_oracle_hcm(career_url):
+        try:
+            jobs = [j for j in _oracle_hcm(career_url) if j.get("title") and j.get("url")]
+            if jobs:
+                return jobs
+        except Exception as e:
+            logger.info(f"[ats] oracle-hcm failed for {career_url}: {str(e)[:80]}")
 
     # TikTok / ByteDance — public job-search API (JS-rendered site).
     if _is_tiktok(career_url):

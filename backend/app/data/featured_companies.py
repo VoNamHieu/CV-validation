@@ -799,7 +799,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Hilton",
         homepage="https://hilton.com",
-        career_url="https://careers.hilton.com",
+        career_url="https://efet.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/requisitions",
     ),
     FeaturedCompany(
         name="Hyatt",
