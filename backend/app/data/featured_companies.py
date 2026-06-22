@@ -182,7 +182,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Rikkeisoft",
         homepage="https://rikkeisoft.com",
-        career_url="https://tuyendung.rikkeisoft.com/",
+        career_url="https://tuyendung.rikkeisoft.com/recruitment/list-job",
     ),
     FeaturedCompany(
         name="CMC Global",
@@ -588,7 +588,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Maersk",
         homepage="https://www.maersk.com",
-        career_url="https://www.maersk.com/careers/vacancies?searchText=&city=",
+        career_url="https://www.maersk.com/careers/vacancies?searchText=&city=vietnam",
     ),
 
     # ── International Banking ─────────────────────────────────────────
@@ -605,7 +605,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Standard Chartered",
         homepage="https://sc.com",
-        career_url="https://jobs.standardchartered.com/Home?utm_source=careersite",
+        career_url="https://jobs.standardchartered.com/search/?q=&locationsearch=Vietnam",
     ),
     FeaturedCompany(
         name="Citi",
@@ -873,7 +873,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="McKinsey",
         homepage="https://www.mckinsey.com",
-        career_url="https://www.mckinsey.com/careers",
+        career_url="https://www.mckinsey.com/careers/search-jobs?countries=Vietnam",
     ),
     FeaturedCompany(
         name="Deloitte",
