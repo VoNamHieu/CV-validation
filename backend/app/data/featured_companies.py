@@ -48,7 +48,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Grab",
         homepage="https://grab.com",
-        career_url="https://grab.careers",
+        career_url="https://www.grab.careers/en/jobs/?orderby=0&pagesize=20&page=1&location=HCMC&country=Vietnam",
     ),
     FeaturedCompany(
         name="Be",
@@ -78,12 +78,12 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Agoda",
         homepage="https://www.agoda.com",
-        career_url="https://careers.agoda.com",
+        career_url="https://careersatagoda.com/vacancies/?keyword=&country=vietnam",
     ),
     FeaturedCompany(
         name="Traveloka",
         homepage="https://www.traveloka.com",
-        career_url="https://www.traveloka.com/en-id/careers",
+        career_url="https://careers.traveloka.com/jobs?location=VN",
     ),
     FeaturedCompany(
         name="Klook",
@@ -108,7 +108,12 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Cake",
         homepage="https://cake.vn",
-        career_url="https://jobs.lever.co/cake",
+        career_url="https://cake.vn/tuyen-dung/jobs",
+    ),
+    FeaturedCompany(
+        name="Visa",
+        homepage="https://www.visa.com.vn",
+        career_url="https://visa.wd5.myworkdayjobs.com/Visa?locationCountry=db69e8c8446c11de98360015c5e6daf6",
     ),
 
     # ── FPT / Viettel ─────────────────────────────────────────────────
