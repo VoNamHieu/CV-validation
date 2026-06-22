@@ -850,128 +850,61 @@ def _finalize(jobs: list[dict]) -> list[dict]:
     return out
 
 
-def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
-    """Detect the ATS (from URL, then embedded in HTML) and fetch its jobs.
-    Returns [] when no ATS is detected or the API yields nothing.
-    Every adapter's output passes through _finalize for consistent
-    dedup / nav-filtering / capping."""
-    # Workday — parse tenant/site from the URL (or a myworkdayjobs URL embedded
-    # in the page HTML, e.g. Maersk) and hit its cxs JSON API.
-    wd_url = career_url if _is_workday(career_url) else None
-    if not wd_url and html:
-        # Un-escape JSON-encoded URLs (/ / \/) so embedded Workday links
-        # like Maersk's "https://maersk.wd3.myworkdayjobs.com/PT_Careers" match.
+def _resolve_workday_url(career_url: str, html: str | None) -> str | None:
+    """The Workday tenant URL for this page: the career_url itself if it's a
+    myworkdayjobs URL, else one embedded in the HTML (e.g. Maersk links to its
+    Workday tenant with JSON-escaped slashes)."""
+    if _is_workday(career_url):
+        return career_url
+    if html:
         unesc = html.replace("\\u002f", "/").replace("\\u002F", "/").replace("\\/", "/")
         m = re.search(r"https?://[a-z0-9-]+\.wd\d+\.myworkdayjobs\.com/[A-Za-z0-9_\-]+", unesc, re.I)
         if m:
-            wd_url = m.group(0)
-    if wd_url:
+            return m.group(0)
+    return None
+
+
+# Adapter protocol: each is (name, detect(url, html) -> bool, fetch(url, html) ->
+# [{title,url,location,description}]). Tried in order; the first whose detect()
+# matches AND returns rows wins. Output always passes through _finalize. To add
+# an ATS: write _is_x / _x and append one line here — no other edits.
+_ADAPTERS: list = [
+    ("workday",        lambda u, h: _resolve_workday_url(u, h) is not None,
+                       lambda u, h: _workday(_resolve_workday_url(u, h))),
+    ("base.vn",        _is_basevn,                       lambda u, h: _basevn(u, h)),
+    ("workatsea",      _is_workatsea,                    lambda u, h: _workatsea(u)),
+    ("oracle-hcm",     lambda u, h: _is_oracle_hcm(u),   lambda u, h: _oracle_hcm(u)),
+    ("bytedance",      lambda u, h: bool(_bd_config(u)), lambda u, h: _bytedance_family(u)),
+    ("vpbanks",        lambda u, h: _is_vpbanks(u),      lambda u, h: _vpbanks(u)),
+    ("mbbank",         lambda u, h: _is_mbbank(u),       lambda u, h: _mbbank(u)),
+    ("iviec",          lambda u, h: _is_iviec(u),        lambda u, h: _iviec(u)),
+    ("ghn",            lambda u, h: _is_ghn(u),          lambda u, h: _ghn(u)),
+    ("phenom",         lambda u, h: _is_phenom_services(u), lambda u, h: _phenom_services(u)),
+    ("eightfold",      _is_eightfold,                    lambda u, h: _eightfold(u)),
+    ("successfactors", _is_successfactors,               lambda u, h: _successfactors(u, h)),
+]
+
+
+def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
+    """Detect the ATS (from URL, then embedded in HTML) and fetch its jobs.
+    Returns [] when no ATS is detected or the API yields nothing. Every
+    adapter's output passes through _finalize for consistent dedup /
+    nav-filtering / capping."""
+    for name, detect, fetch in _ADAPTERS:
         try:
-            jobs = [j for j in _workday(wd_url) if j.get("title") and j.get("url")]
+            if not detect(career_url, html):
+                continue
+            jobs = [j for j in (fetch(career_url, html) or []) if j.get("title") and j.get("url")]
             if jobs:
+                logger.info(f"[ats] {name} → {len(jobs)} jobs ({career_url})")
                 return _finalize(jobs)
         except Exception as e:
-            logger.info(f"[ats] workday failed for {wd_url}: {str(e)[:80]}")
+            logger.info(f"[ats] {name} failed for {career_url}: {str(e)[:80]}")
 
-    # base.vn (talent.vn) parses the page JSON rather than calling a slug API.
-    if _is_basevn(career_url, html):
-        try:
-            jobs = [j for j in _basevn(career_url, html) if j.get("title") and j.get("url")]
-            if jobs:
-                return _finalize(jobs)
-        except Exception as e:
-            logger.info(f"[ats] base.vn failed for {career_url}: {str(e)[:80]}")
-
-    # workatsea (Sea group: Shopee/SPX) — public job-list JSON, region=VN.
-    if _is_workatsea(career_url, html):
-        try:
-            jobs = [j for j in _workatsea(career_url) if j.get("title") and j.get("url")]
-            if jobs:
-                return _finalize(jobs)
-        except Exception as e:
-            logger.info(f"[ats] workatsea failed for {career_url}: {str(e)[:80]}")
-
-    # Oracle Cloud HCM / Fusion — public recruiting REST API.
-    if _is_oracle_hcm(career_url):
-        try:
-            jobs = [j for j in _oracle_hcm(career_url) if j.get("title") and j.get("url")]
-            if jobs:
-                return _finalize(jobs)
-        except Exception as e:
-            logger.info(f"[ats] oracle-hcm failed for {career_url}: {str(e)[:80]}")
-
-    # TikTok / ByteDance — same public job-search API (JS-rendered sites).
-    if _bd_config(career_url):
-        try:
-            jobs = [j for j in _bytedance_family(career_url) if j.get("title") and j.get("url")]
-            if jobs:
-                return _finalize(jobs)
-        except Exception as e:
-            logger.info(f"[ats] bytedance-family failed for {career_url}: {str(e)[:80]}")
-
-    # VPBank Securities — headless CMS API (post_type=tuyen-dung).
-    if _is_vpbanks(career_url):
-        try:
-            jobs = [j for j in _vpbanks(career_url) if j.get("title") and j.get("url")]
-            if jobs:
-                return _finalize(jobs)
-        except Exception as e:
-            logger.info(f"[ats] vpbanks failed for {career_url}: {str(e)[:80]}")
-
-    # MB Bank — paginated "libra" public API (JS SPA otherwise yields 0).
-    if _is_mbbank(career_url):
-        try:
-            jobs = [j for j in _mbbank(career_url) if j.get("title") and j.get("url")]
-            if jobs:
-                return _finalize(jobs)
-        except Exception as e:
-            logger.info(f"[ats] mbbank failed for {career_url}: {str(e)[:80]}")
-
-    # iVIEC — paginated VN bank ATS API (TPBank, Eximbank).
-    if _is_iviec(career_url):
-        try:
-            jobs = [j for j in _iviec(career_url) if j.get("title") and j.get("url")]
-            if jobs:
-                return _finalize(jobs)
-        except Exception as e:
-            logger.info(f"[ats] iviec failed for {career_url}: {str(e)[:80]}")
-
-    # GHN — public recruit gateway API (React SPA renders no anchors).
-    if _is_ghn(career_url):
-        try:
-            jobs = [j for j in _ghn(career_url) if j.get("title") and j.get("url")]
-            if jobs:
-                return _finalize(jobs)
-        except Exception as e:
-            logger.info(f"[ats] ghn failed for {career_url}: {str(e)[:80]}")
-
-    # Phenom ph-services — REST job API on the unprotected careersite host.
-    if _is_phenom_services(career_url):
-        try:
-            jobs = [j for j in _phenom_services(career_url) if j.get("title") and j.get("url")]
-            if jobs:
-                return _finalize(jobs)
-        except Exception as e:
-            logger.info(f"[ats] phenom-services failed for {career_url}: {str(e)[:80]}")
-
-    # Eightfold AI (pcsx) — public search JSON, filtered to VN locations.
-    if _is_eightfold(career_url, html):
-        try:
-            jobs = [j for j in _eightfold(career_url) if j.get("title") and j.get("url")]
-            if jobs:
-                return _finalize(jobs)
-        except Exception as e:
-            logger.info(f"[ats] eightfold failed for {career_url}: {str(e)[:80]}")
-
-    # SuccessFactors (SAP) — parse the SSR /search/ job tiles.
-    if _is_successfactors(career_url, html):
-        try:
-            jobs = [j for j in _successfactors(career_url, html) if j.get("title") and j.get("url")]
-            if jobs:
-                return _finalize(jobs)
-        except Exception as e:
-            logger.info(f"[ats] successfactors failed for {career_url}: {str(e)[:80]}")
-
+    # Generic slug-based ATS (Lever/Greenhouse/Ashby/SmartRecruiters/Recruitee),
+    # detected from the URL or embedded in the HTML. These list GLOBAL jobs, so
+    # keep only VN postings — unless none are VN-tagged (location-less or
+    # VN-domestic data), in which case keep everything rather than drop all.
     hit = detect_ats(career_url) or (detect_ats_in_html(html) if html else None)
     if not hit:
         return []
@@ -984,10 +917,6 @@ def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
     except Exception as e:  # never let a quirky ATS response break the pipeline
         logger.info(f"[ats] {ats}:{slug} fetch failed: {str(e)[:80]}")
         return []
-    # Slug-based ATS (Greenhouse/Lever/Ashby/SmartRecruiters/Recruitee) list the
-    # company's GLOBAL jobs. For the VN-focused featured list, keep only VN
-    # postings — but if none are tagged VN (a VN-domestic company that omits the
-    # location, or location-less data), keep everything rather than drop all.
     vn = [j for j in jobs if _is_vn_loc(j.get("location") or "")]
     if vn:
         jobs = vn
