@@ -700,6 +700,10 @@ _JOB_URL_PATTERNS = (
     re.compile(r"/viec-lam/[A-Za-z0-9\-]+", re.I),
     re.compile(r"/positions?/[A-Za-z0-9\-_/]+", re.I),
     re.compile(r"/openings?/[A-Za-z0-9\-_/]+", re.I),
+    re.compile(r"/ung-tuyen/[A-Za-z0-9\-/]+", re.I),
+    re.compile(r"/vi-tri/[A-Za-z0-9\-]+", re.I),
+    re.compile(r"/cong-viec/[A-Za-z0-9\-]+", re.I),
+    re.compile(r"/recruit(?:ment)?/[A-Za-z0-9\-]+", re.I),
 )
 
 
@@ -715,7 +719,49 @@ _CTA_BLACKLIST = {
     "see all", "view all", "all jobs", "all positions", "apply now",
     "read more", "find out more", "tim hieu them", "xem them", "xem tat ca",
     "ung tuyen", "ung tuyen ngay",
+    "xem chi tiet", "chi tiet", "video", "tin tuc", "dang ky", "dang ky ngay",
+    "nop don", "nop ho so", "view detail", "view details", "kham pha",
+    # listing-page nav/section headings (not jobs)
+    "tuyen dung", "viec lam", "co hoi nghe nghiep", "co hoi viec lam",
+    "quy trinh tuyen dung", "job search", "search jobs", "tat ca viec lam",
+    "vi sao nen gia nhap", "moi truong lam viec", "phuc loi", "van hoa",
 }
+
+# Substrings that mark an anchor as an info/nav page, never a job posting.
+# (Checked against accent-stripped text, so it catches "Chính sách tuyển dụng",
+# "Tài liệu tuyển dụng", "Tin tức - Hoạt động", "Xem toàn bộ tin", …)
+_NAV_TITLE_RX = re.compile(
+    r"chinh sach|tai lieu|chuong trinh|tin tuc|hoat dong|gioi thieu|lien he|"
+    r"ve chung toi|phuc loi|cau hoi|faq|quy che|so do|xem toan bo|cam nang|"
+    r"quy trinh|moi truong lam viec|van hoa|vi sao",
+    re.I,
+)
+
+# Anchor text that is just a location (some cards use the location as link text;
+# the real title lives in the URL slug). Normalized, accent-stripped.
+_LOCATION_ONLY = {
+    "toan quoc", "ha noi", "hanoi", "ho chi minh", "tp ho chi minh",
+    "tphcm", "hcm", "sai gon", "da nang", "hai phong", "can tho",
+    "binh duong", "dong nai", "mien bac", "mien nam", "mien trung",
+    "remote", "vietnam", "viet nam", "nationwide",
+}
+
+
+def _deslug(path: str) -> str:
+    """Turn the last meaningful path segment into a human title, e.g.
+    '/ung-tuyen/.../senior-it-business-analyst/' → 'Senior It Business Analyst'.
+    Returns '' when the segment is a single word, numeric, or a known listing
+    keyword (so we don't fabricate junk titles)."""
+    segs = [s for s in (path or "").strip("/").split("/") if s]
+    if not segs:
+        return ""
+    last = re.sub(r"\.(html?|aspx?|php|jsp)$", "", segs[-1], flags=re.I)
+    words = [w for w in re.split(r"[-_]+", last) if w]
+    if len(words) < 2 or last.isdigit():
+        return ""
+    if _normalize(last.replace("-", " ")) in _CTA_BLACKLIST:
+        return ""
+    return " ".join(words).title()
 
 
 def _collect_link_candidates(html: str, base: str) -> list[dict]:
@@ -751,7 +797,7 @@ def _collect_link_candidates(html: str, base: str) -> list[dict]:
             continue
         text = a.get_text(" ", strip=True)
         norm = _normalize(text)
-        if not text or norm in _CTA_BLACKLIST:
+        if not text or norm in _CTA_BLACKLIST or _NAV_TITLE_RX.search(norm):
             continue
         seen.add(full)
         candidates.append({"url": full, "text": text[:160]})
@@ -837,7 +883,7 @@ Rules:
     return results
 
 
-async def extract_jobs_from_career_page(career_url: str) -> list[JobListing]:
+async def extract_jobs_from_career_page(career_url: str, _depth: int = 0) -> list[JobListing]:
     """Stage 4: list job postings on the discovered career page.
 
     Strategy:
@@ -845,10 +891,50 @@ async def extract_jobs_from_career_page(career_url: str) -> list[JobListing]:
       2. If the heuristic returns < _MIN_JOBS_BEFORE_LLM jobs (common on SPA
          career pages that don't follow URL conventions), ask the LLM to pick
          job links out of the candidate inventory. The LLM may not invent URLs.
+      3. If still empty, follow a "view all jobs / job search" link from the page
+         (many career_urls point at a marketing landing, not the listing).
     """
+    import asyncio as _asyncio
+    from app.services.ats_adapters import fetch_ats_jobs
+
+    def _as_listings(ats_jobs):
+        return [
+            JobListing(title=j["title"][:200], url=j["url"], location=(j.get("location") or "")[:120])
+            for j in ats_jobs[:50]
+        ]
+
+    # Fast path 1: career URL is itself a known ATS host → hit its public JSON
+    # API directly, no page fetch (avoids slow SPA renders entirely).
+    try:
+        ats_jobs = await _asyncio.to_thread(fetch_ats_jobs, career_url, None)
+        if ats_jobs:
+            return _as_listings(ats_jobs)
+    except Exception as e:
+        logger.info(f"[stage4] ATS(url) skipped for {career_url}: {e}")
+
     ok, html, _ = await _fetch_html(career_url)
     if not ok:
         return []
+
+    # Fast path 2: the career page EMBEDS an ATS (iframe/script) → use its API.
+    try:
+        ats_jobs = await _asyncio.to_thread(fetch_ats_jobs, career_url, html)
+        if ats_jobs:
+            return _as_listings(ats_jobs)
+    except Exception as e:
+        logger.info(f"[stage4] ATS(html) skipped for {career_url}: {e}")
+
+    # Fast path 3: Phenom People (no clean API) — render + read its job tiles.
+    if any(s in html.lower() for s in ("phenompeople", "data-ph-id", "phapp.ddo")):
+        try:
+            from app.services.spa_sniff import phenom_jobs
+            ph = await phenom_jobs(career_url)
+            if ph:
+                return [JobListing(title=j["title"][:200], url=j["url"],
+                                   location=(j.get("location") or "")[:120]) for j in ph[:50]]
+        except Exception as e:
+            logger.info(f"[stage4] Phenom extract skipped for {career_url}: {e}")
+
     soup = BeautifulSoup(html, "html.parser")
     base = _apex_url(career_url) or career_url
 
@@ -865,10 +951,20 @@ async def extract_jobs_from_career_page(career_url: str) -> list[JobListing]:
         if full in seen:
             continue
         text = a.get_text(" ", strip=True)
-        if len(text) < 4 or _normalize(text) in _CTA_BLACKLIST:
+        ntext = _normalize(text)
+        title = text
+        # Some cards use the location (or nothing) as the link text; recover the
+        # real title from the URL slug in that case.
+        if len(text) < 4 or ntext in _CTA_BLACKLIST or ntext in _LOCATION_ONLY:
+            slug_title = _deslug(path)
+            if not slug_title:
+                continue
+            title = slug_title
+        ntitle = _normalize(title)
+        if len(title) < 4 or ntitle in _CTA_BLACKLIST or _NAV_TITLE_RX.search(ntitle):
             continue
         seen.add(full)
-        jobs.append(JobListing(title=text[:200], url=full))
+        jobs.append(JobListing(title=title[:200], url=full))
         if len(jobs) >= 50:
             break
 
@@ -888,7 +984,65 @@ async def extract_jobs_from_career_page(career_url: str) -> list[JobListing]:
         if lj.url not in merged_urls:
             jobs.append(lj)
             merged_urls.add(lj.url)
+
+    # Few/no hits: a custom SPA whose jobs come from an internal JSON API or are
+    # rendered as cards the static heuristic can't read. Render + sniff. (Run
+    # even with 1-2 weak hits — those are often nav noise like "Video".)
+    if len(jobs) < _MIN_JOBS_BEFORE_LLM:
+        try:
+            from app.services.spa_sniff import sniff_jobs
+            sniffed = await sniff_jobs(career_url)
+            if len(sniffed) > len(jobs):  # sniff found a real listing → prefer it
+                jobs = [JobListing(title=s["title"][:200], url=s["url"],
+                                   location=(s.get("location") or "")[:120])
+                        for s in sniffed[:50]]
+        except Exception as e:
+            logger.info(f"[stage4] SPA sniff failed for {career_url}: {e}")
+
+    # Still nothing + we're on the first hop → the career_url may be a marketing
+    # landing. Follow its "view all jobs / job search" link once and retry.
+    if not jobs and _depth == 0:
+        listing = _find_listing_link(soup, base, career_url)
+        if listing:
+            logger.info(f"[stage4] no jobs on {career_url} — following listing link {listing}")
+            return await extract_jobs_from_career_page(listing, _depth=1)
     return jobs
+
+
+# Anchor text/href that signals a "see all openings / job search" listing page.
+_LISTING_HREF_RX = re.compile(
+    r"(all-?jobs|view-?all|job-?search|search-?jobs?|job-?list|tim-kiem-viec|viec-lam|"
+    r"tuyen-dung|vacanc|openings?|/positions?|/jobs?(/|$|\?))", re.I)
+_LISTING_TEXT_RX = re.compile(
+    r"(all jobs|view all|search jobs?|job search|all openings?|see (all )?(jobs|openings)|"
+    r"tất cả|tìm việc|tìm kiếm việc|việc làm|vị trí (đang )?tuyển|xem (tất cả|thêm))", re.I)
+
+
+def _find_listing_link(soup, base: str, current_url: str) -> Optional[str]:
+    """Pick the best 'all jobs / job search' link on a landing page."""
+    cur = current_url.rstrip("/")
+    best = None
+    best_score = 0
+    cur_host = urlparse(current_url).netloc
+    for a in soup.find_all("a", href=True):
+        href = (a["href"] or "").strip()
+        if not href or href.startswith(("#", "mailto:", "tel:", "javascript:")):
+            continue
+        full = urljoin(base + "/", href)
+        if full.rstrip("/") == cur or urlparse(full).netloc != cur_host:
+            continue
+        text = a.get_text(" ", strip=True)
+        score = 0
+        if _LISTING_HREF_RX.search(urlparse(full).path):
+            score += 2
+        if text and _LISTING_TEXT_RX.search(text):
+            score += 2
+        # prefer explicit "all/search" over a single job link
+        if re.search(r"(all|search|list|tim-kiem|tất cả|tìm)", (full + " " + text), re.I):
+            score += 1
+        if score > best_score:
+            best_score, best = score, full
+    return best if best_score >= 2 else None
 
 
 # ── ORCHESTRATOR ──────────────────────────────────────────────────────────────

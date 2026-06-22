@@ -23,12 +23,12 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Shopee",
         homepage="https://shopee.vn",
-        career_url="https://careers.shopee.vn",
+        career_url="https://careers.shopee.vn/jobs",
     ),
     FeaturedCompany(
         name="VNG",
         homepage="https://vng.com.vn",
-        career_url="https://careers.vng.com.vn",
+        career_url="https://career.vng.com.vn/vi/tim-kiem-viec-lam",
     ),
     FeaturedCompany(
         name="Tiki",
@@ -58,12 +58,12 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Lazada",
         homepage="https://www.lazada.vn",
-        career_url="https://jobs.lazada.com",
+        career_url="https://www.lazada.com/en/careers/",
     ),
     FeaturedCompany(
         name="Sea",
         homepage="https://www.sea.com",
-        career_url="https://www.sea.com/careers",
+        career_url="https://career.sea.com/jobs",
     ),
     FeaturedCompany(
         name="TikTok",
@@ -167,12 +167,12 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="TMA Solutions",
         homepage="https://www.tmasolutions.com",
-        career_url="https://www.tmasolutions.com/careers",
+        career_url="https://www.tma.vn/tuyen-dung",
     ),
     FeaturedCompany(
         name="Rikkeisoft",
         homepage="https://rikkeisoft.com",
-        career_url="https://careers.rikkeisoft.com",
+        career_url="https://tuyendung.rikkeisoft.com/",
     ),
     FeaturedCompany(
         name="CMC Global",
@@ -194,12 +194,12 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Vietcombank",
         homepage="https://vietcombank.com.vn",
-        career_url="https://careers.vietcombank.com.vn",
+        career_url="https://tuyendung.vietcombank.com.vn/viewalljobs/",
     ),
     FeaturedCompany(
         name="BIDV",
         homepage="https://bidv.com.vn",
-        career_url="https://tuyendung.bidv.com.vn",
+        career_url="https://tuyendung.bidv.com.vn/co-hoi-nghe-nghiep.html",
     ),
     FeaturedCompany(
         name="VietinBank",
@@ -214,7 +214,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="SHB",
         homepage="https://shb.com.vn",
-        career_url="https://jobs.shb.com.vn",
+        career_url="https://tuyendung.shb.com.vn/",
     ),
     FeaturedCompany(
         name="SeABank",
@@ -254,12 +254,12 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="TPBank",
         homepage="https://tpbank.com.vn",
-        career_url="https://tuyendung.tpbank.com.vn",
+        career_url="https://tuyendung.tpb.vn/vi/jobs",
     ),
     FeaturedCompany(
         name="ACB",
         homepage="https://acb.com.vn",
-        career_url="https://tuyendung.acb.com.vn",
+        career_url="https://www.acbjobs.com.vn/alljobs",
     ),
     FeaturedCompany(
         name="HDBank",
@@ -279,7 +279,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="VIB",
         homepage="https://www.vib.com.vn",
-        career_url="https://careers.vib.com.vn",
+        career_url="https://careers.vib.com.vn/careers",
     ),
     FeaturedCompany(
         name="GPBank",
@@ -296,7 +296,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Vinamilk",
         homepage="https://vinamilk.com.vn",
-        career_url="https://careers.vinamilk.com.vn",
+        career_url="https://www.vinamilk.com.vn/en/recruitment/career-opportunities",
     ),
     FeaturedCompany(
         name="Sabeco",
@@ -306,17 +306,57 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Heineken Vietnam",
         homepage="https://heinekenvietnam.com",
-        career_url="https://careers.heineken-vietnam.com.vn",
+        career_url="https://careers.theheinekencompany.com/Tieng-Viet/HEINEKEN-Vietnam",
+    ),
+    FeaturedCompany(
+        name="MSB",
+        homepage="https://msb.com.vn",
+        career_url="https://jobs.msb.com.vn/",
+    ),
+    FeaturedCompany(
+        name="FE Credit",
+        homepage="https://fecredit.com.vn",
+        career_url="https://tuyendung.fecredit.com.vn/ung-tuyen/",
+    ),
+    FeaturedCompany(
+        name="F88",
+        homepage="https://f88.vn",
+        career_url="https://vieclam.f88.vn/tin-tuyen-dung",
+    ),
+    FeaturedCompany(
+        name="FPT Securities",
+        homepage="https://fpts.com.vn",
+        career_url="https://www.fpts.com.vn/co-hoi-nghe-nghiep/",
+    ),
+    FeaturedCompany(
+        name="Hoa Sen Group",
+        homepage="https://hoasengroup.vn",
+        career_url="https://hoasenjobs.com/",
+    ),
+    FeaturedCompany(
+        name="Hop Nhat Logistics",
+        homepage="https://hopnhat.com",
+        career_url="https://hopnhat.com/recruitment",
+    ),
+    FeaturedCompany(
+        name="UrBox",
+        homepage="https://urbox.vn",
+        career_url="https://talent.urbox.vn/alljobs?return=1",
+    ),
+    FeaturedCompany(
+        name="Apollo English",
+        homepage="https://apollo.edu.vn",
+        career_url="https://apollo.edu.vn/co-hoi-nghe-nghiep",
     ),
     FeaturedCompany(
         name="Nestlé Vietnam",
         homepage="https://nestle.com.vn",
-        career_url="https://careers.nestle.com/vietnam",
+        career_url="https://www.nestle.com/jobs/search-jobs?keyword=&country=VN",
     ),
     FeaturedCompany(
         name="Coca-Cola",
         homepage="https://coca-colacompany.com",
-        career_url="https://careers.coca-colacompany.com",
+        career_url="https://careersvn.app.swirecocacola.com/search/",
     ),
     FeaturedCompany(
         name="PepsiCo",
@@ -326,12 +366,42 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Ajinomoto Vietnam",
         homepage="https://ajinomoto.com.vn",
-        career_url="https://career.ajinomoto.com.vn",
+        career_url="https://www.ajinomoto.com.vn/vi/co-hoi-nghe-nghiep",
     ),
     FeaturedCompany(
         name="Acecook Vietnam",
         homepage="https://acecookvietnam.vn",
-        career_url="https://career.acecookvietnam.vn",
+        career_url="https://acecookcareer.com/",
+    ),
+    FeaturedCompany(
+        name="Suntory PepsiCo Vietnam",
+        homepage="https://suntorypepsico.vn",
+        career_url="https://careers.suntorybeverageandfood.com/search/?createNewAlert=false&q=&locationsearch=vietnam",
+    ),
+    FeaturedCompany(
+        name="TH Group",
+        homepage="https://thmilk.vn",
+        career_url="https://www.thmilk.vn/tuyen-dung/",
+    ),
+    FeaturedCompany(
+        name="Mondelez Kinh Do",
+        homepage="https://mondelezinternational.com",
+        career_url="https://www.mondelezinternational.com/careers/jobs/?term=&countrycode=VN",
+    ),
+    FeaturedCompany(
+        name="Orion Vietnam",
+        homepage="https://orion.vn",
+        career_url="https://orion.vn/tuyen-dung/viec-lam/",
+    ),
+    FeaturedCompany(
+        name="247Express",
+        homepage="https://247express.vn",
+        career_url="https://247express.vn/tuyen-dung",
+    ),
+    FeaturedCompany(
+        name="Sunhouse",
+        homepage="https://sunhouse.com.vn",
+        career_url="https://sunhouse.com.vn/tuyen-dung/xem-toan-bo-tin",
     ),
     FeaturedCompany(
         name="Vinasoy",
@@ -341,7 +411,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="IKEA",
         homepage="https://ikea.com",
-        career_url="https://careers.ikea.com",
+        career_url="https://jobs.ikea.com/en",
     ),
     FeaturedCompany(
         name="Decathlon",
@@ -376,12 +446,12 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Masan Group",
         homepage="https://masangroup.com",
-        career_url="https://careers.masangroup.com",
+        career_url="https://careers.masanconsumer.com/search",
     ),
     FeaturedCompany(
         name="Highlands Coffee",
         homepage="https://highlandscoffee.com.vn",
-        career_url="https://highlandscoffee.com.vn/tuyen-dung",
+        career_url="https://careers.highlandscoffee.com.vn/vi/viec-lam/",
     ),
     FeaturedCompany(
         name="Pharmacity",
@@ -396,12 +466,12 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Unilever Vietnam",
         homepage="https://unilever.com.vn",
-        career_url="https://careers.unilever.com/en/vietnam",
+        career_url="https://careers.unilever.com/en/location/vietnam-jobs/34155/1562822/2",
     ),
     FeaturedCompany(
         name="P&G Vietnam",
         homepage="https://vn.pg.com",
-        career_url="https://www.pgcareers.com/global/en",
+        career_url="https://www.pgcareers.com/global/en/locations/vietnam",
     ),
     FeaturedCompany(
         name="Vinpearl",
@@ -418,12 +488,12 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="FedEx",
         homepage="https://fedex.com",
-        career_url="https://careers.fedex.com",
+        career_url="https://careers.fedex.com/vi/jobs?location_name=Vietnam&location_type=4",
     ),
     FeaturedCompany(
         name="UPS",
         homepage="https://ups.com",
-        career_url="https://careers.ups.com",
+        career_url="https://www.jobs-ups.com/apac/vi/c/vi%E1%BB%87c-b%C3%A1n-h%C3%A0ng-jobs",
     ),
     FeaturedCompany(
         name="DB Schenker",
@@ -441,6 +511,16 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         career_url="https://ghtk.vn/tuyen-dung",
     ),
     FeaturedCompany(
+        name="One Mount Group",
+        homepage="https://onemount.com",
+        career_url="https://careers.onemount.com/job-list",
+    ),
+    FeaturedCompany(
+        name="Golden Gate Group",
+        homepage="https://ggg.com.vn",
+        career_url="https://ggg.talent.vn/",
+    ),
+    FeaturedCompany(
         name="GHN",
         homepage="https://ghn.vn",
         career_url="https://ghn.vn/blogs/tuyen-dung",
@@ -448,12 +528,12 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Ninja Van",
         homepage="https://www.ninjavan.co",
-        career_url="https://www.ninjavan.co/en-vn/careers",
+        career_url="https://ninjavan.co/vi-vn/ve-cong-ty/careers#openings",
     ),
     FeaturedCompany(
         name="Ahamove",
         homepage="https://ahamove.com",
-        career_url="https://careers.ahamove.com",
+        career_url="https://ahamove.com/recruitment",
     ),
     FeaturedCompany(
         name="Avina Logistics",
@@ -463,7 +543,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="DHL",
         homepage="https://www.dhl.com",
-        career_url="https://careers.dhl.com/apac/vi",
+        career_url="https://careers.dhl.com/global/en/search-results?keywords=&location=Vietnam",
     ),
     FeaturedCompany(
         name="Nippon Express",
@@ -481,6 +561,16 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         career_url="https://www.hellmann.com/en/career",
     ),
     FeaturedCompany(
+        name="Viettel Post",
+        homepage="https://viettelpost.com.vn",
+        career_url="https://viettelpost.com.vn/tuyen-dung/",
+    ),
+    FeaturedCompany(
+        name="Gemadept",
+        homepage="https://www.gemadept.com.vn",
+        career_url="https://www.gemadept.com.vn/tuyen-dung/",
+    ),
+    FeaturedCompany(
         name="Bee Logistics",
         homepage="https://beelogistics.com",
         career_url="https://recruit.beelogistics.com/Customer/Career",
@@ -488,7 +578,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Maersk",
         homepage="https://www.maersk.com",
-        career_url="https://www.maersk.com/careers",
+        career_url="https://www.maersk.com/careers/vacancies?searchText=&city=",
     ),
 
     # ── International Banking ─────────────────────────────────────────
@@ -500,12 +590,12 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="HSBC",
         homepage="https://hsbc.com",
-        career_url="https://careers.hsbc.com",
+        career_url="https://portal.careers.hsbc.com/careers?location=vietnam",
     ),
     FeaturedCompany(
         name="Standard Chartered",
         homepage="https://sc.com",
-        career_url="https://careers.sc.com",
+        career_url="https://jobs.standardchartered.com/Home?utm_source=careersite",
     ),
     FeaturedCompany(
         name="Citi",
@@ -520,14 +610,14 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="OCBC",
         homepage="https://ocbc.com",
-        career_url="https://careers.ocbc.com",
+        career_url="https://ocbc.wd102.myworkdayjobs.com/External",
     ),
 
     # ── Insurance ─────────────────────────────────────────────────────
     FeaturedCompany(
         name="Sun Life Vietnam",
         homepage="https://sunlife.com.vn",
-        career_url="https://careers.sunlife.com/vn",
+        career_url="https://www.sunlife.com.vn/vn/ve-chung-toi/tro-thanh-nhan-vien/vi-tri-tuyen-dung/",
     ),
     FeaturedCompany(
         name="Manulife",
@@ -537,12 +627,12 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="AIA",
         homepage="https://aia.com.vn",
-        career_url="https://careers.aia.com",
+        career_url="https://aia.wd3.myworkdayjobs.com/External",
     ),
     FeaturedCompany(
         name="Prudential",
         homepage="https://prudential.com.vn",
-        career_url="https://careers.prudential.com",
+        career_url="https://prudential.wd3.myworkdayjobs.com/en-US/prudential",
     ),
     FeaturedCompany(
         name="Chubb",
@@ -586,7 +676,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Samsung",
         homepage="https://samsung.com",
-        career_url="https://careers.samsung.com",
+        career_url="https://www.samsungcareers.com.vn/#/jobs-list",
     ),
     FeaturedCompany(
         name="LG",
@@ -616,7 +706,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Sony",
         homepage="https://sony.com",
-        career_url="https://careers.sony.com",
+        career_url="https://www.sonyjobs.com/jobs.html",
     ),
 
     # ── Semiconductor ─────────────────────────────────────────────────
@@ -643,7 +733,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="NVIDIA",
         homepage="https://nvidia.com",
-        career_url="https://careers.nvidia.com",
+        career_url="https://jobs.nvidia.com/careers",
     ),
     FeaturedCompany(
         name="Qualcomm",
@@ -670,7 +760,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="ABB",
         homepage="https://abb.com",
-        career_url="https://careers.abb.com",
+        career_url="https://careers.abb/global/en/search-results?qcountry=Vietnam",
     ),
     FeaturedCompany(
         name="GE Vernova",
@@ -680,7 +770,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="3M",
         homepage="https://3m.com",
-        career_url="https://careers.3m.com",
+        career_url="https://3m.wd1.myworkdayjobs.com/en-US/Search",
     ),
 
     # ── Tobacco ───────────────────────────────────────────────────────
@@ -736,7 +826,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Microsoft",
         homepage="https://microsoft.com",
-        career_url="https://careers.microsoft.com",
+        career_url="https://apply.careers.microsoft.com/careers",
     ),
     FeaturedCompany(
         name="Google",
@@ -751,7 +841,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="SAP",
         homepage="https://sap.com",
-        career_url="https://careers.sap.com",
+        career_url="https://jobs.sap.com/go/SAP_Labs_Vietnam/9283701/",
     ),
     FeaturedCompany(
         name="Salesforce",
@@ -766,7 +856,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Atlassian",
         homepage="https://atlassian.com",
-        career_url="https://careers.atlassian.com",
+        career_url="https://www.atlassian.com/company/careers/all-jobs",
     ),
 
     # ── Consulting / Professional Services ───────────────────────────
@@ -778,26 +868,56 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Deloitte",
         homepage="https://www.deloitte.com/vn",
-        career_url="https://jobs.deloitte.com",
+        career_url="https://jobs.sea.deloitte.com/search/?q=&locationsearch=vietnam",
     ),
     FeaturedCompany(
         name="PwC",
         homepage="https://www.pwc.com/vn",
-        career_url="https://www.pwc.com/vn/en/careers.html",
+        career_url="https://www.pwc.com/vn/en/careers/experienced-jobs.html",
     ),
     FeaturedCompany(
         name="EY",
         homepage="https://www.ey.com/en_vn",
-        career_url="https://www.ey.com/en_vn/careers",
+        career_url="https://careers.ey.com/ey/search/?q=&location=vn",
     ),
     FeaturedCompany(
         name="KPMG",
         homepage="https://kpmg.com/vn",
-        career_url="https://home.kpmg/vn/en/home/careers.html",
+        career_url="https://careers.kpmg.com.vn/search/?createNewAlert=false&q=&locationsearch=vietnam",
     ),
     FeaturedCompany(
         name="Accenture",
         homepage="https://www.accenture.com/vn-en",
         career_url="https://www.accenture.com/vn-en/careers",
+    ),
+    FeaturedCompany(
+        name="TCBS",
+        homepage="https://www.tcbs.com.vn",
+        career_url="https://www.tcbs.com.vn/ve-chung-toi/tuyen-dung/",
+    ),
+    FeaturedCompany(
+        name="VCBS",
+        homepage="https://www.vcbs.com.vn",
+        career_url="https://www.vcbs.com.vn/co-hoi-nghe-nghiep",
+    ),
+    FeaturedCompany(
+        name="VPBank Securities",
+        homepage="https://www.vpbanks.com.vn",
+        career_url="https://www.vpbanks.com.vn/co-hoi-nghe-nghiep",
+    ),
+    FeaturedCompany(
+        name="NAB Vietnam",
+        homepage="https://www.nab.com.au",
+        career_url="https://nab.wd3.myworkdayjobs.com/en-US/nab_careers?locationCountry=db69e8c8446c11de98360015c5e6daf6",
+    ),
+    FeaturedCompany(
+        name="VPS",
+        homepage="https://www.vps.com.vn",
+        career_url="https://www.vps.com.vn/gia-nhap-vps/co-hoi-nghe-nghiep",
+    ),
+    FeaturedCompany(
+        name="Base Inc",
+        homepage="https://base.vn",
+        career_url="https://baseinc.talent.vn/",
     ),
 )
