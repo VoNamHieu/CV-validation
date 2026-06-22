@@ -167,7 +167,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="TMA Solutions",
         homepage="https://www.tmasolutions.com",
-        career_url="https://www.tmasolutions.com/careers",
+        career_url="https://www.tma.vn/tuyen-dung",
     ),
     FeaturedCompany(
         name="Rikkeisoft",
@@ -214,7 +214,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="SHB",
         homepage="https://shb.com.vn",
-        career_url="https://jobs.shb.com.vn",
+        career_url="https://tuyendung.shb.com.vn/",
     ),
     FeaturedCompany(
         name="SeABank",
@@ -279,7 +279,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="VIB",
         homepage="https://www.vib.com.vn",
-        career_url="https://careers.vib.com.vn",
+        career_url="https://careers.vib.com.vn/careers",
     ),
     FeaturedCompany(
         name="GPBank",
@@ -381,7 +381,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Highlands Coffee",
         homepage="https://highlandscoffee.com.vn",
-        career_url="https://highlandscoffee.com.vn/tuyen-dung",
+        career_url="https://careers.highlandscoffee.com.vn/vi/viec-lam/",
     ),
     FeaturedCompany(
         name="Pharmacity",
@@ -798,7 +798,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Deloitte",
         homepage="https://www.deloitte.com/vn",
-        career_url="https://jobs.deloitte.com",
+        career_url="https://jobs.sea.deloitte.com/search/?q=&locationsearch=vietnam",
     ),
     FeaturedCompany(
         name="PwC",
