@@ -344,9 +344,14 @@ async function batchCapture() {
     let targets;
     try {
         const res = await fetch(`${backendUrl}/debug/capture/targets`, { headers: hdr });
+        if (!res.ok) throw new Error(`HTTP ${res.status}${res.status === 404 ? ' (backend chưa deploy?)' : ''}`);
         targets = (await res.json()).targets || [];
     } catch (e) {
         statusEl.textContent = `❌ Không lấy được target: ${e.message || e}`;
+        btn.disabled = false; return;
+    }
+    if (!targets.length) {
+        statusEl.textContent = '⚠️ Danh sách target rỗng (backend chưa deploy hoặc đã quét hết).';
         btn.disabled = false; return;
     }
     let ok = 0, fail = 0;
