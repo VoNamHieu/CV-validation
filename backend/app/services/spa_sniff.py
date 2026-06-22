@@ -17,15 +17,20 @@ logger = logging.getLogger(__name__)
 
 _TIMEOUT = 15
 _HEADERS = {"User-Agent": "Mozilla/5.0 Chrome/120", "Accept": "application/json, */*"}
-_JOB_URL_RX = re.compile(r"(job|career|opening|position|posting|listing|vacanc|search|requisition)", re.I)
+_JOB_URL_RX = re.compile(
+    r"(job|career|opening|position|posting|listing|vacanc|search|requisition|"
+    r"tuyendung|tuyen-dung|tuyen_dung|tuyen|viec-lam|vieclam|vi-tri|vitri|"
+    r"ung-tuyen|cong-viec|congviec|tindung|co-hoi)", re.I)
 _NOISE = ("google", "facebook", "doubleclick", "/gtm", "analytics", "hotjar", "segment",
           "clarity", "sentry", "cdn", "gstatic", "/fonts", "linkedin", "branding",
           ".js", ".css", ".png", ".svg", ".woff", "cookie", "tracking", "config", "settings")
 
-_TITLE_KEYS = ("title", "name", "jobtitle", "positiontitle", "text", "postingtitle", "displayname")
+_TITLE_KEYS = ("title", "name", "jobtitle", "positiontitle", "text", "postingtitle", "displayname",
+               "tenvitri", "vitri", "tencongviec", "tieude", "jobname", "positionname", "tendangtin")
 _URL_KEYS = ("applyurl", "joburl", "url", "canonicalurl", "absolute_url", "hostedurl",
-             "externalpath", "apply_url", "detailurl", "link")
-_LOC_KEYS = ("locationstext", "location", "locations", "city", "primarylocation", "joblocation")
+             "externalpath", "apply_url", "detailurl", "link", "slug", "alias", "duongdan")
+_LOC_KEYS = ("locationstext", "location", "locations", "city", "primarylocation", "joblocation",
+             "diadiem", "noilamviec", "tinhthanh", "province")
 _DESC_KEYS = ("description", "jobdescription", "overview", "responsibilities", "content", "summary")
 
 

@@ -199,7 +199,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="BIDV",
         homepage="https://bidv.com.vn",
-        career_url="https://tuyendung.bidv.com.vn",
+        career_url="https://tuyendung.bidv.com.vn/co-hoi-nghe-nghiep.html",
     ),
     FeaturedCompany(
         name="VietinBank",
