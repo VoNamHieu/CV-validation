@@ -58,7 +58,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Lazada",
         homepage="https://www.lazada.vn",
-        career_url="https://www.lazada.com/en/careers/",
+        career_url="https://www.lazada.com/en/careers/job-search/?category=&location=VNM",
     ),
     FeaturedCompany(
         name="Sea",
@@ -73,7 +73,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="ByteDance",
         homepage="https://www.bytedance.com",
-        career_url="https://jobs.bytedance.com",
+        career_url="https://jobs.bytedance.com/en/position?keyword=Vietnam",
     ),
     FeaturedCompany(
         name="Agoda",
