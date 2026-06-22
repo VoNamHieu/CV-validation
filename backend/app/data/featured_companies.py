@@ -820,4 +820,24 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         homepage="https://www.accenture.com/vn-en",
         career_url="https://www.accenture.com/vn-en/careers",
     ),
+    FeaturedCompany(
+        name="TCBS",
+        homepage="https://www.tcbs.com.vn",
+        career_url="https://www.tcbs.com.vn/ve-chung-toi/tuyen-dung/",
+    ),
+    FeaturedCompany(
+        name="VCBS",
+        homepage="https://www.vcbs.com.vn",
+        career_url="https://www.vcbs.com.vn/co-hoi-nghe-nghiep",
+    ),
+    FeaturedCompany(
+        name="VPBank Securities",
+        homepage="https://www.vpbanks.com.vn",
+        career_url="https://www.vpbanks.com.vn/co-hoi-nghe-nghiep",
+    ),
+    FeaturedCompany(
+        name="NAB Vietnam",
+        homepage="https://www.nab.com.au",
+        career_url="https://nab.wd3.myworkdayjobs.com/en-US/nab_careers?locationCountry=db69e8c8446c11de98360015c5e6daf6",
+    ),
 )
