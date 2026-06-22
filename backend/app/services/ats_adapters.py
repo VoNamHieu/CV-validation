@@ -811,9 +811,50 @@ def _ghn(career_url: str) -> list[dict]:
     return out
 
 
+# Normalized exact titles that are nav/section labels, never a real posting.
+_BAD_TITLES = {
+    "trang chu", "tuyen dung", "viec lam", "co hoi nghe nghiep", "co hoi viec lam",
+    "tuyen dung hot", "tuyen dung moi", "tat ca viec lam", "xem toan bo tin",
+    "opportunities", "job search", "search jobs", "all jobs", "view all jobs",
+    "apply", "ung tuyen",
+}
+
+
+def _norm_title(s: str) -> str:
+    import unicodedata
+    s = unicodedata.normalize("NFD", s or "")
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+    return s.replace("đ", "d").replace("Đ", "D").lower().strip()
+
+
+def _finalize(jobs: list[dict]) -> list[dict]:
+    """Single exit gate for every adapter: keep title+url rows, drop nav/section
+    labels and date-range rows, dedup by url then by title, cap per company."""
+    out, seen_url, seen_title = [], set(), set()
+    for j in jobs:
+        title = (j.get("title") or "").strip()
+        url = j.get("url") or ""
+        if not title or not url or len(title) < 4:
+            continue
+        nt = _norm_title(title)
+        if nt in _BAD_TITLES or nt.startswith(("tu ngay ", "from ")):  # date-range rows (Canon)
+            continue
+        tkey = nt[:80]
+        if url in seen_url or tkey in seen_title:
+            continue
+        seen_url.add(url)
+        seen_title.add(tkey)
+        out.append(j)
+        if len(out) >= _MAX_ATS_JOBS:
+            break
+    return out
+
+
 def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
     """Detect the ATS (from URL, then embedded in HTML) and fetch its jobs.
-    Returns [] when no ATS is detected or the API yields nothing."""
+    Returns [] when no ATS is detected or the API yields nothing.
+    Every adapter's output passes through _finalize for consistent
+    dedup / nav-filtering / capping."""
     # Workday — parse tenant/site from the URL (or a myworkdayjobs URL embedded
     # in the page HTML, e.g. Maersk) and hit its cxs JSON API.
     wd_url = career_url if _is_workday(career_url) else None
@@ -828,7 +869,7 @@ def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
         try:
             jobs = [j for j in _workday(wd_url) if j.get("title") and j.get("url")]
             if jobs:
-                return jobs
+                return _finalize(jobs)
         except Exception as e:
             logger.info(f"[ats] workday failed for {wd_url}: {str(e)[:80]}")
 
@@ -837,7 +878,7 @@ def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
         try:
             jobs = [j for j in _basevn(career_url, html) if j.get("title") and j.get("url")]
             if jobs:
-                return jobs
+                return _finalize(jobs)
         except Exception as e:
             logger.info(f"[ats] base.vn failed for {career_url}: {str(e)[:80]}")
 
@@ -846,7 +887,7 @@ def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
         try:
             jobs = [j for j in _workatsea(career_url) if j.get("title") and j.get("url")]
             if jobs:
-                return jobs
+                return _finalize(jobs)
         except Exception as e:
             logger.info(f"[ats] workatsea failed for {career_url}: {str(e)[:80]}")
 
@@ -855,7 +896,7 @@ def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
         try:
             jobs = [j for j in _oracle_hcm(career_url) if j.get("title") and j.get("url")]
             if jobs:
-                return jobs
+                return _finalize(jobs)
         except Exception as e:
             logger.info(f"[ats] oracle-hcm failed for {career_url}: {str(e)[:80]}")
 
@@ -864,7 +905,7 @@ def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
         try:
             jobs = [j for j in _bytedance_family(career_url) if j.get("title") and j.get("url")]
             if jobs:
-                return jobs
+                return _finalize(jobs)
         except Exception as e:
             logger.info(f"[ats] bytedance-family failed for {career_url}: {str(e)[:80]}")
 
@@ -873,7 +914,7 @@ def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
         try:
             jobs = [j for j in _vpbanks(career_url) if j.get("title") and j.get("url")]
             if jobs:
-                return jobs
+                return _finalize(jobs)
         except Exception as e:
             logger.info(f"[ats] vpbanks failed for {career_url}: {str(e)[:80]}")
 
@@ -882,7 +923,7 @@ def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
         try:
             jobs = [j for j in _mbbank(career_url) if j.get("title") and j.get("url")]
             if jobs:
-                return jobs
+                return _finalize(jobs)
         except Exception as e:
             logger.info(f"[ats] mbbank failed for {career_url}: {str(e)[:80]}")
 
@@ -891,7 +932,7 @@ def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
         try:
             jobs = [j for j in _iviec(career_url) if j.get("title") and j.get("url")]
             if jobs:
-                return jobs
+                return _finalize(jobs)
         except Exception as e:
             logger.info(f"[ats] iviec failed for {career_url}: {str(e)[:80]}")
 
@@ -900,7 +941,7 @@ def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
         try:
             jobs = [j for j in _ghn(career_url) if j.get("title") and j.get("url")]
             if jobs:
-                return jobs
+                return _finalize(jobs)
         except Exception as e:
             logger.info(f"[ats] ghn failed for {career_url}: {str(e)[:80]}")
 
@@ -909,7 +950,7 @@ def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
         try:
             jobs = [j for j in _phenom_services(career_url) if j.get("title") and j.get("url")]
             if jobs:
-                return jobs
+                return _finalize(jobs)
         except Exception as e:
             logger.info(f"[ats] phenom-services failed for {career_url}: {str(e)[:80]}")
 
@@ -918,7 +959,7 @@ def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
         try:
             jobs = [j for j in _eightfold(career_url) if j.get("title") and j.get("url")]
             if jobs:
-                return jobs
+                return _finalize(jobs)
         except Exception as e:
             logger.info(f"[ats] eightfold failed for {career_url}: {str(e)[:80]}")
 
@@ -927,7 +968,7 @@ def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
         try:
             jobs = [j for j in _successfactors(career_url, html) if j.get("title") and j.get("url")]
             if jobs:
-                return jobs
+                return _finalize(jobs)
         except Exception as e:
             logger.info(f"[ats] successfactors failed for {career_url}: {str(e)[:80]}")
 
@@ -951,4 +992,4 @@ def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
     if vn:
         jobs = vn
     logger.info(f"[ats] {ats}:{slug} → {len(jobs)} jobs ({career_url})")
-    return jobs
+    return _finalize(jobs)

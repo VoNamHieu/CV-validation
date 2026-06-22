@@ -718,7 +718,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Canon",
         homepage="https://canon.com",
-        career_url="https://careers.canon.com",
+        career_url="https://cvn.canon/vn/latestjob.html",
     ),
     FeaturedCompany(
         name="Hitachi",

@@ -736,7 +736,7 @@ _NAV_TITLE_RX = re.compile(
     r"chinh sach|tai lieu|chuong trinh|tin tuc|hoat dong|gioi thieu|lien he|"
     r"ve chung toi|phuc loi|cau hoi|faq|quy che|so do|xem toan bo|cam nang|"
     r"quy trinh|moi truong lam viec|van hoa|vi sao|saved job|talent pool|"
-    r"drop cv|gioi thieu chung",
+    r"drop cv|gioi thieu chung|^tu ngay \d",  # ^tu ngay = date-range rows (Canon)
     re.I,
 )
 
