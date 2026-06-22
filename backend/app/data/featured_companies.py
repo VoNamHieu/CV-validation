@@ -690,7 +690,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="ABB",
         homepage="https://abb.com",
-        career_url="https://careers.abb/global/en/home",
+        career_url="https://careers.abb/global/en/search-results?qcountry=Vietnam",
     ),
     FeaturedCompany(
         name="GE Vernova",
