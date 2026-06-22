@@ -573,12 +573,34 @@ def _oracle_hcm(career_url: str) -> list[dict]:
 #   → {data:{job_post_list:[{id, code, title, city_info:{...parent.en_name}}]}}
 # keyword="Vietnam" already returns VN-only postings. Detail = careers.tiktok
 # .com/position/<id>.
-def _is_tiktok(career_url: str) -> bool:
+# Both TikTok and ByteDance run the same job-search service (data.job_post_list
+# with a city_info parent chain), differing only in API host, the website-path
+# header, and the detail-page base.
+_BD_FAMILY = {
+    "tiktok": {
+        "hosts": ("lifeattiktok.com", "www.lifeattiktok.com", "careers.tiktok.com"),
+        "api": "https://api.lifeattiktok.com/api/v1/public/supplier/search/job/posts",
+        "website_path": "tiktok",
+        "detail": "https://careers.tiktok.com/position/{id}",
+    },
+    "bytedance": {
+        "hosts": ("joinbytedance.com", "www.joinbytedance.com", "jobs.bytedance.com"),
+        "api": "https://jobs.bytedance.com/api/v1/public/supplier/search/job/posts",
+        "website_path": "en",
+        "detail": "https://jobs.bytedance.com/en/position/{id}",
+    },
+}
+
+
+def _bd_config(career_url: str):
     host = (urlparse(career_url or "").netloc or "").lower()
-    return host in ("lifeattiktok.com", "careers.tiktok.com", "www.lifeattiktok.com")
+    for cfg in _BD_FAMILY.values():
+        if host in cfg["hosts"]:
+            return cfg
+    return None
 
 
-def _tiktok_loc(city_info) -> str:
+def _bd_loc(city_info) -> str:
     """Walk the city_info parent chain to a readable 'City, Country' string."""
     names, node = [], city_info if isinstance(city_info, dict) else None
     while isinstance(node, dict):
@@ -586,31 +608,33 @@ def _tiktok_loc(city_info) -> str:
         if nm:
             names.append(nm)
         node = node.get("parent")
-    # innermost first; keep city + country
     return ", ".join(dict.fromkeys(names[:1] + names[-1:]))
 
 
-def _tiktok(career_url: str) -> list[dict]:
-    api = "https://api.lifeattiktok.com/api/v1/public/supplier/search/job/posts"
-    headers = {**_JSON_POST, "website-path": "tiktok"}
+def _bytedance_family(career_url: str) -> list[dict]:
+    cfg = _bd_config(career_url)
+    if not cfg:
+        return []
+    headers = {**_JSON_POST, "website-path": cfg["website_path"], "accept-language": "en-US"}
+    body = {"recruitment_id_list": [], "job_category_id_list": [], "subject_id_list": [],
+            "location_code_list": [], "keyword": "Vietnam", "limit": 50, "offset": 0}
     out = []
     try:
-        r = requests.post(api, headers=headers, timeout=_TIMEOUT,
-                          json={"keyword": "Vietnam", "limit": 50, "offset": 0})
+        r = requests.post(cfg["api"], headers=headers, timeout=_TIMEOUT, json=body)
         if r.status_code != 200:
             return []
         for j in ((r.json() or {}).get("data", {}) or {}).get("job_post_list", []):
             title = (j.get("title") or "").strip()
-            loc = _tiktok_loc(j.get("city_info"))
+            loc = _bd_loc(j.get("city_info"))
             if not title or "vietnam" not in loc.lower():
                 continue
             jid = j.get("id")
-            out.append({"title": title[:200],
-                        "url": f"https://careers.tiktok.com/position/{jid}" if jid else "https://careers.tiktok.com/",
-                        "location": loc[:120], "description": _strip_html(j.get("description", ""))})
+            url = cfg["detail"].format(id=jid) if jid else cfg["api"]
+            out.append({"title": title[:200], "url": url, "location": loc[:120],
+                        "description": _strip_html(j.get("description", ""))})
     except Exception as e:
-        logger.info(f"[ats] tiktok failed: {str(e)[:80]}")
-    logger.info(f"[ats] tiktok → {len(out)} VN jobs")
+        logger.info(f"[ats] bytedance-family failed: {str(e)[:80]}")
+    logger.info(f"[ats] bytedance-family → {len(out)} VN jobs ({cfg['website_path']})")
     return out
 
 
@@ -700,14 +724,14 @@ def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
         except Exception as e:
             logger.info(f"[ats] oracle-hcm failed for {career_url}: {str(e)[:80]}")
 
-    # TikTok / ByteDance — public job-search API (JS-rendered site).
-    if _is_tiktok(career_url):
+    # TikTok / ByteDance — same public job-search API (JS-rendered sites).
+    if _bd_config(career_url):
         try:
-            jobs = [j for j in _tiktok(career_url) if j.get("title") and j.get("url")]
+            jobs = [j for j in _bytedance_family(career_url) if j.get("title") and j.get("url")]
             if jobs:
                 return jobs
         except Exception as e:
-            logger.info(f"[ats] tiktok failed for {career_url}: {str(e)[:80]}")
+            logger.info(f"[ats] bytedance-family failed for {career_url}: {str(e)[:80]}")
 
     # GHN — public recruit gateway API (React SPA renders no anchors).
     if _is_ghn(career_url):

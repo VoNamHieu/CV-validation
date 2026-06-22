@@ -63,7 +63,7 @@ _DOM_JOBS_JS = """() => {
   // (b) pick the title cell out of a <table> row that has no detail link.
   const role = new RegExp("^(chuyen vien|nhan vien|truong |giam doc|pho |ky thuat|ky su|thuc tap|chuyen gia|quan ly|nhan su|tro ly|giam sat|truong nhom|truong phong|truong ca|truong bo|cong nhan|tai xe|lai xe|senior |junior |lead |head |manager|engineer|specialist|executive|officer|intern|associate|director|analyst|developer|designer|consultant|supervisor|accountant|technician|staff|sales |brand |trade )", "i");
   const locrx = new RegExp("ha noi|ho chi minh|hcm|sai gon|da nang|hai phong|can tho|binh duong|dong nai|bac ninh|hung yen|thai nguyen|long an|tinh |thanh pho|toan quoc|mien (bac|nam|trung)|remote|viet nam|vietnam", "i");
-  const nav = new RegExp("chinh sach|tai lieu|chuong trinh|tin tuc|hoat dong|gioi thieu|lien he|ve chung toi|phuc loi|cau hoi|quy che|xem toan bo|cam nang|quy trinh tuyen|moi truong lam|van hoa|vi sao", "i");
+  const nav = new RegExp("chinh sach|tai lieu|chuong trinh|tin tuc|hoat dong|gioi thieu|lien he|ve chung toi|phuc loi|cau hoi|quy che|xem toan bo|cam nang|quy trinh tuyen|moi truong lam|van hoa|vi sao|saved job|talent pool|drop cv", "i");
   const norm = s => (s||'').toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').replace(/\\u0111/g,'d').trim();
   const firstLine = s => (s||'').split(String.fromCharCode(10)).map(x=>x.trim()).filter(Boolean)[0] || '';
   const seen = new Set(); const out = [];
