@@ -23,6 +23,7 @@ from app.services.career_finder import (
 )
 from app.services import company_cache
 from app.services import cache
+from app.services import capture_jobs
 from app.services.gemini_client import discover_jobs_for_profile
 from app.services.url_validator import is_allowed_url
 from app.data.featured_companies import FEATURED_COMPANIES
@@ -177,7 +178,7 @@ async def cache_lookup_by_name(req: NameLookup):
 # keys change namespace so old Redis entries are ignored. Set it to e.g. the
 # Railway commit SHA ($RAILWAY_GIT_COMMIT_SHA) for automatic per-deploy busting,
 # or just increment a number when you want a manual flush.
-_CACHE_VERSION = os.getenv("CACHE_VERSION", "38")
+_CACHE_VERSION = os.getenv("CACHE_VERSION", "39")
 _FEATURED_CACHE_TTL_SECONDS = 30 * 60          # how long a result counts as fresh
 _FEATURED_REDIS_TTL_SECONDS = 24 * 60 * 60     # how long stale data survives in Redis
 _FEATURED_CACHE_KEY = f"featured-jobs:v{_CACHE_VERSION}"
@@ -212,6 +213,12 @@ async def _fetch_jobs_for(career_url: str) -> list[dict]:
             # them tells us where the cold-crawl time actually goes.
             if elapsed > _FEATURED_SLOW_S:
                 logger.warning(f"[featured] SLOW {elapsed:.1f}s ({len(jobs)} jobs) — {career_url}")
+            # Cloudflare/bot-detected sites yield nothing server-side — fall back
+            # to the latest browser-extension DOM capture for those hosts.
+            if not jobs and capture_jobs.is_capture_host(career_url):
+                cap = await capture_jobs.jobs_from_capture(career_url)
+                if cap:
+                    return cap
             return [j.__dict__ for j in jobs]
         except Exception as e:
             logger.warning(f"[featured] Stage 4 failed after {time.time() - t0:.1f}s for {career_url}: {e}")
