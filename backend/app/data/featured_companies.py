@@ -458,12 +458,12 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Ninja Van",
         homepage="https://www.ninjavan.co",
-        career_url="https://www.ninjavan.co/en-vn/careers",
+        career_url="https://ninjavan.co/vi-vn/ve-cong-ty/careers#openings",
     ),
     FeaturedCompany(
         name="Ahamove",
         homepage="https://ahamove.com",
-        career_url="https://careers.ahamove.com",
+        career_url="https://ahamove.com/recruitment",
     ),
     FeaturedCompany(
         name="Avina Logistics",
@@ -844,5 +844,10 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         name="VPS",
         homepage="https://www.vps.com.vn",
         career_url="https://www.vps.com.vn/gia-nhap-vps/co-hoi-nghe-nghiep",
+    ),
+    FeaturedCompany(
+        name="Base Inc",
+        homepage="https://base.vn",
+        career_url="https://baseinc.talent.vn/",
     ),
 )

@@ -38,12 +38,14 @@ _DESC_KEYS = ("description", "jobdescription", "overview", "responsibilities", "
 # JSON API). Matches job-detail URL patterns; skips generic CTA link texts.
 _DOM_JOBS_JS = """() => {
   const rx = new RegExp("chi-tiet|cong-viec|vi-tri|tuyen-dung/|/job/|/jobs/|/positions?/|requisition|recruitment/", "i");
-  const cta = new RegExp("^(xem chi tiet|xem chi ti.t|xem them|xem th.m|ung tuyen|.ng tuy.n|apply|dang ky|.ng k.|view|detail|details|chi tiet|chi ti.t|read more|learn more|nop don|n.p .{1,2}n)$", "i");
+  const bad = new RegExp("/blog/|/tin-tuc|/news/|/event|facebook|tiktok|linkedin|youtube", "i");
+  // startsWith match (no $) so trailing punctuation/icons on CTA links are caught
+  const cta = new RegExp("^(xem chi ti|xem th.m|ung tuyen|.ng tuy|apply|dang ky|.ng k|view|detail|chi ti.t|read more|learn more|nop don|n.p|video|tin t.c|see more|kh.m ph.)", "i");
   const seen = new Set(); const out = [];
   for (const a of document.querySelectorAll('a[href]')) {
     const href = a.getAttribute('href') || '';
     const t = (a.innerText || '').trim();
-    if (!rx.test(href)) continue;
+    if (!rx.test(href) || bad.test(href)) continue;
     if (t.length < 6 || t.length > 120 || cta.test(t)) continue;
     if (seen.has(a.href)) continue;
     seen.add(a.href);
