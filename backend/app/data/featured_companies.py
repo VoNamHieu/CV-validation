@@ -351,7 +351,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Nestlé Vietnam",
         homepage="https://nestle.com.vn",
-        career_url="https://www.nestle.com/jobs/search-jobs?keyword=&country=VN",
+        career_url="https://jobdetails.nestle.com/search-results",
     ),
     FeaturedCompany(
         name="Coca-Cola",

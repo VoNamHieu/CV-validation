@@ -479,6 +479,48 @@ def _workatsea(career_url: str) -> list[dict]:
     return out
 
 
+# ── Phenom "ph-services" (Nestlé, …) ────────────────────────────────────────
+# Phenom career sites render via JS on a Cloudflare-protected host (www.nestle
+# .com → 403 to datacenters), but the underlying job API lives on a separate,
+# unprotected careersite host (jobdetails.nestle.com) at a clean REST endpoint:
+#   POST /services/jobs/search/  {locationsearch, recordsperpage, startrow}
+#   → {"jobList":[{title, id, urltitle, city, country, location, ...}]}
+# Detail URL = {origin}/job/{urltitle}/{id}/. Curate the careersite host as the
+# featured career_url (e.g. https://jobdetails.nestle.com/search-results).
+def _is_phenom_services(career_url: str) -> bool:
+    p = urlparse(career_url or "")
+    host = (p.netloc or "").lower()
+    path = (p.path or "").lower().rstrip("/")
+    return host.startswith("jobdetails.") or path.endswith("/search-results")
+
+
+def _phenom_services(career_url: str) -> list[dict]:
+    p = urlparse(career_url)
+    origin = f"{p.scheme}://{p.netloc}"
+    country = os.getenv("DISCOVER_COUNTRY", "Vietnam")
+    headers = {**_JSON_POST, "Referer": f"{origin}/search-results"}
+    out = []
+    try:
+        r = requests.post(f"{origin}/services/jobs/search/", headers=headers, timeout=_TIMEOUT,
+                          json={"page": 0, "keywords": "", "locationsearch": country,
+                                "recordsperpage": 50, "startrow": 0})
+        if r.status_code != 200:
+            return []
+        for j in (r.json() or {}).get("jobList", []):
+            title = (j.get("title") or "").strip()
+            loc = j.get("location") or j.get("city") or ""
+            if not title or not _is_vn_loc(loc):
+                continue
+            urltitle, jid = j.get("urltitle"), j.get("id")
+            url = f"{origin}/job/{urltitle}/{jid}/" if urltitle and jid else f"{origin}/search-results"
+            out.append({"title": title[:200], "url": url, "location": str(loc)[:120],
+                        "description": ""})
+    except Exception as e:
+        logger.info(f"[ats] phenom-services {origin} failed: {str(e)[:80]}")
+    logger.info(f"[ats] phenom-services → {len(out)} VN jobs ({origin})")
+    return out
+
+
 def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
     """Detect the ATS (from URL, then embedded in HTML) and fetch its jobs.
     Returns [] when no ATS is detected or the API yields nothing."""
@@ -517,6 +559,15 @@ def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
                 return jobs
         except Exception as e:
             logger.info(f"[ats] workatsea failed for {career_url}: {str(e)[:80]}")
+
+    # Phenom ph-services — REST job API on the unprotected careersite host.
+    if _is_phenom_services(career_url):
+        try:
+            jobs = [j for j in _phenom_services(career_url) if j.get("title") and j.get("url")]
+            if jobs:
+                return jobs
+        except Exception as e:
+            logger.info(f"[ats] phenom-services failed for {career_url}: {str(e)[:80]}")
 
     # Eightfold AI (pcsx) — public search JSON, filtered to VN locations.
     if _is_eightfold(career_url, html):
