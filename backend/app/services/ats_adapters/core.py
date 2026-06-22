@@ -896,6 +896,8 @@ def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
                 continue
             jobs = [j for j in (fetch(career_url, html) or []) if j.get("title") and j.get("url")]
             if jobs:
+                for j in jobs:
+                    j.setdefault("source", name)
                 logger.info(f"[ats] {name} → {len(jobs)} jobs ({career_url})")
                 return _finalize(jobs)
         except Exception as e:
