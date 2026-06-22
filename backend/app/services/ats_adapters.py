@@ -640,6 +640,56 @@ def _bytedance_family(career_url: str) -> list[dict]:
     return out
 
 
+# ── iVIEC (VN bank ATS: TPBank, Eximbank, …) — paginated public API ─────────
+# Career sites hosted by iVIEC render via JS and paginate at 10/page, so the
+# generic crawler badly under-counts (TPBank: 114 jobs, we saw 10). The public
+# API returns everything:
+#   GET centralize-api-v2.iviec.vn/api/recruitment/Recruitment/GetRecruitmentsByDomain
+#       ?pageIndex=N&pageSize=50&Domain=<career-host>
+#   → {items:[{name, slug, workingNewAddresses:[{provinceName,countryName}], ...}],
+#      totalRecord, totalPage}
+_IVIEC_HOSTS = {"tuyendung.tpb.vn", "tuyendungeximbank.com"}
+_IVIEC_API = ("https://centralize-api-v2.iviec.vn/api/recruitment/"
+              "Recruitment/GetRecruitmentsByDomain")
+
+
+def _is_iviec(career_url: str) -> bool:
+    return (urlparse(career_url or "").netloc or "").lower() in _IVIEC_HOSTS
+
+
+def _iviec(career_url: str) -> list[dict]:
+    host = (urlparse(career_url).netloc or "").lower()
+    out = []
+    for page in range(1, 6):  # up to 5×50 = 250, capped below
+        try:
+            r = requests.get(_IVIEC_API, headers={**_JSON_POST, "Referer": f"https://{host}/"},
+                             timeout=_TIMEOUT,
+                             params={"pageIndex": page, "pageSize": 50, "Domain": host})
+            if r.status_code != 200:
+                break
+            d = r.json() or {}
+            items = d.get("items", []) or []
+            if not items:
+                break
+            for it in items:
+                name = (it.get("name") or "").strip()
+                slug = it.get("slug")
+                if not name or not slug:
+                    continue
+                addrs = it.get("workingNewAddresses") or it.get("workingAddresses") or []
+                loc = ", ".join(a.get("provinceName") for a in addrs
+                                if isinstance(a, dict) and a.get("provinceName"))
+                out.append({"title": name[:200], "url": f"https://{host}/vi/jobs/{slug}",
+                            "location": loc[:120], "description": _strip_html(it.get("requirement", ""))})
+            if page >= d.get("totalPage", page) or len(out) >= 100:
+                break
+        except Exception as e:
+            logger.info(f"[ats] iviec {host} page {page} failed: {str(e)[:80]}")
+            break
+    logger.info(f"[ats] iviec → {len(out)} jobs ({host})")
+    return out
+
+
 # ── GHN (tuyendung.ghn.vn) — React SPA, public gateway API ──────────────────
 # Cards render client-side (no anchors), but the jobs come from a reachable
 # public API: GET online-gateway.ghn.vn/.../recruit/search-recruit. Title lives
@@ -734,6 +784,15 @@ def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
                 return jobs
         except Exception as e:
             logger.info(f"[ats] bytedance-family failed for {career_url}: {str(e)[:80]}")
+
+    # iVIEC — paginated VN bank ATS API (TPBank, Eximbank).
+    if _is_iviec(career_url):
+        try:
+            jobs = [j for j in _iviec(career_url) if j.get("title") and j.get("url")]
+            if jobs:
+                return jobs
+        except Exception as e:
+            logger.info(f"[ats] iviec failed for {career_url}: {str(e)[:80]}")
 
     # GHN — public recruit gateway API (React SPA renders no anchors).
     if _is_ghn(career_url):
