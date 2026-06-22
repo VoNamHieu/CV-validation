@@ -197,7 +197,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Renesas",
         homepage="https://www.renesas.com",
-        career_url="https://careers.renesas.com",
+        career_url="https://jobs.renesas.com/jobs?options=817&page=1&q=vietnam",
     ),
 
     # ── Banking / Finance ─────────────────────────────────────────────
@@ -426,7 +426,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Decathlon",
         homepage="https://decathlon.com",
-        career_url="https://careers.decathlon.com",
+        career_url="https://careersdecathlonvn.com/en/recruitments",
     ),
     FeaturedCompany(
         name="Adidas",
@@ -504,11 +504,6 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         name="UPS",
         homepage="https://ups.com",
         career_url="https://www.jobs-ups.com/apac/vi/c/vi%E1%BB%87c-b%C3%A1n-h%C3%A0ng-jobs",
-    ),
-    FeaturedCompany(
-        name="DB Schenker",
-        homepage="https://dbschenker.com",
-        career_url="https://careers.dbschenker.com",
     ),
     FeaturedCompany(
         name="Expeditors",
@@ -595,7 +590,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="DBS",
         homepage="https://dbs.com",
-        career_url="https://careers.dbs.com",
+        career_url="https://dbs.wd3.myworkdayjobs.com/DBS_Careers?locationCountry=db69e8c8446c11de98360015c5e6daf6",
     ),
     FeaturedCompany(
         name="HSBC",
@@ -652,7 +647,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Bảo Việt",
         homepage="https://baoviet.com.vn",
-        career_url="https://tuyendung.baoviet.com.vn",
+        career_url="https://baoviet.com.vn/vi/tuyen-dung",
     ),
 
     # ── Vingroup ──────────────────────────────────────────────────────
@@ -694,19 +689,9 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         career_url="https://careers.lg.com",
     ),
     FeaturedCompany(
-        name="Panasonic",
-        homepage="https://panasonic.com",
-        career_url="https://careers.panasonic.com",
-    ),
-    FeaturedCompany(
         name="Canon",
         homepage="https://canon.com",
         career_url="https://careers.canon.com",
-    ),
-    FeaturedCompany(
-        name="Fujitsu",
-        homepage="https://fujitsu.com",
-        career_url="https://careers.fujitsu.com",
     ),
     FeaturedCompany(
         name="Hitachi",
@@ -721,11 +706,6 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
 
     # ── Semiconductor ─────────────────────────────────────────────────
     FeaturedCompany(
-        name="Intel",
-        homepage="https://intel.com",
-        career_url="https://careers.intel.com",
-    ),
-    FeaturedCompany(
         name="Amkor Technology",
         homepage="https://amkor.com",
         career_url="https://careers.amkor.com",
@@ -733,12 +713,12 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Marvell",
         homepage="https://marvell.com",
-        career_url="https://careers.marvell.com",
+        career_url="https://marvell.wd1.myworkdayjobs.com/MarvellCareers?Country=db69e8c8446c11de98360015c5e6daf6",
     ),
     FeaturedCompany(
         name="Infineon",
         homepage="https://infineon.com",
-        career_url="https://careers.infineon.com",
+        career_url="https://jobs.infineon.com/careers?domain=infineon.com&start=0&location=Vietnam&pid=563808961449920&sort_by=relevance&filter_include_remote=0",
     ),
     FeaturedCompany(
         name="NVIDIA",
@@ -755,17 +735,17 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Air Liquide",
         homepage="https://airliquide.com",
-        career_url="https://careers.airliquide.com",
+        career_url="https://airliquidehr.wd3.myworkdayjobs.com/AirLiquideExternalCareer?locationCountry=db69e8c8446c11de98360015c5e6daf6",
     ),
     FeaturedCompany(
         name="Siemens",
         homepage="https://siemens.com",
-        career_url="https://careers.siemens.com",
+        career_url="https://jobs.siemens.com/en_US/externaljobs/SearchJobs/?42414=%5B812066%5D&42414_format=17570&listFilterMode=1&folderRecordsPerPage=6&",
     ),
     FeaturedCompany(
         name="Schneider Electric",
         homepage="https://schneider-electric.com",
-        career_url="https://careers.schneider-electric.com",
+        career_url="https://careers.se.com/jobs?lang=en-US&page=1&location=Vietnam&regionCode=VN",
     ),
     FeaturedCompany(
         name="ABB",
@@ -787,19 +767,13 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="JTI",
         homepage="https://jti.com",
-        career_url="https://careers.jti.com",
+        career_url="https://www.jti.com/en/careers/job-opportunities?careers%5BrefinementList%5D%5Bcountry.en%5D%5B0%5D=Viet%20Nam",
     ),
     FeaturedCompany(
         name="BAT",
         homepage="https://bat.com",
         career_url="https://careers.bat.com",
     ),
-    FeaturedCompany(
-        name="Philip Morris",
-        homepage="https://pmi.com",
-        career_url="https://careers.philipmorris.com",
-    ),
-
     # ── Hospitality ───────────────────────────────────────────────────
     FeaturedCompany(
         name="Marriott",
