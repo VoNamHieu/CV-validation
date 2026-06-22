@@ -23,10 +23,22 @@ from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.services import cache
+from app.data.featured_companies import FEATURED_COMPANIES
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/debug", tags=["Debug Capture"])
+
+# Featured companies whose jobs are JS-rendered / anti-bot, so the headless
+# probe can't read them — these are the ones worth capturing from a real
+# browser. The batch-scan button pulls this list and walks it automatically.
+# URLs come from FEATURED_COMPANIES so they stay in sync. Trim a name once its
+# server-side adapter works.
+_CAPTURE_TARGET_NAMES = {
+    "Atlassian", "Be", "ByteDance", "Cake", "Citi", "Hellmann", "IHG", "IKEA",
+    "Lazada", "Maersk", "McKinsey", "NCB", "Rikkeisoft", "Salesforce",
+    "Standard Chartered", "Traveloka", "VinFast",
+}
 
 _NS = "debug:cap:v1"
 _INDEX_KEY = f"{_NS}:__index__"
@@ -101,3 +113,12 @@ async def latest(host: str = Query(...), x_debug_token: str | None = Header(defa
 async def list_captures(x_debug_token: str | None = Header(default=None)):
     _require_token(x_debug_token)
     return {"captures": await cache.get_json(_INDEX_KEY) or []}
+
+
+@router.get("/capture/targets")
+async def targets(x_debug_token: str | None = Header(default=None)):
+    """URLs the batch-scan button should auto-open + capture (hard JS/anti-bot
+    featured sites). The extension walks these one tab at a time."""
+    _require_token(x_debug_token)
+    return {"targets": [{"name": c.name, "url": c.career_url}
+                        for c in FEATURED_COMPANIES if c.name in _CAPTURE_TARGET_NAMES]}

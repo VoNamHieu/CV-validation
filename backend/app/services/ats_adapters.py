@@ -479,6 +479,179 @@ def _workatsea(career_url: str) -> list[dict]:
     return out
 
 
+# ── Phenom "ph-services" (Nestlé, …) ────────────────────────────────────────
+# Phenom career sites render via JS on a Cloudflare-protected host (www.nestle
+# .com → 403 to datacenters), but the underlying job API lives on a separate,
+# unprotected careersite host (jobdetails.nestle.com) at a clean REST endpoint:
+#   POST /services/jobs/search/  {locationsearch, recordsperpage, startrow}
+#   → {"jobList":[{title, id, urltitle, city, country, location, ...}]}
+# Detail URL = {origin}/job/{urltitle}/{id}/. Curate the careersite host as the
+# featured career_url (e.g. https://jobdetails.nestle.com/search-results).
+def _is_phenom_services(career_url: str) -> bool:
+    p = urlparse(career_url or "")
+    host = (p.netloc or "").lower()
+    path = (p.path or "").lower().rstrip("/")
+    return host.startswith("jobdetails.") or path.endswith("/search-results")
+
+
+def _phenom_services(career_url: str) -> list[dict]:
+    p = urlparse(career_url)
+    origin = f"{p.scheme}://{p.netloc}"
+    country = os.getenv("DISCOVER_COUNTRY", "Vietnam")
+    headers = {**_JSON_POST, "Referer": f"{origin}/search-results"}
+    out = []
+    try:
+        r = requests.post(f"{origin}/services/jobs/search/", headers=headers, timeout=_TIMEOUT,
+                          json={"page": 0, "keywords": "", "locationsearch": country,
+                                "recordsperpage": 50, "startrow": 0})
+        if r.status_code != 200:
+            return []
+        for j in (r.json() or {}).get("jobList", []):
+            title = (j.get("title") or "").strip()
+            loc = j.get("location") or j.get("city") or ""
+            if not title or not _is_vn_loc(loc):
+                continue
+            urltitle, jid = j.get("urltitle"), j.get("id")
+            url = f"{origin}/job/{urltitle}/{jid}/" if urltitle and jid else f"{origin}/search-results"
+            out.append({"title": title[:200], "url": url, "location": str(loc)[:120],
+                        "description": ""})
+    except Exception as e:
+        logger.info(f"[ats] phenom-services {origin} failed: {str(e)[:80]}")
+    logger.info(f"[ats] phenom-services → {len(out)} VN jobs ({origin})")
+    return out
+
+
+# ── Oracle Cloud HCM / Fusion (Hilton, …) — public recruiting REST ──────────
+# Oracle Fusion candidate-experience sites (*.oraclecloud.com/hcmUI/Candidate
+# Experience/.../sites/<SITE>/) expose a public REST API:
+#   GET {host}/hcmRestApi/resources/latest/recruitingCEJobRequisitions
+#       ?onlyData=true&finder=findReqs;siteNumber=<SITE>,keyword=Vietnam,limit=50
+#   → {items:[{requisitionList:[{Id, Title, PrimaryLocation, ...}]}]}
+# Detail = {host}/hcmUI/CandidateExperience/en/sites/<SITE>/job/<Id>.
+def _is_oracle_hcm(career_url: str) -> bool:
+    p = urlparse(career_url or "")
+    return "oraclecloud.com" in (p.netloc or "").lower() and "/sites/" in (p.path or "")
+
+
+def _oracle_hcm(career_url: str) -> list[dict]:
+    p = urlparse(career_url)
+    origin = f"{p.scheme}://{p.netloc}"
+    m = re.search(r"/sites/([A-Za-z0-9_]+)", p.path)
+    site = m.group(1) if m else "CX_1"
+    country = os.getenv("DISCOVER_COUNTRY", "Vietnam")
+    ep = f"{origin}/hcmRestApi/resources/latest/recruitingCEJobRequisitions"
+    finder = f"findReqs;siteNumber={site},facetsList=LOCATIONS;limit=50,keyword={country}"
+    out = []
+    try:
+        r = requests.get(ep, headers=_JSON_POST, timeout=_TIMEOUT,
+                         params={"onlyData": "true",
+                                 "expand": "requisitionList.secondaryLocations", "finder": finder})
+        if r.status_code != 200 or "json" not in r.headers.get("content-type", ""):
+            return []
+        items = (r.json() or {}).get("items", [])
+        rl = items[0].get("requisitionList", []) if items else []
+        for it in rl:
+            title = (it.get("Title") or "").strip()
+            loc = it.get("PrimaryLocation") or ""
+            if not title or not _is_vn_loc(loc):
+                continue
+            jid = it.get("Id")
+            url = (f"{origin}/hcmUI/CandidateExperience/en/sites/{site}/job/{jid}"
+                   if jid else career_url)
+            out.append({"title": title[:200], "url": url, "location": str(loc)[:120],
+                        "description": _strip_html(it.get("ShortDescriptionStr", ""))})
+    except Exception as e:
+        logger.info(f"[ats] oracle-hcm {origin} failed: {str(e)[:80]}")
+    logger.info(f"[ats] oracle-hcm:{site} → {len(out)} VN jobs ({origin})")
+    return out
+
+
+# ── TikTok / ByteDance (lifeattiktok.com) — public job-search API ───────────
+# careers.tiktok.com / lifeattiktok.com render via JS, but expose a clean POST:
+#   POST api.lifeattiktok.com/api/v1/public/supplier/search/job/posts
+#   header website-path: tiktok ; body {keyword, limit, offset}
+#   → {data:{job_post_list:[{id, code, title, city_info:{...parent.en_name}}]}}
+# keyword="Vietnam" already returns VN-only postings. Detail = careers.tiktok
+# .com/position/<id>.
+def _is_tiktok(career_url: str) -> bool:
+    host = (urlparse(career_url or "").netloc or "").lower()
+    return host in ("lifeattiktok.com", "careers.tiktok.com", "www.lifeattiktok.com")
+
+
+def _tiktok_loc(city_info) -> str:
+    """Walk the city_info parent chain to a readable 'City, Country' string."""
+    names, node = [], city_info if isinstance(city_info, dict) else None
+    while isinstance(node, dict):
+        nm = node.get("en_name") or node.get("i18n_name")
+        if nm:
+            names.append(nm)
+        node = node.get("parent")
+    # innermost first; keep city + country
+    return ", ".join(dict.fromkeys(names[:1] + names[-1:]))
+
+
+def _tiktok(career_url: str) -> list[dict]:
+    api = "https://api.lifeattiktok.com/api/v1/public/supplier/search/job/posts"
+    headers = {**_JSON_POST, "website-path": "tiktok"}
+    out = []
+    try:
+        r = requests.post(api, headers=headers, timeout=_TIMEOUT,
+                          json={"keyword": "Vietnam", "limit": 50, "offset": 0})
+        if r.status_code != 200:
+            return []
+        for j in ((r.json() or {}).get("data", {}) or {}).get("job_post_list", []):
+            title = (j.get("title") or "").strip()
+            loc = _tiktok_loc(j.get("city_info"))
+            if not title or "vietnam" not in loc.lower():
+                continue
+            jid = j.get("id")
+            out.append({"title": title[:200],
+                        "url": f"https://careers.tiktok.com/position/{jid}" if jid else "https://careers.tiktok.com/",
+                        "location": loc[:120], "description": _strip_html(j.get("description", ""))})
+    except Exception as e:
+        logger.info(f"[ats] tiktok failed: {str(e)[:80]}")
+    logger.info(f"[ats] tiktok → {len(out)} VN jobs")
+    return out
+
+
+# ── GHN (tuyendung.ghn.vn) — React SPA, public gateway API ──────────────────
+# Cards render client-side (no anchors), but the jobs come from a reachable
+# public API: GET online-gateway.ghn.vn/.../recruit/search-recruit. Title lives
+# in selectedListRecruit.label, province in provinceNameText.label.
+_GHN_API = ("https://online-gateway.ghn.vn/integration/recruit-ghn/"
+            "public-api/recruit/search-recruit")
+
+
+def _is_ghn(career_url: str) -> bool:
+    return (urlparse(career_url or "").netloc or "").lower() == "tuyendung.ghn.vn"
+
+
+def _ghn(career_url: str) -> list[dict]:
+    out, seen = [], set()
+    try:
+        r = requests.get(_GHN_API, headers=_JSON_POST, timeout=_TIMEOUT,
+                         params={"search": "", "page": 1, "pageSize": 60})
+        if r.status_code != 200:
+            return []
+        for j in ((r.json() or {}).get("data", {}) or {}).get("list", []):
+            sel = j.get("selectedListRecruit") or {}
+            title = (sel.get("label") or "").strip()
+            rid = sel.get("value") or j.get("id")
+            if not title or rid in seen:
+                continue
+            seen.add(rid)
+            prov = (j.get("provinceNameText") or {}).get("label") or ""
+            url = f"https://tuyendung.ghn.vn/recruit/detail/{rid}" if rid else "https://tuyendung.ghn.vn/recruit/"
+            out.append({"title": title[:200], "url": url,
+                        "location": str(prov)[:120], "description": _strip_html(j.get("content", ""))})
+            if len(out) >= 40:
+                break
+    except Exception as e:
+        logger.info(f"[ats] ghn failed: {str(e)[:80]}")
+    logger.info(f"[ats] ghn → {len(out)} jobs")
+    return out
+
+
 def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
     """Detect the ATS (from URL, then embedded in HTML) and fetch its jobs.
     Returns [] when no ATS is detected or the API yields nothing."""
@@ -517,6 +690,42 @@ def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
                 return jobs
         except Exception as e:
             logger.info(f"[ats] workatsea failed for {career_url}: {str(e)[:80]}")
+
+    # Oracle Cloud HCM / Fusion — public recruiting REST API.
+    if _is_oracle_hcm(career_url):
+        try:
+            jobs = [j for j in _oracle_hcm(career_url) if j.get("title") and j.get("url")]
+            if jobs:
+                return jobs
+        except Exception as e:
+            logger.info(f"[ats] oracle-hcm failed for {career_url}: {str(e)[:80]}")
+
+    # TikTok / ByteDance — public job-search API (JS-rendered site).
+    if _is_tiktok(career_url):
+        try:
+            jobs = [j for j in _tiktok(career_url) if j.get("title") and j.get("url")]
+            if jobs:
+                return jobs
+        except Exception as e:
+            logger.info(f"[ats] tiktok failed for {career_url}: {str(e)[:80]}")
+
+    # GHN — public recruit gateway API (React SPA renders no anchors).
+    if _is_ghn(career_url):
+        try:
+            jobs = [j for j in _ghn(career_url) if j.get("title") and j.get("url")]
+            if jobs:
+                return jobs
+        except Exception as e:
+            logger.info(f"[ats] ghn failed for {career_url}: {str(e)[:80]}")
+
+    # Phenom ph-services — REST job API on the unprotected careersite host.
+    if _is_phenom_services(career_url):
+        try:
+            jobs = [j for j in _phenom_services(career_url) if j.get("title") and j.get("url")]
+            if jobs:
+                return jobs
+        except Exception as e:
+            logger.info(f"[ats] phenom-services failed for {career_url}: {str(e)[:80]}")
 
     # Eightfold AI (pcsx) — public search JSON, filtered to VN locations.
     if _is_eightfold(career_url, html):

@@ -313,6 +313,76 @@ async function captureForDebug() {
     }
 }
 
+const __sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function __waitTabComplete(tabId, timeoutMs = 25000) {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+        try {
+            const tab = await chrome.tabs.get(tabId);
+            if (tab.status === 'complete') return true;
+        } catch (e) {
+            return false; // tab gone
+        }
+        await __sleep(400);
+    }
+    return false;
+}
+
+// Walk the backend's target list: open each in a background tab, let the SPA
+// render, capture the DOM, POST it, close the tab. One at a time so we don't
+// spawn 17 tabs at once.
+async function batchCapture() {
+    const statusEl = document.getElementById('debugStatus');
+    const btn = document.getElementById('debugBatchBtn');
+    const backendUrl = (document.getElementById('debugBackendUrl').value || '').trim().replace(/\/+$/, '');
+    const token = (document.getElementById('debugToken').value || '').trim();
+    if (!backendUrl || !token) { statusEl.textContent = '⚠️ Nhập Backend URL + Token trước.'; return; }
+    chrome.storage.local.set({ debugBackendUrl: backendUrl, debugToken: token });
+    btn.disabled = true;
+    const hdr = { 'X-Debug-Token': token };
+    let targets;
+    try {
+        const res = await fetch(`${backendUrl}/debug/capture/targets`, { headers: hdr });
+        if (!res.ok) throw new Error(`HTTP ${res.status}${res.status === 404 ? ' (backend chưa deploy?)' : ''}`);
+        targets = (await res.json()).targets || [];
+    } catch (e) {
+        statusEl.textContent = `❌ Không lấy được target: ${e.message || e}`;
+        btn.disabled = false; return;
+    }
+    if (!targets.length) {
+        statusEl.textContent = '⚠️ Danh sách target rỗng (backend chưa deploy hoặc đã quét hết).';
+        btn.disabled = false; return;
+    }
+    let ok = 0, fail = 0;
+    for (let i = 0; i < targets.length; i++) {
+        const t = targets[i];
+        statusEl.textContent = `⏳ ${i + 1}/${targets.length} ${t.name}…  (✅${ok} ❌${fail})`;
+        let tab;
+        try {
+            tab = await chrome.tabs.create({ url: t.url, active: false });
+            await __waitTabComplete(tab.id);
+            await __sleep(6500); // let the SPA fetch + render its jobs
+            const [{ result: snap }] = await chrome.scripting.executeScript({
+                target: { tabId: tab.id }, func: __captureSnapshot,
+            });
+            const r = await fetch(`${backendUrl}/debug/capture`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...hdr },
+                body: JSON.stringify(snap),
+            });
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            ok++;
+        } catch (e) {
+            fail++;
+        } finally {
+            if (tab) { try { await chrome.tabs.remove(tab.id); } catch (e) { /* noop */ } }
+        }
+    }
+    statusEl.textContent = `✅ Xong: ${ok} gửi, ${fail} lỗi / ${targets.length} site.`;
+    btn.disabled = false;
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     initTabs();
     loadProfile();
@@ -347,6 +417,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (d.debugToken) document.getElementById('debugToken').value = d.debugToken;
     });
     document.getElementById('debugCaptureBtn').addEventListener('click', captureForDebug);
+    document.getElementById('debugBatchBtn').addEventListener('click', batchCapture);
 
     // CV upload
     const cvFileInput = document.getElementById('cvFileInput');

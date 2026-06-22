@@ -351,7 +351,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Nestlé Vietnam",
         homepage="https://nestle.com.vn",
-        career_url="https://www.nestle.com/jobs/search-jobs?keyword=&country=VN",
+        career_url="https://jobdetails.nestle.com/search-results",
     ),
     FeaturedCompany(
         name="Coca-Cola",
@@ -523,7 +523,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="GHN",
         homepage="https://ghn.vn",
-        career_url="https://ghn.vn/blogs/tuyen-dung",
+        career_url="https://tuyendung.ghn.vn/recruit/",
     ),
     FeaturedCompany(
         name="Ninja Van",
@@ -622,7 +622,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Manulife",
         homepage="https://manulife.com.vn",
-        career_url="https://careers.manulife.com",
+        career_url="https://manulife.wd3.myworkdayjobs.com/MFCJH_Jobs",
     ),
     FeaturedCompany(
         name="AIA",
@@ -799,7 +799,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Hilton",
         homepage="https://hilton.com",
-        career_url="https://careers.hilton.com",
+        career_url="https://efet.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/requisitions",
     ),
     FeaturedCompany(
         name="Hyatt",
