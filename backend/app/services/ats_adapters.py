@@ -20,6 +20,7 @@ import requests
 logger = logging.getLogger(__name__)
 
 _TIMEOUT = 12
+_MAX_ATS_JOBS = 100   # per-company cap across all adapters
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                   "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -256,22 +257,32 @@ def _workday(career_url: str) -> list[dict]:
     cxs = f"{base}/wday/cxs/{tenant}/{site}"
     country = os.getenv("DISCOVER_COUNTRY", "Vietnam")
     out = []
-    try:
-        # searchText narrows to the country server-side (big global tenants have
-        # thousands of jobs); then keep only ones whose location is really VN.
-        # NOTE: cxs caps limit at 20 (else HTTP 400).
-        r = requests.post(f"{cxs}/jobs", headers=_JSON_POST, timeout=_TIMEOUT,
-                          json={"limit": 20, "offset": 0, "searchText": country, "appliedFacets": {}})
-        if r.status_code == 200:
-            for j in (r.json() or {}).get("jobPostings", []):
+    # searchText narrows to the country server-side (big global tenants have
+    # thousands of jobs); then keep only ones whose location is really VN. The
+    # cxs API caps limit at 20 (else HTTP 400), so paginate by offset to get
+    # tenants with >20 VN postings (e.g. Prudential).
+    for offset in (0, 20, 40, 60):
+        try:
+            r = requests.post(f"{cxs}/jobs", headers=_JSON_POST, timeout=_TIMEOUT,
+                              json={"limit": 20, "offset": offset, "searchText": country,
+                                    "appliedFacets": {}})
+            if r.status_code != 200:
+                break
+            postings = (r.json() or {}).get("jobPostings", []) or []
+            if not postings:
+                break
+            for j in postings:
                 loc = j.get("locationsText", "") or ""
                 if not _is_vn_loc(loc):
                     continue
                 ext = j.get("externalPath", "") or ""
                 out.append({"title": j.get("title", ""), "url": base + ext if ext else base,
                             "location": loc, "description": "", "_ext": ext})
-    except Exception as e:
-        logger.info(f"[ats] workday {tenant} failed: {str(e)[:80]}")
+            if len(postings) < 20 or len(out) >= _MAX_ATS_JOBS:
+                break
+        except Exception as e:
+            logger.info(f"[ats] workday {tenant} offset {offset} failed: {str(e)[:80]}")
+            break
 
     # Fetch each VN job's full JD from the cxs detail endpoint (bounded).
     for job in out[:12]:

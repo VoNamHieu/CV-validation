@@ -130,6 +130,11 @@ def try_http_fetch(url: str) -> tuple[bool, str]:
     try:
         r = requests.get(url, headers=headers, timeout=15, allow_redirects=True)
         if r.status_code == 200:
+            # requests falls back to ISO-8859-1 for text/* without an explicit
+            # charset, which mojibakes UTF-8 VN pages (Thế Giới Di Động, Canon).
+            # Trust the chardet-detected encoding in that case.
+            if not r.encoding or r.encoding.lower() in ("iso-8859-1", "latin-1"):
+                r.encoding = r.apparent_encoding or "utf-8"
             if len(r.text) > 1000 and "<html" in r.text.lower():
                 return True, r.text
             return False, f"Response too short or not HTML ({len(r.text)} chars)"
