@@ -840,4 +840,9 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         homepage="https://www.nab.com.au",
         career_url="https://nab.wd3.myworkdayjobs.com/en-US/nab_careers?locationCountry=db69e8c8446c11de98360015c5e6daf6",
     ),
+    FeaturedCompany(
+        name="VPS",
+        homepage="https://www.vps.com.vn",
+        career_url="https://www.vps.com.vn/gia-nhap-vps/co-hoi-nghe-nghiep",
+    ),
 )

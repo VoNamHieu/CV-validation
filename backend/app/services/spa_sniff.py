@@ -34,6 +34,26 @@ _LOC_KEYS = ("locationstext", "location", "locations", "city", "primarylocation"
 _DESC_KEYS = ("description", "jobdescription", "overview", "responsibilities", "content", "summary")
 
 
+# Extracts job-detail anchors from a rendered DOM (for SSR/RSC sites with no
+# JSON API). Matches job-detail URL patterns; skips generic CTA link texts.
+_DOM_JOBS_JS = """() => {
+  const rx = new RegExp("chi-tiet|cong-viec|vi-tri|tuyen-dung/|/job/|/jobs/|/positions?/|requisition|recruitment/", "i");
+  const cta = new RegExp("^(xem chi tiet|xem chi ti.t|xem them|xem th.m|ung tuyen|.ng tuy.n|apply|dang ky|.ng k.|view|detail|details|chi tiet|chi ti.t|read more|learn more|nop don|n.p .{1,2}n)$", "i");
+  const seen = new Set(); const out = [];
+  for (const a of document.querySelectorAll('a[href]')) {
+    const href = a.getAttribute('href') || '';
+    const t = (a.innerText || '').trim();
+    if (!rx.test(href)) continue;
+    if (t.length < 6 || t.length > 120 || cta.test(t)) continue;
+    if (seen.has(a.href)) continue;
+    seen.add(a.href);
+    out.push({ title: t, url: a.href, location: '', description: '' });
+    if (out.length >= 60) break;
+  }
+  return out;
+}"""
+
+
 def _first(d: dict, keys) -> str:
     low = {k.lower(): v for k, v in d.items()}
     for k in keys:
@@ -259,9 +279,13 @@ async def sniff_jobs(career_url: str) -> list[dict]:
         if read_tasks:
             done = await asyncio.gather(*read_tasks, return_exceptions=True)
             bodies = [d for d in done if isinstance(d, tuple) and d[1]]
+        # Also harvest job-detail anchors from the RENDERED DOM — covers SSR /
+        # Next.js App-Router sites (e.g. VPS) that have no clean JSON job API but
+        # render <a href=".../chi-tiet-cong-viec/…">Title</a> links.
+        dom_jobs = await page.evaluate(_DOM_JOBS_JS)
     except Exception as e:
         logger.info(f"[spa_sniff] render failed {career_url}: {str(e)[:60]}")
-        bodies = []
+        bodies, dom_jobs = [], []
     finally:
         await ctx.close()
 
@@ -275,6 +299,9 @@ async def sniff_jobs(career_url: str) -> list[dict]:
         jobs = _items_to_jobs(_find_job_list(data), origin)
         if len(jobs) > len(best):
             best, best_src = jobs, url
+    # API-less SSR sites: fall back to the rendered job-detail anchors.
+    if not best and dom_jobs:
+        best, best_src = dom_jobs, "rendered-DOM anchors"
     if best:
         logger.info(f"[spa_sniff] {origin} → {len(best)} jobs via {best_src[:70]}")
     return best
