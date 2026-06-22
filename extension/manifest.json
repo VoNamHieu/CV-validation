@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "JobFit AI — Auto Apply",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "AI Agent tự động ứng tuyển trên BẤT KỲ job site nào với CV đã optimize từ JobFit AI",
   "permissions": [
     "activeTab",
