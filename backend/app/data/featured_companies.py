@@ -115,6 +115,11 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         homepage="https://www.visa.com.vn",
         career_url="https://visa.wd5.myworkdayjobs.com/Visa?locationCountry=db69e8c8446c11de98360015c5e6daf6",
     ),
+    FeaturedCompany(
+        name="Mastercard",
+        homepage="https://www.mastercard.com",
+        career_url="https://careers.mastercard.com/us/en/search-results",
+    ),
 
     # ── FPT / Viettel ─────────────────────────────────────────────────
     FeaturedCompany(
