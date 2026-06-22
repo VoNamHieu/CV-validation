@@ -53,7 +53,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Be",
         homepage="https://be.com.vn",
-        career_url="https://be.com.vn/en/careers",
+        career_url="https://be.com.vn/ve-be/tuyen-dung/",
     ),
     FeaturedCompany(
         name="Lazada",

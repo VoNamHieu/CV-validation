@@ -35,7 +35,7 @@ router = APIRouter(prefix="/debug", tags=["Debug Capture"])
 # URLs come from FEATURED_COMPANIES so they stay in sync. Trim a name once its
 # server-side adapter works.
 _CAPTURE_TARGET_NAMES = {
-    "Atlassian", "Be", "Citi", "Hellmann", "IHG", "IKEA",
+    "Atlassian", "Citi", "Hellmann", "IHG", "IKEA",
     "Lazada", "Maersk", "McKinsey", "Rikkeisoft", "Salesforce",
     "Standard Chartered", "VinFast",
 }
