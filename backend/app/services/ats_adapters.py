@@ -932,5 +932,12 @@ def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
     except Exception as e:  # never let a quirky ATS response break the pipeline
         logger.info(f"[ats] {ats}:{slug} fetch failed: {str(e)[:80]}")
         return []
+    # Slug-based ATS (Greenhouse/Lever/Ashby/SmartRecruiters/Recruitee) list the
+    # company's GLOBAL jobs. For the VN-focused featured list, keep only VN
+    # postings — but if none are tagged VN (a VN-domestic company that omits the
+    # location, or location-less data), keep everything rather than drop all.
+    vn = [j for j in jobs if _is_vn_loc(j.get("location") or "")]
+    if vn:
+        jobs = vn
     logger.info(f"[ats] {ats}:{slug} → {len(jobs)} jobs ({career_url})")
     return jobs

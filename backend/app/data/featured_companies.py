@@ -121,6 +121,33 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         career_url="https://careers.mastercard.com/us/en/search-results",
     ),
 
+    # ── Agency / Media / Marketing ────────────────────────────────────
+    FeaturedCompany(
+        name="Ogilvy",
+        homepage="https://www.ogilvy.com",
+        career_url="https://boards.greenhouse.io/ogilvy",
+    ),
+    FeaturedCompany(
+        name="Dentsu",
+        homepage="https://www.dentsu.com",
+        career_url="https://dentsuaegis.wd3.myworkdayjobs.com/en-US/DAN_GLOBAL/?locationCountry=db69e8c8446c11de98360015c5e6daf6",
+    ),
+    FeaturedCompany(
+        name="CleverAds",
+        homepage="https://cleverads.vn",
+        career_url="https://cleverads.vn/tuyen-dung/",
+    ),
+    FeaturedCompany(
+        name="SEONGON",
+        homepage="https://seongon.com",
+        career_url="https://seongon.com/tuyen-dung",
+    ),
+    FeaturedCompany(
+        name="Vietcetera",
+        homepage="https://vietcetera.com",
+        career_url="https://vietcetera.com/careers",
+    ),
+
     # ── FPT / Viettel ─────────────────────────────────────────────────
     FeaturedCompany(
         name="FPT Software",
