@@ -640,6 +640,38 @@ def _bytedance_family(career_url: str) -> list[dict]:
     return out
 
 
+# ── MB Bank (careers.mbbank.com.vn "libra") — paginated public API ──────────
+# tuyendung.mbbank.com.vn is a JS SPA (crawler saw 0); jobs come from
+#   GET careers.mbbank.com.vn/libra-job-management/public/recruitment-news?size=&page=
+#   → {content:[{id, name, province, toDate}]}
+def _is_mbbank(career_url: str) -> bool:
+    return (urlparse(career_url or "").netloc or "").lower() in (
+        "tuyendung.mbbank.com.vn", "careers.mbbank.com.vn")
+
+
+def _mbbank(career_url: str) -> list[dict]:
+    api = "https://careers.mbbank.com.vn/libra-job-management/public/recruitment-news"
+    out = []
+    try:
+        r = requests.get(api, headers=_JSON_POST, timeout=_TIMEOUT,
+                         params={"workGroupId": "", "name": "", "skillTags": "",
+                                 "city": "", "size": 100, "page": 0})
+        if r.status_code != 200:
+            return []
+        for it in (r.json() or {}).get("content", []) or []:
+            name = (it.get("name") or "").strip()
+            jid = it.get("id")
+            if not name or not jid:
+                continue
+            out.append({"title": name[:200],
+                        "url": f"https://tuyendung.mbbank.com.vn/job/{jid}",
+                        "location": str(it.get("province") or "")[:120], "description": ""})
+    except Exception as e:
+        logger.info(f"[ats] mbbank failed: {str(e)[:80]}")
+    logger.info(f"[ats] mbbank → {len(out)} jobs")
+    return out
+
+
 # ── iVIEC (VN bank ATS: TPBank, Eximbank, …) — paginated public API ─────────
 # Career sites hosted by iVIEC render via JS and paginate at 10/page, so the
 # generic crawler badly under-counts (TPBank: 114 jobs, we saw 10). The public
@@ -784,6 +816,15 @@ def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
                 return jobs
         except Exception as e:
             logger.info(f"[ats] bytedance-family failed for {career_url}: {str(e)[:80]}")
+
+    # MB Bank — paginated "libra" public API (JS SPA otherwise yields 0).
+    if _is_mbbank(career_url):
+        try:
+            jobs = [j for j in _mbbank(career_url) if j.get("title") and j.get("url")]
+            if jobs:
+                return jobs
+        except Exception as e:
+            logger.info(f"[ats] mbbank failed for {career_url}: {str(e)[:80]}")
 
     # iVIEC — paginated VN bank ATS API (TPBank, Eximbank).
     if _is_iviec(career_url):
