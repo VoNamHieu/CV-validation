@@ -135,7 +135,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="FPT Shop",
         homepage="https://fptshop.com.vn",
-        career_url="https://career.fptshop.com.vn",
+        career_url="https://tuyendung.frt.vn/",
     ),
     FeaturedCompany(
         name="Viettel Software",
@@ -187,7 +187,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="CMC Global",
         homepage="https://cmcglobal.com.vn",
-        career_url="https://careers.cmcglobal.com.vn",
+        career_url="https://cmcglobal.com.vn/career/",
     ),
     FeaturedCompany(
         name="Bosch",
@@ -219,7 +219,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Agribank",
         homepage="https://agribank.com.vn",
-        career_url="https://tuyendung.agribank.com.vn",
+        career_url="https://www.agribank.com.vn/vn/tuyen-dung/chuong-trinh-tuyen-dung",
     ),
     FeaturedCompany(
         name="SHB",
@@ -244,7 +244,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Eximbank",
         homepage="https://eximbank.com.vn",
-        career_url="https://tuyendung.eximbank.com.vn",
+        career_url="https://tuyendungeximbank.com/vi",
     ),
     FeaturedCompany(
         name="Techcombank",
@@ -279,7 +279,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Sacombank",
         homepage="https://www.sacombank.com.vn",
-        career_url="https://tuyendung.sacombank.com",
+        career_url="https://sacombankcareer.com/viewalljobs/",
     ),
     FeaturedCompany(
         name="MSB",
@@ -416,7 +416,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Vinasoy",
         homepage="https://vinasoy.com.vn",
-        career_url="https://tuyendung.vinasoy.com.vn",
+        career_url="https://career.vinasoy.com/tim-viec-lam/tat-ca-viec-lam/vi",
     ),
     FeaturedCompany(
         name="IKEA",
@@ -451,7 +451,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="WinMart",
         homepage="https://winmart.vn",
-        career_url="https://careers.winmart.vn",
+        career_url="https://tuyendung.winmart.vn/alljobs?office=4999&return=1",
     ),
     FeaturedCompany(
         name="Masan Group",
@@ -466,12 +466,12 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Pharmacity",
         homepage="https://pharmacity.vn",
-        career_url="https://careers.pharmacity.vn",
+        career_url="https://corp.pharmacity.vn/tim-viec-lam/",
     ),
     FeaturedCompany(
         name="Guardian",
         homepage="https://guardian.com.vn",
-        career_url="https://guardianjobs.com.vn",
+        career_url="https://www.guardian.com.vn/tuyen-dung",
     ),
     FeaturedCompany(
         name="Unilever Vietnam",
@@ -654,7 +654,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Vingroup",
         homepage="https://vingroup.net",
-        career_url="https://careers.vingroup.net",
+        career_url="https://tuyendung.vingroup.net/jobs",
     ),
     FeaturedCompany(
         name="VinFast",
@@ -669,7 +669,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Vinschool",
         homepage="https://vinschool.edu.vn",
-        career_url="https://careers.vinschool.edu.vn",
+        career_url="https://tuyendung.vinschool.edu.vn/jobs?location=&type=&dept=684,430,431,432,433&return=1",
     ),
     FeaturedCompany(
         name="Vinmec",
@@ -745,7 +745,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Schneider Electric",
         homepage="https://schneider-electric.com",
-        career_url="https://careers.se.com/jobs?lang=en-US&page=1&location=Vietnam&regionCode=VN",
+        career_url="https://careers.se.com/jobs?lang=en-US&location=Vietnam&woe=12&regionCode=VN&stretchUnit=MILES&stretch=10&page=1",
     ),
     FeaturedCompany(
         name="ABB",
