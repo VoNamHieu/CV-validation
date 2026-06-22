@@ -252,6 +252,67 @@ function initTabs() {
 }
 
 // ─── Init ───
+// ── Debug capture ──────────────────────────────────────────────────────────
+// Runs IN the page (injected) and returns a snapshot of the rendered DOM so we
+// can build/repair extractors against what a real browser actually sees.
+function __captureSnapshot() {
+    const firstLine = s => (s || '').split('\n').map(x => x.trim()).filter(Boolean)[0] || '';
+    const anchors = [...document.querySelectorAll('a[href]')].slice(0, 1500).map(a => ({
+        href: a.href,
+        text: firstLine(a.innerText).slice(0, 160),
+    }));
+    const tables = [...document.querySelectorAll('table')].slice(0, 20).map(t =>
+        [...t.querySelectorAll('tr')].slice(0, 80).map(r =>
+            [...r.querySelectorAll('th,td')].map(c => firstLine(c.innerText).slice(0, 120))
+        )
+    );
+    const nd = document.getElementById('__NEXT_DATA__');
+    const jsonld = [...document.querySelectorAll('script[type="application/ld+json"]')]
+        .slice(0, 10).map(s => (s.textContent || '').slice(0, 100000));
+    return {
+        url: location.href,
+        title: document.title || '',
+        html: document.documentElement.outerHTML,
+        anchors,
+        tables,
+        nextData: nd ? (nd.textContent || '').slice(0, 500000) : '',
+        jsonld,
+    };
+}
+
+async function captureForDebug() {
+    const statusEl = document.getElementById('debugStatus');
+    const btn = document.getElementById('debugCaptureBtn');
+    const backendUrl = (document.getElementById('debugBackendUrl').value || '').trim().replace(/\/+$/, '');
+    const token = (document.getElementById('debugToken').value || '').trim();
+    if (!backendUrl || !token) {
+        statusEl.textContent = '⚠️ Nhập Backend URL + Token trước.';
+        return;
+    }
+    chrome.storage.local.set({ debugBackendUrl: backendUrl, debugToken: token });
+    btn.disabled = true; btn.textContent = '⏳ Đang chụp…'; statusEl.textContent = '';
+    try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!tab || !/^https?:/.test(tab.url || '')) throw new Error('Tab không hợp lệ');
+        const [{ result: snap }] = await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            func: __captureSnapshot,
+        });
+        const res = await fetch(`${backendUrl}/debug/capture`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Debug-Token': token },
+            body: JSON.stringify(snap),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+        statusEl.textContent = `✅ Đã gửi ${data.host} · ${Math.round((data.bytes || 0) / 1024)}KB · ${data.anchors} links · ${data.tables} bảng`;
+    } catch (e) {
+        statusEl.textContent = `❌ ${e.message || e}`;
+    } finally {
+        btn.disabled = false; btn.textContent = '🐞 Gửi DOM để debug';
+    }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     initTabs();
     loadProfile();
@@ -279,6 +340,13 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('saveBtn').addEventListener('click', saveProfile);
     document.getElementById('importFromApp').addEventListener('click', importFromApp);
     document.getElementById('resetAll').addEventListener('click', resetAll);
+
+    // Debug capture: restore saved backend URL + token, wire the button.
+    chrome.storage.local.get(['debugBackendUrl', 'debugToken'], (d) => {
+        if (d.debugBackendUrl) document.getElementById('debugBackendUrl').value = d.debugBackendUrl;
+        if (d.debugToken) document.getElementById('debugToken').value = d.debugToken;
+    });
+    document.getElementById('debugCaptureBtn').addEventListener('click', captureForDebug);
 
     // CV upload
     const cvFileInput = document.getElementById('cvFileInput');

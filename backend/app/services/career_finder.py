@@ -700,6 +700,10 @@ _JOB_URL_PATTERNS = (
     re.compile(r"/viec-lam/[A-Za-z0-9\-]+", re.I),
     re.compile(r"/positions?/[A-Za-z0-9\-_/]+", re.I),
     re.compile(r"/openings?/[A-Za-z0-9\-_/]+", re.I),
+    re.compile(r"/ung-tuyen/[A-Za-z0-9\-/]+", re.I),
+    re.compile(r"/vi-tri/[A-Za-z0-9\-]+", re.I),
+    re.compile(r"/cong-viec/[A-Za-z0-9\-]+", re.I),
+    re.compile(r"/recruit(?:ment)?/[A-Za-z0-9\-]+", re.I),
 )
 
 
@@ -722,6 +726,42 @@ _CTA_BLACKLIST = {
     "quy trinh tuyen dung", "job search", "search jobs", "tat ca viec lam",
     "vi sao nen gia nhap", "moi truong lam viec", "phuc loi", "van hoa",
 }
+
+# Substrings that mark an anchor as an info/nav page, never a job posting.
+# (Checked against accent-stripped text, so it catches "Chính sách tuyển dụng",
+# "Tài liệu tuyển dụng", "Tin tức - Hoạt động", "Xem toàn bộ tin", …)
+_NAV_TITLE_RX = re.compile(
+    r"chinh sach|tai lieu|chuong trinh|tin tuc|hoat dong|gioi thieu|lien he|"
+    r"ve chung toi|phuc loi|cau hoi|faq|quy che|so do|xem toan bo|cam nang|"
+    r"quy trinh|moi truong lam viec|van hoa|vi sao",
+    re.I,
+)
+
+# Anchor text that is just a location (some cards use the location as link text;
+# the real title lives in the URL slug). Normalized, accent-stripped.
+_LOCATION_ONLY = {
+    "toan quoc", "ha noi", "hanoi", "ho chi minh", "tp ho chi minh",
+    "tphcm", "hcm", "sai gon", "da nang", "hai phong", "can tho",
+    "binh duong", "dong nai", "mien bac", "mien nam", "mien trung",
+    "remote", "vietnam", "viet nam", "nationwide",
+}
+
+
+def _deslug(path: str) -> str:
+    """Turn the last meaningful path segment into a human title, e.g.
+    '/ung-tuyen/.../senior-it-business-analyst/' → 'Senior It Business Analyst'.
+    Returns '' when the segment is a single word, numeric, or a known listing
+    keyword (so we don't fabricate junk titles)."""
+    segs = [s for s in (path or "").strip("/").split("/") if s]
+    if not segs:
+        return ""
+    last = re.sub(r"\.(html?|aspx?|php|jsp)$", "", segs[-1], flags=re.I)
+    words = [w for w in re.split(r"[-_]+", last) if w]
+    if len(words) < 2 or last.isdigit():
+        return ""
+    if _normalize(last.replace("-", " ")) in _CTA_BLACKLIST:
+        return ""
+    return " ".join(words).title()
 
 
 def _collect_link_candidates(html: str, base: str) -> list[dict]:
@@ -757,7 +797,7 @@ def _collect_link_candidates(html: str, base: str) -> list[dict]:
             continue
         text = a.get_text(" ", strip=True)
         norm = _normalize(text)
-        if not text or norm in _CTA_BLACKLIST:
+        if not text or norm in _CTA_BLACKLIST or _NAV_TITLE_RX.search(norm):
             continue
         seen.add(full)
         candidates.append({"url": full, "text": text[:160]})
@@ -911,10 +951,20 @@ async def extract_jobs_from_career_page(career_url: str, _depth: int = 0) -> lis
         if full in seen:
             continue
         text = a.get_text(" ", strip=True)
-        if len(text) < 4 or _normalize(text) in _CTA_BLACKLIST:
+        ntext = _normalize(text)
+        title = text
+        # Some cards use the location (or nothing) as the link text; recover the
+        # real title from the URL slug in that case.
+        if len(text) < 4 or ntext in _CTA_BLACKLIST or ntext in _LOCATION_ONLY:
+            slug_title = _deslug(path)
+            if not slug_title:
+                continue
+            title = slug_title
+        ntitle = _normalize(title)
+        if len(title) < 4 or ntitle in _CTA_BLACKLIST or _NAV_TITLE_RX.search(ntitle):
             continue
         seen.add(full)
-        jobs.append(JobListing(title=text[:200], url=full))
+        jobs.append(JobListing(title=title[:200], url=full))
         if len(jobs) >= 50:
             break
 

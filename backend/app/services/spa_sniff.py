@@ -33,6 +33,24 @@ _LOC_KEYS = ("locationstext", "location", "locations", "city", "primarylocation"
              "diadiem", "noilamviec", "tinhthanh", "province")
 _DESC_KEYS = ("description", "jobdescription", "overview", "responsibilities", "content", "summary")
 
+# Role words used to tell a real job title from a look-alike list (provinces,
+# region codes, menu items) when scoring candidate JSON lists. Substring match
+# on the accent-stripped title.
+_ROLE_RX = re.compile(
+    r"chuyen vien|nhan vien|truong|giam doc|pho |ky thuat|ky su|thuc tap|"
+    r"chuyen gia|quan ly|nhan su|tro ly|giam sat|cong nhan|tai xe|lai xe|"
+    r"manager|engineer|specialist|executive|officer|intern|associate|director|"
+    r"analyst|developer|designer|consultant|supervisor|accountant|technician|"
+    r"senior|junior|lead|head|sales|marketing|nhan vien|telesales",
+    re.I)
+
+
+def _norm_vi(s: str) -> str:
+    import unicodedata
+    s = unicodedata.normalize("NFD", s or "")
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+    return s.replace("đ", "d").replace("Đ", "D").lower().strip()
+
 
 # Extracts job-detail anchors from a rendered DOM (for SSR/RSC sites with no
 # JSON API). Matches job-detail URL patterns; skips generic CTA link texts.
@@ -40,24 +58,62 @@ _DOM_JOBS_JS = """() => {
   const rx = new RegExp("recruit/|chi-tiet|cong-viec|vi-tri|tuyen-dung/|/job/|/jobs/|/positions?/|requisition|recruitment/", "i");
   const bad = new RegExp("/blog/|/tin-tuc|/news/|/event|facebook|tiktok|linkedin|youtube", "i");
   const cta = new RegExp("^(xem chi ti|xem th.m|ung tuyen|.ng tuy|apply|dang ky|.ng k|view|detail|chi ti.t|read more|learn more|nop don|n.p|video|tin t.c|see more|kh.m ph.)", "i");
+  // Role words that strongly mark text as a job title (vi accents stripped). Used
+  // to (a) accept anchors whose URL isn't job-shaped (root-level slugs) and
+  // (b) pick the title cell out of a <table> row that has no detail link.
+  const role = new RegExp("^(chuyen vien|nhan vien|truong |giam doc|pho |ky thuat|ky su|thuc tap|chuyen gia|quan ly|nhan su|tro ly|giam sat|truong nhom|truong phong|truong ca|truong bo|cong nhan|tai xe|lai xe|senior |junior |lead |head |manager|engineer|specialist|executive|officer|intern|associate|director|analyst|developer|designer|consultant|supervisor|accountant|technician|staff|sales |brand |trade )", "i");
+  const locrx = new RegExp("ha noi|ho chi minh|hcm|sai gon|da nang|hai phong|can tho|binh duong|dong nai|bac ninh|hung yen|thai nguyen|long an|tinh |thanh pho|toan quoc|mien (bac|nam|trung)|remote|viet nam|vietnam", "i");
+  const nav = new RegExp("chinh sach|tai lieu|chuong trinh|tin tuc|hoat dong|gioi thieu|lien he|ve chung toi|phuc loi|cau hoi|quy che|xem toan bo|cam nang|quy trinh tuyen|moi truong lam|van hoa|vi sao", "i");
+  const norm = s => (s||'').toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').replace(/\\u0111/g,'d').trim();
   const firstLine = s => (s||'').split(String.fromCharCode(10)).map(x=>x.trim()).filter(Boolean)[0] || '';
   const seen = new Set(); const out = [];
+  // (A) Anchors: href looks job-shaped, OR the link text reads like a role title.
   for (const a of document.querySelectorAll('a[href]')) {
     const href = a.getAttribute('href') || '';
-    if (!rx.test(href) || bad.test(href) || seen.has(a.href)) continue;
-    // Prefer the link's own text (it's usually the title). Only when the link
-    // is a bare CTA ("Xem chi tiết") climb to the card and read its heading.
-    const card = a.closest('li, article, [class*="card" i], [class*="item" i], [class*="job" i]');
+    if (bad.test(href) || seen.has(a.href)) continue;
+    const card = a.closest('li, article, tr, [class*="card" i], [class*="item" i], [class*="job" i]');
     let title = firstLine(a.innerText);
     if (!title || cta.test(title)) {
       const h = card && card.querySelector('h1,h2,h3,h4,h5,[class*="title" i],[class*="name" i],[class*="position" i]');
       if (h) title = firstLine(h.innerText);
     }
+    const titleIsRole = title && role.test(norm(title));
+    if (!rx.test(href) && !titleIsRole) continue;
+    if (nav.test(norm(title)) || nav.test(href.replace(/[-/]/g,' '))) continue;
+    const nt = norm(title);
+    if (nt === 'tuyen dung' || nt === 'viec lam' || nt === 'co hoi nghe nghiep') continue;
     if (!title || title.length < 5 || title.length > 120 || cta.test(title)) continue;
     const loc = card ? (card.querySelector('[class*="location" i], [class*="address" i], [class*="diadiem" i]') || {}).innerText : '';
     seen.add(a.href);
     out.push({ title, url: a.href, location: (loc||'').split(String.fromCharCode(10))[0].trim().slice(0,120), description: '' });
     if (out.length >= 60) break;
+  }
+  // (B) Table rows whose detail opens via JS (no <a>) — e.g. Ant-design tables.
+  // Title = the cell that reads like a role; location = a cell matching a place.
+  if (out.length < 3) {
+    for (const tr of document.querySelectorAll('table tr')) {
+      const tds = [...tr.querySelectorAll('td')].map(td => firstLine(td.innerText)).filter(Boolean);
+      if (tds.length < 2) continue;
+      const title = tds.find(t => role.test(norm(t)));
+      if (!title || title.length < 5 || title.length > 120 || cta.test(title) || seen.has('row:'+title)) continue;
+      // Use the row's detail link only when it points to a real sub-page; many
+      // JS tables wrap rows in a link to the homepage/listing, which would make
+      // every job share one URL (and collapse on dedupe). Fall back to a
+      // title-fragment URL so rows stay distinct.
+      let url = '';
+      const a = tr.querySelector('a[href]');
+      if (a) {
+        try {
+          const pu = new URL(a.href, location.href);
+          if (pu.pathname && pu.pathname !== '/' && pu.pathname !== location.pathname) url = a.href;
+        } catch (e) {}
+      }
+      if (!url) url = location.href.split('#')[0] + '#' + encodeURIComponent(title.slice(0,40));
+      const loc = tds.find(t => locrx.test(norm(t))) || '';
+      seen.add('row:'+title);
+      out.push({ title, url, location: loc.slice(0,120), description: '' });
+      if (out.length >= 60) break;
+    }
   }
   return out;
 }"""
@@ -124,7 +180,13 @@ def _items_to_jobs(items, origin: str) -> list[dict]:
             url = origin + url
         if not url:
             jid = it.get("id") or it.get("jobId") or it.get("slug")
-            url = f"{origin}/job/{jid}" if jid else origin
+            if jid:
+                url = f"{origin}/job/{jid}"
+            else:
+                # No url and no id (e.g. 247Express table JSON) — keep rows
+                # distinct with a title fragment so they don't collapse on dedupe.
+                from urllib.parse import quote
+                url = f"{origin}#{quote(title[:40])}"
         out.append({"title": title[:200], "url": url,
                     "location": _first(it, _LOC_KEYS)[:120],
                     "description": _strip(_first(it, _DESC_KEYS))})
@@ -298,19 +360,41 @@ async def sniff_jobs(career_url: str) -> list[dict]:
     finally:
         await ctx.close()
 
-    best: list[dict] = []
-    best_src = ""
+    parsed = []
     for url, body in bodies:
         try:
-            data = json.loads(body)
+            parsed.append((url, json.loads(body)))
         except Exception:
             continue
+
+    # Score a candidate list by how many of its titles read like real job titles.
+    # A title counts when it contains a role word (chuyên viên / manager / …) or
+    # is clearly a long multi-word phrase. This rejects look-alike lists that the
+    # loose finder also returns — region codes ("ACS"), provinces ("Cao Bằng"),
+    # single-word menu items — so a smaller real-job list outranks them.
+    def _quality(jobs: list[dict]) -> int:
+        if not jobs:
+            return 0
+        n = 0
+        for j in jobs:
+            t = j["title"]
+            tn = _norm_vi(t)
+            if _ROLE_RX.search(tn) or (t.count(" ") >= 4 and len(t) >= 22):
+                n += 1
+        return n
+
+    best: list[dict] = []
+    best_src = ""
+    best_score = (-1, -1)  # (quality, count)
+    for url, data in parsed:
         jobs = _items_to_jobs(_find_job_list(data), origin)
-        if len(jobs) > len(best):
-            best, best_src = jobs, url
-    # API-less SSR sites: fall back to the rendered job-detail anchors.
-    if not best and dom_jobs:
-        best, best_src = dom_jobs, "rendered-DOM anchors"
+        score = (_quality(jobs), len(jobs))
+        if jobs and score > best_score:
+            best, best_src, best_score = jobs, url, score
+    # Rendered DOM (role/job anchors + JS-only table rows). Prefer it when the
+    # best JSON list looks like junk (low quality) or is thin.
+    if dom_jobs and (_quality(dom_jobs), len(dom_jobs)) > best_score:
+        best, best_src = dom_jobs, "rendered-DOM"
     if best:
         logger.info(f"[spa_sniff] {origin} → {len(best)} jobs via {best_src[:70]}")
     return best

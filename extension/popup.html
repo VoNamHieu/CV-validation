@@ -214,6 +214,18 @@
       <div id="statusBody">Chưa có dữ liệu</div>
       <div id="syncStatus" style="margin-top: 6px; font-size: 11px; opacity: 0.75;">⚪ Chưa đồng bộ</div>
     </div>
+
+    <!-- ═══ Debug capture (dev tool) ═══ -->
+    <div class="setting-card" style="flex-direction: column; align-items: stretch; gap: 8px;">
+      <div class="setting-label">
+        <span>🐞 Debug: gửi DOM trang này</span>
+        <p class="hint">Chụp DOM trang đang mở → backend để dựng extractor chính xác</p>
+      </div>
+      <input type="text" id="debugBackendUrl" placeholder="https://your-app.up.railway.app" style="width:100%;">
+      <input type="password" id="debugToken" placeholder="X-Debug-Token" style="width:100%;">
+      <button id="debugCaptureBtn" class="btn-action" style="width:100%;">🐞 Gửi DOM để debug</button>
+      <div id="debugStatus" style="font-size: 11px; opacity: 0.8;"></div>
+    </div>
   </div>
 
   <!-- ═══ Footer ═══ -->

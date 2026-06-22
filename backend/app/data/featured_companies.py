@@ -23,7 +23,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Shopee",
         homepage="https://shopee.vn",
-        career_url="https://careers.shopee.vn",
+        career_url="https://careers.shopee.vn/jobs",
     ),
     FeaturedCompany(
         name="VNG",
@@ -306,7 +306,47 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Heineken Vietnam",
         homepage="https://heinekenvietnam.com",
-        career_url="https://careers.theheinekencompany.com/Tieng-Viet/Job-Listing?operatings_company%5B0%5D=524",
+        career_url="https://careers.theheinekencompany.com/Tieng-Viet/HEINEKEN-Vietnam",
+    ),
+    FeaturedCompany(
+        name="MSB",
+        homepage="https://msb.com.vn",
+        career_url="https://jobs.msb.com.vn/",
+    ),
+    FeaturedCompany(
+        name="FE Credit",
+        homepage="https://fecredit.com.vn",
+        career_url="https://tuyendung.fecredit.com.vn/ung-tuyen/",
+    ),
+    FeaturedCompany(
+        name="F88",
+        homepage="https://f88.vn",
+        career_url="https://vieclam.f88.vn/tin-tuyen-dung",
+    ),
+    FeaturedCompany(
+        name="FPT Securities",
+        homepage="https://fpts.com.vn",
+        career_url="https://www.fpts.com.vn/co-hoi-nghe-nghiep/",
+    ),
+    FeaturedCompany(
+        name="Hoa Sen Group",
+        homepage="https://hoasengroup.vn",
+        career_url="https://hoasenjobs.com/",
+    ),
+    FeaturedCompany(
+        name="Hop Nhat Logistics",
+        homepage="https://hopnhat.com",
+        career_url="https://hopnhat.com/recruitment",
+    ),
+    FeaturedCompany(
+        name="UrBox",
+        homepage="https://urbox.vn",
+        career_url="https://talent.urbox.vn/alljobs?return=1",
+    ),
+    FeaturedCompany(
+        name="Apollo English",
+        homepage="https://apollo.edu.vn",
+        career_url="https://apollo.edu.vn/co-hoi-nghe-nghiep",
     ),
     FeaturedCompany(
         name="Nestlé Vietnam",
@@ -352,6 +392,16 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         name="Orion Vietnam",
         homepage="https://orion.vn",
         career_url="https://orion.vn/tuyen-dung/viec-lam/",
+    ),
+    FeaturedCompany(
+        name="247Express",
+        homepage="https://247express.vn",
+        career_url="https://247express.vn/tuyen-dung",
+    ),
+    FeaturedCompany(
+        name="Sunhouse",
+        homepage="https://sunhouse.com.vn",
+        career_url="https://sunhouse.com.vn/tuyen-dung/xem-toan-bo-tin",
     ),
     FeaturedCompany(
         name="Vinasoy",

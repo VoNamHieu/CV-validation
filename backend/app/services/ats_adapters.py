@@ -430,6 +430,55 @@ def _eightfold(career_url: str) -> list[dict]:
     return out
 
 
+# ── workatsea (Sea group: Shopee, SPX, Garena, SeaMoney) ────────────────────
+# careers.shopee.vn is a thin SPA backed by ats.workatsea.com. The job list is a
+# public GET: /ats/api/v1/user/job/list/?region_ids=<region>&limit&offset.
+# region_ids=32 == Vietnam (Hanoi=33, HCMC=34). Each item already carries the
+# HTML job_description + requirements, so no per-job detail fetch is needed.
+_WORKATSEA_VN_REGION = "32"
+
+
+def _is_workatsea(career_url: str, html: str | None) -> bool:
+    host = (urlparse(career_url).netloc or "").lower()
+    if host == "careers.shopee.vn":
+        return True
+    return bool(html) and "workatsea" in html.lower()
+
+
+def _workatsea(career_url: str) -> list[dict]:
+    p = urlparse(career_url)
+    origin = f"{p.scheme}://{p.netloc}"
+    api = "https://ats.workatsea.com/ats/api/v1/user/job/list/"
+    out, seen = [], set()
+    for offset in (0, 20, 40):
+        try:
+            r = requests.get(api, headers=_JSON_POST, timeout=_TIMEOUT,
+                             params={"region_ids": _WORKATSEA_VN_REGION, "limit": 20,
+                                     "offset": offset, "lang_code": "vi"})
+            if r.status_code != 200:
+                break
+            jl = ((r.json() or {}).get("data", {}) or {}).get("job_list", []) or []
+            if not jl:
+                break
+            for j in jl:
+                jid = j.get("id")
+                title = (j.get("job_name") or "").strip()
+                if not title or jid in seen:
+                    continue
+                seen.add(jid)
+                desc = _strip_html((j.get("job_description") or "") + " " +
+                                   (j.get("requirements") or ""))
+                out.append({"title": title[:200], "url": f"{origin}/jobs/{jid}",
+                            "location": "Vietnam", "description": desc})
+            if len(jl) < 20 or len(out) >= 40:
+                break
+        except Exception as e:
+            logger.info(f"[ats] workatsea offset {offset} failed: {str(e)[:80]}")
+            break
+    logger.info(f"[ats] workatsea → {len(out)} VN jobs ({origin})")
+    return out
+
+
 def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
     """Detect the ATS (from URL, then embedded in HTML) and fetch its jobs.
     Returns [] when no ATS is detected or the API yields nothing."""
@@ -459,6 +508,15 @@ def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
                 return jobs
         except Exception as e:
             logger.info(f"[ats] base.vn failed for {career_url}: {str(e)[:80]}")
+
+    # workatsea (Sea group: Shopee/SPX) — public job-list JSON, region=VN.
+    if _is_workatsea(career_url, html):
+        try:
+            jobs = [j for j in _workatsea(career_url) if j.get("title") and j.get("url")]
+            if jobs:
+                return jobs
+        except Exception as e:
+            logger.info(f"[ats] workatsea failed for {career_url}: {str(e)[:80]}")
 
     # Eightfold AI (pcsx) — public search JSON, filtered to VN locations.
     if _is_eightfold(career_url, html):
