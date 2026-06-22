@@ -610,7 +610,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Citi",
         homepage="https://citibank.com",
-        career_url="https://careers.citibank.com",
+        career_url="https://jobs.citi.com/search-jobs/Vietnam/287/2/1562822/16x16667/107x83333/50/2",
     ),
     FeaturedCompany(
         name="UOB",

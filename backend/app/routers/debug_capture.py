@@ -34,10 +34,11 @@ router = APIRouter(prefix="/debug", tags=["Debug Capture"])
 # browser. The batch-scan button pulls this list and walks it automatically.
 # URLs come from FEATURED_COMPANIES so they stay in sync. Trim a name once its
 # server-side adapter works.
+# Only these still need a real-browser capture (JS/anti-bot, but confirmed to
+# have VN openings). The rest of the old live-0 list either resolved with a
+# correct URL or has no Vietnam career page.
 _CAPTURE_TARGET_NAMES = {
-    "Atlassian", "Citi", "Hellmann", "IHG", "IKEA",
-    "Lazada", "Maersk", "McKinsey", "Rikkeisoft", "Salesforce",
-    "Standard Chartered", "VinFast",
+    "Maersk", "McKinsey", "Rikkeisoft", "Standard Chartered",
 }
 
 _NS = "debug:cap:v1"
