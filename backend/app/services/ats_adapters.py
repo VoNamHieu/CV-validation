@@ -491,7 +491,9 @@ def _is_phenom_services(career_url: str) -> bool:
     p = urlparse(career_url or "")
     host = (p.netloc or "").lower()
     path = (p.path or "").lower().rstrip("/")
-    return host.startswith("jobdetails.") or path.endswith("/search-results")
+    return (host.startswith("jobdetails.")
+            or path.endswith("/search-results")
+            or path.endswith("/viewalljobs"))  # VN Phenom banks (Sacombank, Vietcombank)
 
 
 def _phenom_services(career_url: str) -> list[dict]:
@@ -503,7 +505,7 @@ def _phenom_services(career_url: str) -> list[dict]:
     try:
         r = requests.post(f"{origin}/services/jobs/search/", headers=headers, timeout=_TIMEOUT,
                           json={"page": 0, "keywords": "", "locationsearch": country,
-                                "recordsperpage": 50, "startrow": 0})
+                                "recordsperpage": 100, "startrow": 0})
         if r.status_code != 200:
             return []
         for j in (r.json() or {}).get("jobList", []):
