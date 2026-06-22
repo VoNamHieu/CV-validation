@@ -640,6 +640,41 @@ def _bytedance_family(career_url: str) -> list[dict]:
     return out
 
 
+# ── VPBank Securities (vpbanks.com.vn) — headless CMS, post_type=tuyen-dung ──
+def _is_vpbanks(career_url: str) -> bool:
+    return (urlparse(career_url or "").netloc or "").lower() in (
+        "www.vpbanks.com.vn", "vpbanks.com.vn")
+
+
+def _vpbanks(career_url: str) -> list[dict]:
+    api = "https://www.vpbanks.com.vn/api/v1/front/post-type-content"
+    out = []
+    for page in range(1, 4):
+        try:
+            r = requests.get(api, headers=_JSON_POST, timeout=_TIMEOUT,
+                             params={"page": page, "limit": 50, "post_type": "tuyen-dung", "locale": "vi"})
+            if r.status_code != 200:
+                break
+            data = (r.json() or {}).get("data", []) or []
+            if not data:
+                break
+            for it in data:
+                title = (it.get("title") or "").strip()
+                slug = it.get("slug")
+                if not title or not slug:
+                    continue
+                out.append({"title": title[:200],
+                            "url": f"https://www.vpbanks.com.vn/co-hoi-nghe-nghiep/{slug}",
+                            "location": "Vietnam", "description": _strip_html(it.get("long_description", ""))})
+            if len(data) < 50 or len(out) >= 100:
+                break
+        except Exception as e:
+            logger.info(f"[ats] vpbanks page {page} failed: {str(e)[:80]}")
+            break
+    logger.info(f"[ats] vpbanks → {len(out)} jobs")
+    return out
+
+
 # ── MB Bank (careers.mbbank.com.vn "libra") — paginated public API ──────────
 # tuyendung.mbbank.com.vn is a JS SPA (crawler saw 0); jobs come from
 #   GET careers.mbbank.com.vn/libra-job-management/public/recruitment-news?size=&page=
@@ -816,6 +851,15 @@ def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
                 return jobs
         except Exception as e:
             logger.info(f"[ats] bytedance-family failed for {career_url}: {str(e)[:80]}")
+
+    # VPBank Securities — headless CMS API (post_type=tuyen-dung).
+    if _is_vpbanks(career_url):
+        try:
+            jobs = [j for j in _vpbanks(career_url) if j.get("title") and j.get("url")]
+            if jobs:
+                return jobs
+        except Exception as e:
+            logger.info(f"[ats] vpbanks failed for {career_url}: {str(e)[:80]}")
 
     # MB Bank — paginated "libra" public API (JS SPA otherwise yields 0).
     if _is_mbbank(career_url):
