@@ -878,6 +878,17 @@ async def extract_jobs_from_career_page(career_url: str, _depth: int = 0) -> lis
     except Exception as e:
         logger.info(f"[stage4] ATS(html) skipped for {career_url}: {e}")
 
+    # Fast path 3: Phenom People (no clean API) — render + read its job tiles.
+    if any(s in html.lower() for s in ("phenompeople", "data-ph-id", "phapp.ddo")):
+        try:
+            from app.services.spa_sniff import phenom_jobs
+            ph = await phenom_jobs(career_url)
+            if ph:
+                return [JobListing(title=j["title"][:200], url=j["url"],
+                                   location=(j.get("location") or "")[:120]) for j in ph[:50]]
+        except Exception as e:
+            logger.info(f"[stage4] Phenom extract skipped for {career_url}: {e}")
+
     soup = BeautifulSoup(html, "html.parser")
     base = _apex_url(career_url) or career_url
 

@@ -154,6 +154,42 @@ def next_data_jobs(career_url: str) -> list[dict]:
     return _items_to_jobs(items, f"{p.scheme}://{p.netloc}")
 
 
+async def phenom_jobs(career_url: str) -> list[dict]:
+    """Phenom People career sites load jobs via an opaque tokenized /widgets POST
+    (no clean public API), but render clean job tiles into the DOM. Render the
+    search page and read the [data-ph-at-job-title-text] tiles. Point the URL at
+    a location-filtered search (…?location=Vietnam) so the tiles are already VN."""
+    try:
+        from app.services.browser_pool import get_browser
+    except ImportError:
+        return []
+    browser = await get_browser()
+    ctx = await browser.new_context(locale="en-US", user_agent="Mozilla/5.0 Chrome/120")
+    page = await ctx.new_page()
+    rows = []
+    try:
+        await page.goto(career_url, timeout=40000, wait_until="domcontentloaded")
+        try:
+            await page.wait_for_load_state("networkidle", timeout=10000)
+        except Exception:
+            pass
+        await page.wait_for_timeout(3000)
+        rows = await page.evaluate(
+            """() => [...document.querySelectorAll('.jobs-list-item, [data-ph-at-id="job-card"]')].map(item => {
+                const el = item.querySelector('[data-ph-at-job-title-text]');
+                const a = item.querySelector('a[href*="/job/"]');
+                const loc = (item.querySelector('[data-ph-at-job-location-text], .job-location, [class*="location" i]') || {}).innerText;
+                return { title: el ? (el.innerText||'').trim() : '', url: a ? a.href : '', location: (loc||'').trim() };
+            }).filter(j => j.title && j.url)"""
+        )
+    except Exception as e:
+        logger.info(f"[phenom] render failed {career_url}: {str(e)[:60]}")
+    finally:
+        await ctx.close()
+    logger.info(f"[phenom] {career_url[:60]} → {len(rows)} jobs")
+    return rows[:50]
+
+
 async def sniff_jobs(career_url: str) -> list[dict]:
     """Render the SPA, capture its job-list JSON endpoint(s), re-fetch + parse.
     First tries __NEXT_DATA__ (cheap, no render) for Next.js SSG sites."""
