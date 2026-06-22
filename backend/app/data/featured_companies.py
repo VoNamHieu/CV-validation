@@ -803,17 +803,17 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="PwC",
         homepage="https://www.pwc.com/vn",
-        career_url="https://www.pwc.com/vn/en/careers.html",
+        career_url="https://www.pwc.com/vn/en/careers/experienced-jobs.html",
     ),
     FeaturedCompany(
         name="EY",
         homepage="https://www.ey.com/en_vn",
-        career_url="https://www.ey.com/en_vn/careers",
+        career_url="https://careers.ey.com/ey/search/?q=&location=vn",
     ),
     FeaturedCompany(
         name="KPMG",
         homepage="https://kpmg.com/vn",
-        career_url="https://home.kpmg/vn/en/home/careers.html",
+        career_url="https://careers.kpmg.com.vn/search/?createNewAlert=false&q=&locationsearch=vietnam",
     ),
     FeaturedCompany(
         name="Accenture",
