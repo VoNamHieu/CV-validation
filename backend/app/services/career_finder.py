@@ -715,6 +715,8 @@ _CTA_BLACKLIST = {
     "see all", "view all", "all jobs", "all positions", "apply now",
     "read more", "find out more", "tim hieu them", "xem them", "xem tat ca",
     "ung tuyen", "ung tuyen ngay",
+    "xem chi tiet", "chi tiet", "video", "tin tuc", "dang ky", "dang ky ngay",
+    "nop don", "nop ho so", "view detail", "view details", "kham pha",
 }
 
 
@@ -929,15 +931,17 @@ async def extract_jobs_from_career_page(career_url: str, _depth: int = 0) -> lis
             jobs.append(lj)
             merged_urls.add(lj.url)
 
-    # Last resort: a custom SPA whose jobs come from an internal JSON API the
-    # static/rendered HTML doesn't expose. Render + sniff that API generically.
-    if not jobs:
+    # Few/no hits: a custom SPA whose jobs come from an internal JSON API or are
+    # rendered as cards the static heuristic can't read. Render + sniff. (Run
+    # even with 1-2 weak hits — those are often nav noise like "Video".)
+    if len(jobs) < _MIN_JOBS_BEFORE_LLM:
         try:
             from app.services.spa_sniff import sniff_jobs
             sniffed = await sniff_jobs(career_url)
-            for s in sniffed[:50]:
-                jobs.append(JobListing(title=s["title"][:200], url=s["url"],
-                                       location=(s.get("location") or "")[:120]))
+            if len(sniffed) > len(jobs):  # sniff found a real listing → prefer it
+                jobs = [JobListing(title=s["title"][:200], url=s["url"],
+                                   location=(s.get("location") or "")[:120])
+                        for s in sniffed[:50]]
         except Exception as e:
             logger.info(f"[stage4] SPA sniff failed for {career_url}: {e}")
 

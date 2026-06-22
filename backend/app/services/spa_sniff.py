@@ -37,19 +37,26 @@ _DESC_KEYS = ("description", "jobdescription", "overview", "responsibilities", "
 # Extracts job-detail anchors from a rendered DOM (for SSR/RSC sites with no
 # JSON API). Matches job-detail URL patterns; skips generic CTA link texts.
 _DOM_JOBS_JS = """() => {
-  const rx = new RegExp("chi-tiet|cong-viec|vi-tri|tuyen-dung/|/job/|/jobs/|/positions?/|requisition|recruitment/", "i");
+  const rx = new RegExp("recruit/|chi-tiet|cong-viec|vi-tri|tuyen-dung/|/job/|/jobs/|/positions?/|requisition|recruitment/", "i");
   const bad = new RegExp("/blog/|/tin-tuc|/news/|/event|facebook|tiktok|linkedin|youtube", "i");
-  // startsWith match (no $) so trailing punctuation/icons on CTA links are caught
   const cta = new RegExp("^(xem chi ti|xem th.m|ung tuyen|.ng tuy|apply|dang ky|.ng k|view|detail|chi ti.t|read more|learn more|nop don|n.p|video|tin t.c|see more|kh.m ph.)", "i");
+  const firstLine = s => (s||'').split(String.fromCharCode(10)).map(x=>x.trim()).filter(Boolean)[0] || '';
   const seen = new Set(); const out = [];
   for (const a of document.querySelectorAll('a[href]')) {
     const href = a.getAttribute('href') || '';
-    const t = (a.innerText || '').trim();
-    if (!rx.test(href) || bad.test(href)) continue;
-    if (t.length < 6 || t.length > 120 || cta.test(t)) continue;
-    if (seen.has(a.href)) continue;
+    if (!rx.test(href) || bad.test(href) || seen.has(a.href)) continue;
+    // Prefer the link's own text (it's usually the title). Only when the link
+    // is a bare CTA ("Xem chi tiết") climb to the card and read its heading.
+    const card = a.closest('li, article, [class*="card" i], [class*="item" i], [class*="job" i]');
+    let title = firstLine(a.innerText);
+    if (!title || cta.test(title)) {
+      const h = card && card.querySelector('h1,h2,h3,h4,h5,[class*="title" i],[class*="name" i],[class*="position" i]');
+      if (h) title = firstLine(h.innerText);
+    }
+    if (!title || title.length < 5 || title.length > 120 || cta.test(title)) continue;
+    const loc = card ? (card.querySelector('[class*="location" i], [class*="address" i], [class*="diadiem" i]') || {}).innerText : '';
     seen.add(a.href);
-    out.push({ title: t, url: a.href, location: '', description: '' });
+    out.push({ title, url: a.href, location: (loc||'').split(String.fromCharCode(10))[0].trim().slice(0,120), description: '' });
     if (out.length >= 60) break;
   }
   return out;
