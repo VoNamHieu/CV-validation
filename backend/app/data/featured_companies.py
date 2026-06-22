@@ -249,7 +249,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Techcombank",
         homepage="https://www.techcombank.com.vn",
-        career_url="https://techcombankjobs.com",
+        career_url="https://www.techcombankjobs.com/search-results",
     ),
     FeaturedCompany(
         name="MB Bank",

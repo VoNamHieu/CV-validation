@@ -492,8 +492,13 @@ def _is_phenom_services(career_url: str) -> bool:
     host = (p.netloc or "").lower()
     path = (p.path or "").lower().rstrip("/")
     return (host.startswith("jobdetails.")
+            or host in _PHENOM_HOSTS
             or path.endswith("/search-results")
             or path.endswith("/viewalljobs"))  # VN Phenom banks (Sacombank, Vietcombank)
+
+
+# Root-domain Phenom career sites (no /search-results path to key off).
+_PHENOM_HOSTS = {"www.techcombankjobs.com", "techcombankjobs.com"}
 
 
 def _phenom_services(career_url: str) -> list[dict]:
