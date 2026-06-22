@@ -175,11 +175,16 @@ async def phenom_jobs(career_url: str) -> list[dict]:
             pass
         await page.wait_for_timeout(3000)
         rows = await page.evaluate(
-            """() => [...document.querySelectorAll('.jobs-list-item, [data-ph-at-id="job-card"]')].map(item => {
-                const el = item.querySelector('[data-ph-at-job-title-text]');
-                const a = item.querySelector('a[href*="/job/"]');
-                const loc = (item.querySelector('[data-ph-at-job-location-text], .job-location, [class*="location" i]') || {}).innerText;
-                return { title: el ? (el.innerText||'').trim() : '', url: a ? a.href : '', location: (loc||'').trim() };
+            """() => [...document.querySelectorAll('[data-ph-at-job-title-text]')].map(el => {
+                // Real job tiles always have an adjacent /job/ link; language /
+                // nav items carrying the same attribute do not — requiring the
+                // link filters them out (works for DHL .jobs-list-item and UPS's
+                // bare tiles alike).
+                const item = el.closest('.jobs-list-item, li, article, [role="listitem"]') || el.parentElement;
+                const a = el.closest('a[href*="/job/"]') ||
+                          (item || document).querySelector('a[href*="/job/"]');
+                const loc = item ? (item.querySelector('[data-ph-at-job-location-text], .job-location, [class*="location" i]') || {}).innerText : '';
+                return { title: (el.innerText||'').trim(), url: a ? a.href : '', location: (loc||'').trim() };
             }).filter(j => j.title && j.url)"""
         )
     except Exception as e:

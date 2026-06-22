@@ -423,7 +423,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="UPS",
         homepage="https://ups.com",
-        career_url="https://www.jobs-ups.com/apac/vi/",
+        career_url="https://www.jobs-ups.com/apac/vi/c/vi%E1%BB%87c-b%C3%A1n-h%C3%A0ng-jobs",
     ),
     FeaturedCompany(
         name="DB Schenker",
