@@ -521,6 +521,44 @@ def _phenom_services(career_url: str) -> list[dict]:
     return out
 
 
+# ── GHN (tuyendung.ghn.vn) — React SPA, public gateway API ──────────────────
+# Cards render client-side (no anchors), but the jobs come from a reachable
+# public API: GET online-gateway.ghn.vn/.../recruit/search-recruit. Title lives
+# in selectedListRecruit.label, province in provinceNameText.label.
+_GHN_API = ("https://online-gateway.ghn.vn/integration/recruit-ghn/"
+            "public-api/recruit/search-recruit")
+
+
+def _is_ghn(career_url: str) -> bool:
+    return (urlparse(career_url or "").netloc or "").lower() == "tuyendung.ghn.vn"
+
+
+def _ghn(career_url: str) -> list[dict]:
+    out, seen = [], set()
+    try:
+        r = requests.get(_GHN_API, headers=_JSON_POST, timeout=_TIMEOUT,
+                         params={"search": "", "page": 1, "pageSize": 60})
+        if r.status_code != 200:
+            return []
+        for j in ((r.json() or {}).get("data", {}) or {}).get("list", []):
+            sel = j.get("selectedListRecruit") or {}
+            title = (sel.get("label") or "").strip()
+            rid = sel.get("value") or j.get("id")
+            if not title or rid in seen:
+                continue
+            seen.add(rid)
+            prov = (j.get("provinceNameText") or {}).get("label") or ""
+            url = f"https://tuyendung.ghn.vn/recruit/detail/{rid}" if rid else "https://tuyendung.ghn.vn/recruit/"
+            out.append({"title": title[:200], "url": url,
+                        "location": str(prov)[:120], "description": _strip_html(j.get("content", ""))})
+            if len(out) >= 40:
+                break
+    except Exception as e:
+        logger.info(f"[ats] ghn failed: {str(e)[:80]}")
+    logger.info(f"[ats] ghn → {len(out)} jobs")
+    return out
+
+
 def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
     """Detect the ATS (from URL, then embedded in HTML) and fetch its jobs.
     Returns [] when no ATS is detected or the API yields nothing."""
@@ -559,6 +597,15 @@ def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
                 return jobs
         except Exception as e:
             logger.info(f"[ats] workatsea failed for {career_url}: {str(e)[:80]}")
+
+    # GHN — public recruit gateway API (React SPA renders no anchors).
+    if _is_ghn(career_url):
+        try:
+            jobs = [j for j in _ghn(career_url) if j.get("title") and j.get("url")]
+            if jobs:
+                return jobs
+        except Exception as e:
+            logger.info(f"[ats] ghn failed for {career_url}: {str(e)[:80]}")
 
     # Phenom ph-services — REST job API on the unprotected careersite host.
     if _is_phenom_services(career_url):
