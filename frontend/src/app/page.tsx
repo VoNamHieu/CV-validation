@@ -8,6 +8,7 @@ import StepUploadCV from '@/components/steps/StepUploadCV';
 import StepInputUrl from '@/components/steps/StepInputUrl';
 import StepEditCv from '@/components/steps/StepEditCv';
 import HistoryView from '@/components/views/HistoryView';
+import Mode1ResultBanner from '@/components/Mode1ResultBanner';
 
 export default function Home() {
   const view = useAppStore((s) => s.view);
@@ -37,6 +38,9 @@ export default function Home() {
       }} />
 
       <Sidebar />
+
+      {/* Mode 1 — tailored-CV result pushed from the extension */}
+      <Mode1ResultBanner />
 
       {/* Main content area */}
       <div style={{

@@ -77,3 +77,65 @@ export function syncCvFileToExtension(
         "JOBFIT_SYNC_CV_FILE_RESPONSE",
     );
 }
+
+// ─────────────────────────────── Mode 1 ───────────────────────────────
+
+/**
+ * Sync the rich CV JSON into extension storage. The extension needs this to
+ * tailor the CV against a job page's JD (Mode 1) — the flat 23-field profile
+ * isn't enough (no experience bullets / skills detail).
+ */
+export function syncCvDataToExtension(cv: CVData): Promise<SyncResult> {
+    return postAndAwait(
+        { type: "JOBFIT_SYNC_CV_DATA", cv },
+        "JOBFIT_SYNC_CV_DATA_RESPONSE",
+    );
+}
+
+export interface Mode1Result {
+    source_ref: string;
+    improved_cv: CVData;
+    improvements: unknown[];
+    match: Record<string, unknown>;
+}
+
+/**
+ * Subscribe to tailored-CV results pushed from the extension (Mode 1). The
+ * extension tailors on the job page, then the background pushes the result
+ * here for rendering. Returns an unsubscribe function.
+ */
+export function onMode1Result(callback: (result: Mode1Result) => void): () => void {
+    const handler = (event: MessageEvent) => {
+        if (event.source !== window) return;
+        if (event.data?.type !== "JOBFIT_MODE1_RESULT") return;
+        callback({
+            source_ref: event.data.source_ref,
+            improved_cv: event.data.improved_cv,
+            improvements: event.data.improvements ?? [],
+            match: event.data.match ?? {},
+        });
+    };
+    window.addEventListener("message", handler);
+    return () => window.removeEventListener("message", handler);
+}
+
+/**
+ * Trigger the extension to auto-apply for a tailored job. The web app only
+ * holds the opaque source_ref; the extension resolves it back to the real job
+ * URL locally and opens it — the backend never learns the URL.
+ */
+export function triggerMode1Apply(
+    sourceRef: string,
+    opts?: { profile?: ExtensionProfile; cvFileBase64?: string; cvFileName?: string },
+): Promise<SyncResult> {
+    return postAndAwait(
+        {
+            type: "JOBFIT_MODE1_APPLY",
+            sourceRef,
+            profile: opts?.profile,
+            cvFileBase64: opts?.cvFileBase64,
+            cvFileName: opts?.cvFileName,
+        },
+        "JOBFIT_MODE1_APPLY_RESPONSE",
+    );
+}

@@ -262,6 +262,115 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     // ══════════════════════════════════════════════════════════════
+    // ── MODE 1 — Sync rich CV JSON (needed for tailoring) ──
+    // ══════════════════════════════════════════════════════════════
+    if (message.type === 'SAVE_CV_DATA') {
+        if (!message.cv) {
+            sendResponse({ success: false, error: 'Missing cv' });
+            return true;
+        }
+        chrome.storage.local.set({ jobfitCv: message.cv, jobfitCvSyncedAt: Date.now() }, () => {
+            sendResponse({ success: true });
+        });
+        return true;
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // ── MODE 1 — Tailor CV for the JD on the current job page. ──
+    //    Proxies the no-store /api/ai/tailor (the ONLY endpoint that
+    //    sees raw board JD). On success: store source_ref → job_url
+    //    LOCALLY (the server never learns the URL) and hand the
+    //    tailored CV to the web app for rendering.
+    // ══════════════════════════════════════════════════════════════
+    if (message.type === 'MODE1_TAILOR') {
+        const { cv, jdText, sourceRef, jobUrl, options } = message;
+        (async () => {
+            try {
+                if (!cv || !jdText || !sourceRef || !jobUrl) {
+                    sendResponse({ success: false, error: 'Missing cv, jdText, sourceRef, or jobUrl' });
+                    return;
+                }
+                const data = await chrome.storage.local.get('jobfitAppUrl');
+                const appUrl = data.jobfitAppUrl || 'https://cv-validation.vercel.app';
+                const urls = [
+                    appUrl,
+                    appUrl.includes('localhost') ? null : 'http://localhost:3000',
+                ].filter(Boolean);
+
+                let lastError = null;
+                for (const baseUrl of urls) {
+                    try {
+                        const res = await fetch(`${baseUrl}/api/ai/tailor`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ cv, jd_text: jdText, source_ref: sourceRef, options }),
+                            // Pipeline = 3 sequential LLM calls (extract → score → optimize).
+                            signal: AbortSignal.timeout(120000),
+                        });
+                        if (!res.ok) {
+                            const err = await res.json().catch(() => ({}));
+                            throw new Error(err.detail || `API error: ${res.status}`);
+                        }
+                        const result = await res.json();
+                        // source_ref → job_url lives ONLY here, never on the server.
+                        const store = await chrome.storage.local.get('mode1RefMap');
+                        const map = store.mode1RefMap || {};
+                        map[sourceRef] = { jobUrl, at: Date.now() };
+                        await chrome.storage.local.set({ mode1RefMap: map });
+                        // Push the tailored CV to the web-app tab(s) to render.
+                        pushToWebApp({ type: 'JOBFIT_MODE1_RESULT', ...result });
+                        sendResponse({ success: true, data: result });
+                        return;
+                    } catch (e) {
+                        lastError = e;
+                        console.warn(`[JobFit AI] tailor proxy failed for ${baseUrl}:`, e.message);
+                    }
+                }
+                sendResponse({ success: false, error: lastError?.message || 'All endpoints failed' });
+            } catch (e) {
+                sendResponse({ success: false, error: e.message });
+            }
+        })();
+        return true;
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // ── MODE 1 — Apply: resolve source_ref → job_url LOCALLY, then
+    //    reuse the existing single-apply path. The web app only ever
+    //    holds the opaque source_ref.
+    // ══════════════════════════════════════════════════════════════
+    if (message.type === 'MODE1_APPLY') {
+        (async () => {
+            try {
+                const { sourceRef } = message;
+                const store = await chrome.storage.local.get(['mode1RefMap', 'jobfitProfile']);
+                const entry = (store.mode1RefMap || {})[sourceRef];
+                if (!entry?.jobUrl) {
+                    sendResponse({ success: false, error: 'Unknown source_ref — hãy tailor job này trước.' });
+                    return;
+                }
+                const profile = message.profile || store.jobfitProfile;
+                if (!profile) {
+                    sendResponse({ success: false, error: 'Chưa có profile — hãy đồng bộ profile trước.' });
+                    return;
+                }
+                handleAutoApplyStart(
+                    {
+                        jobUrl: entry.jobUrl,
+                        profile,
+                        cvFileBase64: message.cvFileBase64,
+                        cvFileName: message.cvFileName,
+                    },
+                    sendResponse,
+                );
+            } catch (e) {
+                sendResponse({ success: false, error: e.message });
+            }
+        })();
+        return true;
+    }
+
+    // ══════════════════════════════════════════════════════════════
     // ── EXT_CRAWL — Crawl a URL by opening a background tab. ──
     //    Used by the web app as a Cloudflare bypass: when the Railway
     //    backend's Playwright fetch is blocked, we open the page in the
@@ -468,6 +577,16 @@ function broadcastProgress() {
     chrome.tabs.query({}, (tabs) => {
         for (const tab of tabs) {
             chrome.tabs.sendMessage(tab.id, progress).catch(() => { });
+        }
+    });
+}
+
+// Push an arbitrary message to every tab; content-webapp.js forwards the
+// JobFit-app ones to the page. Used to deliver the Mode-1 tailored CV.
+function pushToWebApp(message) {
+    chrome.tabs.query({}, (tabs) => {
+        for (const tab of tabs) {
+            if (tab.id != null) chrome.tabs.sendMessage(tab.id, message).catch(() => { });
         }
     });
 }

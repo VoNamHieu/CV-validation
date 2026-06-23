@@ -9,7 +9,7 @@ import {
 import { useAppStore } from '@/store/useAppStore';
 import { parsePdfWithAI } from '@/lib/api';
 import { cvToExtensionProfile } from '@/lib/extension-profile';
-import { syncProfileToExtension } from '@/lib/extension-sync';
+import { syncProfileToExtension, syncCvDataToExtension } from '@/lib/extension-sync';
 import { CITY_OPTIONS } from '@/lib/job-targeting';
 
 export default function StepUploadCV() {
@@ -60,6 +60,9 @@ export default function StepUploadCV() {
                 setExtSyncError(res.error ?? '');
                 if (!res.ok) console.warn('[JobFit] Profile sync → extension failed:', res.error);
             });
+            // Also sync the rich CV JSON so the extension can tailor it on a job
+            // page (Mode 1) — the relay drops cvData from the profile message.
+            syncCvDataToExtension(structured).catch(() => { });
 
             setUploaded(true);
             setProcessing(false);

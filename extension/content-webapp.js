@@ -113,12 +113,31 @@
         if (event.data?.type === 'JOBFIT_GET_PROGRESS') {
             relay({ type: 'GET_APPLY_PROGRESS' }, 'JOBFIT_APPLY_PROGRESS');
         }
+
+        // ─── Mode 1: sync rich CV JSON (needed for tailoring) ───
+        if (event.data?.type === 'JOBFIT_SYNC_CV_DATA') {
+            relay({
+                type: 'SAVE_CV_DATA',
+                cv: event.data.cv,
+            }, 'JOBFIT_SYNC_CV_DATA_RESPONSE');
+        }
+
+        // ─── Mode 1: apply by source_ref (extension resolves → job URL locally) ───
+        if (event.data?.type === 'JOBFIT_MODE1_APPLY') {
+            relay({
+                type: 'MODE1_APPLY',
+                sourceRef: event.data.sourceRef,
+                profile: event.data.profile,
+                cvFileBase64: event.data.cvFileBase64,
+                cvFileName: event.data.cvFileName,
+            }, 'JOBFIT_MODE1_APPLY_RESPONSE');
+        }
     });
 
-    // ── Listen for progress updates FROM background (pushed) ──
+    // ── Listen for pushed messages FROM background ──
     chrome.runtime.onMessage.addListener((message) => {
-        if (message.type === 'JOBFIT_APPLY_PROGRESS') {
-            // Forward to web app
+        // Progress updates + Mode-1 tailored-CV results both forward to the page.
+        if (message.type === 'JOBFIT_APPLY_PROGRESS' || message.type === 'JOBFIT_MODE1_RESULT') {
             window.postMessage(message, '*');
         }
     });
