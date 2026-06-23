@@ -264,11 +264,6 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         career_url="https://tuyendung.ocb.com.vn",
     ),
     FeaturedCompany(
-        name="NCB",
-        homepage="https://ncb-bank.vn",
-        career_url="https://tuyendung.ncb-bank.vn",
-    ),
-    FeaturedCompany(
         name="Eximbank",
         homepage="https://eximbank.com.vn",
         career_url="https://tuyendungeximbank.com/vi",
@@ -334,11 +329,6 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         name="Vinamilk",
         homepage="https://vinamilk.com.vn",
         career_url="https://www.vinamilk.com.vn/en/recruitment/career-opportunities",
-    ),
-    FeaturedCompany(
-        name="Sabeco",
-        homepage="https://sabeco.com.vn",
-        career_url="https://career.sabeco.com.vn",
     ),
     FeaturedCompany(
         name="Heineken Vietnam",
@@ -446,11 +436,6 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         career_url="https://career.vinasoy.com/tim-viec-lam/tat-ca-viec-lam/vi",
     ),
     FeaturedCompany(
-        name="IKEA",
-        homepage="https://ikea.com",
-        career_url="https://jobs.ikea.com/en",
-    ),
-    FeaturedCompany(
         name="Decathlon",
         homepage="https://decathlon.com",
         career_url="https://careersdecathlonvn.com/en/recruitments",
@@ -531,11 +516,6 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         name="UPS",
         homepage="https://ups.com",
         career_url="https://www.jobs-ups.com/apac/vi/c/vi%E1%BB%87c-b%C3%A1n-h%C3%A0ng-jobs",
-    ),
-    FeaturedCompany(
-        name="Expeditors",
-        homepage="https://expeditors.com",
-        career_url="https://careers.expeditors.com",
     ),
     FeaturedCompany(
         name="GHTK",
@@ -634,17 +614,6 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         homepage="https://citibank.com",
         career_url="https://jobs.citi.com/search-jobs/Vietnam/287/2/1562822/16x16667/107x83333/50/2",
     ),
-    FeaturedCompany(
-        name="UOB",
-        homepage="https://uobgroup.com",
-        career_url="https://careers.uobgroup.com",
-    ),
-    FeaturedCompany(
-        name="OCBC",
-        homepage="https://ocbc.com",
-        career_url="https://ocbc.wd102.myworkdayjobs.com/External",
-    ),
-
     # ── Insurance ─────────────────────────────────────────────────────
     FeaturedCompany(
         name="Sun Life Vietnam",
@@ -732,11 +701,6 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     ),
 
     # ── Semiconductor ─────────────────────────────────────────────────
-    FeaturedCompany(
-        name="Amkor Technology",
-        homepage="https://amkor.com",
-        career_url="https://careers.amkor.com",
-    ),
     FeaturedCompany(
         name="Marvell",
         homepage="https://marvell.com",
