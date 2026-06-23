@@ -91,6 +91,9 @@ def adjacent_families(family: str, threshold: float = 0.5) -> dict[str, float]:
 _RULES: list[tuple[str, str]] = [
     # Manufacturing / technician (check early — "công nhân", "kỹ thuật viên")
     ("Manufacturing & Technician", r"cong nhan|cn |van hanh may|lo hoi|technician|ky thuat vien|operator|assembl|machinist|qa\b.*line|cong nhan dien"),
+    # Explicit Product roles — checked BEFORE Data&AI so "AI Product Owner" /
+    # "Data Product Manager" resolve to the role (Product), not the specialization.
+    ("Product", r"product (owner|manager|management|lead|director|head|supervisor|executive|associate|specialist|develop)|head of product|quan ly san pham"),
     # Data & AI
     ("Data & AI", r"data scien|data engineer|machine learn|\bml\b|\bai\b|data analyst|business intelligence|analytics|data steward|big data|\bmis\b"),
     # Engineering / software
