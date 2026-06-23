@@ -104,16 +104,18 @@ _RULES: list[tuple[str, str]] = [
     ("Design", r"designer|\bux\b|\bui\b|graphic|creative|art director|thiet ke|motion|illustrat|copywriter|copy writer"),
     # Marketing  (drop bare \bpr\b — collides with VN; keep full comms terms)
     ("Marketing", r"marketing|\bbrand\b|growth|content|seo|digital mkt|truyen thong|thuong hieu|public relations|communicat|social|\bcrm\b|campaign|trade marketing|\bmkt\b|strategist"),
+    # Legal / Risk / Compliance — BEFORE Sales/Finance: these signals are
+    # unambiguous, but bank compliance/risk titles also contain "khách hàng"/
+    # "tài chính" which would otherwise be grabbed by Sales/Finance first.
+    ("Legal, Risk & Compliance", r"legal|phap che|phap ly|compliance|tuan thu|\brisk\b|rui ro|quan tri rui ro|regulat|aml|phong chong rua tien"),
     # Sales & BD (incl. VN bank relationship-manager roles — high volume)
     ("Sales & BD", r"sales|ban hang|kinh doanh|business develop|account manager|account executive|partnership|relationship manager|\bbd\b|telesale|merchant|distribution|giam sat ban hang|khach hang ca nhan|khach hang doanh nghiep|khach hang lon|quan he khach hang|\bkhcn\b|\bkhdn\b|tu van tin dung|phat trien khach hang"),
     # Finance & Accounting (incl. credit / valuation — VN banks)
     ("Finance & Accounting", r"finance|financ|accountant|ke toan|tai chinh|audit|kiem toan|treasury|actuar|dinh phi|tax|thue|fp&a|controller|kiem soat|tham dinh (gia|tin dung)|tin dung|credit|dinh gia|thu hoi no|phan tich.*tai chinh|giao dich vien|\bgdv\b|kiem ngan|teller"),
     # HR
     ("Human Resources", r"human resource|\bhr\b|hrbp|recruit|tuyen dung|talent|nhan su|c&b|learning.*develop|\bl&d\b|dao tao|compensation|payroll"),
-    # Legal / Risk / Compliance
-    ("Legal, Risk & Compliance", r"legal|phap che|phap ly|compliance|tuan thu|\brisk\b|rui ro|quan tri rui ro|regulat"),
-    # Customer Service
-    ("Customer Service", r"customer service|customer support|cham soc khach hang|\bcskh\b|call center|contact center|dich vu khach hang|tong dai|support agent"),
+    # Customer Service (incl. Customer Success / Experience)
+    ("Customer Service", r"customer (service|support|success|experience)|cham soc khach hang|\bcskh\b|call center|contact center|dich vu khach hang|tong dai|support agent|customer success"),
     # Operations / supply chain / commerce ops
     ("Operations", r"operation|van hanh|supply chain|chuoi cung ung|logistic|warehouse|kho|fulfil|category|seller|merchandis|procure|mua hang|thu mua|planning|planner|inventory|dieu phoi|giao nhan|vendor|optimization"),
     # General & management (catch-all-ish, check late)
