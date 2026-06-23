@@ -24,6 +24,10 @@ from app.services.career_finder import (
 from app.services import company_cache
 from app.services import cache
 from app.services import capture_jobs
+from app.search.profile import build_profile, distill_from_cv
+from app.search.facet import rank_jobs
+from app.search.company_industry import classify_company
+from app.search.semantic import rerank_bucket
 from app.services.gemini_client import discover_jobs_for_profile
 from app.services.url_validator import is_allowed_url
 from app.data.featured_companies import FEATURED_COMPANIES
@@ -377,6 +381,75 @@ async def featured_jobs(refresh: bool = False):
         )
         return {"fetched_at": 0, "from_cache": bool(fallback),
                 "stale": bool(fallback), "warming": True, "companies": fallback}
+
+
+class SearchRequest(BaseModel):
+    """Facet search over the featured pool. Supply CV text (distilled to intent)
+    or explicit fields; explicit fields override CV-derived ones."""
+    cv_text: str | None = None
+    target_roles: list[str] = Field(default_factory=list)
+    domains: list[str] = Field(default_factory=list)
+    level: str = ""
+    desired_locations: list[str] = Field(default_factory=list)
+    salary_floor: int = 0
+    limit: int = 60
+    rerank: bool = True   # Phase-2 embedding rerank within the facet bucket
+
+
+def _flatten_featured(companies: list[dict]) -> list[dict]:
+    """company-grouped featured → flat job dicts tagged with company + industry."""
+    flat = []
+    for c in companies or []:
+        industry = classify_company(c.get("name", ""), c.get("career_url", ""))
+        for j in c.get("jobs", []):
+            flat.append({**j, "company": c.get("name", ""), "industry": industry})
+    return flat
+
+
+@router.post("/search")
+async def search(req: SearchRequest):
+    """Rank the featured pool against a CV-derived (or explicit) profile using
+    the facet engine (role-adjacency × industry × location). No LLM at retrieval;
+    LLM only if a CV is distilled. Serves the cached pool (warming if cold)."""
+    # Build profile: distill CV first (if given), then let explicit fields win.
+    profile = distill_from_cv(req.cv_text) if req.cv_text else build_profile([])
+    if req.target_roles:
+        profile = build_profile(req.target_roles, req.domains or profile.domains,
+                                req.level or profile.level,
+                                req.desired_locations or profile.desired_locations,
+                                req.salary_floor or profile.salary_floor)
+    elif req.domains or req.desired_locations or req.level or req.salary_floor:
+        profile.domains = req.domains or profile.domains
+        profile.desired_locations = req.desired_locations or profile.desired_locations
+        profile.level = req.level or profile.level
+        profile.salary_floor = req.salary_floor or profile.salary_floor
+
+    # Reuse the featured cache (L1 → Redis); kick a refresh if cold.
+    now = time.time()
+    companies = _featured_cache.get("data")
+    if not companies:
+        entry = await _read_featured_entry()
+        companies = entry.get("companies") if entry else None
+    if not companies:
+        _ensure_refresh_task()
+        return {"warming": True, "profile": profile.__dict__, "results": []}
+
+    ranked = rank_jobs(_flatten_featured(companies), profile)  # Phase 1: facet
+
+    # Phase 2: embedding rerank within the top facet bucket (cached per job).
+    if req.rerank and ranked:
+        query_text = (req.cv_text or "").strip() or " ".join(
+            (req.target_roles or []) + profile.domains)
+        if query_text:
+            ranked = await rerank_bucket(ranked, query_text, top=60)
+
+    return {
+        "warming": False,
+        "profile": profile.__dict__,
+        "reranked": req.rerank,
+        "total_matched": len(ranked),
+        "results": ranked[: max(1, min(req.limit, 200))],
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
