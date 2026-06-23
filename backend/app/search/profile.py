@@ -60,6 +60,10 @@ def distill_from_cv(cv_text: str) -> SearchProfile:
     try:
         raw = generate_json(_SYS, (cv_text or "")[:8000])
         d = json.loads(raw) if isinstance(raw, str) else (raw or {})
+        if isinstance(d, list):                       # model returned an array
+            d = next((x for x in d if isinstance(x, dict)), {})
+        if not isinstance(d, dict):
+            d = {}
     except Exception as e:
         logger.info(f"[profile] distill failed: {str(e)[:80]}")
         d = {}
