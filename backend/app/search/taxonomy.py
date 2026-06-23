@@ -92,15 +92,15 @@ _RULES: list[tuple[str, str]] = [
     # Manufacturing / technician (check early — "công nhân", "kỹ thuật viên")
     ("Manufacturing & Technician", r"cong nhan|cn |van hanh may|lo hoi|technician|ky thuat vien|operator|assembl|machinist|qa\b.*line|cong nhan dien"),
     # Data & AI
-    ("Data & AI", r"data scien|data engineer|machine learn|\bml\b|\bai\b|data analyst|business intelligence|\bbi\b|analytics|data steward|big data"),
+    ("Data & AI", r"data scien|data engineer|machine learn|\bml\b|\bai\b|data analyst|business intelligence|analytics|data steward|big data|\bmis\b"),
     # Engineering / software
     ("Engineering", r"software|developer|\bdev\b|engineer|lap trinh|backend|frontend|full.?stack|devops|\bsre\b|\bqa\b|tester|mobile|android|ios|embedded|firmware|system|infra|cloud|\bit\b.*(engineer|developer|support|operation)|ky su(?!.*ban)"),
-    # Product
-    ("Product", r"product manage|product owner|product lead|product assistant|product specialist|business analyst|\bba\b|product analyst|quan ly san pham|tech product"),
+    # Product  (drop bare \bba\b — false-matches VN "Bà"/"Ba"; keep "business analyst")
+    ("Product", r"product manage|product owner|product lead|product assistant|product specialist|business analyst|product analyst|quan ly san pham|tech product"),
     # Design
     ("Design", r"designer|\bux\b|\bui\b|graphic|creative|art director|thiet ke|motion|illustrat|copywriter|copy writer"),
-    # Marketing
-    ("Marketing", r"marketing|\bbrand\b|growth|content|seo|digital mkt|truyen thong|thuong hieu|\bpr\b|communicat|social|crm|campaign|trade marketing|mkt|strategist"),
+    # Marketing  (drop bare \bpr\b — collides with VN; keep full comms terms)
+    ("Marketing", r"marketing|\bbrand\b|growth|content|seo|digital mkt|truyen thong|thuong hieu|public relations|communicat|social|\bcrm\b|campaign|trade marketing|\bmkt\b|strategist"),
     # Sales & BD (incl. VN bank relationship-manager roles — high volume)
     ("Sales & BD", r"sales|ban hang|kinh doanh|business develop|account manager|account executive|partnership|relationship manager|\bbd\b|telesale|merchant|distribution|giam sat ban hang|khach hang ca nhan|khach hang doanh nghiep|khach hang lon|quan he khach hang|\bkhcn\b|\bkhdn\b|tu van tin dung|phat trien khach hang"),
     # Finance & Accounting (incl. credit / valuation — VN banks)
