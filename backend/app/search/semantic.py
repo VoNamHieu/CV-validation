@@ -37,7 +37,9 @@ async def rerank_bucket(jobs: list[dict], query_text: str, top: int = 60) -> lis
         return jobs
     bucket, tail = jobs[:top], jobs[top:]
 
-    docs = [build_job_doc(j.get("title", "")) for j in bucket]
+    # Title + JD snippet make the vector discriminative; many ATS adapters
+    # populate `description`, search-result-only jobs leave it blank (→ title-only).
+    docs = [build_job_doc(j.get("title", ""), jd=j.get("description", "")) for j in bucket]
     keys = [_h(d) for d in docs]
     cached = await _get_many(keys)
     miss = [i for i, k in enumerate(keys) if k not in cached]
