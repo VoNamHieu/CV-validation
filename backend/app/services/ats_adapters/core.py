@@ -20,6 +20,7 @@ import requests
 logger = logging.getLogger(__name__)
 
 _TIMEOUT = 12
+_MAX_ATS_JOBS = 100   # per-company cap across all adapters
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                   "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -256,22 +257,32 @@ def _workday(career_url: str) -> list[dict]:
     cxs = f"{base}/wday/cxs/{tenant}/{site}"
     country = os.getenv("DISCOVER_COUNTRY", "Vietnam")
     out = []
-    try:
-        # searchText narrows to the country server-side (big global tenants have
-        # thousands of jobs); then keep only ones whose location is really VN.
-        # NOTE: cxs caps limit at 20 (else HTTP 400).
-        r = requests.post(f"{cxs}/jobs", headers=_JSON_POST, timeout=_TIMEOUT,
-                          json={"limit": 20, "offset": 0, "searchText": country, "appliedFacets": {}})
-        if r.status_code == 200:
-            for j in (r.json() or {}).get("jobPostings", []):
+    # searchText narrows to the country server-side (big global tenants have
+    # thousands of jobs); then keep only ones whose location is really VN. The
+    # cxs API caps limit at 20 (else HTTP 400), so paginate by offset to get
+    # tenants with >20 VN postings (e.g. Prudential).
+    for offset in (0, 20, 40, 60):
+        try:
+            r = requests.post(f"{cxs}/jobs", headers=_JSON_POST, timeout=_TIMEOUT,
+                              json={"limit": 20, "offset": offset, "searchText": country,
+                                    "appliedFacets": {}})
+            if r.status_code != 200:
+                break
+            postings = (r.json() or {}).get("jobPostings", []) or []
+            if not postings:
+                break
+            for j in postings:
                 loc = j.get("locationsText", "") or ""
                 if not _is_vn_loc(loc):
                     continue
                 ext = j.get("externalPath", "") or ""
                 out.append({"title": j.get("title", ""), "url": base + ext if ext else base,
                             "location": loc, "description": "", "_ext": ext})
-    except Exception as e:
-        logger.info(f"[ats] workday {tenant} failed: {str(e)[:80]}")
+            if len(postings) < 20 or len(out) >= _MAX_ATS_JOBS:
+                break
+        except Exception as e:
+            logger.info(f"[ats] workday {tenant} offset {offset} failed: {str(e)[:80]}")
+            break
 
     # Fetch each VN job's full JD from the cxs detail endpoint (bounded).
     for job in out[:12]:
@@ -491,7 +502,14 @@ def _is_phenom_services(career_url: str) -> bool:
     p = urlparse(career_url or "")
     host = (p.netloc or "").lower()
     path = (p.path or "").lower().rstrip("/")
-    return host.startswith("jobdetails.") or path.endswith("/search-results")
+    return (host.startswith("jobdetails.")
+            or host in _PHENOM_HOSTS
+            or path.endswith("/search-results")
+            or path.endswith("/viewalljobs"))  # VN Phenom banks (Sacombank, Vietcombank)
+
+
+# Root-domain Phenom career sites (no /search-results path to key off).
+_PHENOM_HOSTS = {"www.techcombankjobs.com", "techcombankjobs.com"}
 
 
 def _phenom_services(career_url: str) -> list[dict]:
@@ -503,7 +521,7 @@ def _phenom_services(career_url: str) -> list[dict]:
     try:
         r = requests.post(f"{origin}/services/jobs/search/", headers=headers, timeout=_TIMEOUT,
                           json={"page": 0, "keywords": "", "locationsearch": country,
-                                "recordsperpage": 50, "startrow": 0})
+                                "recordsperpage": 100, "startrow": 0})
         if r.status_code != 200:
             return []
         for j in (r.json() or {}).get("jobList", []):
@@ -638,6 +656,123 @@ def _bytedance_family(career_url: str) -> list[dict]:
     return out
 
 
+# ── VPBank Securities (vpbanks.com.vn) — headless CMS, post_type=tuyen-dung ──
+def _is_vpbanks(career_url: str) -> bool:
+    return (urlparse(career_url or "").netloc or "").lower() in (
+        "www.vpbanks.com.vn", "vpbanks.com.vn")
+
+
+def _vpbanks(career_url: str) -> list[dict]:
+    api = "https://www.vpbanks.com.vn/api/v1/front/post-type-content"
+    out = []
+    for page in range(1, 4):
+        try:
+            r = requests.get(api, headers=_JSON_POST, timeout=_TIMEOUT,
+                             params={"page": page, "limit": 50, "post_type": "tuyen-dung", "locale": "vi"})
+            if r.status_code != 200:
+                break
+            data = (r.json() or {}).get("data", []) or []
+            if not data:
+                break
+            for it in data:
+                title = (it.get("title") or "").strip()
+                slug = it.get("slug")
+                if not title or not slug:
+                    continue
+                out.append({"title": title[:200],
+                            "url": f"https://www.vpbanks.com.vn/co-hoi-nghe-nghiep/{slug}",
+                            "location": "Vietnam", "description": _strip_html(it.get("long_description", ""))})
+            if len(data) < 50 or len(out) >= 100:
+                break
+        except Exception as e:
+            logger.info(f"[ats] vpbanks page {page} failed: {str(e)[:80]}")
+            break
+    logger.info(f"[ats] vpbanks → {len(out)} jobs")
+    return out
+
+
+# ── MB Bank (careers.mbbank.com.vn "libra") — paginated public API ──────────
+# tuyendung.mbbank.com.vn is a JS SPA (crawler saw 0); jobs come from
+#   GET careers.mbbank.com.vn/libra-job-management/public/recruitment-news?size=&page=
+#   → {content:[{id, name, province, toDate}]}
+def _is_mbbank(career_url: str) -> bool:
+    return (urlparse(career_url or "").netloc or "").lower() in (
+        "tuyendung.mbbank.com.vn", "careers.mbbank.com.vn")
+
+
+def _mbbank(career_url: str) -> list[dict]:
+    api = "https://careers.mbbank.com.vn/libra-job-management/public/recruitment-news"
+    out = []
+    try:
+        r = requests.get(api, headers=_JSON_POST, timeout=_TIMEOUT,
+                         params={"workGroupId": "", "name": "", "skillTags": "",
+                                 "city": "", "size": 100, "page": 0})
+        if r.status_code != 200:
+            return []
+        for it in (r.json() or {}).get("content", []) or []:
+            name = (it.get("name") or "").strip()
+            jid = it.get("id")
+            if not name or not jid:
+                continue
+            out.append({"title": name[:200],
+                        "url": f"https://tuyendung.mbbank.com.vn/job/{jid}",
+                        "location": str(it.get("province") or "")[:120], "description": ""})
+    except Exception as e:
+        logger.info(f"[ats] mbbank failed: {str(e)[:80]}")
+    logger.info(f"[ats] mbbank → {len(out)} jobs")
+    return out
+
+
+# ── iVIEC (VN bank ATS: TPBank, Eximbank, …) — paginated public API ─────────
+# Career sites hosted by iVIEC render via JS and paginate at 10/page, so the
+# generic crawler badly under-counts (TPBank: 114 jobs, we saw 10). The public
+# API returns everything:
+#   GET centralize-api-v2.iviec.vn/api/recruitment/Recruitment/GetRecruitmentsByDomain
+#       ?pageIndex=N&pageSize=50&Domain=<career-host>
+#   → {items:[{name, slug, workingNewAddresses:[{provinceName,countryName}], ...}],
+#      totalRecord, totalPage}
+_IVIEC_HOSTS = {"tuyendung.tpb.vn", "tuyendungeximbank.com"}
+_IVIEC_API = ("https://centralize-api-v2.iviec.vn/api/recruitment/"
+              "Recruitment/GetRecruitmentsByDomain")
+
+
+def _is_iviec(career_url: str) -> bool:
+    return (urlparse(career_url or "").netloc or "").lower() in _IVIEC_HOSTS
+
+
+def _iviec(career_url: str) -> list[dict]:
+    host = (urlparse(career_url).netloc or "").lower()
+    out = []
+    for page in range(1, 6):  # up to 5×50 = 250, capped below
+        try:
+            r = requests.get(_IVIEC_API, headers={**_JSON_POST, "Referer": f"https://{host}/"},
+                             timeout=_TIMEOUT,
+                             params={"pageIndex": page, "pageSize": 50, "Domain": host})
+            if r.status_code != 200:
+                break
+            d = r.json() or {}
+            items = d.get("items", []) or []
+            if not items:
+                break
+            for it in items:
+                name = (it.get("name") or "").strip()
+                slug = it.get("slug")
+                if not name or not slug:
+                    continue
+                addrs = it.get("workingNewAddresses") or it.get("workingAddresses") or []
+                loc = ", ".join(a.get("provinceName") for a in addrs
+                                if isinstance(a, dict) and a.get("provinceName"))
+                out.append({"title": name[:200], "url": f"https://{host}/vi/jobs/{slug}",
+                            "location": loc[:120], "description": _strip_html(it.get("requirement", ""))})
+            if page >= d.get("totalPage", page) or len(out) >= 100:
+                break
+        except Exception as e:
+            logger.info(f"[ats] iviec {host} page {page} failed: {str(e)[:80]}")
+            break
+    logger.info(f"[ats] iviec → {len(out)} jobs ({host})")
+    return out
+
+
 # ── GHN (tuyendung.ghn.vn) — React SPA, public gateway API ──────────────────
 # Cards render client-side (no anchors), but the jobs come from a reachable
 # public API: GET online-gateway.ghn.vn/.../recruit/search-recruit. Title lives
@@ -676,99 +811,102 @@ def _ghn(career_url: str) -> list[dict]:
     return out
 
 
-def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
-    """Detect the ATS (from URL, then embedded in HTML) and fetch its jobs.
-    Returns [] when no ATS is detected or the API yields nothing."""
-    # Workday — parse tenant/site from the URL (or a myworkdayjobs URL embedded
-    # in the page HTML, e.g. Maersk) and hit its cxs JSON API.
-    wd_url = career_url if _is_workday(career_url) else None
-    if not wd_url and html:
-        # Un-escape JSON-encoded URLs (/ / \/) so embedded Workday links
-        # like Maersk's "https://maersk.wd3.myworkdayjobs.com/PT_Careers" match.
+# Normalized exact titles that are nav/section labels, never a real posting.
+_BAD_TITLES = {
+    "trang chu", "tuyen dung", "viec lam", "co hoi nghe nghiep", "co hoi viec lam",
+    "tuyen dung hot", "tuyen dung moi", "tat ca viec lam", "xem toan bo tin",
+    "opportunities", "job search", "search jobs", "all jobs", "view all jobs",
+    "apply", "ung tuyen",
+}
+
+
+def _norm_title(s: str) -> str:
+    import unicodedata
+    s = unicodedata.normalize("NFD", s or "")
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+    return s.replace("đ", "d").replace("Đ", "D").lower().strip()
+
+
+def _finalize(jobs: list[dict]) -> list[dict]:
+    """Single exit gate for every adapter: keep title+url rows, drop nav/section
+    labels and date-range rows, dedup by url then by title, cap per company."""
+    out, seen_url, seen_title = [], set(), set()
+    for j in jobs:
+        title = (j.get("title") or "").strip()
+        url = j.get("url") or ""
+        if not title or not url or len(title) < 4:
+            continue
+        nt = _norm_title(title)
+        if nt in _BAD_TITLES or nt.startswith(("tu ngay ", "from ")):  # date-range rows (Canon)
+            continue
+        tkey = nt[:80]
+        if url in seen_url or tkey in seen_title:
+            continue
+        seen_url.add(url)
+        seen_title.add(tkey)
+        out.append(j)
+        if len(out) >= _MAX_ATS_JOBS:
+            break
+    return out
+
+
+def _resolve_workday_url(career_url: str, html: str | None) -> str | None:
+    """The Workday tenant URL for this page: the career_url itself if it's a
+    myworkdayjobs URL, else one embedded in the HTML (e.g. Maersk links to its
+    Workday tenant with JSON-escaped slashes)."""
+    if _is_workday(career_url):
+        return career_url
+    if html:
         unesc = html.replace("\\u002f", "/").replace("\\u002F", "/").replace("\\/", "/")
         m = re.search(r"https?://[a-z0-9-]+\.wd\d+\.myworkdayjobs\.com/[A-Za-z0-9_\-]+", unesc, re.I)
         if m:
-            wd_url = m.group(0)
-    if wd_url:
-        try:
-            jobs = [j for j in _workday(wd_url) if j.get("title") and j.get("url")]
-            if jobs:
-                return jobs
-        except Exception as e:
-            logger.info(f"[ats] workday failed for {wd_url}: {str(e)[:80]}")
+            return m.group(0)
+    return None
 
-    # base.vn (talent.vn) parses the page JSON rather than calling a slug API.
-    if _is_basevn(career_url, html):
-        try:
-            jobs = [j for j in _basevn(career_url, html) if j.get("title") and j.get("url")]
-            if jobs:
-                return jobs
-        except Exception as e:
-            logger.info(f"[ats] base.vn failed for {career_url}: {str(e)[:80]}")
 
-    # workatsea (Sea group: Shopee/SPX) — public job-list JSON, region=VN.
-    if _is_workatsea(career_url, html):
-        try:
-            jobs = [j for j in _workatsea(career_url) if j.get("title") and j.get("url")]
-            if jobs:
-                return jobs
-        except Exception as e:
-            logger.info(f"[ats] workatsea failed for {career_url}: {str(e)[:80]}")
+# Adapter protocol: each is (name, detect(url, html) -> bool, fetch(url, html) ->
+# [{title,url,location,description}]). Tried in order; the first whose detect()
+# matches AND returns rows wins. Output always passes through _finalize. To add
+# an ATS: write _is_x / _x and append one line here — no other edits.
+_ADAPTERS: list = [
+    ("workday",        lambda u, h: _resolve_workday_url(u, h) is not None,
+                       lambda u, h: _workday(_resolve_workday_url(u, h))),
+    ("base.vn",        _is_basevn,                       lambda u, h: _basevn(u, h)),
+    ("workatsea",      _is_workatsea,                    lambda u, h: _workatsea(u)),
+    ("oracle-hcm",     lambda u, h: _is_oracle_hcm(u),   lambda u, h: _oracle_hcm(u)),
+    ("bytedance",      lambda u, h: bool(_bd_config(u)), lambda u, h: _bytedance_family(u)),
+    ("vpbanks",        lambda u, h: _is_vpbanks(u),      lambda u, h: _vpbanks(u)),
+    ("mbbank",         lambda u, h: _is_mbbank(u),       lambda u, h: _mbbank(u)),
+    ("iviec",          lambda u, h: _is_iviec(u),        lambda u, h: _iviec(u)),
+    ("ghn",            lambda u, h: _is_ghn(u),          lambda u, h: _ghn(u)),
+    ("phenom",         lambda u, h: _is_phenom_services(u), lambda u, h: _phenom_services(u)),
+    ("eightfold",      _is_eightfold,                    lambda u, h: _eightfold(u)),
+    ("successfactors", _is_successfactors,               lambda u, h: _successfactors(u, h)),
+]
 
-    # Oracle Cloud HCM / Fusion — public recruiting REST API.
-    if _is_oracle_hcm(career_url):
-        try:
-            jobs = [j for j in _oracle_hcm(career_url) if j.get("title") and j.get("url")]
-            if jobs:
-                return jobs
-        except Exception as e:
-            logger.info(f"[ats] oracle-hcm failed for {career_url}: {str(e)[:80]}")
 
-    # TikTok / ByteDance — same public job-search API (JS-rendered sites).
-    if _bd_config(career_url):
+def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
+    """Detect the ATS (from URL, then embedded in HTML) and fetch its jobs.
+    Returns [] when no ATS is detected or the API yields nothing. Every
+    adapter's output passes through _finalize for consistent dedup /
+    nav-filtering / capping."""
+    for name, detect, fetch in _ADAPTERS:
         try:
-            jobs = [j for j in _bytedance_family(career_url) if j.get("title") and j.get("url")]
+            if not detect(career_url, html):
+                continue
+            jobs = [j for j in (fetch(career_url, html) or []) if j.get("title") and j.get("url")]
             if jobs:
-                return jobs
+                for j in jobs:
+                    j.setdefault("source", name)
+                logger.info(f"[ats] {name} → {len(jobs)} jobs ({career_url})")
+                return _finalize(jobs)
         except Exception as e:
-            logger.info(f"[ats] bytedance-family failed for {career_url}: {str(e)[:80]}")
+            logger.info(f"[ats] {name} failed for {career_url}: {str(e)[:80]}")
 
-    # GHN — public recruit gateway API (React SPA renders no anchors).
-    if _is_ghn(career_url):
-        try:
-            jobs = [j for j in _ghn(career_url) if j.get("title") and j.get("url")]
-            if jobs:
-                return jobs
-        except Exception as e:
-            logger.info(f"[ats] ghn failed for {career_url}: {str(e)[:80]}")
-
-    # Phenom ph-services — REST job API on the unprotected careersite host.
-    if _is_phenom_services(career_url):
-        try:
-            jobs = [j for j in _phenom_services(career_url) if j.get("title") and j.get("url")]
-            if jobs:
-                return jobs
-        except Exception as e:
-            logger.info(f"[ats] phenom-services failed for {career_url}: {str(e)[:80]}")
-
-    # Eightfold AI (pcsx) — public search JSON, filtered to VN locations.
-    if _is_eightfold(career_url, html):
-        try:
-            jobs = [j for j in _eightfold(career_url) if j.get("title") and j.get("url")]
-            if jobs:
-                return jobs
-        except Exception as e:
-            logger.info(f"[ats] eightfold failed for {career_url}: {str(e)[:80]}")
-
-    # SuccessFactors (SAP) — parse the SSR /search/ job tiles.
-    if _is_successfactors(career_url, html):
-        try:
-            jobs = [j for j in _successfactors(career_url, html) if j.get("title") and j.get("url")]
-            if jobs:
-                return jobs
-        except Exception as e:
-            logger.info(f"[ats] successfactors failed for {career_url}: {str(e)[:80]}")
-
+    # Generic slug-based ATS (Lever/Greenhouse/Ashby/SmartRecruiters/Recruitee),
+    # detected from the URL or embedded in the HTML. These list GLOBAL jobs, so
+    # keep only VN postings — unless none are VN-tagged (location-less or
+    # VN-domestic data), in which case keep everything rather than drop all.
     hit = detect_ats(career_url) or (detect_ats_in_html(html) if html else None)
     if not hit:
         return []
@@ -781,5 +919,8 @@ def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
     except Exception as e:  # never let a quirky ATS response break the pipeline
         logger.info(f"[ats] {ats}:{slug} fetch failed: {str(e)[:80]}")
         return []
+    vn = [j for j in jobs if _is_vn_loc(j.get("location") or "")]
+    if vn:
+        jobs = vn
     logger.info(f"[ats] {ats}:{slug} → {len(jobs)} jobs ({career_url})")
-    return jobs
+    return _finalize(jobs)

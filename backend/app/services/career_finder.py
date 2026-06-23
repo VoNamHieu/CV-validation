@@ -712,6 +712,8 @@ _JOB_URL_PATTERNS = (
 # anchors that don't match the path patterns above; the LLM gets the cleaned
 # text + a link inventory and picks out real postings.
 _MIN_JOBS_BEFORE_LLM = 3
+# Max postings kept per company (big employers — banks, groups — list 100+).
+_MAX_JOBS = 100
 
 # Generic CTA / navigation anchor texts that should never be treated as jobs.
 _CTA_BLACKLIST = {
@@ -734,7 +736,7 @@ _NAV_TITLE_RX = re.compile(
     r"chinh sach|tai lieu|chuong trinh|tin tuc|hoat dong|gioi thieu|lien he|"
     r"ve chung toi|phuc loi|cau hoi|faq|quy che|so do|xem toan bo|cam nang|"
     r"quy trinh|moi truong lam viec|van hoa|vi sao|saved job|talent pool|"
-    r"drop cv|gioi thieu chung",
+    r"drop cv|gioi thieu chung|^tu ngay \d",  # ^tu ngay = date-range rows (Canon)
     re.I,
 )
 
@@ -878,7 +880,7 @@ Rules:
             continue
         seen.add(url)
         results.append(JobListing(title=title[:200], url=url, location=location[:120]))
-        if len(results) >= 50:
+        if len(results) >= _MAX_JOBS:
             break
     logger.info(f"[llm_jobs] LLM picked {len(results)} jobs from {len(candidates)} candidates")
     return results
@@ -901,7 +903,7 @@ async def extract_jobs_from_career_page(career_url: str, _depth: int = 0) -> lis
     def _as_listings(ats_jobs):
         return [
             JobListing(title=j["title"][:200], url=j["url"], location=(j.get("location") or "")[:120])
-            for j in ats_jobs[:50]
+            for j in ats_jobs[:_MAX_JOBS]
         ]
 
     # Fast path 1: career URL is itself a known ATS host → hit its public JSON
@@ -932,7 +934,7 @@ async def extract_jobs_from_career_page(career_url: str, _depth: int = 0) -> lis
             ph = await phenom_jobs(career_url)
             if ph:
                 return [JobListing(title=j["title"][:200], url=j["url"],
-                                   location=(j.get("location") or "")[:120]) for j in ph[:50]]
+                                   location=(j.get("location") or "")[:120]) for j in ph[:_MAX_JOBS]]
         except Exception as e:
             logger.info(f"[stage4] Phenom extract skipped for {career_url}: {e}")
 
@@ -966,7 +968,7 @@ async def extract_jobs_from_career_page(career_url: str, _depth: int = 0) -> lis
             continue
         seen.add(full)
         jobs.append(JobListing(title=title[:200], url=full))
-        if len(jobs) >= 50:
+        if len(jobs) >= _MAX_JOBS:
             break
 
     if len(jobs) >= _MIN_JOBS_BEFORE_LLM:
@@ -996,7 +998,7 @@ async def extract_jobs_from_career_page(career_url: str, _depth: int = 0) -> lis
             if len(sniffed) > len(jobs):  # sniff found a real listing → prefer it
                 jobs = [JobListing(title=s["title"][:200], url=s["url"],
                                    location=(s.get("location") or "")[:120])
-                        for s in sniffed[:50]]
+                        for s in sniffed[:_MAX_JOBS]]
         except Exception as e:
             logger.info(f"[stage4] SPA sniff failed for {career_url}: {e}")
 
