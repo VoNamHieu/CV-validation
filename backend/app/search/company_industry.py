@@ -8,7 +8,7 @@ rules for anything unmapped, then "Conglomerate / Other".
 from __future__ import annotations
 
 import re
-from app.data.taxonomy import INDUSTRIES  # noqa: F401  (validity reference)
+from app.search.taxonomy import INDUSTRIES  # noqa: F401  (validity reference)
 
 COMPANY_INDUSTRY: dict[str, str] = {
     # E-commerce & Marketplace

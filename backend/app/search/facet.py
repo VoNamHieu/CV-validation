@@ -10,11 +10,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from app.data.taxonomy import classify_title, adjacent_families
-from app.data.company_industry import classify_company
+from app.search.taxonomy import classify_title, adjacent_families
+from app.search.company_industry import classify_company
 
 # accent-fold + lower for location matching (reuse taxonomy's normalizer shape)
-from app.data.taxonomy import _norm  # noqa: E402
+from app.search.taxonomy import _norm  # noqa: E402
 
 
 @dataclass
