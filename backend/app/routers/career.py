@@ -27,6 +27,7 @@ from app.services import capture_jobs
 from app.search.profile import build_profile, distill_from_cv
 from app.search.facet import rank_jobs
 from app.search.company_industry import classify_company
+from app.search.semantic import rerank_bucket
 from app.services.gemini_client import discover_jobs_for_profile
 from app.services.url_validator import is_allowed_url
 from app.data.featured_companies import FEATURED_COMPANIES
@@ -392,6 +393,7 @@ class SearchRequest(BaseModel):
     desired_locations: list[str] = Field(default_factory=list)
     salary_floor: int = 0
     limit: int = 60
+    rerank: bool = True   # Phase-2 embedding rerank within the facet bucket
 
 
 def _flatten_featured(companies: list[dict]) -> list[dict]:
@@ -432,10 +434,19 @@ async def search(req: SearchRequest):
         _ensure_refresh_task()
         return {"warming": True, "profile": profile.__dict__, "results": []}
 
-    ranked = rank_jobs(_flatten_featured(companies), profile)
+    ranked = rank_jobs(_flatten_featured(companies), profile)  # Phase 1: facet
+
+    # Phase 2: embedding rerank within the top facet bucket (cached per job).
+    if req.rerank and ranked:
+        query_text = (req.cv_text or "").strip() or " ".join(
+            (req.target_roles or []) + profile.domains)
+        if query_text:
+            ranked = await rerank_bucket(ranked, query_text, top=60)
+
     return {
         "warming": False,
         "profile": profile.__dict__,
+        "reranked": req.rerank,
         "total_matched": len(ranked),
         "results": ranked[: max(1, min(req.limit, 200))],
     }
