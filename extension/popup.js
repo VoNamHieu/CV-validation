@@ -255,20 +255,57 @@ function initTabs() {
 // ── Debug capture ──────────────────────────────────────────────────────────
 // Runs IN the page (injected) and returns a snapshot of the rendered DOM so we
 // can build/repair extractors against what a real browser actually sees.
-function __captureSnapshot() {
-    const firstLine = s => (s || '').split('\n').map(x => x.trim()).filter(Boolean)[0] || '';
-    const anchors = [...document.querySelectorAll('a[href]')].slice(0, 1500).map(a => ({
+// Injected (world: MAIN). Async: scrolls + waits for the SPA to actually render
+// its JD before snapshotting, so we don't capture an empty pre-XHR shell. Reads
+// window.__jfApis (set by content-netcap.js) to surface the backend job API.
+async function __captureSnapshot() {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const textLen = () => ((document.body && document.body.innerText) || '').length;
+
+    // ── Wait for content: scroll to trigger lazy/virtualized lists, then wait
+    //    until the visible text stabilizes above a threshold (SPAs fetch the JD
+    //    after first paint). Bounded so it never hangs the capture. ──
+    const JOB_SEL = "[class*='job' i],[class*='description' i],[class*='recruit' i]," +
+        "[class*='tuyen-dung' i],[itemtype*='JobPosting' i],article,main,h1";
+    const start = Date.now();
+    let last = -1, stable = 0;
+    while (Date.now() - start < 12000) {
+        try { window.scrollTo(0, (document.body && document.body.scrollHeight) || 0); } catch (e) { /* noop */ }
+        const n = textLen();
+        const hasJob = !!document.querySelector(JOB_SEL);
+        if (n > 1200 && hasJob && n === last) {
+            if (++stable >= 2) break;            // two stable polls → content settled
+        } else {
+            stable = 0;
+        }
+        last = n;
+        await sleep(700);
+    }
+    try { window.scrollTo(0, 0); } catch (e) { /* noop */ }
+
+    const firstLine = (s) => (s || '').split('\n').map((x) => x.trim()).filter(Boolean)[0] || '';
+    const anchors = [...document.querySelectorAll('a[href]')].slice(0, 1500).map((a) => ({
         href: a.href,
         text: firstLine(a.innerText).slice(0, 160),
     }));
-    const tables = [...document.querySelectorAll('table')].slice(0, 20).map(t =>
-        [...t.querySelectorAll('tr')].slice(0, 80).map(r =>
-            [...r.querySelectorAll('th,td')].map(c => firstLine(c.innerText).slice(0, 120))
+    const tables = [...document.querySelectorAll('table')].slice(0, 20).map((t) =>
+        [...t.querySelectorAll('tr')].slice(0, 80).map((r) =>
+            [...r.querySelectorAll('th,td')].map((c) => firstLine(c.innerText).slice(0, 120))
         )
     );
     const nd = document.getElementById('__NEXT_DATA__');
     const jsonld = [...document.querySelectorAll('script[type="application/ld+json"]')]
-        .slice(0, 10).map(s => (s.textContent || '').slice(0, 100000));
+        .slice(0, 10).map((s) => (s.textContent || '').slice(0, 100000));
+
+    // Embedded JS state islands (Nuxt/Redux/Apollo/Remix) — the JD often lives
+    // here even when the rendered DOM is thin.
+    let state = '';
+    for (const k of ['__NUXT__', '__INITIAL_STATE__', '__APOLLO_STATE__', '__remixContext', '__INITIAL_DATA__']) {
+        try {
+            if (window[k]) { state = JSON.stringify(window[k]).slice(0, 500000); break; }
+        } catch (e) { /* unserializable — skip */ }
+    }
+
     return {
         url: location.href,
         title: document.title || '',
@@ -277,6 +314,8 @@ function __captureSnapshot() {
         tables,
         nextData: nd ? (nd.textContent || '').slice(0, 500000) : '',
         jsonld,
+        apis: (window.__jfApis || []).slice(0, 200),   // backend API calls the page made
+        state,
     };
 }
 
@@ -296,6 +335,7 @@ async function captureForDebug() {
         if (!tab || !/^https?:/.test(tab.url || '')) throw new Error('Tab không hợp lệ');
         const [{ result: snap }] = await chrome.scripting.executeScript({
             target: { tabId: tab.id },
+            world: 'MAIN',               // read window.__jfApis + page state
             func: __captureSnapshot,
         });
         const res = await fetch(`${backendUrl}/debug/capture`, {
@@ -305,7 +345,7 @@ async function captureForDebug() {
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
-        statusEl.textContent = `✅ Đã gửi ${data.host} · ${Math.round((data.bytes || 0) / 1024)}KB · ${data.anchors} links · ${data.tables} bảng`;
+        statusEl.textContent = `✅ ${data.host} · ${Math.round((data.bytes || 0) / 1024)}KB · ${data.anchors} links · ${data.apis || 0} API calls`;
     } catch (e) {
         statusEl.textContent = `❌ ${e.message || e}`;
     } finally {
@@ -381,9 +421,9 @@ async function batchCapture() {
         try {
             tab = await chrome.tabs.create({ url: t.url, active: false });
             await __waitTabComplete(tab.id);
-            await __sleep(6500); // let the SPA fetch + render its jobs
+            await __sleep(1500); // brief settle; __captureSnapshot then waits for real content
             const [{ result: snap }] = await chrome.scripting.executeScript({
-                target: { tabId: tab.id }, func: __captureSnapshot,
+                target: { tabId: tab.id }, world: 'MAIN', func: __captureSnapshot,
             });
             const r = await fetch(`${backendUrl}/debug/capture`, {
                 method: 'POST',

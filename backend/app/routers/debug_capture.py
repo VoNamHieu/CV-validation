@@ -56,7 +56,8 @@ class CapturePayload(BaseModel):
     tables: list = Field(default_factory=list)     # [[ "cell", ... ], ...]
     nextData: str = ""                              # raw __NEXT_DATA__ JSON
     jsonld: list = Field(default_factory=list)      # raw ld+json blocks
-    apis: list = Field(default_factory=list)        # [{method,url,body}] (phase 2)
+    apis: list = Field(default_factory=list)        # [{method,url,status}] page's own XHR/fetch — reveals backend job APIs
+    state: str = Field("", max_length=600000)       # embedded JS state (__NUXT__/__INITIAL_STATE__/__APOLLO_STATE__)
     note: str = Field("", max_length=1000)
 
 
@@ -91,13 +92,16 @@ async def capture(payload: CapturePayload, x_debug_token: str | None = Header(de
     index = [e for e in index if e.get("host") != host]   # de-dup by host
     index.insert(0, {"host": host, "url": payload.url, "title": payload.title,
                      "ts": ts, "bytes": len(data.get("html", "")),
-                     "anchors": len(payload.anchors), "tables": len(payload.tables)})
+                     "anchors": len(payload.anchors), "tables": len(payload.tables),
+                     "apis": len(payload.apis)})
     await cache.set_json(_INDEX_KEY, index[:_MAX_INDEX], _TTL)
 
     logger.info(f"[debug-capture] stored {host} "
-                f"({len(data.get('html',''))}B html, {len(payload.anchors)} anchors)")
+                f"({len(data.get('html',''))}B html, {len(payload.anchors)} anchors, "
+                f"{len(payload.apis)} apis)")
     return {"ok": True, "host": host, "bytes": len(data.get("html", "")),
-            "anchors": len(payload.anchors), "tables": len(payload.tables)}
+            "anchors": len(payload.anchors), "tables": len(payload.tables),
+            "apis": len(payload.apis)}
 
 
 @router.get("/capture/latest")
