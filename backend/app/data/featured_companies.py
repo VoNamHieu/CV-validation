@@ -294,11 +294,6 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         career_url="https://www.acbjobs.com.vn/alljobs",
     ),
     FeaturedCompany(
-        name="HDBank",
-        homepage="https://hdbank.com.vn",
-        career_url="https://career.hdbank.com.vn",
-    ),
-    FeaturedCompany(
         name="Sacombank",
         homepage="https://www.sacombank.com.vn",
         career_url="https://sacombankcareer.com/viewalljobs/",
@@ -653,11 +648,6 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         career_url="https://tuyendung.vingroup.net/jobs",
     ),
     FeaturedCompany(
-        name="VinFast",
-        homepage="https://vinfastauto.com",
-        career_url="https://vinfastauto.com/vn_vi/co-hoi-nghe-nghiep",
-    ),
-    FeaturedCompany(
         name="Vinhomes",
         homepage="https://vinhomes.vn",
         career_url="https://careers.vinhomes.vn",
@@ -759,11 +749,6 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
 
     # ── Tobacco ───────────────────────────────────────────────────────
     FeaturedCompany(
-        name="JTI",
-        homepage="https://jti.com",
-        career_url="https://www.jti.com/en/careers/job-opportunities?careers%5BrefinementList%5D%5Bcountry.en%5D%5B0%5D=Viet%20Nam",
-    ),
-    FeaturedCompany(
         name="BAT",
         homepage="https://bat.com",
         career_url="https://careers.bat.com",
@@ -862,11 +847,6 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         name="KPMG",
         homepage="https://kpmg.com/vn",
         career_url="https://careers.kpmg.com.vn/search/?createNewAlert=false&q=&locationsearch=vietnam",
-    ),
-    FeaturedCompany(
-        name="Accenture",
-        homepage="https://www.accenture.com/vn-en",
-        career_url="https://www.accenture.com/vn-en/careers",
     ),
     FeaturedCompany(
         name="TCBS",
