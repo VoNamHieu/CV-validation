@@ -957,6 +957,52 @@ def _fptsoft(career_url: str) -> list[dict]:
     return out
 
 
+# ── Phenom apply/v2 (HSBC + other portal.careers.* portals) ─────────────────
+# Phenom career portals expose a public list API:
+#   GET https://<host>/api/apply/v2/jobs?domain=<reg-domain>&location=<country>
+#   → {positions:[{name, canonicalPositionUrl, location, ...}], count}
+# The list omits the JD, but each canonicalPositionUrl page carries a JSON-LD
+# JobPosting the normal crawl extracts — so listing the jobs here is enough.
+def _is_phenom_v2(career_url: str, html: str | None = None) -> bool:
+    host = (urlparse(career_url or "").netloc or "").lower()
+    if host.startswith("portal.careers."):
+        return True
+    return bool(html) and "/api/apply/v2/jobs" in html
+
+
+def _phenom_v2(career_url: str) -> list[dict]:
+    p = urlparse(career_url)
+    origin = f"{p.scheme}://{p.netloc}"
+    domain = _registrable_domain(p.netloc)
+    country = os.getenv("DISCOVER_COUNTRY", "Vietnam").lower()
+    out, seen = [], set()
+    for start in range(0, 100, 10):       # 10/page
+        try:
+            r = requests.get(f"{origin}/api/apply/v2/jobs", headers=_JSON_POST, timeout=_TIMEOUT,
+                             params={"domain": domain, "location": country, "num": 10, "start": start})
+            if r.status_code != 200:
+                break
+            pos = (r.json() or {}).get("positions", []) or []
+            if not pos:
+                break
+            for j in pos:
+                title = (j.get("name") or "").strip()
+                url = j.get("canonicalPositionUrl") or ""
+                if not title or not url or url in seen:
+                    continue
+                seen.add(url)
+                out.append({"title": title[:200], "url": url,
+                            "location": (j.get("location") or "")[:120],
+                            "description": _strip_html(j.get("job_description") or "")})
+            if len(pos) < 10 or len(out) >= 100:
+                break
+        except Exception as e:
+            logger.info(f"[ats] phenom_v2 failed: {str(e)[:80]}")
+            break
+    logger.info(f"[ats] phenom_v2 → {len(out)} jobs ({origin})")
+    return out
+
+
 # Adapter protocol: each is (name, detect(url, html) -> bool, fetch(url, html) ->
 # [{title,url,location,description}]). Tried in order; the first whose detect()
 # matches AND returns rows wins. Output always passes through _finalize. To add
@@ -974,6 +1020,7 @@ _ADAPTERS: list = [
     ("ghn",            lambda u, h: _is_ghn(u),          lambda u, h: _ghn(u)),
     ("ahamove",        _is_ahamove,                      lambda u, h: _ahamove(u)),
     ("fptsoft",        _is_fptsoft,                      lambda u, h: _fptsoft(u)),
+    ("phenom-v2",      _is_phenom_v2,                    lambda u, h: _phenom_v2(u)),
     ("phenom",         lambda u, h: _is_phenom_services(u), lambda u, h: _phenom_services(u)),
     ("eightfold",      _is_eightfold,                    lambda u, h: _eightfold(u)),
     ("successfactors", _is_successfactors,               lambda u, h: _successfactors(u, h)),
