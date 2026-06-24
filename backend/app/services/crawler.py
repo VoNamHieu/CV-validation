@@ -298,7 +298,19 @@ def clean_html(html: str) -> str:
         r"\b(nav|navbar|navigation|footer|header|sidebar|advert|ads|cookie|banner|popup)\b",
         re.I,
     )
+    # A class match alone must NOT remove the page's content. Two false-positive
+    # sources: structural roots carrying theme classes (Astra's "ast-hfb-header"
+    # on <body>), and content wrappers whose class merely CONTAINS a noise word
+    # ("layout fixed-header"). Real nav/footer/sidebar/banner chrome is small, so
+    # keep any structural root or any element holding most of the page's text.
+    _KEEP = {"body", "html", "main", "article"}
+    _total = len(soup.get_text(strip=True)) or 1
     for el in soup.find_all(class_=_NOISE_RX):
+        if el.name in _KEEP:
+            continue
+        t = len(el.get_text(strip=True))
+        if t > 400 and t > 0.4 * _total:   # large dominant block = content, not chrome
+            continue
         el.decompose()
 
     text = soup.get_text(separator="\n", strip=True)
