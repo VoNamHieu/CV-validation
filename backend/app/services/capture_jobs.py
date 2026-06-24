@@ -49,6 +49,14 @@ _RULES = {
         "href": re.compile(r"/job/[^/]+/\d+", re.I),
         "title": "text",
     },
+    # VPBank — SuccessFactors career site (tuyendung.vpbank.com.vn). The /search/
+    # listing is JS-rendered (0 jobs server-side), but the captured DOM exposes
+    # the /job/<slug>/<id> links; each JD detail page renders server-side and
+    # crawls normally.
+    "tuyendung.vpbank.com.vn": {
+        "href": re.compile(r"/job/[^/]+/\d+", re.I),
+        "title": "text",
+    },
     "maersk.com": {
         "href": re.compile(r"/vacancies/.+/jt-", re.I),
         "title": "slug",
@@ -64,6 +72,36 @@ def _host(career_url: str) -> str:
 
 def is_capture_host(career_url: str) -> bool:
     return _host(career_url) in _RULES
+
+
+def _same_page(a: str, b: str) -> bool:
+    """Host+path equality, ignoring scheme / query / trailing slash."""
+    def norm(u: str) -> str:
+        p = urlparse(u or "")
+        return f"{p.netloc.lower().removeprefix('www.')}{p.path.rstrip('/')}"
+    return bool(a) and bool(b) and norm(a) == norm(b)
+
+
+async def jd_from_capture(jd_url: str) -> str | None:
+    """Extract JD text from a stored DOM capture of *this* job page.
+
+    The crawl-side counterpart to jobs_from_capture: for SPA / IP-blocked JD
+    pages whose text only exists in the browser-rendered DOM, return the cleaned
+    text of the extension's capture — but ONLY when the capture is of the same
+    URL, so we never serve a stale listing or a different posting.
+    """
+    snap = await cache.get_json(f"{_NS}:{_host(jd_url)}")
+    if not snap or not _same_page(jd_url, snap.get("url", "")):
+        return None
+    html = snap.get("html") or ""
+    if not html:
+        return None
+    from app.services.crawler import clean_html
+    txt = clean_html(html)
+    if len(txt) < 200:
+        return None
+    logger.info(f"[capture-jobs] JD from DOM capture for {jd_url} ({len(txt)} chars)")
+    return txt
 
 
 async def jobs_from_capture(career_url: str) -> list[dict]:

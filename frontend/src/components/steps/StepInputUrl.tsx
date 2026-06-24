@@ -214,7 +214,7 @@ export default function StepInputUrl() {
             } else {
                 featured = await getFeaturedJobsWarm(onWaiting);
             }
-            type FeaturedJob = { url: string; applyUrl: string; title: string; company: string; careerUrl: string; location: string };
+            type FeaturedJob = { url: string; applyUrl: string; title: string; company: string; careerUrl: string; location: string; description: string };
             const allJobs: FeaturedJob[] = [];
             for (const c of featured.companies) {
                 for (const j of c.jobs) {
@@ -228,6 +228,8 @@ export default function StepInputUrl() {
                         title: j.title,
                         company: c.name, careerUrl: c.career_url,
                         location: j.location || '',
+                        // JD text the ATS API already returned (capped server-side).
+                        description: j.description || '',
                     });
                 }
             }
@@ -301,19 +303,22 @@ export default function StepInputUrl() {
                 ? ranked.map((r) => r.url).filter(Boolean)
                 : poolJobs.map((j) => j.url);
             const lookup = new Map(poolJobs.map((j) => [j.url, j]));
-            const topJobs = orderedUrls
+            const orderedJobs = orderedUrls
                 .map((u) => lookup.get(u))
-                .filter((j): j is FeaturedJob => !!j)
-                .slice(0, MAX_JOBS);
+                .filter((j): j is FeaturedJob => !!j);
+            const topJobs = orderedJobs.slice(0, MAX_JOBS);
+            // Ranked spares (rank MAX_JOBS+1 onward) kept as a backfill queue: if
+            // a top job turns out dead (404 / SPA shell / no JD), the pipeline
+            // pulls the next-best spare so we still aim to deliver MAX_JOBS scored.
+            const backfillJobs = orderedJobs.slice(MAX_JOBS);
             setPhaseDetail(`Top ${topJobs.length} by CV fit selected`);
 
-            // Pre-populate JD entries so the user sees the queue immediately.
-            // Mark any opening outside the chosen city so the editor can label it.
-            for (const job of topJobs) {
-                // Only flag as off-city when the listing has a known location that
-                // doesn't match — an empty location is "unknown", not "elsewhere".
+            // Build a JD entry from a featured job. Off-city listings get a label
+            // so the editor can flag them — an empty location is "unknown", not
+            // "elsewhere", so only a known, non-matching location is flagged.
+            const makeEntry = (job: FeaturedJob): JDEntry => {
                 const off = !!cityKey && !!job.location && !matchesCity(job.location, cityKey);
-                addJdEntry({
+                return {
                     id: `jd-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
                     source: job.url,
                     applyUrl: job.applyUrl,
@@ -323,8 +328,30 @@ export default function StepInputUrl() {
                     company: job.company,
                     location: job.location || undefined,
                     locationNote: off ? `Khác ${cityName}` : undefined,
-                });
+                    prefetchedJd: job.description || undefined,
+                };
+            };
+
+            // Pre-populate the top JD entries so the user sees the queue immediately.
+            const seenUrls = new Set<string>();
+            for (const job of topJobs) {
+                seenUrls.add(job.url);
+                addJdEntry(makeEntry(job));
             }
+
+            // Pull the next live spare on demand, skipping URLs already queued.
+            let backfillIdx = 0;
+            const nextBackfill = (): JDEntry | null => {
+                while (backfillIdx < backfillJobs.length) {
+                    const job = backfillJobs[backfillIdx++];
+                    if (seenUrls.has(job.url)) continue;
+                    seenUrls.add(job.url);
+                    const entry = makeEntry(job);
+                    addJdEntry(entry);
+                    return entry;
+                }
+                return null;
+            };
 
             // ── Phase 4-6: crawl JD + extract + score + tailor CV — all jobs in
             //    PARALLEL. Outside full-auto, the first finished job opens the
@@ -334,6 +361,8 @@ export default function StepInputUrl() {
                 runId,
                 fallbackTitle: targetTitle,
                 navigateOnFirstDone: !isFullAuto,
+                targetScored: topJobs.length,
+                nextBackfill,
             });
 
             // ── Full-auto extension: CVs were already tailored inside the
@@ -387,10 +416,17 @@ export default function StepInputUrl() {
         autoOptimize?: boolean;
         // Jump to the report as soon as one job is scored (default on).
         navigateOnFirstDone?: boolean;
+        // Stop pulling backfill once this many jobs have been SCORED.
+        // Defaults to the number of pre-populated entries.
+        targetScored?: number;
+        // Pull the next ranked spare when a job dies; returns null when the
+        // backfill pool is exhausted. Omit to disable backfill (URL flow).
+        nextBackfill?: () => JDEntry | null;
     }): Promise<{ navigated: boolean }> => {
         const {
             queueLen, runId, fallbackTitle = '',
             resolveCareerFirst = false, autoOptimize = true, navigateOnFirstDone = true,
+            nextBackfill,
         } = opts;
 
         setPhase('crawling_job');
@@ -410,6 +446,10 @@ export default function StepInputUrl() {
         // Company dedup across concurrent workers — first resolved wins.
         const seenCompanies = new Set<string>();
         let doneCount = 0;
+        let scoredCount = 0;
+        // How many SCORED jobs we aim for; backfill tops up toward this when
+        // jobs die. Defaults to the count of pre-populated entries.
+        const targetScored = opts.targetScored ?? useAppStore.getState().jdEntries.length;
         let navigated = false;
         let legacySaved = false;
 
@@ -488,7 +528,14 @@ export default function StepInputUrl() {
                 let jobTitle = '';
                 let company = '';
 
-                try {
+                // Skip the crawl entirely when the search layer already fetched
+                // the JD from an ATS API — the fix for SPA / IP-blocked boards
+                // whose page never renders but whose API returned the full text.
+                if ((entry.prefetchedJd?.length ?? 0) >= 200) {
+                    jobPageText = entry.prefetchedJd as string;
+                }
+
+                if (jobPageText.length < 200) try {
                     const jobPage = await crawlUrl(jobUrl);
                     // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     const ld = jobPage.jsonLd as any;
@@ -589,6 +636,7 @@ export default function StepInputUrl() {
                     jobTitle: resolvedTitle,
                     company: resolvedCompany,
                 });
+                scoredCount++;
 
                 // Also save first successful to legacy fields for backward compat
                 if (!legacySaved || !useAppStore.getState().matchResult) {
@@ -666,18 +714,27 @@ export default function StepInputUrl() {
             } finally {
                 doneCount++;
                 if (!navigated && runRef.current === runId) {
-                    setPhaseDetail(`Processed ${doneCount}/${entries.length} jobs...`);
+                    setPhaseDetail(`Scored ${scoredCount}/${targetScored} — processed ${doneCount} jobs...`);
                 }
             }
         };
 
-        // Worker pool: up to JOB_CONCURRENCY entries in flight at once.
-        let cursor = 0;
+        // Worker pool: up to JOB_CONCURRENCY entries in flight at once. The queue
+        // seeds with the pre-populated top entries; when one dies and we're still
+        // short of `targetScored`, the next ranked spare is pulled in to replace
+        // it — so a few dead/expired postings no longer strand the whole run.
+        const queue: JDEntry[] = [...entries];
+        const takeNext = (): JDEntry | null => {
+            if (queue.length) return queue.shift()!;
+            if (scoredCount >= targetScored) return null;
+            return nextBackfill ? nextBackfill() : null;
+        };
         await Promise.all(
             Array.from({ length: Math.min(JOB_CONCURRENCY, entries.length) }, async () => {
-                while (cursor < entries.length) {
-                    const next = entries[cursor++];
+                let next = takeNext();
+                while (next) {
                     await processEntry(next);
+                    next = takeNext();
                 }
             })
         );

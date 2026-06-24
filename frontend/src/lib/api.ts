@@ -329,6 +329,9 @@ export interface JobListing {
     url: string;            // the JD page to crawl/score (may be an aggregator)
     apply_url?: string;     // official link to send the user to (never aggregator)
     location: string;
+    // JD text when the source ATS API already returned it — lets the pipeline
+    // score WITHOUT re-crawling the (often SPA / IP-blocked) JD page.
+    description?: string;
 }
 
 export interface FinderResult {
