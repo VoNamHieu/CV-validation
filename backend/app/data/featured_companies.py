@@ -677,7 +677,10 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Samsung",
         homepage="https://samsung.com",
-        career_url="https://www.samsungcareers.com.vn/#/jobs-list",
+        # Workday tenant: 3 clean VN jobs WITH JD via the adapter. The old
+        # samsungcareers.com.vn SPA returned 14 entries but facility-code titles
+        # (SEVT/SEV/SRV) and zero JD — useless for facet/embedding/tailoring.
+        career_url="https://sec.wd3.myworkdayjobs.com/Samsung_Careers",
     ),
     FeaturedCompany(
         name="LG",

@@ -113,6 +113,10 @@ class JobListing:
     title: str
     url: str
     location: str = ""
+    # JD text when the source (an ATS API) already returned it — lets the caller
+    # score the job WITHOUT re-crawling the (often SPA / IP-blocked) JD page.
+    # Capped upstream so the aggregate featured payload stays bounded.
+    description: str = ""
 
 
 @dataclass
@@ -714,6 +718,10 @@ _JOB_URL_PATTERNS = (
 _MIN_JOBS_BEFORE_LLM = 3
 # Max postings kept per company (big employers — banks, groups — list 100+).
 _MAX_JOBS = 100
+# Cap each preserved JD description so the aggregate featured payload (hundreds
+# of companies × up to _MAX_JOBS each) stays bounded. ~5k chars is plenty for
+# JD extraction + fit scoring; the full text is never needed for ranking.
+_MAX_JD_CHARS = 5000
 
 # Generic CTA / navigation anchor texts that should never be treated as jobs.
 _CTA_BLACKLIST = {
@@ -901,8 +909,16 @@ async def extract_jobs_from_career_page(career_url: str, _depth: int = 0) -> lis
     from app.services.ats_adapters import fetch_ats_jobs
 
     def _as_listings(ats_jobs):
+        # Preserve the ATS-provided description (capped) so the scoring pipeline
+        # can skip re-crawling the JD page — the fix for SPA / IP-blocked boards
+        # whose JD never renders server-side but whose API already returned it.
         return [
-            JobListing(title=j["title"][:200], url=j["url"], location=(j.get("location") or "")[:120])
+            JobListing(
+                title=j["title"][:200],
+                url=j["url"],
+                location=(j.get("location") or "")[:120],
+                description=(j.get("description") or "")[:_MAX_JD_CHARS],
+            )
             for j in ats_jobs[:_MAX_JOBS]
         ]
 

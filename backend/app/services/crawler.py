@@ -289,10 +289,17 @@ def clean_html(html: str) -> str:
     for tag in soup(["script", "style", "nav", "footer", "header", "aside", "noscript", "svg", "iframe"]):
         tag.decompose()
 
-    noise_classes = ["nav", "navigation", "footer", "header", "sidebar", "ad", "cookie", "banner", "popup"]
-    for cls in noise_classes:
-        for el in soup.find_all(class_=re.compile(cls, re.I)):
-            el.decompose()
+    # Match WHOLE class tokens, never bare substrings. A substring match on a
+    # short token like "ad" catches Modernizr feature classes ("boxshadow",
+    # "borderradius", "cssgradients") that sit on <html>, decomposing the entire
+    # page → empty text. Word boundaries keep real noise (nav/footer/…) while
+    # leaving content wrappers intact.
+    _NOISE_RX = re.compile(
+        r"\b(nav|navbar|navigation|footer|header|sidebar|advert|ads|cookie|banner|popup)\b",
+        re.I,
+    )
+    for el in soup.find_all(class_=_NOISE_RX):
+        el.decompose()
 
     text = soup.get_text(separator="\n", strip=True)
     lines = [l.strip() for l in text.splitlines() if l.strip()]

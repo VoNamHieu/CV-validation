@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 from app.services.crawler import try_http_fetch, try_playwright_fetch, clean_html, detect_needs_playwright, extract_json_ld as _extract_jsonld_job
 from app.services.gemini_client import generate_json
 from app.services.url_validator import is_allowed_url
+from app.services.jd_resolver import resolve_jd_via_ats
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -403,25 +404,50 @@ async def fetch_page(req: FetchPageRequest):
     # Playwright fallback
     logger.info(f"[fetch_page] Using Playwright for: {req.url}")
     pw_ok, pw_data = await try_playwright_fetch(req.url)
-    if pw_ok:
-        if _looks_like_anti_bot(pw_data):
-            logger.info(f"[fetch_page] Anti-bot block detected on: {req.url}")
-            return FetchPageResponse(
-                success=False,
-                method="playwright",
-                blocked=True,
-                error="anti_bot_blocked",
-            )
+    if pw_ok and not _looks_like_anti_bot(pw_data):
         jsonld = _extract_jsonld_job(pw_data)
         cleaned = clean_html(pw_data)
-        return FetchPageResponse(success=True, text=cleaned[:15000], method="playwright", jsonLd=jsonld)
+        # Only trust a render that actually produced content. SPAs on a
+        # datacenter IP often "load" but yield a near-empty shell — that must
+        # NOT be reported as success (it strands the caller with blank text).
+        if len(cleaned) >= 200 or jsonld:
+            return FetchPageResponse(success=True, text=cleaned[:15000], method="playwright", jsonLd=jsonld)
 
-    # Both HTTP and Playwright failed outright. If the HTTP body looked like a
-    # block page, surface that so the caller can choose the extension fallback.
-    blocked = _looks_like_anti_bot(http_data) if not http_ok else False
+    # ── ATS structured fallback ──
+    # HTTP + Playwright came back blocked or thin. Many such pages are SPA job
+    # boards (GHN, Oracle HCM, SuccessFactors, …) that expose the same JD via a
+    # public platform API — reuse the search-layer adapters to recover it.
+    try:
+        ats_text = resolve_jd_via_ats(req.url)
+    except Exception as e:  # never let the adapter layer break the crawl
+        logger.info(f"[fetch_page] ATS resolve failed for {req.url}: {str(e)[:80]}")
+        ats_text = None
+    if ats_text:
+        logger.info(f"[fetch_page] Recovered via ATS API: {req.url} ({len(ats_text)} chars)")
+        return FetchPageResponse(success=True, text=ats_text[:15000], method="ats_api")
+
+    # ── DOM-capture fallback ──
+    # SPA / IP-blocked JD pages whose text only exists in a browser-rendered DOM:
+    # if the extension already captured THIS page, serve its cleaned text.
+    try:
+        from app.services import capture_jobs
+        cap_text = await capture_jobs.jd_from_capture(req.url)
+    except Exception as e:
+        logger.info(f"[fetch_page] capture lookup failed for {req.url}: {str(e)[:80]}")
+        cap_text = None
+    if cap_text:
+        return FetchPageResponse(success=True, text=cap_text[:15000], method="dom_capture")
+
+    # Nothing worked. Report an honest failure (flag anti-bot / thin renders as
+    # blocked) so the caller falls back to the extension (residential IP) or
+    # backfills this dead listing with the next ranked job.
+    anti_bot = (_looks_like_anti_bot(pw_data) if pw_ok
+                else (_looks_like_anti_bot(http_data) if not http_ok else False))
     return FetchPageResponse(
         success=False,
-        blocked=blocked,
-        error=("anti_bot_blocked" if blocked
-               else f"HTTP: {http_data if not http_ok else 'thin content'} | Playwright: {pw_data if not pw_ok else 'failed'}"),
+        blocked=anti_bot or pw_ok,  # pw_ok here means "rendered but thin" → treat as soft block
+        method="playwright" if pw_ok else "http",
+        error=("anti_bot_blocked" if anti_bot
+               else "thin_after_render" if pw_ok
+               else f"HTTP: {http_data if not http_ok else 'thin content'} | Playwright: {pw_data}"),
     )

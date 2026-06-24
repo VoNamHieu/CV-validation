@@ -62,6 +62,10 @@ export interface JDEntry {
   company?: string;
   // Job's free-text location (from the listing), used for city matching.
   location?: string;
+  // JD text the search layer already fetched from an ATS API. When present and
+  // substantial, the pipeline scores it directly instead of re-crawling the
+  // (often SPA / IP-blocked) JD page.
+  prefetchedJd?: string;
   // Set when this job matched the target title but NOT the chosen city — the
   // UI labels it "khác thành phố" so the user knows it's an off-city result.
   locationNote?: string;
