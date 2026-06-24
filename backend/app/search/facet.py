@@ -10,7 +10,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from app.search.taxonomy import classify_title, adjacent_families
+from app.search.taxonomy import (
+    classify_title, adjacent_families, classify_seniority, level_index,
+    FULL_CONFIDENCE,
+)
 from app.search.company_industry import classify_company
 
 # accent-fold + lower for location matching (reuse taxonomy's normalizer shape)
@@ -39,12 +42,35 @@ class SearchProfile:
 _OUT_OF_DOMAIN = 0.6   # multiplier when job industry not in profile.domains
 
 
+def _seniority_mult(job_level: str | None, profile_level: str) -> float:
+    """Demote a job that sits BELOW the candidate's level (e.g. an intern role
+    for a mid/senior PM). At-or-above level is neutral here — over-reach is
+    filtered downstream (the FE experience-gap rule). Unknown on either side →
+    neutral, so an unclassifiable title is never penalised for it."""
+    ji = level_index(job_level or "")
+    pi = level_index(profile_level or "")
+    if ji is None or pi is None:
+        return 1.0
+    gap = pi - ji                       # > 0 ⇒ job is below the candidate
+    if gap <= 0:
+        return 1.0
+    if gap == 1:
+        return 0.8                      # one level below — mild demotion
+    return 0.4                          # two+ levels below — strong demotion
+
+
 def score_job(job: dict, profile: SearchProfile, role_weights: dict[str, float],
               industry: str | None = None) -> dict | None:
-    """Return {score, role_family, industry, role_w, in_domain} or None if the
-    job's role family isn't reachable from the profile."""
+    """Return {score, role_family, industry, role_w, in_domain, ...} or None if
+    the job's role family isn't reachable from the profile.
+
+    The blended score is role_w × industry × classification-confidence ×
+    seniority-fit, so (a) a title we could only land on the General & Management
+    catch-all (low confidence) scores well below a confident match, and (b) a
+    role below the candidate's level is demoted instead of riding its family
+    adjacency weight."""
     title = job.get("title") or ""
-    fam, _ = classify_title(title)
+    fam, conf = classify_title(title)
     role_w = role_weights.get(fam, 0.0)
     if role_w <= 0:
         return None
@@ -60,10 +86,17 @@ def score_job(job: dict, profile: SearchProfile, role_weights: dict[str, float],
     in_domain = bool(profile.domains) and ind in profile.domains
     ind_mult = 1.0 if (in_domain or not profile.domains) else _OUT_OF_DOMAIN
 
+    # Fold the classification confidence so the @0.3 catch-all can't masquerade
+    # as a full-weight family match (a confident rule match → 1.0, no change).
+    conf_mult = min(1.0, conf / FULL_CONFIDENCE)
+    job_level = classify_seniority(title)
+    sen_mult = _seniority_mult(job_level, profile.level)
+
     return {
-        "score": round(role_w * ind_mult, 3),
+        "score": round(role_w * ind_mult * conf_mult * sen_mult, 3),
         "role_family": fam, "industry": ind,
         "role_w": role_w, "in_domain": in_domain,
+        "confidence": conf, "seniority": job_level, "seniority_mult": sen_mult,
     }
 
 

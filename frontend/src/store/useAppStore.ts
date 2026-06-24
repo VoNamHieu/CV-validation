@@ -71,6 +71,9 @@ export interface JDEntry {
   locationNote?: string;
   // Which CV template the candidate chose for this job.
   selectedTemplateId?: CvTemplateId;
+  // Role family (taxonomy) this job was ranked under — drives the role-adjacent
+  // backfill: a dead posting is replaced by another job in the SAME family.
+  roleFamily?: string;
 }
 
 type Step = 1 | 2 | 3 | 4;

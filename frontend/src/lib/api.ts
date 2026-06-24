@@ -401,6 +401,84 @@ export async function getFeaturedJobsWarm(
     return pollWarm(() => getFeaturedJobs(), onWaiting, opts);
 }
 
+// ── Facet search (Phase-1 engine) ──
+// Ranks the featured pool by role-family adjacency × industry × location
+// against a CV-derived/explicit profile (backend taxonomy.py). Replaces the
+// token-overlap title filter + LLM tournament so the auto-flow only ever
+// surfaces jobs inside the candidate's role space (+ adjacent families).
+export interface FacetSearchJob {
+    url: string;
+    apply_url?: string;
+    title: string;
+    company?: string;
+    career_url?: string;
+    location?: string;
+    description?: string;
+    industry?: string;
+    _facet?: {
+        score: number;
+        role_family: string;
+        industry: string;
+        role_w: number;
+        in_domain: boolean;
+    };
+}
+
+export interface FacetSearchRequest {
+    cv_text?: string;
+    target_roles?: string[];
+    domains?: string[];
+    level?: string;
+    desired_locations?: string[];
+    salary_floor?: number;
+    limit?: number;
+    rerank?: boolean;
+}
+
+export interface FacetSearchResult {
+    warming?: boolean;
+    profile?: Record<string, unknown>;
+    reranked?: boolean;
+    total_matched?: number;
+    results: FacetSearchJob[];
+}
+
+export async function searchFeaturedJobs(req: FacetSearchRequest): Promise<FacetSearchResult> {
+    const res = await fetch('/api/career/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(req),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || 'Failed to search jobs');
+    }
+    return res.json();
+}
+
+// Same warm-up contract as the featured/discover pollers: the backend returns
+// {warming:true, results:[]} while the pool builds, so poll short requests
+// instead of blocking on one long one.
+export async function searchFeaturedJobsWarm(
+    req: FacetSearchRequest,
+    onWaiting?: (attempt: number) => void,
+    opts: { maxWaitMs?: number; pollMs?: number } = {},
+): Promise<FacetSearchResult> {
+    const maxWaitMs = opts.maxWaitMs ?? 180_000;
+    const pollMs = opts.pollMs ?? 4_000;
+    const deadline = Date.now() + maxWaitMs;
+    let attempt = 0;
+    for (;;) {
+        const res = await searchFeaturedJobs(req);
+        if ((res.results || []).length > 0) return res;  // ranked data ready
+        if (!res.warming) return res;                     // genuinely empty
+        if (Date.now() >= deadline) return res;           // gave up waiting
+        attempt++;
+        onWaiting?.(attempt);
+        await new Promise((r) => setTimeout(r, pollMs));
+    }
+}
+
 // ── Search profile inferred from the CV (roles + domains + strengths) ──
 export interface SearchProfile {
     target_roles: string[];

@@ -11,7 +11,7 @@ import { useAppStore, type JDEntry } from '@/store/useAppStore';
 import {
     smartSearch, crawlUrl, extractJdStructured, scoreFit, fetchPage,
     extractJobLinks, rankJobsTournament, extensionCrawl, isExtensionAvailable,
-    findCareer, getFeaturedJobsWarm, discoverJobsWarm, inferSearchProfile,
+    findCareer, discoverJobsWarm, inferSearchProfile, searchFeaturedJobsWarm,
     optimizeCvVariants, type JobListing,
 } from '@/lib/api';
 import { buildSearchUrl, matchesCity, titleMatchScore, cityLabel, experienceGapExceeds } from '@/lib/job-targeting';
@@ -183,11 +183,31 @@ export default function StepInputUrl() {
                         : `Preparing live openings… (${attempt})`,
                 );
             };
-            // 'ground' = grounded web search across the candidate's whole fit
-            // (roles + adjacent + domains + strengths), inferred from the CV.
-            // 'featured' = curated company list.
-            let featured;
+            // A ranked opening, carrying the taxonomy role family so the
+            // dead-job backfill can stay inside the candidate's role space.
+            type FeaturedJob = {
+                url: string; applyUrl: string; title: string; company: string;
+                careerUrl: string; location: string; description: string;
+                roleFamily?: string;
+            };
+
+            // City pairing: keep in-city matches; if none, keep the (still
+            // relevance-ranked) list but flag it off-city so the editor labels it.
+            const pairCity = (jobs: FeaturedJob[]): { pool: FeaturedJob[]; offCity: boolean } => {
+                if (!cityKey) return { pool: jobs, offCity: false };
+                const inCity = jobs.filter((j) => matchesCity(j.location, cityKey));
+                if (inCity.length) return { pool: inCity, offCity: false };
+                return { pool: jobs, offCity: true };
+            };
+
+            let orderedJobs: FeaturedJob[] = [];
+            let offCity = false;
+
             if (mode === 'ground') {
+                // 'ground' = grounded web search across the candidate's whole fit
+                // (roles + adjacent + domains + strengths), inferred from the CV.
+                // No curated pool to facet-rank, so we keep the strict title pair
+                // + LLM tournament here.
                 setPhase('analyzing_cv');
                 setPhaseDetail('Reading your CV to understand your fit…');
                 let roles = targetTitle ? [targetTitle] : [];
@@ -210,108 +230,116 @@ export default function StepInputUrl() {
                 setPhase('searching');
                 setPhaseDetail(`Searching: ${roles.slice(0, 3).join(', ')}${domains.length ? ` · ${domains.slice(0, 2).join(', ')}` : ''}`);
                 console.log('[ground-search] profile:', { roles, domains, strengths, city: cityName || '(any)' });
-                featured = await discoverJobsWarm({ roles, domains, strengths }, cityName, onWaiting);
-            } else {
-                featured = await getFeaturedJobsWarm(onWaiting);
-            }
-            type FeaturedJob = { url: string; applyUrl: string; title: string; company: string; careerUrl: string; location: string; description: string };
-            const allJobs: FeaturedJob[] = [];
-            for (const c of featured.companies) {
-                for (const j of c.jobs) {
-                    if (!j.url || !j.title) continue;
-                    allJobs.push({
-                        url: j.url,
-                        // Apply target: backend sets apply_url to the official
-                        // posting/career page when the JD URL is an aggregator;
-                        // otherwise the job's own (official) URL.
-                        applyUrl: j.apply_url || j.url,
-                        title: j.title,
-                        company: c.name, careerUrl: c.career_url,
-                        location: j.location || '',
-                        // JD text the ATS API already returned (capped server-side).
-                        description: j.description || '',
-                    });
+                const discovered = await discoverJobsWarm({ roles, domains, strengths }, cityName, onWaiting);
+
+                const allJobs: FeaturedJob[] = [];
+                for (const c of discovered.companies) {
+                    for (const j of c.jobs) {
+                        if (!j.url || !j.title) continue;
+                        allJobs.push({
+                            url: j.url, applyUrl: j.apply_url || j.url, title: j.title,
+                            company: c.name, careerUrl: c.career_url,
+                            location: j.location || '', description: j.description || '',
+                        });
+                    }
                 }
-            }
-
-            // ── Debug: surface exactly what the discovery returned ──
-            const dbgTag = mode === 'ground' ? '[ground-search]' : '[featured]';
-            console.groupCollapsed(`${dbgTag} role=${targetTitle || '(none)'} city=${cityName || '(any)'} → ${featured.companies.length} companies, ${allJobs.length} jobs${featured.warming ? ' (WARMING/timed-out)' : ''}`);
-            console.log('response flags:', { warming: featured.warming, stale: featured.stale, from_cache: featured.from_cache, fetched_at: featured.fetched_at });
-            console.table(featured.companies.map((c) => ({
-                company: c.name, jobs: c.jobs.length, career_url: c.career_url, homepage: c.homepage,
-            })));
-            console.groupEnd();
-
-            if (allJobs.length === 0) {
-                // Distinguish the failure modes so it's clear what to fix.
-                const why = featured.warming
-                    ? 'still preparing (timed out) — try again in a moment'
-                    : featured.companies.length === 0
-                        ? (mode === 'ground'
+                if (allJobs.length === 0) {
+                    const why = discovered.warming
+                        ? 'still preparing (timed out) — try again in a moment'
+                        : discovered.companies.length === 0
                             ? `grounded search found no companies for "${targetTitle}"`
-                            : 'no companies available')
-                        : `${featured.companies.length} companies found but none list any openings right now`;
-                throw new Error(`No matching openings: ${why}.`);
-            }
+                            : `${discovered.companies.length} companies found but none list any openings right now`;
+                    throw new Error(`No matching openings: ${why}.`);
+                }
 
-            // ── Phase 3 (presented as "compiling listings"): HARD-pair by title,
-            //    then by city. Title match is strict — only openings sharing the
-            //    target role survive. If the curated list has none at all, fall
-            //    back to the full list so the user isn't stranded. ──
-            setPhase('extracting_links');
-            const titleScored = allJobs
-                .map((job) => ({ job, score: titleMatchScore(targetTitle, job.title) }))
-                .filter((x) => x.score > 0);
-            const titleStranded = titleScored.length === 0;
-            const titlePool = titleStranded
-                ? allJobs.map((job) => ({ job, score: 0 }))
-                : titleScored;
+                // Strict title pairing → city → LLM tournament.
+                const titleScored = allJobs
+                    .map((job) => ({ job, score: titleMatchScore(targetTitle, job.title) }))
+                    .filter((x) => x.score > 0)
+                    .map((x) => x.job);
+                const paired = pairCity(titleScored.length ? titleScored : allJobs);
+                offCity = paired.offCity;
 
-            // City pairing: keep in-city matches; if none, stay strict on title
-            // but surface this role in other cities (each marked "off-city").
-            let pool = titlePool;
-            let offCity = false;
-            if (cityKey) {
-                const inCity = titlePool.filter((x) => matchesCity(x.job.location, cityKey));
-                if (inCity.length) pool = inCity;
-                else offCity = true;
-            }
-            const poolJobs = pool.map((x) => x.job);
-            setPhaseDetail(
-                titleStranded
-                    ? 'No exact title match — ranking all openings by CV fit...'
-                    : offCity
-                        ? `No "${targetTitle}" in ${cityName} — showing this role in other cities...`
-                        : `${poolJobs.length} "${targetTitle}"${cityName ? ` in ${cityName}` : ''} openings — ranking by CV fit...`,
-            );
-
-            // ── Phase 4: rank the paired pool by CV fit ──
-            setPhase('ranking');
-            setPhaseDetail(`Ranking ${poolJobs.length} jobs by fit to your CV...`);
-            const MAX_JOBS = 5;
-            let ranked: { url: string; title?: string; fit_score?: number }[] = [];
-            try {
-                ranked = await rankJobsTournament(
-                    cvData,
-                    poolJobs.map((j) => ({ url: j.url, title: j.title, company: j.company })),
+                setPhase('ranking');
+                setPhaseDetail(`Ranking ${paired.pool.length} jobs by fit to your CV...`);
+                let ranked: { url: string; title?: string; fit_score?: number }[] = [];
+                try {
+                    ranked = await rankJobsTournament(
+                        cvData,
+                        paired.pool.map((j) => ({ url: j.url, title: j.title, company: j.company })),
+                    );
+                } catch (rankErr) {
+                    console.log('[ground-search] ranking failed, using original order:', rankErr);
+                }
+                const lookup = new Map(paired.pool.map((j) => [j.url, j]));
+                orderedJobs = ranked.length
+                    ? ranked.map((r) => lookup.get(r.url)).filter((j): j is FeaturedJob => !!j)
+                    : paired.pool;
+            } else {
+                // ── 'featured' = curated pool ranked by the FACET ENGINE
+                //    (role-family adjacency × industry × location, taxonomy.py).
+                //    This replaces the old token-overlap title filter + LLM
+                //    tournament, so only jobs inside the candidate's role space
+                //    (Product + adjacent families) ever surface — no stray
+                //    marketing/intern roles, and the pool stays relevance-ordered. ──
+                setPhase('searching');
+                setPhaseDetail(targetTitle
+                    ? `Matching openings to "${targetTitle}"${cityName ? ` in ${cityName}` : ''}...`
+                    : 'Matching openings to your CV...');
+                const search = await searchFeaturedJobsWarm(
+                    {
+                        target_roles: targetTitle ? [targetTitle] : [],
+                        level: cvData.employment?.current_level || '',
+                        // Pull a deep ranked pool so the role-adjacent backfill has
+                        // plenty of same-family spares when postings turn out dead.
+                        limit: 200,
+                        rerank: true,
+                    },
+                    onWaiting,
                 );
-            } catch (rankErr) {
-                console.log('[StepInputUrl/featured] ranking failed, using original order:', rankErr);
+                const results = search.results || [];
+
+                // ── Debug: what the facet engine ranked ──
+                console.groupCollapsed(`[facet-search] role=${targetTitle || '(none)'} → ${results.length}/${search.total_matched ?? results.length} ranked${search.warming ? ' (WARMING/timed-out)' : ''}`);
+                console.log('profile:', search.profile, 'reranked:', search.reranked);
+                console.table(results.slice(0, 20).map((j) => ({
+                    score: j._facet?.score, family: j._facet?.role_family,
+                    company: j.company, title: j.title,
+                })));
+                console.groupEnd();
+
+                if (results.length === 0) {
+                    const why = search.warming
+                        ? 'still preparing (timed out) — try again in a moment'
+                        : 'no openings match your role right now';
+                    throw new Error(`No matching openings: ${why}.`);
+                }
+
+                const ranked: FeaturedJob[] = results.map((j) => ({
+                    url: j.url,
+                    applyUrl: j.apply_url || j.url,
+                    title: j.title,
+                    company: j.company || '',
+                    careerUrl: j.career_url || '',
+                    location: j.location || '',
+                    // JD text the ATS API already returned (scores without re-crawl).
+                    description: j.description || '',
+                    roleFamily: j._facet?.role_family,
+                }));
+                // Already relevance-ranked by the facet engine — just pair the city.
+                const paired = pairCity(ranked);
+                offCity = paired.offCity;
+                orderedJobs = paired.pool;
             }
-            const orderedUrls = ranked.length
-                ? ranked.map((r) => r.url).filter(Boolean)
-                : poolJobs.map((j) => j.url);
-            const lookup = new Map(poolJobs.map((j) => [j.url, j]));
-            const orderedJobs = orderedUrls
-                .map((u) => lookup.get(u))
-                .filter((j): j is FeaturedJob => !!j);
+
+            // ── Select the jobs to process; keep the rest as a role-adjacent
+            //    backfill (see below). ──
+            const MAX_JOBS = 5;
             const topJobs = orderedJobs.slice(0, MAX_JOBS);
-            // Ranked spares (rank MAX_JOBS+1 onward) kept as a backfill queue: if
-            // a top job turns out dead (404 / SPA shell / no JD), the pipeline
-            // pulls the next-best spare so we still aim to deliver MAX_JOBS scored.
             const backfillJobs = orderedJobs.slice(MAX_JOBS);
-            setPhaseDetail(`Top ${topJobs.length} by CV fit selected`);
+            setPhaseDetail(offCity
+                ? `No "${targetTitle}" in ${cityName} — showing this role in other cities...`
+                : `Top ${topJobs.length} by CV fit selected`);
 
             // Build a JD entry from a featured job. Off-city listings get a label
             // so the editor can flag them — an empty location is "unknown", not
@@ -329,6 +357,7 @@ export default function StepInputUrl() {
                     location: job.location || undefined,
                     locationNote: off ? `Khác ${cityName}` : undefined,
                     prefetchedJd: job.description || undefined,
+                    roleFamily: job.roleFamily,
                 };
             };
 
@@ -339,16 +368,44 @@ export default function StepInputUrl() {
                 addJdEntry(makeEntry(job));
             }
 
-            // Pull the next live spare on demand, skipping URLs already queued.
-            let backfillIdx = 0;
-            const nextBackfill = (): JDEntry | null => {
-                while (backfillIdx < backfillJobs.length) {
-                    const job = backfillJobs[backfillIdx++];
+            // ── Role-adjacent backfill (#2) ──
+            // Bucket the spare pool by role family, preserving rank order within
+            // each. When a posting turns out dead (404 / SPA shell / no JD), refill
+            // from the SAME family first, then walk the other families in the
+            // pool's own relevance order — so a dead Product role is replaced by
+            // another Product role, never by whatever happened to rank next.
+            // (Ground-mode jobs have no roleFamily → one shared bucket = the old
+            // position order, so that path is unaffected.)
+            const UNKNOWN_FAMILY = '_';
+            const familyBuckets = new Map<string, FeaturedJob[]>();
+            const familyOrder: string[] = [];
+            for (const job of backfillJobs) {
+                const fam = job.roleFamily || UNKNOWN_FAMILY;
+                if (!familyBuckets.has(fam)) { familyBuckets.set(fam, []); familyOrder.push(fam); }
+                familyBuckets.get(fam)!.push(job);
+            }
+            const pullFromFamily = (fam: string): JDEntry | null => {
+                const bucket = familyBuckets.get(fam);
+                while (bucket && bucket.length) {
+                    const job = bucket.shift()!;
                     if (seenUrls.has(job.url)) continue;
                     seenUrls.add(job.url);
                     const entry = makeEntry(job);
                     addJdEntry(entry);
                     return entry;
+                }
+                return null;
+            };
+            const nextBackfill = (deadFamily?: string): JDEntry | null => {
+                // Same family as the job that just died, first.
+                if (deadFamily) {
+                    const hit = pullFromFamily(deadFamily);
+                    if (hit) return hit;
+                }
+                // Otherwise walk families in the pool's relevance order.
+                for (const fam of familyOrder) {
+                    const hit = pullFromFamily(fam);
+                    if (hit) return hit;
                 }
                 return null;
             };
@@ -419,9 +476,10 @@ export default function StepInputUrl() {
         // Stop pulling backfill once this many jobs have been SCORED.
         // Defaults to the number of pre-populated entries.
         targetScored?: number;
-        // Pull the next ranked spare when a job dies; returns null when the
-        // backfill pool is exhausted. Omit to disable backfill (URL flow).
-        nextBackfill?: () => JDEntry | null;
+        // Pull a spare when a job dies; the dead job's role family is passed so
+        // the backfill can prefer a same-family replacement. Returns null when
+        // the backfill pool is exhausted. Omit to disable backfill (URL flow).
+        nextBackfill?: (deadFamily?: string) => JDEntry | null;
     }): Promise<{ navigated: boolean }> => {
         const {
             queueLen, runId, fallbackTitle = '',
@@ -724,17 +782,22 @@ export default function StepInputUrl() {
         // short of `targetScored`, the next ranked spare is pulled in to replace
         // it — so a few dead/expired postings no longer strand the whole run.
         const queue: JDEntry[] = [...entries];
-        const takeNext = (): JDEntry | null => {
+        const takeNext = (deadFamily?: string): JDEntry | null => {
             if (queue.length) return queue.shift()!;
             if (scoredCount >= targetScored) return null;
-            return nextBackfill ? nextBackfill() : null;
+            return nextBackfill ? nextBackfill(deadFamily) : null;
         };
         await Promise.all(
             Array.from({ length: Math.min(JOB_CONCURRENCY, entries.length) }, async () => {
                 let next = takeNext();
                 while (next) {
-                    await processEntry(next);
-                    next = takeNext();
+                    const processed = next;
+                    await processEntry(processed);
+                    // If this job died, ask the backfill for a same-family spare
+                    // so the replacement stays inside the candidate's role space.
+                    const died = useAppStore.getState().jdEntries
+                        .find((e) => e.id === processed.id)?.status === 'error';
+                    next = takeNext(died ? processed.roleFamily : undefined);
                 }
             })
         );

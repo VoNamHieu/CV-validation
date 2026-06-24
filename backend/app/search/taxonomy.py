@@ -134,10 +134,81 @@ def _norm(s: str) -> str:
     return (s or "").lower().translate(_ACCENT)
 
 
+# Confidence a rule match carries vs the General & Management catch-all. The
+# fallback is deliberately low so score_job can demote titles we couldn't really
+# classify (an intern / "Creator Manager" that only lands on the catch-all).
+FULL_CONFIDENCE = 0.8
+FALLBACK_CONFIDENCE = 0.3
+
+
 def classify_title(title: str) -> tuple[str, float]:
     """(role_family, confidence). Falls back to General & Management @0.3."""
     n = _norm(title)
     for fam, rx in _COMPILED:
         if rx.search(n):
-            return fam, 0.8
-    return "General & Management", 0.3
+            return fam, FULL_CONFIDENCE
+    return "General & Management", FALLBACK_CONFIDENCE
+
+
+# ── SENIORITY (ordered low → high) ───────────────────────────────────────────
+# A separate axis from role family: a "Product Manager" and a "Product Intern"
+# share a family but not a level. Used to demote jobs BELOW the candidate's
+# level (an intern role for a mid/senior candidate).
+SENIORITY_LEVELS = (
+    "Intern/Fresher", "Junior", "Mid", "Senior", "Lead/Manager", "Director/Head+",
+)
+_LEVEL_INDEX = {lv: i for i, lv in enumerate(SENIORITY_LEVELS)}
+
+# Title → seniority keyword rules (specific → generic, first match wins).
+# Bare "manager" is INTENTIONALLY not a signal: a "Product Manager" is a mid IC
+# role, not Lead — only explicit lead/principal/head/senior/junior/intern words
+# move the level. Titles with no signal return None (→ no seniority penalty).
+_SENIORITY_RULES: list[tuple[str, str]] = [
+    ("Intern/Fresher", r"\bintern(ship)?\b|fresher|thuc tap|sinh vien|\btts\b"),
+    ("Director/Head+", r"director|head of|\bhead\b|chief|\bc[efimot]o\b|\bvp\b|svp|evp|vice president|giam doc|truong phong|truong bo phan|pho phong"),
+    ("Lead/Manager",   r"\blead\b|principal|\bstaff\b"),
+    ("Senior",         r"\bsenior\b|\bsr\b|cao cap|chuyen gia|chuyen vien cao cap"),
+    ("Junior",         r"\bjunior\b|\bjr\b|entry[ -]?level|moi ra truong|tap su"),
+]
+_SENIORITY_COMPILED = [(lv, re.compile(rx, re.I)) for lv, rx in _SENIORITY_RULES]
+
+
+def classify_seniority(title: str) -> str | None:
+    """Seniority level label for a title, or None when it carries no signal."""
+    n = _norm(title)
+    for lv, rx in _SENIORITY_COMPILED:
+        if rx.search(n):
+            return lv
+    return None
+
+
+def level_index(level: str) -> int | None:
+    """Ordinal position of a seniority label (0 = Intern), or None if unknown."""
+    return _LEVEL_INDEX.get(level)
+
+
+# Loose level strings (CV-extractor "current_level", API callers) → canonical
+# SENIORITY_LEVELS. Lets the seniority signal engage even when the input isn't
+# already vocab-exact ("Lead", "Mid-level", "thực tập" → canonical).
+_LEVEL_ALIASES: list[tuple[str, str]] = [
+    (r"intern|fresher|thuc tap|sinh vien", "Intern/Fresher"),
+    (r"director|head|chief|\bc[efimot]o\b|\bvp\b|svp|evp|giam doc|truong phong", "Director/Head+"),
+    (r"lead|principal|manager|\bstaff\b|quan ly|truong nhom", "Lead/Manager"),
+    (r"senior|\bsr\b|cao cap", "Senior"),
+    (r"junior|\bjr\b|entry|moi ra truong|tap su", "Junior"),
+    (r"mid|middle|intermediate|trung cap", "Mid"),
+]
+_LEVEL_ALIAS_COMPILED = [(re.compile(rx, re.I), lv) for rx, lv in _LEVEL_ALIASES]
+
+
+def canon_level(level: str) -> str:
+    """Map a loose level string to a canonical SENIORITY_LEVELS label, or ""."""
+    if not level:
+        return ""
+    if level in _LEVEL_INDEX:
+        return level
+    n = _norm(level)
+    for rx, lv in _LEVEL_ALIAS_COMPILED:
+        if rx.search(n):
+            return lv
+    return ""
