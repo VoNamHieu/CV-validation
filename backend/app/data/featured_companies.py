@@ -633,7 +633,9 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Chubb",
         homepage="https://chubb.com",
-        career_url="https://careers.chubb.com",
+        # Oracle HCM tenant (careers.chubb.com is a JS shell with no extractable
+        # links); the recruitingCEJobRequisitions API serves VN jobs.
+        career_url="https://fa-ewgu-saasfaprod1.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_2001/jobs",
     ),
     FeaturedCompany(
         name="Bảo Việt",
