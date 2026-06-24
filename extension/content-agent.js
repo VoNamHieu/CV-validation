@@ -1762,4 +1762,66 @@ async function init() {
     };
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// ── MODE 1 — Tailor CV for THIS job page ──
+//    Triggered from the popup ("Tailor CV for this job"). Reads the JD
+//    text off the page + the synced rich CV, mints an opaque source_ref,
+//    and asks the background to run the no-store /api/ai/tailor pipeline.
+//    The JD text only ever leaves via that endpoint; the job URL never
+//    leaves the browser (stored under source_ref by the background).
+// ═══════════════════════════════════════════════════════════════════
+function _newSourceRef() {
+    try {
+        if (crypto?.randomUUID) return crypto.randomUUID();
+    } catch { /* not a secure context */ }
+    return 'sr-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+}
+
+async function runMode1() {
+    const cv = await new Promise(r => {
+        chrome.storage.local.get('jobfitCv', d => r(d.jobfitCv || null));
+    });
+    if (!cv) {
+        showToast('⚠️ Chưa có CV. Hãy mở JobFit AI và đồng bộ CV trước.', 5000);
+        return { success: false, error: 'no CV synced' };
+    }
+
+    const jdText = (document.body?.innerText || '').replace(/\s+\n/g, '\n').trim().slice(0, 15000);
+    if (jdText.length < 80) {
+        showToast('⚠️ Không đọc được JD trên trang này.', 5000);
+        return { success: false, error: 'no JD text' };
+    }
+
+    const sourceRef = _newSourceRef();
+    showToast('✨ Đang tailor CV cho job này… (có thể mất ~1 phút)', 0);
+    try {
+        const resp = await chrome.runtime.sendMessage({
+            type: 'MODE1_TAILOR',
+            cv,
+            jdText,
+            sourceRef,
+            jobUrl: location.href,
+            options: { length: 'concise' },
+        });
+        document.getElementById('jobfit-toast')?.remove();
+        if (resp?.success) {
+            showToast('✅ CV đã tailor — mở JobFit AI để xem & ứng tuyển.', 6000);
+        } else {
+            showToast(`❌ Tailor lỗi: ${resp?.error || 'unknown'}`, 6000);
+        }
+        return resp || { success: false, error: 'no response' };
+    } catch (e) {
+        document.getElementById('jobfit-toast')?.remove();
+        showToast(`❌ Tailor lỗi: ${e.message}`, 6000);
+        return { success: false, error: e.message };
+    }
+}
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message?.type === 'RUN_MODE1') {
+        runMode1().then(sendResponse);
+        return true; // async
+    }
+});
+
 init();

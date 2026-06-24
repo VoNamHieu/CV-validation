@@ -313,6 +313,25 @@ async function captureForDebug() {
     }
 }
 
+// ── Mode 1: tell the content script on the active job tab to tailor the CV ──
+async function tailorCurrentJob() {
+    const statusEl = document.getElementById('tailorStatus');
+    const btn = document.getElementById('tailorJobBtn');
+    btn.disabled = true; btn.textContent = '⏳ Đang tailor…'; statusEl.textContent = '';
+    try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!tab || !/^https?:/.test(tab.url || '')) throw new Error('Mở một trang job (https) trước.');
+        const resp = await chrome.tabs.sendMessage(tab.id, { type: 'RUN_MODE1' });
+        statusEl.textContent = resp?.success
+            ? '✅ Đã tailor — mở JobFit AI để xem & ứng tuyển.'
+            : `❌ ${resp?.error || 'Không tailor được'}`;
+    } catch (e) {
+        statusEl.textContent = `❌ ${e.message || e}`;
+    } finally {
+        btn.disabled = false; btn.textContent = '✨ Tailor CV cho job đang mở';
+    }
+}
+
 const __sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function __waitTabComplete(tabId, timeoutMs = 25000) {
@@ -410,6 +429,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('saveBtn').addEventListener('click', saveProfile);
     document.getElementById('importFromApp').addEventListener('click', importFromApp);
     document.getElementById('resetAll').addEventListener('click', resetAll);
+    document.getElementById('tailorJobBtn').addEventListener('click', tailorCurrentJob);
 
     // Debug capture: restore saved backend URL + token, wire the button.
     chrome.storage.local.get(['debugBackendUrl', 'debugToken'], (d) => {
