@@ -734,13 +734,17 @@ def _mbbank(career_url: str) -> list[dict]:
 #       ?pageIndex=N&pageSize=50&Domain=<career-host>
 #   → {items:[{name, slug, workingNewAddresses:[{provinceName,countryName}], ...}],
 #      totalRecord, totalPage}
-_IVIEC_HOSTS = {"tuyendung.tpb.vn", "tuyendungeximbank.com"}
+_IVIEC_HOSTS = {"tuyendung.tpb.vn", "tuyendungeximbank.com", "careers.fptis.com"}
 _IVIEC_API = ("https://centralize-api-v2.iviec.vn/api/recruitment/"
               "Recruitment/GetRecruitmentsByDomain")
 
 
-def _is_iviec(career_url: str) -> bool:
-    return (urlparse(career_url or "").netloc or "").lower() in _IVIEC_HOSTS
+def _is_iviec(career_url: str, html: str | None = None) -> bool:
+    if (urlparse(career_url or "").netloc or "").lower() in _IVIEC_HOSTS:
+        return True
+    # Any iVIEC-hosted career site loads its data from the centralize-api-v2
+    # backend — detect generically so new iVIEC tenants work without a hardcode.
+    return bool(html) and "centralize-api-v2.iviec.vn" in html.lower()
 
 
 def _iviec(career_url: str) -> list[dict]:
@@ -880,7 +884,7 @@ _ADAPTERS: list = [
     ("bytedance",      lambda u, h: bool(_bd_config(u)), lambda u, h: _bytedance_family(u)),
     ("vpbanks",        lambda u, h: _is_vpbanks(u),      lambda u, h: _vpbanks(u)),
     ("mbbank",         lambda u, h: _is_mbbank(u),       lambda u, h: _mbbank(u)),
-    ("iviec",          lambda u, h: _is_iviec(u),        lambda u, h: _iviec(u)),
+    ("iviec",          lambda u, h: _is_iviec(u, h),     lambda u, h: _iviec(u)),
     ("ghn",            lambda u, h: _is_ghn(u),          lambda u, h: _ghn(u)),
     ("phenom",         lambda u, h: _is_phenom_services(u), lambda u, h: _phenom_services(u)),
     ("eightfold",      _is_eightfold,                    lambda u, h: _eightfold(u)),
