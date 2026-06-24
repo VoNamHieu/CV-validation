@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import os
 import re
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import requests
 
@@ -429,7 +429,10 @@ def _eightfold(career_url: str) -> list[dict]:
                 loc = ", ".join(locs) if isinstance(locs, list) else str(locs)
                 if not _is_vn_loc(loc):
                     continue
-                url = j.get("positionUrl") or f"{origin}/careers?pid={jid}&domain={domain}"
+                # positionUrl is root-relative (e.g. "/careers/job/123") — make
+                # it absolute, else the JD URL is uncrawlable.
+                pos = j.get("positionUrl")
+                url = urljoin(origin + "/", pos) if pos else f"{origin}/careers?pid={jid}&domain={domain}"
                 out.append({"title": title[:200], "url": url,
                             "location": loc[:120], "description": ""})
             if len(positions) < 10 or len(out) >= 25:
