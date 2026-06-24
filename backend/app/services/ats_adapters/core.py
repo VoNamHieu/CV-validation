@@ -915,6 +915,48 @@ def _ahamove(career_url: str) -> list[dict]:
     return out
 
 
+# ── FPT Software — custom Spring API (career.fpt-software.com) ──────────────
+# JS career site; jobs come from a public paginated API with full HTML JD inline:
+#   GET /service/api/v1.0/public/job-postings?page=N&pageSize=10
+#   → {content:[{title, slug, description, locationName, ...}], last, totalPages}
+_FPTSOFT_API = "https://career.fpt-software.com/service/api/v1.0/public/job-postings"
+
+
+def _is_fptsoft(career_url: str, html: str | None = None) -> bool:
+    host = (urlparse(career_url or "").netloc or "").lower().removeprefix("www.")
+    if host == "career.fpt-software.com":
+        return True
+    return bool(html) and "career.fpt-software.com/service/api" in html.lower()
+
+
+def _fptsoft(career_url: str) -> list[dict]:
+    out = []
+    try:
+        for page in range(0, 12):       # API caps at 10/page
+            r = requests.get(_FPTSOFT_API, headers=_JSON_POST, timeout=_TIMEOUT,
+                             params={"page": page, "pageSize": 10})
+            if r.status_code != 200:
+                break
+            d = r.json() or {}
+            for j in d.get("content", []) or []:
+                title = (j.get("title") or "").strip()
+                slug = j.get("slug")
+                if not title or not slug:
+                    continue
+                out.append({
+                    "title": title[:200],
+                    "url": f"https://career.fpt-software.com/co-hoi-viec-lam/{slug}",
+                    "location": (j.get("locationName") or "")[:120],
+                    "description": _strip_html(j.get("description") or j.get("summary") or ""),
+                })
+            if d.get("last") or len(out) >= 100:
+                break
+    except Exception as e:
+        logger.info(f"[ats] fptsoft failed: {str(e)[:80]}")
+    logger.info(f"[ats] fptsoft → {len(out)} jobs")
+    return out
+
+
 # Adapter protocol: each is (name, detect(url, html) -> bool, fetch(url, html) ->
 # [{title,url,location,description}]). Tried in order; the first whose detect()
 # matches AND returns rows wins. Output always passes through _finalize. To add
@@ -931,6 +973,7 @@ _ADAPTERS: list = [
     ("iviec",          lambda u, h: _is_iviec(u, h),     lambda u, h: _iviec(u)),
     ("ghn",            lambda u, h: _is_ghn(u),          lambda u, h: _ghn(u)),
     ("ahamove",        _is_ahamove,                      lambda u, h: _ahamove(u)),
+    ("fptsoft",        _is_fptsoft,                      lambda u, h: _fptsoft(u)),
     ("phenom",         lambda u, h: _is_phenom_services(u), lambda u, h: _phenom_services(u)),
     ("eightfold",      _is_eightfold,                    lambda u, h: _eightfold(u)),
     ("successfactors", _is_successfactors,               lambda u, h: _successfactors(u, h)),
