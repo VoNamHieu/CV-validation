@@ -276,7 +276,11 @@ def _workday(career_url: str) -> list[dict]:
                 if not _is_vn_loc(loc):
                     continue
                 ext = j.get("externalPath", "") or ""
-                out.append({"title": j.get("title", ""), "url": base + ext if ext else base,
+                # externalPath is relative to the SITE ("/job/…"); the public
+                # URL needs the site segment ("{base}/{site}/job/…") — without it
+                # Workday 404s.
+                out.append({"title": j.get("title", ""),
+                            "url": f"{base}/{site}{ext}" if ext else f"{base}/{site}",
                             "location": loc, "description": "", "_ext": ext})
             if len(postings) < 20 or len(out) >= _MAX_ATS_JOBS:
                 break
