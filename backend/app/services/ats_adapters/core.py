@@ -871,6 +871,50 @@ def _resolve_workday_url(career_url: str, html: str | None) -> str | None:
     return None
 
 
+# ── Ahamove — Strapi CMS (cms.ahamove.com) ──────────────────────────────────
+# ahamove.com/job is a Next.js SPA, but jobs come from a public Strapi API that
+# already carries the full JD inline:
+#   GET cms.ahamove.com/api/jobs?populate=*
+#   → {data:[{title, slug, job_description, job_requirement, benefit, ...}]}
+_AHAMOVE_API = "https://cms.ahamove.com/api/jobs"
+
+
+def _is_ahamove(career_url: str, html: str | None = None) -> bool:
+    host = (urlparse(career_url or "").netloc or "").lower().removeprefix("www.")
+    if host == "ahamove.com":
+        return True
+    return bool(html) and "cms.ahamove.com" in html.lower()
+
+
+def _ahamove(career_url: str) -> list[dict]:
+    out = []
+    try:
+        r = requests.get(_AHAMOVE_API, headers=_JSON_POST, timeout=_TIMEOUT,
+                         params={"populate": "*", "pagination[pageSize]": 100})
+        if r.status_code != 200:
+            return []
+        for j in (r.json() or {}).get("data", []) or []:
+            a = j.get("attributes", j) if isinstance(j, dict) else {}
+            title = (a.get("title") or "").strip()
+            slug = a.get("slug") or a.get("id_job")
+            if not title or not slug:
+                continue
+            desc = "\n\n".join(_strip_html(a.get(k) or "") for k in
+                               ("job_description", "job_requirement", "benefit") if a.get(k))
+            loc = a.get("locations")
+            if isinstance(loc, dict):  # Strapi relation: {"data":[{"attributes":{"name":…}}]}
+                loc = ", ".join((x.get("attributes", {}) or {}).get("name", "")
+                                for x in (loc.get("data") or []) if isinstance(x, dict))
+            elif isinstance(loc, list):
+                loc = ", ".join(x.get("name", "") if isinstance(x, dict) else str(x) for x in loc)
+            out.append({"title": title[:200], "url": f"https://ahamove.com/job/{slug}",
+                        "location": str(loc or "")[:120], "description": desc.strip()})
+    except Exception as e:
+        logger.info(f"[ats] ahamove failed: {str(e)[:80]}")
+    logger.info(f"[ats] ahamove → {len(out)} jobs")
+    return out
+
+
 # Adapter protocol: each is (name, detect(url, html) -> bool, fetch(url, html) ->
 # [{title,url,location,description}]). Tried in order; the first whose detect()
 # matches AND returns rows wins. Output always passes through _finalize. To add
@@ -886,6 +930,7 @@ _ADAPTERS: list = [
     ("mbbank",         lambda u, h: _is_mbbank(u),       lambda u, h: _mbbank(u)),
     ("iviec",          lambda u, h: _is_iviec(u, h),     lambda u, h: _iviec(u)),
     ("ghn",            lambda u, h: _is_ghn(u),          lambda u, h: _ghn(u)),
+    ("ahamove",        _is_ahamove,                      lambda u, h: _ahamove(u)),
     ("phenom",         lambda u, h: _is_phenom_services(u), lambda u, h: _phenom_services(u)),
     ("eightfold",      _is_eightfold,                    lambda u, h: _eightfold(u)),
     ("successfactors", _is_successfactors,               lambda u, h: _successfactors(u, h)),
