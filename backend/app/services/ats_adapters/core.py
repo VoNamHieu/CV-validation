@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import os
 import re
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import requests
 
@@ -429,7 +429,10 @@ def _eightfold(career_url: str) -> list[dict]:
                 loc = ", ".join(locs) if isinstance(locs, list) else str(locs)
                 if not _is_vn_loc(loc):
                     continue
-                url = j.get("positionUrl") or f"{origin}/careers?pid={jid}&domain={domain}"
+                # positionUrl is root-relative (e.g. "/careers/job/123") — make
+                # it absolute, else the JD URL is uncrawlable.
+                pos = j.get("positionUrl")
+                url = urljoin(origin + "/", pos) if pos else f"{origin}/careers?pid={jid}&domain={domain}"
                 out.append({"title": title[:200], "url": url,
                             "location": loc[:120], "description": ""})
             if len(positions) < 10 or len(out) >= 25:
@@ -731,13 +734,17 @@ def _mbbank(career_url: str) -> list[dict]:
 #       ?pageIndex=N&pageSize=50&Domain=<career-host>
 #   → {items:[{name, slug, workingNewAddresses:[{provinceName,countryName}], ...}],
 #      totalRecord, totalPage}
-_IVIEC_HOSTS = {"tuyendung.tpb.vn", "tuyendungeximbank.com"}
+_IVIEC_HOSTS = {"tuyendung.tpb.vn", "tuyendungeximbank.com", "careers.fptis.com"}
 _IVIEC_API = ("https://centralize-api-v2.iviec.vn/api/recruitment/"
               "Recruitment/GetRecruitmentsByDomain")
 
 
-def _is_iviec(career_url: str) -> bool:
-    return (urlparse(career_url or "").netloc or "").lower() in _IVIEC_HOSTS
+def _is_iviec(career_url: str, html: str | None = None) -> bool:
+    if (urlparse(career_url or "").netloc or "").lower() in _IVIEC_HOSTS:
+        return True
+    # Any iVIEC-hosted career site loads its data from the centralize-api-v2
+    # backend — detect generically so new iVIEC tenants work without a hardcode.
+    return bool(html) and "centralize-api-v2.iviec.vn" in html.lower()
 
 
 def _iviec(career_url: str) -> list[dict]:
@@ -864,6 +871,50 @@ def _resolve_workday_url(career_url: str, html: str | None) -> str | None:
     return None
 
 
+# ── Ahamove — Strapi CMS (cms.ahamove.com) ──────────────────────────────────
+# ahamove.com/job is a Next.js SPA, but jobs come from a public Strapi API that
+# already carries the full JD inline:
+#   GET cms.ahamove.com/api/jobs?populate=*
+#   → {data:[{title, slug, job_description, job_requirement, benefit, ...}]}
+_AHAMOVE_API = "https://cms.ahamove.com/api/jobs"
+
+
+def _is_ahamove(career_url: str, html: str | None = None) -> bool:
+    host = (urlparse(career_url or "").netloc or "").lower().removeprefix("www.")
+    if host == "ahamove.com":
+        return True
+    return bool(html) and "cms.ahamove.com" in html.lower()
+
+
+def _ahamove(career_url: str) -> list[dict]:
+    out = []
+    try:
+        r = requests.get(_AHAMOVE_API, headers=_JSON_POST, timeout=_TIMEOUT,
+                         params={"populate": "*", "pagination[pageSize]": 100})
+        if r.status_code != 200:
+            return []
+        for j in (r.json() or {}).get("data", []) or []:
+            a = j.get("attributes", j) if isinstance(j, dict) else {}
+            title = (a.get("title") or "").strip()
+            slug = a.get("slug") or a.get("id_job")
+            if not title or not slug:
+                continue
+            desc = "\n\n".join(_strip_html(a.get(k) or "") for k in
+                               ("job_description", "job_requirement", "benefit") if a.get(k))
+            loc = a.get("locations")
+            if isinstance(loc, dict):  # Strapi relation: {"data":[{"attributes":{"name":…}}]}
+                loc = ", ".join((x.get("attributes", {}) or {}).get("name", "")
+                                for x in (loc.get("data") or []) if isinstance(x, dict))
+            elif isinstance(loc, list):
+                loc = ", ".join(x.get("name", "") if isinstance(x, dict) else str(x) for x in loc)
+            out.append({"title": title[:200], "url": f"https://ahamove.com/job/{slug}",
+                        "location": str(loc or "")[:120], "description": desc.strip()})
+    except Exception as e:
+        logger.info(f"[ats] ahamove failed: {str(e)[:80]}")
+    logger.info(f"[ats] ahamove → {len(out)} jobs")
+    return out
+
+
 # Adapter protocol: each is (name, detect(url, html) -> bool, fetch(url, html) ->
 # [{title,url,location,description}]). Tried in order; the first whose detect()
 # matches AND returns rows wins. Output always passes through _finalize. To add
@@ -877,8 +928,9 @@ _ADAPTERS: list = [
     ("bytedance",      lambda u, h: bool(_bd_config(u)), lambda u, h: _bytedance_family(u)),
     ("vpbanks",        lambda u, h: _is_vpbanks(u),      lambda u, h: _vpbanks(u)),
     ("mbbank",         lambda u, h: _is_mbbank(u),       lambda u, h: _mbbank(u)),
-    ("iviec",          lambda u, h: _is_iviec(u),        lambda u, h: _iviec(u)),
+    ("iviec",          lambda u, h: _is_iviec(u, h),     lambda u, h: _iviec(u)),
     ("ghn",            lambda u, h: _is_ghn(u),          lambda u, h: _ghn(u)),
+    ("ahamove",        _is_ahamove,                      lambda u, h: _ahamove(u)),
     ("phenom",         lambda u, h: _is_phenom_services(u), lambda u, h: _phenom_services(u)),
     ("eightfold",      _is_eightfold,                    lambda u, h: _eightfold(u)),
     ("successfactors", _is_successfactors,               lambda u, h: _successfactors(u, h)),

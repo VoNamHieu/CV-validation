@@ -12,11 +12,13 @@ import json
 import logging
 
 from app.search.facet import SearchProfile
-from app.search.taxonomy import classify_title, INDUSTRIES, _norm
+from app.search.taxonomy import (
+    classify_title, INDUSTRIES, _norm, SENIORITY_LEVELS, canon_level,
+)
 
 logger = logging.getLogger(__name__)
 
-_LEVELS = ("Intern/Fresher", "Junior", "Mid", "Senior", "Lead/Manager", "Director/Head+")
+_LEVELS = SENIORITY_LEVELS
 
 # Free-text domain → canonical INDUSTRY. The LLM distill is constrained to the
 # vocab, but explicit-field API callers pass loose terms ("fintech", "tech"); map
@@ -87,7 +89,7 @@ def build_profile(target_roles: list[str], domains: list[str] | None = None,
         role_families=fams or ["General & Management"],
         domains=domains,
         desired_locations=[d for d in (desired_locations or []) if d],
-        level=level if level in _LEVELS else "",
+        level=canon_level(level),
         salary_floor=salary_floor or 0,
     )
 

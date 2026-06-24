@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import re
+from urllib.parse import urljoin
 
 import requests
 
@@ -176,8 +177,11 @@ def _items_to_jobs(items, origin: str) -> list[dict]:
         if not title or len(title) < 3:
             continue
         url = _first(it, _URL_KEYS)
-        if url and url.startswith("/"):
-            url = origin + url
+        if url and not url.startswith("http"):
+            # Make absolute: protocol-relative ("//host/x"), root-relative
+            # ("/x"), or a bare slug ("6742-foo" — many SPAs put the slug in a
+            # url/slug field). A bare slug left as-is is an uncrawlable URL.
+            url = ("https:" + url) if url.startswith("//") else urljoin(origin + "/", url.lstrip("/"))
         if not url:
             jid = it.get("id") or it.get("jobId") or it.get("slug")
             if jid:

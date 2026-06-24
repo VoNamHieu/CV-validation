@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "JobFit AI — Auto Apply",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "AI Agent tự động ứng tuyển trên BẤT KỲ job site nào với CV đã optimize từ JobFit AI",
   "permissions": [
     "activeTab",
@@ -23,6 +23,28 @@
         "content-webapp.js"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://*/*"
+      ],
+      "exclude_matches": [
+        "https://*.google.com/*",
+        "https://*.youtube.com/*",
+        "https://*.facebook.com/*",
+        "https://*.instagram.com/*",
+        "https://*.twitter.com/*",
+        "https://*.x.com/*",
+        "https://*.tiktok.com/*",
+        "https://*.netflix.com/*",
+        "https://*.spotify.com/*",
+        "https://*.vercel.app/*"
+      ],
+      "js": [
+        "content-netcap.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
     },
     {
       "matches": [
