@@ -17,20 +17,41 @@ export async function POST(request: NextRequest) {
             );
         }
 
+        // Resolve a possibly-relative href to an absolute http(s) URL using the
+        // search page as the base. Doing this deterministically in code — rather
+        // than asking the LLM to "prepend the site domain" — is the difference
+        // between a working link and a dead one: the LLM routinely either left
+        // relative hrefs untouched (e.g. "/viec-lam/job-123", which 404s when
+        // opened standalone) or concatenated the whole search URL incl. query
+        // params. `new URL(href, base)` applies the WHATWG resolution rules:
+        // a "/path" href resolves against the base ORIGIN (dropping the search
+        // path + query), a "../x" href resolves against the base directory.
+        const toAbsolute = (href: string): string | null => {
+            try {
+                const u = new URL(href, site_url || undefined);
+                if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+                return u.href;
+            } catch {
+                return null;
+            }
+        };
+
         // Pre-extract every [LINK:href] text [/LINK] record from the upstream
         // payload (extension or backend produces this markup). Sending the AI
         // a compact, dedup'd link list — instead of 20k chars of mixed
         // header/footer/card text — guarantees no real link gets truncated
-        // out, even on pages where job cards render late.
+        // out, even on pages where job cards render late. We hand the AI the
+        // already-absolute URLs so the only thing it has to decide is which
+        // links are job postings — never how to build a URL.
         const linkRecords: string[] = [];
         const seenHrefs = new Set<string>();
         const linkRe = /\[LINK:([^\]]+)\]\s*([\s\S]*?)\s*\[\/LINK\]/g;
         for (const m of html_text.matchAll(linkRe)) {
-            const href = (m[1] || "").trim();
+            const absHref = toAbsolute((m[1] || "").trim());
             const label = (m[2] || "").replace(/\s+/g, " ").trim().slice(0, 200);
-            if (!href || seenHrefs.has(href)) continue;
-            seenHrefs.add(href);
-            linkRecords.push(`[LINK:${href}] ${label}`);
+            if (!absHref || seenHrefs.has(absHref)) continue;
+            seenHrefs.add(absHref);
+            linkRecords.push(`[LINK:${absHref}] ${label}`);
             if (linkRecords.length >= 400) break;
         }
         const compactLinks = linkRecords.join("\n");
@@ -54,7 +75,7 @@ export async function POST(request: NextRequest) {
 RULES:
 - Look for URLs that point to individual job postings (not category pages, not the homepage).
 - Job posting URLs usually contain patterns like: /job/, /viec-lam/, /jobs/, /work/, or have job-specific IDs.
-- Return FULL URLs (with https://). If the URL is relative, prepend the site domain.
+- The links are already full, absolute https:// URLs. Copy the url VERBATIM — do not modify, shorten, append, or invent any URL. Only return URLs that appear in the list.
 - For each job, also capture the visible job title text shown next to that link (e.g. "Senior Frontend Developer"). If no title is visible, use an empty string.
 - Filter out URLs that are clearly NOT job postings (login pages, about pages, contact pages, FAQ, etc.).
 - If you find fewer than 1 job URL, return an empty array and set "found" to false.
@@ -92,13 +113,20 @@ ${payload}`;
             return NextResponse.json({ detail: "AI returned invalid JSON. Please retry." }, { status: 502 });
         }
 
-        // Normalize: keep jobs with a url, de-dupe, and derive job_urls for
-        // backward compatibility with callers that only read the URL list.
+        // Normalize: re-resolve each URL to absolute (safety net in case the AI
+        // echoed back a relative href anyway), de-dupe, and — when we fed it a
+        // real link list — drop any URL that wasn't actually on the page. That
+        // membership check is what kills hallucinated/guessed URLs, the other
+        // common source of dead links. derive job_urls for backward compat.
         const seen = new Set<string>();
         const jobs: Array<{ url: string; title: string }> = [];
         for (const j of Array.isArray(parsed?.jobs) ? parsed.jobs : []) {
-            const url = j?.url?.trim();
+            const url = toAbsolute((j?.url || "").trim());
             if (!url || seen.has(url)) continue;
+            if (seenHrefs.size > 0 && !seenHrefs.has(url)) {
+                console.warn("[extract-job-links] dropping URL not present on page", { url });
+                continue;
+            }
             seen.add(url);
             jobs.push({ url, title: (j?.title || "").trim() });
         }
