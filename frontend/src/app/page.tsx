@@ -8,6 +8,7 @@ import StepUploadCV from '@/components/steps/StepUploadCV';
 import StepInputUrl from '@/components/steps/StepInputUrl';
 import StepEditCv from '@/components/steps/StepEditCv';
 import HistoryView from '@/components/views/HistoryView';
+import BrowseView from '@/components/views/BrowseView';
 import Mode1ResultBanner from '@/components/Mode1ResultBanner';
 
 export default function Home() {
@@ -61,6 +62,7 @@ export default function Home() {
             </>
           )}
           {view === 'history' && <HistoryView />}
+          {view === 'browse' && <BrowseView />}
         </main>
 
         <footer style={{
