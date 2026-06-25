@@ -89,6 +89,30 @@ def test_import_export_classifies_operations_not_catchall():
     assert classify_title("Export Sales Executive")[0] == "Sales & BD"
 
 
+def test_audit_batch_recoveries_and_guards():
+    from app.search.taxonomy import classify_title
+    # Catch-all gaps now routed to real families (coverage-audit batch).
+    assert classify_title("Chuyên viên Hành chính")[0] == "Operations"
+    assert classify_title("Nhân viên Phục vụ")[0] == "Customer Service"
+    assert classify_title("Bếp Trưởng")[0] == "Manufacturing & Technician"
+    assert classify_title("Chuyên gia Phát triển Sản phẩm")[0] == "Product"
+    assert classify_title("Chuyên viên Thanh tra")[0] == "Legal, Risk & Compliance"
+    # Guard: a real "Data Steward" must stay Data & AI (the 'steward' hospitality
+    # keyword was dropped precisely because it collided with this).
+    assert classify_title("Senior Data Steward")[0] == "Data & AI"
+
+
+def test_garbage_title_filter():
+    from app.routers.career import _is_garbage_title
+    assert _is_garbage_title("Find Jobs")
+    assert _is_garbage_title("Tầng 1, số 11B Cát Linh, Phường Ô Chợ Dừa, Hà Nội")
+    assert _is_garbage_title("🔍 PGD Láng Hạ, TP. Hà Nội")
+    # Real jobs kept — incl. "số hóa" (digitalization), which is not an address.
+    assert not _is_garbage_title("Chuyên viên Số hóa Ngân hàng")
+    assert not _is_garbage_title("Senior Product Manager")
+    assert not _is_garbage_title("Nhân viên Phục vụ")
+
+
 # ─────────────────────────── facet.score_job ───────────────────────────
 
 def test_score_job_soft_floors_unreachable_family():

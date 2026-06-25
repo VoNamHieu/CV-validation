@@ -116,20 +116,22 @@ def adjacent_families(family: str, threshold: float = 0.5) -> dict[str, float]:
 # generic. Returns (family, confidence). Vietnamese + English keywords.
 _RULES: list[tuple[str, str]] = [
     # Manufacturing / technician (check early — "công nhân", "kỹ thuật viên")
-    ("Manufacturing & Technician", r"cong nhan|cn |van hanh may|lo hoi|technician|ky thuat vien|operator|assembl|machinist|qa\b.*line|cong nhan dien"),
+    # Includes hands-on hospitality/culinary + food-tech (interim least-bad home;
+    # no Hospitality/Food family exists — flagged for a future family).
+    ("Manufacturing & Technician", r"cong nhan|cn |van hanh may|lo hoi|technician|ky thuat vien|operator|assembl|machinist|qa\b.*line|cong nhan dien|\bchef\b|sous chef|bep truong|housekeep|cong nghe thuc pham"),
     # Explicit Product roles — checked BEFORE Data&AI so "AI Product Owner" /
     # "Data Product Manager" resolve to the role (Product), not the specialization.
-    ("Product", r"product (owner|manager|management|lead|director|head|supervisor|executive|associate|specialist|intern|develop)|head of product|quan ly san pham"),
+    ("Product", r"product (owner|manager|management|lead|director|head|supervisor|executive|associate|specialist|intern|develop)|head of product|quan ly san pham|phat trien san pham|go.?to.?market|\bgtm\b"),
     # Data & AI  (business analyst lives here, NOT Product — it's analytics/
     # requirements work, adjacent to Product but a distinct, lower tier)
-    ("Data & AI", r"data scien|data engineer|machine learn|\bml\b|\bai\b|data analyst|business analyst|business intelligence|analytics|data steward|big data|\bmis\b|phan tich nghiep vu"),
+    ("Data & AI", r"data scien|data engineer|machine learn|\bml\b|\bai\b|data analyst|business analyst|business intelligence|analytics|data steward|big data|\bmis\b|phan tich nghiep vu|(commercial|market|insights|claim|chargeback|costing) analyst"),
     # Engineering / software (incl. semiconductor: VLSI / ASIC / IC & chip design
     # / verification / layout — checked before Design & Finance so "Analog IC
     # Design" / "Memory Controller Verification" land here, not on Design's
     # "design" or Finance's "controller"). Bare "kỹ thuật" deliberately NOT a
     # signal: it collides with "kỹ thuật số" (digital), "kỹ thuật SEO" (mktg) and
     # maintenance/construction technicians (→ Manufacturing).
-    ("Engineering", r"software|developer|\bdev\b|engineer|lap trinh|backend|frontend|full.?stack|devops|\bsre\b|\bqa\b|tester|mobile|android|ios|embedded|firmware|system|infra|cloud|\bit\b.*(engineer|developer|support|operation)|ky su(?!.*ban)|semiconductor|\bvlsi\b|\basic\b|\bfpga\b|\brtl\b|verilog|silicon|\bic design|chip verification|functional verification|ip verification|design verification|memory controller|\blayout\b"),
+    ("Engineering", r"software|developer|\bdev\b|engineer|lap trinh|backend|frontend|full.?stack|devops|\bsre\b|\bqa\b|tester|mobile|android|ios|embedded|firmware|system|infra|cloud|\bit\b.*(engineer|developer|support|operation)|ky su(?!.*ban)|semiconductor|\bvlsi\b|\basic\b|\bfpga\b|\brtl\b|verilog|silicon|\bic design|chip verification|functional verification|ip verification|design verification|memory controller|\blayout\b|\bcntt\b|an toan thong tin|kiem thu|platform (specialist|manager|lead)"),
     # Product  (business analyst moved to Data & AI; bare \bba\b dropped — it
     # false-matches VN "Bà"/"Ba")
     ("Product", r"product manage|product owner|product lead|product assistant|product specialist|product analyst|quan ly san pham|tech product"),
@@ -143,22 +145,22 @@ _RULES: list[tuple[str, str]] = [
     # Legal / Risk / Compliance — BEFORE Sales/Finance: these signals are
     # unambiguous, but bank compliance/risk titles also contain "khách hàng"/
     # "tài chính" which would otherwise be grabbed by Sales/Finance first.
-    ("Legal, Risk & Compliance", r"legal|phap che|phap ly|compliance|tuan thu|\brisk\b|rui ro|quan tri rui ro|regulat|aml|phong chong rua tien"),
+    ("Legal, Risk & Compliance", r"legal|phap che|phap ly|compliance|tuan thu|\brisk\b|rui ro|quan tri rui ro|regulat|aml|phong chong rua tien|thanh tra|nghiem thu|gian lan|an ninh"),
     # Sales & BD (incl. VN bank relationship-manager roles — high volume)
-    ("Sales & BD", r"sales|\bsale\b|ban hang|kinh doanh|business develop|account manager|account executive|partnership|relationship manager|\bbd\b|telesale|merchant|distribution|giam sat ban hang|khach hang ca nhan|khach hang doanh nghiep|khach hang lon|quan he khach hang|\bkhcn\b|\bkhdn\b|tu van tin dung|phat trien khach hang"),
+    ("Sales & BD", r"sales|\bsale\b|ban hang|kinh doanh|business develop|account manager|account executive|partnership|relationship manager|\bbd\b|telesale|merchant|distribution|giam sat ban hang|khach hang ca nhan|khach hang doanh nghiep|khach hang lon|quan he khach hang|\bkhcn\b|\bkhdn\b|tu van tin dung|phat trien khach hang|account specialist|account associate|client partner|client solution|priority relationship|phat trien thi truong|phat trien doi tac"),
     # Finance & Accounting (incl. credit / valuation — VN banks)
-    ("Finance & Accounting", r"finance|financ|accountant|accounting|ke toan|tai chinh|audit|kiem toan|treasury|actuar|dinh phi|tax|thue|fp&a|controller|kiem soat|tham dinh (gia|tin dung)|tin dung|credit|dinh gia|thu hoi no|phan tich.*tai chinh|giao dich vien|\bgdv\b|kiem ngan|teller"),
+    ("Finance & Accounting", r"finance|financ|accountant|accounting|ke toan|tai chinh|audit|kiem toan|treasury|actuar|dinh phi|tax|thue|fp&a|controller|kiem soat|tham dinh (gia|tin dung)|tin dung|credit|dinh gia|thu hoi no|phan tich.*tai chinh|giao dich vien|\bgdv\b|kiem ngan|teller|valuation|modeling|economics|\bvme\b|card portfolio|\bavp\b|cash management|du toan|ngan sach|\btham dinh\b|xu ly no"),
     # HR
-    ("Human Resources", r"human resource|\bhr\b|hrbp|recruit|tuyen dung|talent|nhan su|c&b|learning.*develop|\bl&d\b|dao tao|compensation|payroll|employer brand"),
+    ("Human Resources", r"human resource|\bhr\b|hrbp|recruit|tuyen dung|talent|nhan su|c&b|learning.*develop|\bl&d\b|dao tao|compensation|payroll|employer brand|nhan tai|nang luc|quan he lao dong|dai ngo"),
     # Customer Service (incl. Customer Success / Experience)
-    ("Customer Service", r"customer (service|support|success|experience)|cham soc khach hang|\bcskh\b|call center|contact center|dich vu khach hang|tong dai|support agent|customer success"),
+    ("Customer Service", r"customer (service|support|success|experience)|cham soc khach hang|\bcskh\b|call center|contact center|dich vu khach hang|tong dai|support agent|customer success|phuc vu|le tan|receptionist"),
     # Operations / supply chain / commerce ops
     # Operations incl. supply chain + import/export / customs / freight. XNK and
     # hải quan had NO rule before → they fell to the General & Management catch-all
     # (so "Chuyên viên Xuất nhập khẩu" mis-matched strategy/consultant roles).
     # Regulatory-customs ("Customs Regulatory") still resolves to Legal/Risk first
     # (checked earlier); "Export Sales"/"Kinh doanh XNK" still resolve to Sales.
-    ("Operations", r"operation|van hanh|supply chain|chuoi cung ung|logistic|warehouse|kho|fulfil|category|seller|merchandis|procure|mua hang|thu mua|planning|planner|inventory|dieu phoi|giao nhan|vendor|optimization|xuat nhap khau|\bxnk\b|hai quan|customs|\bimport\b|\bexport\b|freight|forwarding"),
+    ("Operations", r"operation|van hanh|supply chain|chuoi cung ung|logistic|warehouse|kho|fulfil|category|seller|merchandis|procure|mua hang|thu mua|planning|planner|inventory|dieu phoi|giao nhan|vendor|optimization|xuat nhap khau|\bxnk\b|hai quan|customs|\bimport\b|\bexport\b|freight|forwarding|lay hang|xu ly tai buu cuc|picking|hanh chinh|van phong|thu ky|van thu|sourcing|supplier|buyer|purchasing|xay dung|giao thong|ket cau|kien truc su"),
     # General & management (catch-all-ish, check late)
     ("General & Management", r"management trainee|\bmt\b program|strategy|chien luoc|consultant|tu van|general manager|\bgm\b|director|head of|truong phong|truong bo phan|project manager|program manager|\bpmo\b|quan ly du an|giam doc|pho phong|chief|\bceo\b|\bcoo\b|\bcfo\b|\bcto\b"),
 ]

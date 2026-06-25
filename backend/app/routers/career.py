@@ -34,6 +34,7 @@ from app.data.featured_companies import FEATURED_COMPANIES
 
 import asyncio
 import os
+import re
 import time
 from urllib.parse import urlparse
 
@@ -399,12 +400,42 @@ class SearchRequest(BaseModel):
     rerank: bool = True   # Phase-2 embedding rerank within the facet bucket
 
 
+# Crawl-quality gate: titles that aren't jobs (nav/CTA labels, scraped branch
+# ADDRESSES, thank-you pages, foreign blog/video posts, emoji-led location
+# filters). Dropped from the ranking pool so they never pollute search — this is
+# a crawl-quality fix, NOT taxonomy (the classifier shouldn't learn garbage).
+_GARBAGE_EMOJI = re.compile(r'^\W*[\U0001F300-\U0001FAFF]')
+_GARBAGE_UI = {"find jobs", "see jobs", "privacy notice", "trang chủ", "home",
+               "apply now", "view all jobs", "language selector", "cookie policy", "terms of use"}
+
+
+def _is_garbage_title(title: str) -> bool:
+    n = (title or "").strip()
+    low = n.lower()
+    if len(n) < 3:
+        return True
+    if not re.search(r'[a-zA-ZÀ-ỹ]', n):          # no Latin/VN letters (foreign blog content)
+        return True
+    if low in _GARBAGE_UI:                          # nav / CTA labels
+        return True
+    if 'thư cảm ơn' in low or 'thank you' in low:   # thank-you pages
+        return True
+    if _GARBAGE_EMOJI.match(n):                      # emoji-led posts / location filters
+        return True
+    if 'phường' in low and re.search(r'tầng|lầu|tòa nhà|^số|đường', low):  # address scraped as a title
+        return True
+    return False
+
+
 def _flatten_featured(companies: list[dict]) -> list[dict]:
-    """company-grouped featured → flat job dicts tagged with company + industry."""
+    """company-grouped featured → flat job dicts tagged with company + industry.
+    Skips crawl-garbage titles (non-jobs) so they never reach ranking/display."""
     flat = []
     for c in companies or []:
         industry = classify_company(c.get("name", ""), c.get("career_url", ""))
         for j in c.get("jobs", []):
+            if _is_garbage_title(j.get("title", "")):
+                continue
             flat.append({**j, "company": c.get("name", ""), "industry": industry})
     return flat
 
