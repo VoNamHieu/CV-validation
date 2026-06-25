@@ -8,6 +8,7 @@ scoring moves to SQL once jobs live in the store.
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 
 from app.search.taxonomy import (
@@ -18,6 +19,8 @@ from app.search.company_industry import classify_company
 
 # accent-fold + lower for location matching (reuse taxonomy's normalizer shape)
 from app.search.taxonomy import _norm  # noqa: E402
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -125,4 +128,22 @@ def rank_jobs(jobs: list[dict], profile: SearchProfile) -> list[dict]:
     # then by score within each tier — "exact role first, widen only after".
     scored.sort(key=lambda x: (x["_facet"].get("is_primary", False),
                                x["_facet"]["score"]), reverse=True)
+
+    if logger.isEnabledFor(logging.INFO):
+        logger.info(
+            "[facet] profile roles=%s domains=%s level=%r → expanded=%s | "
+            "%d/%d jobs scored",
+            profile.role_families, profile.domains, profile.level,
+            {k: round(v, 2) for k, v in rw.items()}, len(scored), len(jobs),
+        )
+        for j in scored[:12]:
+            f = j["_facet"]
+            logger.info(
+                "[facet]   %.3f %s fam=%s conf=%.1f role_w=%.2f "
+                "in_domain=%s sen=%s×%.2f | %s",
+                f["score"], "P" if f["is_primary"] else "·", f["role_family"],
+                f["confidence"], f["role_w"], f["in_domain"],
+                f.get("seniority"), f["seniority_mult"],
+                (j.get("title") or "")[:60],
+            )
     return scored
