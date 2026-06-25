@@ -93,17 +93,25 @@ _RULES: list[tuple[str, str]] = [
     ("Manufacturing & Technician", r"cong nhan|cn |van hanh may|lo hoi|technician|ky thuat vien|operator|assembl|machinist|qa\b.*line|cong nhan dien"),
     # Explicit Product roles — checked BEFORE Data&AI so "AI Product Owner" /
     # "Data Product Manager" resolve to the role (Product), not the specialization.
-    ("Product", r"product (owner|manager|management|lead|director|head|supervisor|executive|associate|specialist|develop)|head of product|quan ly san pham"),
+    ("Product", r"product (owner|manager|management|lead|director|head|supervisor|executive|associate|specialist|intern|develop)|head of product|quan ly san pham"),
     # Data & AI  (business analyst lives here, NOT Product — it's analytics/
     # requirements work, adjacent to Product but a distinct, lower tier)
-    ("Data & AI", r"data scien|data engineer|machine learn|\bml\b|\bai\b|data analyst|business analyst|business intelligence|analytics|data steward|big data|\bmis\b"),
-    # Engineering / software
-    ("Engineering", r"software|developer|\bdev\b|engineer|lap trinh|backend|frontend|full.?stack|devops|\bsre\b|\bqa\b|tester|mobile|android|ios|embedded|firmware|system|infra|cloud|\bit\b.*(engineer|developer|support|operation)|ky su(?!.*ban)"),
+    ("Data & AI", r"data scien|data engineer|machine learn|\bml\b|\bai\b|data analyst|business analyst|business intelligence|analytics|data steward|big data|\bmis\b|phan tich nghiep vu"),
+    # Engineering / software (incl. semiconductor: VLSI / ASIC / IC & chip design
+    # / verification / layout — checked before Design & Finance so "Analog IC
+    # Design" / "Memory Controller Verification" land here, not on Design's
+    # "design" or Finance's "controller"). Bare "kỹ thuật" deliberately NOT a
+    # signal: it collides with "kỹ thuật số" (digital), "kỹ thuật SEO" (mktg) and
+    # maintenance/construction technicians (→ Manufacturing).
+    ("Engineering", r"software|developer|\bdev\b|engineer|lap trinh|backend|frontend|full.?stack|devops|\bsre\b|\bqa\b|tester|mobile|android|ios|embedded|firmware|system|infra|cloud|\bit\b.*(engineer|developer|support|operation)|ky su(?!.*ban)|semiconductor|\bvlsi\b|\basic\b|\bfpga\b|\brtl\b|verilog|silicon|\bic design|chip verification|functional verification|ip verification|design verification|memory controller|\blayout\b"),
     # Product  (business analyst moved to Data & AI; bare \bba\b dropped — it
     # false-matches VN "Bà"/"Ba")
     ("Product", r"product manage|product owner|product lead|product assistant|product specialist|product analyst|quan ly san pham|tech product"),
     # Design
-    ("Design", r"designer|\bux\b|\bui\b|graphic|creative|art director|thiet ke|motion|illustrat|copywriter|copy writer"),
+    # "design" only as a design-role (Design Intern/Lead/Manager…) or a visual
+    # design discipline — NOT bare "design", which collides with process /
+    # business / IC design (those resolve to Ops / G&M / Engineering instead).
+    ("Design", r"designer|design (intern|lead|manager|director|head|team|associate|specialist|trainee|ops|operation)|ux design|ui design|product design|graphic design|visual design|web design|service design|brand design|\bux\b|\bui\b|graphic|creative|art director|thiet ke|motion|illustrat|copywriter|copy writer"),
     # Marketing  (drop bare \bpr\b — collides with VN; keep full comms terms)
     ("Marketing", r"marketing|\bbrand\b|growth|content|seo|digital mkt|truyen thong|thuong hieu|public relations|communicat|social|\bcrm\b|campaign|trade marketing|\bmkt\b|strategist"),
     # Legal / Risk / Compliance — BEFORE Sales/Finance: these signals are
@@ -111,11 +119,11 @@ _RULES: list[tuple[str, str]] = [
     # "tài chính" which would otherwise be grabbed by Sales/Finance first.
     ("Legal, Risk & Compliance", r"legal|phap che|phap ly|compliance|tuan thu|\brisk\b|rui ro|quan tri rui ro|regulat|aml|phong chong rua tien"),
     # Sales & BD (incl. VN bank relationship-manager roles — high volume)
-    ("Sales & BD", r"sales|ban hang|kinh doanh|business develop|account manager|account executive|partnership|relationship manager|\bbd\b|telesale|merchant|distribution|giam sat ban hang|khach hang ca nhan|khach hang doanh nghiep|khach hang lon|quan he khach hang|\bkhcn\b|\bkhdn\b|tu van tin dung|phat trien khach hang"),
+    ("Sales & BD", r"sales|\bsale\b|ban hang|kinh doanh|business develop|account manager|account executive|partnership|relationship manager|\bbd\b|telesale|merchant|distribution|giam sat ban hang|khach hang ca nhan|khach hang doanh nghiep|khach hang lon|quan he khach hang|\bkhcn\b|\bkhdn\b|tu van tin dung|phat trien khach hang"),
     # Finance & Accounting (incl. credit / valuation — VN banks)
-    ("Finance & Accounting", r"finance|financ|accountant|ke toan|tai chinh|audit|kiem toan|treasury|actuar|dinh phi|tax|thue|fp&a|controller|kiem soat|tham dinh (gia|tin dung)|tin dung|credit|dinh gia|thu hoi no|phan tich.*tai chinh|giao dich vien|\bgdv\b|kiem ngan|teller"),
+    ("Finance & Accounting", r"finance|financ|accountant|accounting|ke toan|tai chinh|audit|kiem toan|treasury|actuar|dinh phi|tax|thue|fp&a|controller|kiem soat|tham dinh (gia|tin dung)|tin dung|credit|dinh gia|thu hoi no|phan tich.*tai chinh|giao dich vien|\bgdv\b|kiem ngan|teller"),
     # HR
-    ("Human Resources", r"human resource|\bhr\b|hrbp|recruit|tuyen dung|talent|nhan su|c&b|learning.*develop|\bl&d\b|dao tao|compensation|payroll"),
+    ("Human Resources", r"human resource|\bhr\b|hrbp|recruit|tuyen dung|talent|nhan su|c&b|learning.*develop|\bl&d\b|dao tao|compensation|payroll|employer brand"),
     # Customer Service (incl. Customer Success / Experience)
     ("Customer Service", r"customer (service|support|success|experience)|cham soc khach hang|\bcskh\b|call center|contact center|dich vu khach hang|tong dai|support agent|customer success"),
     # Operations / supply chain / commerce ops
