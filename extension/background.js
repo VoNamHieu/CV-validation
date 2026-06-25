@@ -283,10 +283,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     //    tailored CV to the web app for rendering.
     // ══════════════════════════════════════════════════════════════
     if (message.type === 'MODE1_TAILOR') {
+        const M1 = '[JobFit Mode1/bg]';
         const { cv, jdText, sourceRef, jobUrl, options } = message;
+        console.log(`${M1} received`, {
+            hasCv: !!cv, jdChars: jdText?.length || 0, sourceRef,
+            jobUrl, options,
+        });
         (async () => {
             try {
                 if (!cv || !jdText || !sourceRef || !jobUrl) {
+                    console.warn(`${M1} ✖ missing fields`, { cv: !!cv, jdText: !!jdText, sourceRef: !!sourceRef, jobUrl: !!jobUrl });
                     sendResponse({ success: false, error: 'Missing cv, jdText, sourceRef, or jobUrl' });
                     return;
                 }
@@ -296,10 +302,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     appUrl,
                     appUrl.includes('localhost') ? null : 'http://localhost:3000',
                 ].filter(Boolean);
+                console.log(`${M1} endpoints to try (in order):`, urls);
 
                 let lastError = null;
                 for (const baseUrl of urls) {
+                    const t0 = Date.now();
                     try {
+                        console.log(`${M1} → POST ${baseUrl}/api/ai/tailor`);
                         const res = await fetch(`${baseUrl}/api/ai/tailor`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -307,27 +316,37 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                             // Pipeline = 3 sequential LLM calls (extract → score → optimize).
                             signal: AbortSignal.timeout(120000),
                         });
+                        console.log(`${M1} ← ${baseUrl} status=${res.status} ok=${res.ok} in ${Date.now() - t0}ms`);
                         if (!res.ok) {
                             const err = await res.json().catch(() => ({}));
                             throw new Error(err.detail || `API error: ${res.status}`);
                         }
                         const result = await res.json();
+                        console.log(`${M1} ✓ tailor result`, {
+                            keys: Object.keys(result || {}),
+                            variants: result?.variants?.length ?? 0,
+                            score: result?.match?.overall_score,
+                        });
                         // source_ref → job_url lives ONLY here, never on the server.
                         const store = await chrome.storage.local.get('mode1RefMap');
                         const map = store.mode1RefMap || {};
                         map[sourceRef] = { jobUrl, at: Date.now() };
                         await chrome.storage.local.set({ mode1RefMap: map });
-                        // Push the tailored CV to the web-app tab(s) to render.
+                        console.log(`${M1} stored sourceRef→jobUrl map (local only)`);
+                        // Push the tailored CV to the web-app tab(s) to render
+                        // (pushToWebApp logs the JobFit-app tab count + warns if none open).
                         pushToWebApp({ type: 'JOBFIT_MODE1_RESULT', ...result });
                         sendResponse({ success: true, data: result });
                         return;
                     } catch (e) {
                         lastError = e;
-                        console.warn(`[JobFit AI] tailor proxy failed for ${baseUrl}:`, e.message);
+                        console.warn(`${M1} ✖ tailor proxy failed for ${baseUrl} after ${Date.now() - t0}ms:`, e.message);
                     }
                 }
+                console.error(`${M1} ✖ all endpoints failed:`, lastError?.message);
                 sendResponse({ success: false, error: lastError?.message || 'All endpoints failed' });
             } catch (e) {
+                console.error(`${M1} ✖ handler exception:`, e);
                 sendResponse({ success: false, error: e.message });
             }
         })();
@@ -585,8 +604,17 @@ function broadcastProgress() {
 // JobFit-app ones to the page. Used to deliver the Mode-1 tailored CV.
 function pushToWebApp(message) {
     chrome.tabs.query({}, (tabs) => {
+        let appTabs = 0;
         for (const tab of tabs) {
-            if (tab.id != null) chrome.tabs.sendMessage(tab.id, message).catch(() => { });
+            if (tab.id == null) continue;
+            if (/cv-validation\.vercel\.app|localhost:3000/.test(tab.url || '')) appTabs++;
+            chrome.tabs.sendMessage(tab.id, message).catch(() => { });
+        }
+        if (message?.type === 'JOBFIT_MODE1_RESULT') {
+            console.log(`[JobFit Mode1/bg] pushed ${message.type} → ${appTabs} JobFit-app tab(s) open`);
+            if (appTabs === 0) {
+                console.warn('[JobFit Mode1/bg] ⚠️ no JobFit AI tab open — the tailored CV has nowhere to render. Open/refresh the JobFit AI tab.');
+            }
         }
     });
 }

@@ -1777,40 +1777,71 @@ function _newSourceRef() {
     return 'sr-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
 }
 
+// Debug logging for the tailor-on-job-board flow. Page-side logs show in the
+// JOB BOARD tab's DevTools console (filter: "Mode1"). Background-side logs show
+// in the extension's service-worker console (chrome://extensions → JobFit AI →
+// "service worker"). Both share the [JobFit Mode1] prefix.
+const M1 = '[JobFit Mode1]';
+
 async function runMode1() {
+    const t0 = Date.now();
+    console.log(`${M1} ▶ start`, { url: location.href, host: location.hostname });
+
     const cv = await new Promise(r => {
-        chrome.storage.local.get('jobfitCv', d => r(d.jobfitCv || null));
+        chrome.storage.local.get(['jobfitCv', 'jobfitCvSyncedAt'], d =>
+            r({ cv: d.jobfitCv || null, syncedAt: d.jobfitCvSyncedAt }));
     });
-    if (!cv) {
+    if (!cv.cv) {
+        console.warn(`${M1} ✖ no CV synced — open JobFit AI and sync first`);
         showToast('⚠️ Chưa có CV. Hãy mở JobFit AI và đồng bộ CV trước.', 5000);
         return { success: false, error: 'no CV synced' };
     }
+    console.log(`${M1} ✓ CV synced`, {
+        name: cv.cv.name || cv.cv.full_name || '(unnamed)',
+        skills: Array.isArray(cv.cv.skills) ? cv.cv.skills.length : 0,
+        syncedAt: cv.syncedAt ? new Date(cv.syncedAt).toISOString() : 'unknown',
+    });
 
     const jdText = (document.body?.innerText || '').replace(/\s+\n/g, '\n').trim().slice(0, 15000);
+    console.log(`${M1} JD extracted from page`, {
+        chars: jdText.length,
+        head: jdText.slice(0, 140).replace(/\n/g, ' '),
+    });
     if (jdText.length < 80) {
+        console.warn(`${M1} ✖ JD too short (${jdText.length} chars) — page may be an SPA shell or wrong tab`);
         showToast('⚠️ Không đọc được JD trên trang này.', 5000);
         return { success: false, error: 'no JD text' };
     }
 
     const sourceRef = _newSourceRef();
+    console.log(`${M1} → sending MODE1_TAILOR to background`, { sourceRef, jdChars: jdText.length });
     showToast('✨ Đang tailor CV cho job này… (có thể mất ~1 phút)', 0);
     try {
         const resp = await chrome.runtime.sendMessage({
             type: 'MODE1_TAILOR',
-            cv,
+            cv: cv.cv,
             jdText,
             sourceRef,
             jobUrl: location.href,
             options: { length: 'concise' },
         });
+        const ms = Date.now() - t0;
         document.getElementById('jobfit-toast')?.remove();
         if (resp?.success) {
+            const v0 = resp.data?.variants?.[0];
+            console.log(`${M1} ✅ tailored in ${ms}ms`, {
+                variants: resp.data?.variants?.length ?? 0,
+                improvements: v0?.improvements?.length ?? 0,
+                score: resp.data?.match?.overall_score,
+            });
             showToast('✅ CV đã tailor — mở JobFit AI để xem & ứng tuyển.', 6000);
         } else {
+            console.warn(`${M1} ✖ tailor failed in ${ms}ms:`, resp?.error, resp);
             showToast(`❌ Tailor lỗi: ${resp?.error || 'unknown'}`, 6000);
         }
         return resp || { success: false, error: 'no response' };
     } catch (e) {
+        console.error(`${M1} ✖ exception after ${Date.now() - t0}ms:`, e);
         document.getElementById('jobfit-toast')?.remove();
         showToast(`❌ Tailor lỗi: ${e.message}`, 6000);
         return { success: false, error: e.message };
