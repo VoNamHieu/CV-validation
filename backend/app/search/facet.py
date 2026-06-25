@@ -44,6 +44,13 @@ class SearchProfile:
 # weight of the industry signal vs the role signal in the blended score
 _OUT_OF_DOMAIN = 0.6   # multiplier when job industry not in profile.domains
 
+# A role family with NO adjacency path to the profile is demoted to this floor
+# instead of being dropped — so every role stays SEARCHABLE (a candidate can
+# pivot INTO any family, incl. graph orphans like HR/Legal/Manufacturing) but
+# ranks at the very bottom, behind every reachable family. is_primary tiering +
+# score ordering keep these last. Universal (graph-structure, not per-pair).
+_UNREACHABLE_FLOOR = 0.25
+
 
 def _seniority_mult(job_level: str | None, profile_level: str) -> float:
     """Demote a job whose level doesn't fit the candidate — BOTH directions.
@@ -70,19 +77,24 @@ def _seniority_mult(job_level: str | None, profile_level: str) -> float:
 
 def score_job(job: dict, profile: SearchProfile, role_weights: dict[str, float],
               industry: str | None = None) -> dict | None:
-    """Return {score, role_family, industry, role_w, in_domain, ...} or None if
-    the job's role family isn't reachable from the profile.
+    """Return {score, role_family, industry, role_w, in_domain, reachable, ...},
+    or None ONLY when a job is dropped by the location filter.
 
     The blended score is role_w × industry × classification-confidence ×
     seniority-fit, so (a) a title we could only land on the General & Management
     catch-all (low confidence) scores well below a confident match, and (b) a
     role below the candidate's level is demoted instead of riding its family
-    adjacency weight."""
+    adjacency weight.
+
+    A family with no adjacency path to the profile is NOT dropped — it's demoted
+    to `_UNREACHABLE_FLOOR` and flagged `reachable=False`, so it ranks dead last
+    (behind every reachable family) but stays visible/pivot-able."""
     title = job.get("title") or ""
     fam, conf = classify_title(title)
     role_w = role_weights.get(fam, 0.0)
-    if role_w <= 0:
-        return None
+    reachable = role_w > 0
+    if not reachable:
+        role_w = _UNREACHABLE_FLOOR   # soft floor — demote to the tail, don't drop
 
     # hard-ish location filter: if user set locations, require overlap
     if profile.desired_locations:
@@ -110,7 +122,7 @@ def score_job(job: dict, profile: SearchProfile, role_weights: dict[str, float],
     return {
         "score": round(role_w * ind_mult * conf_mult * sen_mult, 3),
         "role_family": fam, "industry": ind, "is_primary": is_primary,
-        "role_w": role_w, "in_domain": in_domain,
+        "role_w": role_w, "in_domain": in_domain, "reachable": reachable,
         "confidence": conf, "seniority": job_level, "seniority_mult": sen_mult,
     }
 
@@ -124,17 +136,21 @@ def rank_jobs(jobs: list[dict], profile: SearchProfile) -> list[dict]:
         s = score_job(j, profile, rw, industry=j.get("industry"))
         if s:
             scored.append({**j, "_facet": s})
-    # Tier by primary role-family first (PM/PO before any BA/Analyst/Consultant),
-    # then by score within each tier — "exact role first, widen only after".
+    # Three tiers, in order: primary role-family → reachable adjacent → soft-
+    # floored unreachable (pivot-only). Within each tier, by score. So an
+    # unreachable-family job can never outrank a reachable one even if its raw
+    # score happens higher; "exact role first, widen, then everything else last".
     scored.sort(key=lambda x: (x["_facet"].get("is_primary", False),
+                               x["_facet"].get("reachable", True),
                                x["_facet"]["score"]), reverse=True)
 
     if logger.isEnabledFor(logging.INFO):
+        floored = sum(1 for j in scored if not j["_facet"].get("reachable", True))
         logger.info(
             "[facet] profile roles=%s domains=%s level=%r → expanded=%s | "
-            "%d/%d jobs scored",
+            "%d/%d jobs scored (%d soft-floored / unreachable)",
             profile.role_families, profile.domains, profile.level,
-            {k: round(v, 2) for k, v in rw.items()}, len(scored), len(jobs),
+            {k: round(v, 2) for k, v in rw.items()}, len(scored), len(jobs), floored,
         )
         for j in scored[:12]:
             f = j["_facet"]

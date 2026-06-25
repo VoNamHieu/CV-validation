@@ -12,7 +12,7 @@ import pytest
 
 from app.search import ranker, semantic
 from app.search.embed import build_job_doc
-from app.search.facet import score_job, rank_jobs, SearchProfile
+from app.search.facet import score_job, rank_jobs, SearchProfile, _UNREACHABLE_FLOOR
 from app.search.profile import build_profile
 
 
@@ -73,12 +73,19 @@ def test_build_job_doc_includes_skills():
 
 # ─────────────────────────── facet.score_job ───────────────────────────
 
-def test_score_job_role_gate_drops_unreachable_family():
-    # profile only retrieves Engineering-adjacent families; a far role → None
+def test_score_job_soft_floors_unreachable_family():
+    # profile only retrieves Engineering-adjacent families; a far role is NOT
+    # dropped — it's soft-floored (reachable=False) so it stays pivot-able but
+    # ranks dead last behind any reachable family.
     prof = build_profile(["Backend Software Engineer"])
     rw = prof.expanded_roles()
-    out = score_job({"title": "Registered Nurse"}, prof, rw, industry="Pharma & Healthcare")
-    assert out is None
+    far = score_job({"title": "Registered Nurse"}, prof, rw, industry="Pharma & Healthcare")
+    assert far is not None
+    assert far["reachable"] is False
+    assert far["role_w"] == _UNREACHABLE_FLOOR
+    # A reachable in-family role outranks the floored one in rank_jobs tiering.
+    near = score_job({"title": "Backend Software Engineer"}, prof, rw)
+    assert near["reachable"] is True and near["score"] > far["score"]
 
 
 def test_score_job_location_filter_drops_mismatch():
