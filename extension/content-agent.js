@@ -1255,6 +1255,10 @@ async function runAgentLoop(profile) {
         });
     });
     const hasCV = !!cvData;
+    console.log('[JobFit Apply] ▶ runAgentLoop start', {
+        url: location.href, host: location.hostname, hasCV,
+        profileFields: Object.keys(profile || {}).length,
+    });
 
     try {
         // Step 0: Find and click Apply button
@@ -1263,10 +1267,12 @@ async function runAgentLoop(profile) {
 
         const applyBtn = findApplyButton();
         if (applyBtn) {
+            console.log('[JobFit Apply] step0: clicked Apply button:', (applyBtn.innerText || applyBtn.value || '').trim().slice(0, 40));
             applyBtn.click();
             showProgress(0, AGENT_MAX_ITERATIONS, 'Đã click nút Ứng tuyển, chờ form...');
             await sleep(2000);
         } else {
+            console.log('[JobFit Apply] step0: no Apply button found — scanning current form');
             showProgress(0, AGENT_MAX_ITERATIONS, 'Không tìm thấy nút Apply, scan form hiện tại...');
             await sleep(500);
         }
@@ -1384,6 +1390,10 @@ async function runAgentLoop(profile) {
                     return;
                 }
             }
+
+            console.log(`[JobFit Apply] iter ${i + 1}/${AGENT_MAX_ITERATIONS}: fields=${state.formFields.length} → action=${plan.action}` +
+                (plan.reason ? ` (${String(plan.reason).slice(0, 50)})` : '') +
+                (Array.isArray(plan.instructions) ? ` [${plan.instructions.length} instr]` : ''));
 
             // ── 4. CHECK ACTION ──
             if (plan.action === 'DONE') {
@@ -1529,6 +1539,8 @@ function showConfirmation(filledCount, totalFields, isSuccess) {
 //        | 'filled'    (form filled, awaiting the user's review + submit)
 //        | 'failed'
 function reportResult(success, detail, outcome) {
+    const o = outcome || (success ? 'filled' : 'failed');
+    console.log(`[JobFit Apply] ■ result: ${success ? '✅' : '✖'} outcome=${o} | ${detail} | ${window.location.hostname}`);
     chrome.runtime.sendMessage({
         type: 'AUTO_APPLY_RESULT',
         result: {

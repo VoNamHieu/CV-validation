@@ -359,20 +359,46 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     //    holds the opaque source_ref.
     // ══════════════════════════════════════════════════════════════
     if (message.type === 'MODE1_APPLY') {
+        const MA = '[JobFit Mode1/apply]';
+        // Wrap sendResponse so the final outcome is always logged.
+        const reply = (r) => {
+            if (r?.success) console.log(`${MA} ✅ apply handed off / started`, r);
+            else console.warn(`${MA} ✖ apply failed:`, r?.error, r);
+            sendResponse(r);
+        };
         (async () => {
             try {
                 const { sourceRef } = message;
+                console.log(`${MA} received`, {
+                    sourceRef,
+                    profileInMsg: !!message.profile,
+                    cvFile: message.cvFileName || null,
+                    cvBytes: message.cvFileBase64?.length || 0,
+                });
                 const store = await chrome.storage.local.get(['mode1RefMap', 'jobfitProfile']);
                 const entry = (store.mode1RefMap || {})[sourceRef];
                 if (!entry?.jobUrl) {
-                    sendResponse({ success: false, error: 'Unknown source_ref — hãy tailor job này trước.' });
+                    console.warn(`${MA} ✖ unknown source_ref — not in local ref-map (tailor this job first?)`, {
+                        sourceRef, knownRefs: Object.keys(store.mode1RefMap || {}).length,
+                    });
+                    reply({ success: false, error: 'Unknown source_ref — hãy tailor job này trước.' });
                     return;
                 }
+                console.log(`${MA} ✓ resolved source_ref → jobUrl (local only)`, {
+                    jobUrl: entry.jobUrl,
+                    tailoredAt: entry.at ? new Date(entry.at).toISOString() : '?',
+                });
                 const profile = message.profile || store.jobfitProfile;
                 if (!profile) {
-                    sendResponse({ success: false, error: 'Chưa có profile — hãy đồng bộ profile trước.' });
+                    console.warn(`${MA} ✖ no profile (message + storage both empty) — sync profile first`);
+                    reply({ success: false, error: 'Chưa có profile — hãy đồng bộ profile trước.' });
                     return;
                 }
+                console.log(`${MA} → handleAutoApplyStart (opens tab + runs auto-apply agent)`, {
+                    jobUrl: entry.jobUrl,
+                    hasCvFile: !!message.cvFileBase64,
+                    profileFields: Object.keys(profile || {}).length,
+                });
                 handleAutoApplyStart(
                     {
                         jobUrl: entry.jobUrl,
@@ -380,10 +406,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                         cvFileBase64: message.cvFileBase64,
                         cvFileName: message.cvFileName,
                     },
-                    sendResponse,
+                    reply,
                 );
             } catch (e) {
-                sendResponse({ success: false, error: e.message });
+                console.error(`${MA} ✖ handler exception:`, e);
+                reply({ success: false, error: e.message });
             }
         })();
         return true;
