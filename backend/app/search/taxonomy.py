@@ -60,7 +60,12 @@ ROLE_FAMILIES = (
 # Used at query time to expand a CV's target families to adjacent ones with a
 # score multiplier. Small graph on purpose — embeddings handle finer nuance.
 ROLE_ADJACENCY: dict[str, dict[str, float]] = {
-    "Product":            {"General & Management": 0.85, "Data & AI": 0.65, "Marketing": 0.60, "Engineering": 0.50},
+    # G&M kept at 0.60 (was 0.85): it's a heterogeneous catch-all (PM/PMO is
+    # product-adjacent, but so are strategy/director/consultant, which are not).
+    # At 0.85 it outranked the cleaner Data&AI/Marketing pivots inside the
+    # adjacent tier; 0.60 lines it up with them. Ordering across tiers is handled
+    # by is_primary in rank_jobs + ranker.rerank, not by this weight.
+    "Product":            {"General & Management": 0.60, "Data & AI": 0.65, "Marketing": 0.60, "Engineering": 0.50},
     "Engineering":        {"Data & AI": 0.75, "Product": 0.50},
     "Data & AI":          {"Engineering": 0.75, "Product": 0.65, "Finance & Accounting": 0.60},
     "Marketing":          {"Sales & BD": 0.75, "Product": 0.60, "Design": 0.55, "Customer Service": 0.40},
