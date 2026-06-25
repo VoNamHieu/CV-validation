@@ -1,49 +1,91 @@
 'use client';
 
 // Mode 1 — when the extension tailors the CV for a job page, the background
-// pushes the result here. This banner surfaces it on the web app: shows the
-// match score + what changed, and lets the user kick off auto-apply. The apply
-// call carries ONLY the opaque source_ref — the extension resolves it back to
-// the real job URL locally, so the backend never learns the URL.
+// pushes the result here. On arrival we auto-open the tailored CV in the full
+// editor (StepEditCv) so the user lands straight on the editable/downloadable
+// CV, and surface a small confirmation toast that shows the match score +
+// what changed and offers one-click auto-apply. The apply call carries ONLY
+// the opaque source_ref — the extension resolves it back to the real job URL
+// locally, so the backend never learns the URL.
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { onMode1Result, triggerMode1Apply, type Mode1Result } from '@/lib/extension-sync';
 import { buildCvPdfCache } from '@/lib/cv-pdf-cache';
 import { useAppStore, type JDData, type MatchResult } from '@/store/useAppStore';
 import type { CvImprovement } from '@/lib/cv-improvements';
 
+const hostnameOf = (u: string) => { try { return new URL(u).hostname; } catch { return ''; } };
+
 export default function Mode1ResultBanner() {
     const [result, setResult] = useState<Mode1Result | null>(null);
     const [applying, setApplying] = useState(false);
     const [status, setStatus] = useState('');
-    const { addJdEntry, setSelectedJdId, setStep, setView } = useAppStore();
+    const { addJdEntry, addJobRecord, setSelectedJdId, setStep, setView } = useAppStore();
 
-    useEffect(() => onMode1Result(setResult), []);
-
-    if (!result) return null;
-
-    // Drop the tailored result into the editor (StepEditCv) so the user can
-    // review/edit/download it — the same view the featured flow uses, instead
-    // of only this summary banner.
-    const viewInEditor = () => {
-        const id = `mode1-${Date.now()}`;
-        const jdTitle = (result.jd as { title?: string } | undefined)?.title;
-        addJdEntry({
-            id,
-            source: 'mode1-tailor',
-            label: jdTitle || 'CV đã tailor (job page)',
-            status: 'done',
-            jdData: (result.jd as unknown as JDData) || undefined,
-            matchResult: result.match as unknown as MatchResult,
-            optimizedCv: result.improved_cv,
-            optimizedCvImprovements: result.improvements as CvImprovement[],
-            jobTitle: jdTitle || undefined,
-        });
+    // Drop the tailored result into the editor (StepEditCv) — the same view the
+    // featured flow uses (template preview, improvements, edit, download) — AND
+    // save the job to history like a normal one. Both are keyed by source_ref so
+    // re-firing (StrictMode, a duplicate push, or a later "Xem CV" click) is
+    // idempotent and never appends a duplicate.
+    const openInEditor = useCallback((r: Mode1Result) => {
+        const id = `mode1-${r.source_ref || Date.now()}`;
+        // The job title comes from the page (extension), since the extracted JD
+        // carries no title; fall back to the JD then a generic label.
+        const title = r.jobTitle || (r.jd as { title?: string } | undefined)?.title || '';
+        const overall = (r.match as { overall_score?: number } | undefined)?.overall_score ?? 0;
+        const store = useAppStore.getState();
+        if (!store.jdEntries.some(e => e.id === id)) {
+            addJdEntry({
+                id,
+                source: 'mode1-tailor',
+                applyUrl: r.jobUrl || undefined,
+                label: title || 'CV đã tailor (job page)',
+                status: 'done',
+                jdData: (r.jd as unknown as JDData) || undefined,
+                matchResult: r.match as unknown as MatchResult,
+                optimizedCv: r.improved_cv,
+                optimizedCvImprovements: r.improvements as CvImprovement[],
+                jobTitle: title || undefined,
+            });
+        }
+        // Save to history (client-side localStorage only — the real URL never
+        // reaches the server) so a tailored job shows up under saved jobs.
+        const recId = `mode1-job-${r.source_ref || id}`;
+        if ((r.jobUrl || title) && !store.jobHistory.some(j => j.id === recId)) {
+            addJobRecord({
+                id: recId,
+                jobTitle: title || 'Tailored job',
+                company: '',
+                jobUrl: r.jobUrl || '',
+                siteName: hostnameOf(r.jobUrl || ''),
+                overallScore: overall,
+                timestamp: Date.now(),
+                jdData: (r.jd as unknown as JDData) || undefined,
+                matchResult: r.match as unknown as MatchResult,
+                optimizedCv: r.improved_cv,
+                status: 'saved',
+            });
+        }
         setSelectedJdId(id);
         setView('apply');
         setStep(3);
-        setResult(null);
-    };
+    }, [addJdEntry, addJobRecord, setSelectedJdId, setView, setStep]);
+
+    // When a tailored CV arrives from the extension, go straight to the editor
+    // instead of waiting on a manual click — the user tailored on a job board
+    // and expects to land on the editable, downloadable CV. The banner is still
+    // shown as a small confirmation toast (with one-click auto-apply); the user
+    // is already in the editor behind it.
+    useEffect(() => {
+        const unsub = onMode1Result((r) => { setResult(r); openInEditor(r); });
+        // Signal the extension that a consumer is live. If tailoring happened
+        // while no app tab was open, the extension opened THIS tab and stashed
+        // the result; the content script now replays it to us in response.
+        window.postMessage({ type: 'JOBFIT_WEBAPP_READY' }, '*');
+        return unsub;
+    }, [openInEditor]);
+
+    if (!result) return null;
 
     const score = typeof result.match?.overall_score === 'number'
         ? (result.match.overall_score as number) : null;
@@ -90,30 +132,19 @@ export default function Mode1ResultBanner() {
             <div style={{ color: '#c7d2fe', marginBottom: 10 }}>
                 {name}{score != null ? ` · độ phù hợp ${score}/100` : ''}{nChanges ? ` · ${nChanges} chỉnh sửa` : ''}
             </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-                <button
-                    onClick={viewInEditor}
-                    disabled={applying}
-                    style={{
-                        flex: 1, padding: '10px 14px', borderRadius: 10,
-                        border: '1px solid rgba(165,180,252,0.5)', cursor: 'pointer', fontWeight: 700,
-                        background: 'rgba(99,102,241,0.15)', color: '#e0e7ff',
-                    }}
-                >
-                    📄 Xem CV
-                </button>
-                <button
-                    onClick={apply}
-                    disabled={applying}
-                    style={{
-                        flex: 1, padding: '10px 14px', borderRadius: 10, border: 'none',
-                        cursor: applying ? 'default' : 'pointer', fontWeight: 700,
-                        background: applying ? '#4338ca' : 'linear-gradient(135deg,#8b5cf6,#6366f1)', color: '#fff',
-                    }}
-                >
-                    {applying ? '⏳…' : '🚀 Ứng tuyển'}
-                </button>
-            </div>
+            {/* Viewing is automatic now (the editor is already open behind this
+                toast), so the banner just confirms + offers one-click apply. */}
+            <button
+                onClick={apply}
+                disabled={applying}
+                style={{
+                    width: '100%', padding: '10px 14px', borderRadius: 10, border: 'none',
+                    cursor: applying ? 'default' : 'pointer', fontWeight: 700,
+                    background: applying ? '#4338ca' : 'linear-gradient(135deg,#8b5cf6,#6366f1)', color: '#fff',
+                }}
+            >
+                {applying ? '⏳…' : '🚀 Ứng tuyển'}
+            </button>
             {status && <div style={{ marginTop: 8, fontSize: 12, color: '#c7d2fe' }}>{status}</div>}
         </div>
     );

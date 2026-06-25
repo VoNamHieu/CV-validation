@@ -1835,6 +1835,7 @@ async function runMode1() {
             jdText,
             sourceRef,
             jobUrl: location.href,
+            jobTitle: (document.title || '').trim().slice(0, 200),
             options: { length: 'concise' },
         });
         const ms = Date.now() - t0;

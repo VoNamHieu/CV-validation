@@ -284,7 +284,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // ══════════════════════════════════════════════════════════════
     if (message.type === 'MODE1_TAILOR') {
         const M1 = '[JobFit Mode1/bg]';
-        const { cv, jdText, sourceRef, jobUrl, options } = message;
+        const { cv, jdText, sourceRef, jobUrl, jobTitle, options } = message;
         console.log(`${M1} received`, {
             hasCv: !!cv, jdChars: jdText?.length || 0, sourceRef,
             jobUrl, options,
@@ -335,7 +335,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                         console.log(`${M1} stored sourceRef→jobUrl map (local only)`);
                         // Push the tailored CV to the web-app tab(s) to render
                         // (pushToWebApp logs the JobFit-app tab count + warns if none open).
-                        pushToWebApp({ type: 'JOBFIT_MODE1_RESULT', ...result });
+                        // jobUrl + jobTitle ride along so the web app can save the
+                        // job to history (client-side only — still never sent to
+                        // the server; source_ref stays the apply handle).
+                        pushToWebApp({ type: 'JOBFIT_MODE1_RESULT', ...result, jobUrl, jobTitle });
                         sendResponse({ success: true, data: result });
                         return;
                     } catch (e) {
@@ -627,20 +630,61 @@ function broadcastProgress() {
     });
 }
 
+// When we open a JobFit-app tab for a cold Mode-1 result, remember when — so a
+// burst of tailors (multiple jobs, no tab open) opens ONE tab, not one each.
+// Resets if the worker is recycled, by which point the tab exists and is taken
+// by the firstAppTab branch instead.
+let mode1ColdTabOpenAt = 0;
+
 // Push an arbitrary message to every tab; content-webapp.js forwards the
 // JobFit-app ones to the page. Used to deliver the Mode-1 tailored CV.
 function pushToWebApp(message) {
     chrome.tabs.query({}, (tabs) => {
         let appTabs = 0;
+        let firstAppTab = null;
         for (const tab of tabs) {
             if (tab.id == null) continue;
-            if (/cv-validation\.vercel\.app|localhost:3000/.test(tab.url || '')) appTabs++;
+            if (/cv-validation\.vercel\.app|localhost:3000/.test(tab.url || '')) {
+                appTabs++;
+                if (firstAppTab == null) firstAppTab = tab;
+            }
             chrome.tabs.sendMessage(tab.id, message).catch(() => { });
         }
         if (message?.type === 'JOBFIT_MODE1_RESULT') {
             console.log(`[JobFit Mode1/bg] pushed ${message.type} → ${appTabs} JobFit-app tab(s) open`);
-            if (appTabs === 0) {
-                console.warn('[JobFit Mode1/bg] ⚠️ no JobFit AI tab open — the tailored CV has nowhere to render. Open/refresh the JobFit AI tab.');
+            if (firstAppTab) {
+                // The user tailored on a job board, so the JobFit-app tab is in
+                // the background. Bring it to the front so the auto-opened CV
+                // editor is actually visible. tabs.update selects the tab in its
+                // window; windows.update is needed when it's in another window.
+                chrome.tabs.update(firstAppTab.id, { active: true }).catch(() => { });
+                if (firstAppTab.windowId != null) {
+                    chrome.windows.update(firstAppTab.windowId, { focused: true }).catch(() => { });
+                }
+                console.log(`[JobFit Mode1/bg] focused JobFit-app tab ${firstAppTab.id} (win ${firstAppTab.windowId})`);
+            } else {
+                // No JobFit-app tab open. Stash the result and open ONE tab; the
+                // new tab claims it from storage via the JOBFIT_WEBAPP_READY
+                // handshake (MV3 workers are ephemeral and a fresh tab hasn't
+                // subscribed yet, so we can't just sendMessage). Tailoring several
+                // jobs while no tab is open accumulates into a LIST so none is
+                // lost, and the in-memory guard keeps the whole burst to one tab
+                // (later results land in the now-open tab via the firstAppTab
+                // branch above).
+                chrome.storage.local.get('pendingMode1Results', (d) => {
+                    const list = (d.pendingMode1Results || []).concat({ message, at: Date.now() });
+                    chrome.storage.local.set({ pendingMode1Results: list.slice(-10) });
+                });
+                if (Date.now() - mode1ColdTabOpenAt > 15000) {
+                    mode1ColdTabOpenAt = Date.now();
+                    chrome.storage.local.get('jobfitAppUrl', (d) => {
+                        const appUrl = d.jobfitAppUrl || 'https://cv-validation.vercel.app';
+                        chrome.tabs.create({ url: appUrl, active: true });
+                        console.log(`[JobFit Mode1/bg] no app tab — stashed tailored CV + opened ${appUrl}`);
+                    });
+                } else {
+                    console.log('[JobFit Mode1/bg] no app tab, but one is already opening — stashed for that tab');
+                }
             }
         }
     });

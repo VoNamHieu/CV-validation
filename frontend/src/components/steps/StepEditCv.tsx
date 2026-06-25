@@ -103,6 +103,21 @@ export default function StepEditCv() {
         const i = sortedEntries.findIndex(e => e.id === selectedJdId);
         return i >= 0 ? i : 0;
     });
+    // The initializer above only runs on mount. When the editor is ALREADY
+    // mounted (e.g. the extension's Mode-1 tailor pushes a new CV and navigates
+    // here), selectedJdId changes but selectedIdx wouldn't follow — leaving the
+    // user on the wrong tab. Re-point ONLY when selectedJdId changes to a newly
+    // resolvable entry; never on a plain sortedEntries change, so manual tab
+    // clicks (which move selectedIdx, not selectedJdId) are preserved.
+    const lastSyncedJdId = useRef(selectedJdId);
+    useEffect(() => {
+        if (!selectedJdId || selectedJdId === lastSyncedJdId.current) return;
+        const i = sortedEntries.findIndex(e => e.id === selectedJdId);
+        if (i >= 0) {
+            lastSyncedJdId.current = selectedJdId;
+            setSelectedIdx(i);
+        }
+    }, [selectedJdId, sortedEntries]);
     const [autoApplyStatus, setAutoApplyStatus] = useState<AutoApplyStatus>('idle');
     const [autoApplyMessage, setAutoApplyMessage] = useState('');
 
@@ -596,7 +611,7 @@ export default function StepEditCv() {
                         Optimizing your CVs…
                     </h3>
                     <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: 24, lineHeight: 1.6 }}>
-                        Jobs are matched — we're tailoring a CV for each one. They'll appear here as they finish.
+                        Jobs are matched — we&apos;re tailoring a CV for each one. They&apos;ll appear here as they finish.
                     </p>
                 </div>
             );

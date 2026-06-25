@@ -122,6 +122,28 @@
             }, 'JOBFIT_SYNC_CV_DATA_RESPONSE');
         }
 
+        // ─── Mode 1: web app is ready → deliver any tailored CV the background
+        // stashed while no app tab was open (cold-open after tailoring on a job
+        // board). Posted by the page once its onMode1Result listener is live, so
+        // delivery can't race ahead of the consumer. ───
+        if (event.data?.type === 'JOBFIT_WEBAPP_READY') {
+            try {
+                chrome.storage.local.get('pendingMode1Results', (d) => {
+                    const list = d.pendingMode1Results || [];
+                    if (!list.length) return;
+                    // Clear first (single delivery), then forward each that's still
+                    // fresh — stale leftovers from a crashed session are dropped.
+                    chrome.storage.local.remove('pendingMode1Results');
+                    const now = Date.now();
+                    for (const p of list) {
+                        if (p && p.message && p.at && now - p.at < 5 * 60 * 1000) {
+                            window.postMessage(p.message, '*');
+                        }
+                    }
+                });
+            } catch { /* extension context invalidated — nothing to deliver */ }
+        }
+
         // ─── Mode 1: apply by source_ref (extension resolves → job URL locally) ───
         if (event.data?.type === 'JOBFIT_MODE1_APPLY') {
             relay({

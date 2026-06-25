@@ -98,6 +98,8 @@ export interface Mode1Result {
     improvements: unknown[];
     match: Record<string, unknown>;
     jd?: Record<string, unknown>;
+    jobUrl?: string;     // real job URL — client-side only, for saving to history
+    jobTitle?: string;   // job page title — for the saved-job + editor label
 }
 
 /**
@@ -114,6 +116,9 @@ export function onMode1Result(callback: (result: Mode1Result) => void): () => vo
             improved_cv: event.data.improved_cv,
             improvements: event.data.improvements ?? [],
             match: event.data.match ?? {},
+            jd: event.data.jd,   // extracted JD — gives the editor a real title + re-optimize context
+            jobUrl: event.data.jobUrl,
+            jobTitle: event.data.jobTitle,
         });
     };
     window.addEventListener("message", handler);
