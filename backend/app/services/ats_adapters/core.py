@@ -596,8 +596,10 @@ def _oracle_hcm(career_url: str) -> list[dict]:
 #   POST api.lifeattiktok.com/api/v1/public/supplier/search/job/posts
 #   header website-path: tiktok ; body {keyword, limit, offset}
 #   → {data:{job_post_list:[{id, code, title, city_info:{...parent.en_name}}]}}
-# keyword="Vietnam" already returns VN-only postings. Detail = careers.tiktok
-# .com/position/<id>.
+# keyword="Vietnam" already returns VN-only postings. Detail page is
+# lifeattiktok.com/search/<id> — NOT careers.tiktok.com/position/<id>, which
+# 302s to lifeattiktok.com/position/<id> and renders "page missing" (verified
+# headless: /search/<id> shows the job, /position/<id> is a dead route).
 # Both TikTok and ByteDance run the same job-search service (data.job_post_list
 # with a city_info parent chain), differing only in API host, the website-path
 # header, and the detail-page base.
@@ -606,7 +608,7 @@ _BD_FAMILY = {
         "hosts": ("lifeattiktok.com", "www.lifeattiktok.com", "careers.tiktok.com"),
         "api": "https://api.lifeattiktok.com/api/v1/public/supplier/search/job/posts",
         "website_path": "tiktok",
-        "detail": "https://careers.tiktok.com/position/{id}",
+        "detail": "https://lifeattiktok.com/search/{id}",
     },
     "bytedance": {
         "hosts": ("joinbytedance.com", "www.joinbytedance.com", "jobs.bytedance.com"),
