@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 
 _NS = "emb:v1"
 _TTL = 7 * 24 * 3600
+# Hard cap on how many jobs we embed+rerank in one query (cost/latency bound).
+_MAX_RERANK = 250
 
 
 def _h(s: str) -> str:
@@ -31,11 +33,22 @@ async def _get_many(keys: list[str]) -> dict[str, list[float]]:
 
 
 async def rerank_bucket(jobs: list[dict], query_text: str, top: int = 60) -> list[dict]:
-    """Embed (cached) the top `top` facet matches + the query, then rerank.
-    Returns the full list with the bucket reordered ahead of the tail."""
+    """Embed (cached) a bucket of facet matches + the query, then rerank.
+    Returns the full list with the bucket reordered ahead of the tail.
+
+    The bucket must cover the whole PRIMARY tier, not a fixed `top`: within a
+    facet-score tie (e.g. 193 Operations jobs all at 1.0) the first `top` are in
+    arbitrary order, so a fixed cutoff can drop the genuinely-relevant jobs (an
+    import/export role among generic Ops) BEFORE the cosine tie-breaker runs.
+    Capped at _MAX_RERANK for cost; we log if a tier is bigger than that."""
     if not jobs or not query_text:
         return jobs
-    bucket, tail = jobs[:top], jobs[top:]
+    n_primary = sum(1 for j in jobs if (j.get("_facet") or {}).get("is_primary"))
+    eff_top = min(max(top, n_primary), _MAX_RERANK)
+    if n_primary > _MAX_RERANK:
+        logger.info(f"[semantic] primary tier {n_primary} > cap {_MAX_RERANK} — "
+                    f"reranking first {_MAX_RERANK}, rest stay in facet order")
+    bucket, tail = jobs[:eff_top], jobs[eff_top:]
 
     # Title + JD snippet make the vector discriminative; many ATS adapters
     # populate `description`, search-result-only jobs leave it blank (→ title-only).

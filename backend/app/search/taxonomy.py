@@ -153,7 +153,12 @@ _RULES: list[tuple[str, str]] = [
     # Customer Service (incl. Customer Success / Experience)
     ("Customer Service", r"customer (service|support|success|experience)|cham soc khach hang|\bcskh\b|call center|contact center|dich vu khach hang|tong dai|support agent|customer success"),
     # Operations / supply chain / commerce ops
-    ("Operations", r"operation|van hanh|supply chain|chuoi cung ung|logistic|warehouse|kho|fulfil|category|seller|merchandis|procure|mua hang|thu mua|planning|planner|inventory|dieu phoi|giao nhan|vendor|optimization"),
+    # Operations incl. supply chain + import/export / customs / freight. XNK and
+    # hải quan had NO rule before → they fell to the General & Management catch-all
+    # (so "Chuyên viên Xuất nhập khẩu" mis-matched strategy/consultant roles).
+    # Regulatory-customs ("Customs Regulatory") still resolves to Legal/Risk first
+    # (checked earlier); "Export Sales"/"Kinh doanh XNK" still resolve to Sales.
+    ("Operations", r"operation|van hanh|supply chain|chuoi cung ung|logistic|warehouse|kho|fulfil|category|seller|merchandis|procure|mua hang|thu mua|planning|planner|inventory|dieu phoi|giao nhan|vendor|optimization|xuat nhap khau|\bxnk\b|hai quan|customs|\bimport\b|\bexport\b|freight|forwarding"),
     # General & management (catch-all-ish, check late)
     ("General & Management", r"management trainee|\bmt\b program|strategy|chien luoc|consultant|tu van|general manager|\bgm\b|director|head of|truong phong|truong bo phan|project manager|program manager|\bpmo\b|quan ly du an|giam doc|pho phong|chief|\bceo\b|\bcoo\b|\bcfo\b|\bcto\b"),
 ]

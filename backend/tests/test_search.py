@@ -74,6 +74,21 @@ def test_build_job_doc_includes_skills():
     assert "Skills: SQL, Roadmapping" in doc
 
 
+# ─────────────────────────── taxonomy: import/export ───────────────────
+
+def test_import_export_classifies_operations_not_catchall():
+    # "Xuất nhập khẩu" / customs had no rule → fell to the General & Management
+    # catch-all, so an XNK candidate mis-matched strategy/consultant roles. They
+    # must resolve to Operations; strategy titles must stay G&M.
+    from app.search.taxonomy import classify_title
+    assert classify_title("Chuyên viên Xuất nhập khẩu")[0] == "Operations"
+    assert classify_title("Nhân viên Thủ tục Hải quan")[0] == "Operations"
+    assert classify_title("Customs Clearance Specialist")[0] == "Operations"
+    assert classify_title("Chuyên viên Hợp tác chiến lược")[0] == "General & Management"
+    # "Export Sales" is a sales role — Sales is checked before Operations.
+    assert classify_title("Export Sales Executive")[0] == "Sales & BD"
+
+
 # ─────────────────────────── facet.score_job ───────────────────────────
 
 def test_score_job_soft_floors_unreachable_family():
