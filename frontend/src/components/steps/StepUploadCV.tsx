@@ -4,18 +4,19 @@ import { useCallback, useRef, useState } from 'react';
 import {
     UploadSimple, FileText, X, SpinnerGap, Brain,
     CheckCircle, Sparkle, ArrowRight, WarningCircle, Lightning,
-    Target, MapPin,
+    Target, MapPin, Stack,
 } from '@phosphor-icons/react';
 import { useAppStore } from '@/store/useAppStore';
 import { parsePdfWithAI } from '@/lib/api';
 import { cvToExtensionProfile } from '@/lib/extension-profile';
 import { syncProfileToExtension, syncCvDataToExtension } from '@/lib/extension-sync';
-import { CITY_OPTIONS } from '@/lib/job-targeting';
+import { CITY_OPTIONS, SENIORITY_OPTIONS, canonSeniority } from '@/lib/job-targeting';
 
 export default function StepUploadCV() {
     const {
         setCvRawText, setCvData, setStep, cvFileName, setFullyAutoMode,
         targetJobTitle, setTargetJobTitle, targetLocation, setTargetLocation,
+        targetLevel, setTargetLevel,
     } = useAppStore();
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [dragOver, setDragOver] = useState(false);
@@ -49,6 +50,10 @@ export default function StepUploadCV() {
                 || structured.employment?.current_title?.trim()
                 || ''
             );
+            // Pre-select the seniority chip from the CV's inferred level ('' if
+            // it doesn't map — the user can pick, and the backend infers from the
+            // CV level anyway when none is chosen).
+            setTargetLevel(canonSeniority(structured.employment?.current_level || ''));
 
             // Push extracted profile to the extension immediately so the popup
             // is filled the moment the CV is uploaded — without waiting for
@@ -71,7 +76,7 @@ export default function StepUploadCV() {
             setProcessing(false);
             setProcessingFile('');
         }
-    }, [setCvRawText, setCvData, setTargetJobTitle]);
+    }, [setCvRawText, setCvData, setTargetJobTitle, setTargetLevel]);
 
     const onDrop = useCallback((e: React.DragEvent) => {
         e.preventDefault();
@@ -309,6 +314,45 @@ export default function StepUploadCV() {
                             style={{ paddingLeft: 42, height: 48, fontSize: '0.92rem', width: '100%', borderRadius: 'var(--radius-lg)' }}
                         />
                     </div>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: -12, marginBottom: 20 }}>
+                        Pre-filled from your CV — you can change it. We search this role and closely related ones.
+                    </p>
+
+                    <label style={{
+                        display: 'flex', alignItems: 'center', gap: 6,
+                        fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-muted)',
+                        textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10,
+                    }}>
+                        <Stack size={14} weight="duotone" style={{ color: 'var(--accent-purple)' }} />
+                        Seniority <span style={{ textTransform: 'none', fontWeight: 400, letterSpacing: 0 }}>· optional</span>
+                    </label>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+                        {SENIORITY_OPTIONS.map((s) => {
+                            const active = targetLevel === s.key;
+                            return (
+                                <button
+                                    key={s.key}
+                                    type="button"
+                                    onClick={() => setTargetLevel(active ? '' : s.key)}
+                                    style={{
+                                        padding: '8px 16px', borderRadius: 20, cursor: 'pointer',
+                                        fontSize: '0.83rem', fontWeight: active ? 600 : 400,
+                                        border: `1px solid ${active ? 'var(--accent-purple)' : 'var(--border-default)'}`,
+                                        background: active ? 'rgba(139,92,246,0.12)' : 'var(--bg-secondary)',
+                                        color: active ? 'var(--accent-purple)' : 'var(--text-secondary)',
+                                        transition: 'all 0.18s ease',
+                                    }}
+                                >
+                                    {s.label}
+                                </button>
+                            );
+                        })}
+                    </div>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 20 }}>
+                        {targetLevel
+                            ? 'Roles far from this level are ranked lower.'
+                            : 'No level selected — we infer it from your CV.'}
+                    </p>
 
                     <label style={{
                         display: 'flex', alignItems: 'center', gap: 6,

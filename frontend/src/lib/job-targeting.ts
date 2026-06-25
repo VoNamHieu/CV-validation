@@ -23,6 +23,33 @@ export function cityLabel(key: string): string {
     return CITY_OPTIONS.find((c) => c.key === key)?.label || '';
 }
 
+// ── Seniority preference ──────────────────────────────────────────────────
+// `key` is the canonical level the backend's facet engine understands (it
+// demotes jobs whose level doesn't fit). The backend re-canonicalizes anything
+// we send (canon_level), so `match` here is only to PRE-SELECT a chip from the
+// CV's loose `current_level` — it doesn't need to be authoritative.
+export interface SeniorityOption {
+    key: string;
+    label: string;
+    match: RegExp;
+}
+
+// Order = display order of the chips on the upload step (low → high).
+export const SENIORITY_OPTIONS: SeniorityOption[] = [
+    { key: 'Intern/Fresher', label: 'Intern / Fresher', match: /intern|fresher|thực tập|thuc tap|sinh viên|sinh vien/i },
+    { key: 'Junior', label: 'Junior', match: /junior|\bjr\b|entry|mới ra trường|moi ra truong|tập sự|tap su/i },
+    { key: 'Mid', label: 'Mid', match: /\bmid\b|middle|intermediate|trung cấp|trung cap/i },
+    { key: 'Senior', label: 'Senior', match: /senior|\bsr\b|cao cấp|cao cap/i },
+    { key: 'Lead/Manager', label: 'Lead / Manager', match: /lead|principal|manager|\bstaff\b|quản lý|quan ly|trưởng nhóm|truong nhom/i },
+    { key: 'Director/Head+', label: 'Director / Head+', match: /director|head|chief|\bc[efimot]o\b|\bvp\b|giám đốc|giam doc|trưởng phòng|truong phong/i },
+];
+
+// Best-effort map a CV's loose level string to a canonical chip key (or '').
+export function canonSeniority(level: string): string {
+    if (!level) return '';
+    return SENIORITY_OPTIONS.find((o) => o.match.test(level))?.key || '';
+}
+
 // Does a job's free-text location belong to the chosen city? Empty cityKey
 // (freestyle) always matches.
 export function matchesCity(location: string, cityKey: string): boolean {

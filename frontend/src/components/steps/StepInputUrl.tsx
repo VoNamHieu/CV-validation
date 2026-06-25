@@ -113,7 +113,7 @@ export default function StepInputUrl() {
         setStep, cvData, setJdData, setMatchResult,
         clearJdEntries, addJdEntry, updateJdEntry, setOptimizedCv, addJobRecord,
         setView, jobHistory, fullyAutoMode, setFullyAutoMode, setSelectedJdId,
-        targetJobTitle, targetLocation,
+        targetJobTitle, targetLocation, targetLevel,
     } = useAppStore();
 
     const [url, setUrl] = useState('');
@@ -289,7 +289,9 @@ export default function StepInputUrl() {
                 const search = await searchFeaturedJobsWarm(
                     {
                         target_roles: targetTitle ? [targetTitle] : [],
-                        level: cvData.employment?.current_level || '',
+                        // User's seniority pick overrides the CV-inferred level;
+                        // empty → backend infers from the CV level.
+                        level: targetLevel || cvData.employment?.current_level || '',
                         // Pull a deep ranked pool so the role-adjacent backfill has
                         // plenty of same-family spares when postings turn out dead.
                         limit: 200,

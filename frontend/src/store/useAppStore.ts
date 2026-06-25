@@ -100,8 +100,13 @@ interface AppState {
   // can override it. targetLocation is a CITY_OPTIONS key ('' = freestyle).
   targetJobTitle: string;
   targetLocation: string;
+  // User's seniority preference ('' = no preference / infer from CV). A
+  // canonical level string the facet engine understands; demotes ill-fitting
+  // levels at search time.
+  targetLevel: string;
   setTargetJobTitle: (title: string) => void;
   setTargetLocation: (cityKey: string) => void;
+  setTargetLevel: (level: string) => void;
 
   // Single JD (legacy, still used for text/pdf input)
   jdRawText: string;
@@ -161,6 +166,7 @@ const initialState = {
   cvData: null,
   targetJobTitle: '',
   targetLocation: '',
+  targetLevel: '',
   jdRawText: '',
   jdData: null,
   matchResult: null,
@@ -187,6 +193,7 @@ export const useAppStore = create<AppState>()(
 
       setTargetJobTitle: (title) => set({ targetJobTitle: title }),
       setTargetLocation: (cityKey) => set({ targetLocation: cityKey }),
+      setTargetLevel: (level) => set({ targetLevel: level }),
 
       setJdRawText: (text) => set({ jdRawText: text }),
       setJdData: (data) => set({ jdData: data }),
