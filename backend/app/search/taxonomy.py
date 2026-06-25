@@ -94,12 +94,14 @@ _RULES: list[tuple[str, str]] = [
     # Explicit Product roles — checked BEFORE Data&AI so "AI Product Owner" /
     # "Data Product Manager" resolve to the role (Product), not the specialization.
     ("Product", r"product (owner|manager|management|lead|director|head|supervisor|executive|associate|specialist|develop)|head of product|quan ly san pham"),
-    # Data & AI
-    ("Data & AI", r"data scien|data engineer|machine learn|\bml\b|\bai\b|data analyst|business intelligence|analytics|data steward|big data|\bmis\b"),
+    # Data & AI  (business analyst lives here, NOT Product — it's analytics/
+    # requirements work, adjacent to Product but a distinct, lower tier)
+    ("Data & AI", r"data scien|data engineer|machine learn|\bml\b|\bai\b|data analyst|business analyst|business intelligence|analytics|data steward|big data|\bmis\b"),
     # Engineering / software
     ("Engineering", r"software|developer|\bdev\b|engineer|lap trinh|backend|frontend|full.?stack|devops|\bsre\b|\bqa\b|tester|mobile|android|ios|embedded|firmware|system|infra|cloud|\bit\b.*(engineer|developer|support|operation)|ky su(?!.*ban)"),
-    # Product  (drop bare \bba\b — false-matches VN "Bà"/"Ba"; keep "business analyst")
-    ("Product", r"product manage|product owner|product lead|product assistant|product specialist|business analyst|product analyst|quan ly san pham|tech product"),
+    # Product  (business analyst moved to Data & AI; bare \bba\b dropped — it
+    # false-matches VN "Bà"/"Ba")
+    ("Product", r"product manage|product owner|product lead|product assistant|product specialist|product analyst|quan ly san pham|tech product"),
     # Design
     ("Design", r"designer|\bux\b|\bui\b|graphic|creative|art director|thiet ke|motion|illustrat|copywriter|copy writer"),
     # Marketing  (drop bare \bpr\b — collides with VN; keep full comms terms)

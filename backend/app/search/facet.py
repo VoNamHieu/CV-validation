@@ -43,20 +43,26 @@ _OUT_OF_DOMAIN = 0.6   # multiplier when job industry not in profile.domains
 
 
 def _seniority_mult(job_level: str | None, profile_level: str) -> float:
-    """Demote a job that sits BELOW the candidate's level (e.g. an intern role
-    for a mid/senior PM). At-or-above level is neutral here — over-reach is
-    filtered downstream (the FE experience-gap rule). Unknown on either side →
-    neutral, so an unclassifiable title is never penalised for it."""
+    """Demote a job whose level doesn't fit the candidate — BOTH directions.
+    Below-level (an intern role for a mid PM) is a step down; above-level (a
+    Head/Director role for a mid) is a stretch the candidate likely can't land.
+    A one-level stretch up is only mildly demoted (worth surfacing); two+ levels
+    either way is demoted hard. Unknown on either side → neutral, so an
+    unclassifiable title is never penalised."""
     ji = level_index(job_level or "")
     pi = level_index(profile_level or "")
     if ji is None or pi is None:
         return 1.0
-    gap = pi - ji                       # > 0 ⇒ job is below the candidate
-    if gap <= 0:
+    gap = pi - ji                       # > 0 ⇒ below candidate; < 0 ⇒ above
+    if gap == 0:
         return 1.0
     if gap == 1:
-        return 0.8                      # one level below — mild demotion
-    return 0.4                          # two+ levels below — strong demotion
+        return 0.8                      # one level below — mild
+    if gap >= 2:
+        return 0.4                      # well below — strong
+    if gap == -1:
+        return 0.75                     # one level above — a stretch, still show
+    return 0.35                         # two+ levels above (Head/Director) — strong
 
 
 def score_job(job: dict, profile: SearchProfile, role_weights: dict[str, float],
@@ -92,9 +98,15 @@ def score_job(job: dict, profile: SearchProfile, role_weights: dict[str, float],
     job_level = classify_seniority(title)
     sen_mult = _seniority_mult(job_level, profile.level)
 
+    # Primary = the candidate's OWN role family (e.g. Product). Adjacent families
+    # (Analyst/BA, Consultant…) are reachable but must rank as a separate, lower
+    # tier — we only widen to them after the primary pool is exhausted, not mix
+    # an in-domain BA above an out-of-domain PM.
+    is_primary = fam in profile.role_families
+
     return {
         "score": round(role_w * ind_mult * conf_mult * sen_mult, 3),
-        "role_family": fam, "industry": ind,
+        "role_family": fam, "industry": ind, "is_primary": is_primary,
         "role_w": role_w, "in_domain": in_domain,
         "confidence": conf, "seniority": job_level, "seniority_mult": sen_mult,
     }
@@ -109,5 +121,8 @@ def rank_jobs(jobs: list[dict], profile: SearchProfile) -> list[dict]:
         s = score_job(j, profile, rw, industry=j.get("industry"))
         if s:
             scored.append({**j, "_facet": s})
-    scored.sort(key=lambda x: x["_facet"]["score"], reverse=True)
+    # Tier by primary role-family first (PM/PO before any BA/Analyst/Consultant),
+    # then by score within each tier — "exact role first, widen only after".
+    scored.sort(key=lambda x: (x["_facet"].get("is_primary", False),
+                               x["_facet"]["score"]), reverse=True)
     return scored
