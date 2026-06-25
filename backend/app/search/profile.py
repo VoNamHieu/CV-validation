@@ -99,8 +99,11 @@ _SYS = (
     '{"target_roles": [..], "domains": [..], "seniority": "..", '
     '"desired_locations": [..], "salary_floor": <int VND or 0>}\n'
     "Rules:\n"
-    "- target_roles: 3–6 job titles the candidate fits, INCLUDING adjacent/pivot "
-    "roles (e.g. a PM also fits Business Analyst, Project Manager). Plain titles.\n"
+    "- target_roles: 1–3 job titles the candidate is ACTUALLY targeting — their "
+    "core role, plus a genuine pivot ONLY if the CV clearly signals one. Do NOT "
+    "pad with merely-adjacent roles (e.g. don't add Business Analyst for a PM) — "
+    "the search engine widens to adjacent families itself and ranks them below "
+    "the primary role. Plain titles.\n"
     f"- domains: 0–3 from EXACTLY this list (verbatim), else omit: {list(INDUSTRIES)}\n"
     f"- seniority: one of {list(_LEVELS)}\n"
     "- desired_locations: VN cities the CV implies/prefers, else [].\n"
