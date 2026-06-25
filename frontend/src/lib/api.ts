@@ -427,6 +427,9 @@ export interface FacetSearchJob {
 export interface FacetSearchRequest {
     cv_text?: string;
     target_roles?: string[];
+    // Candidate's PROVEN role titles (CV) — the fit CONSTRAINT, distinct from
+    // target_roles (the DIRECTION). Empty → fit is neutral.
+    cv_roles?: string[];
     domains?: string[];
     level?: string;
     desired_locations?: string[];

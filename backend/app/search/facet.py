@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 
 from app.search.taxonomy import (
     classify_title, adjacent_families, classify_seniority, level_index,
-    FULL_CONFIDENCE,
+    FULL_CONFIDENCE, SENIORITY_LEVELS,
 )
 from app.search.company_industry import classify_company
 
@@ -25,12 +25,16 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class SearchProfile:
-    role_families: list[str] = field(default_factory=list)  # primary first
+    role_families: list[str] = field(default_factory=list)  # primary first (DIRECTION)
     domains: list[str] = field(default_factory=list)        # preferred industries
     desired_locations: list[str] = field(default_factory=list)
     level: str = ""
     salary_floor: int = 0
     adjacency_threshold: float = 0.5
+    # The candidate's PROVEN role families (from the CV) — the CONSTRAINT axis.
+    # role_families is where they want to go; cv_families is what they can show.
+    # Empty → fit is neutral (fully backward-compatible).
+    cv_families: list[str] = field(default_factory=list)
 
     def expanded_roles(self) -> dict[str, float]:
         """All role families to retrieve, with weight (self=1.0, pivots decay)."""
@@ -51,19 +55,71 @@ _OUT_OF_DOMAIN = 0.6   # multiplier when job industry not in profile.domains
 # score ordering keep these last. Universal (graph-structure, not per-pair).
 _UNREACHABLE_FLOOR = 0.25
 
+# CV-as-constraint: a job whose family is far from the candidate's PROVEN
+# (CV) family is demoted to this floor, never zeroed — direction still steers,
+# the CV just shades feasibility.
+_FIT_FLOOR = 0.4
+# How many seniority levels a FULL fit mismatch (fit_mult→floor) discounts the
+# candidate by, when judging level fit in a pivot direction.
+_LEVEL_DISCOUNT_SPAN = 2
+
+
+def _fit_mult(job_fam: str, cv_families: list[str]) -> float:
+    """How transferable the candidate's proven CV family(s) are into `job_fam`,
+    via the SAME adjacency graph: same family → 1.0, adjacent → the edge weight,
+    far → `_FIT_FLOOR`. No CV families → 1.0 (neutral / backward-compatible).
+    Role-agnostic: the graph does the work, no role pair is named."""
+    if not cv_families:
+        return 1.0
+    best = 0.0
+    for cvf in cv_families:
+        best = max(best, adjacent_families(cvf, 0.0).get(job_fam, 0.0))
+    return max(best, _FIT_FLOOR)
+
+
+def _effective_level(profile_level: str, fit_mult: float) -> str:
+    """A candidate's CAREER seniority doesn't fully transfer into a role family
+    they haven't proven. For a pivot (fit_mult < 1.0) discount the level toward
+    entry in proportion to the gap, so entry roles in the new direction stop
+    being demoted and senior/head roles get demoted harder. Same family or no CV
+    (fit_mult == 1.0) → unchanged."""
+    pi = level_index(profile_level or "")
+    if pi is None or fit_mult >= 1.0:
+        return profile_level
+    # round-half-UP (not Python's banker's round, which would zero the discount
+    # at the exact 0.5 tie — i.e. fit_mult=0.75, a common edge weight — making a
+    # genuine pivot escape its level discount and the curve non-monotonic).
+    drop = int((1.0 - fit_mult) * _LEVEL_DISCOUNT_SPAN + 0.5)
+    eff = max(pi - drop, 0)   # floor at Intern; discount never RAISES the level
+    return SENIORITY_LEVELS[eff]
+
 
 def _seniority_mult(job_level: str | None, profile_level: str) -> float:
     """Demote a job whose level doesn't fit the candidate — BOTH directions.
     Below-level (an intern role for a mid PM) is a step down; above-level (a
     Head/Director role for a mid) is a stretch the candidate likely can't land.
     A one-level stretch up is only mildly demoted (worth surfacing); two+ levels
-    either way is demoted hard. Unknown on either side → neutral, so an
-    unclassifiable title is never penalised."""
-    ji = level_index(job_level or "")
+    either way is demoted hard. Unknown PROFILE level → neutral.
+
+    A job title with NO level word (bare "Product Manager", "Chuyên viên") is
+    assumed Mid (the modal IC level) so its level still participates — but since
+    that's a guess, it only fires on a CLEAR gap (>=2 levels); a 1-level
+    difference stays neutral so a wrong default can't flip a near-fit."""
     pi = level_index(profile_level or "")
-    if ji is None or pi is None:
+    if pi is None:
         return 1.0
+    ji = level_index(job_level or "")
+    defaulted = ji is None
+    if defaulted:
+        ji = level_index("Mid")
     gap = pi - ji                       # > 0 ⇒ below candidate; < 0 ⇒ above
+    if defaulted:
+        # Assumed level — act only on a clear mismatch, never on near-fits.
+        if gap >= 2:
+            return 0.4
+        if gap <= -2:
+            return 0.35
+        return 1.0
     if gap == 0:
         return 1.0
     if gap == 1:
@@ -110,8 +166,14 @@ def score_job(job: dict, profile: SearchProfile, role_weights: dict[str, float],
     # Fold the classification confidence so the @0.3 catch-all can't masquerade
     # as a full-weight family match (a confident rule match → 1.0, no change).
     conf_mult = min(1.0, conf / FULL_CONFIDENCE)
+
+    # CV-as-constraint: how transferable the candidate's proven family is into
+    # this job's family (1.0 when same / no CV given). Also discounts the level
+    # they're judged at, so a pivot's career seniority doesn't transfer wholesale.
+    fit_mult = _fit_mult(fam, profile.cv_families)
     job_level = classify_seniority(title)
-    sen_mult = _seniority_mult(job_level, profile.level)
+    eff_level = _effective_level(profile.level, fit_mult)
+    sen_mult = _seniority_mult(job_level, eff_level)
 
     # Primary = the candidate's OWN role family (e.g. Product). Adjacent families
     # (Analyst/BA, Consultant…) are reachable but must rank as a separate, lower
@@ -120,10 +182,11 @@ def score_job(job: dict, profile: SearchProfile, role_weights: dict[str, float],
     is_primary = fam in profile.role_families
 
     return {
-        "score": round(role_w * ind_mult * conf_mult * sen_mult, 3),
+        "score": round(role_w * ind_mult * conf_mult * sen_mult * fit_mult, 3),
         "role_family": fam, "industry": ind, "is_primary": is_primary,
         "role_w": role_w, "in_domain": in_domain, "reachable": reachable,
         "confidence": conf, "seniority": job_level, "seniority_mult": sen_mult,
+        "fit_mult": round(fit_mult, 2), "eff_level": eff_level,
     }
 
 
@@ -155,10 +218,10 @@ def rank_jobs(jobs: list[dict], profile: SearchProfile) -> list[dict]:
         for j in scored[:12]:
             f = j["_facet"]
             logger.info(
-                "[facet]   %.3f %s fam=%s conf=%.1f role_w=%.2f "
+                "[facet]   %.3f %s fam=%s conf=%.1f role_w=%.2f fit=%.2f "
                 "in_domain=%s sen=%s×%.2f | %s",
                 f["score"], "P" if f["is_primary"] else "·", f["role_family"],
-                f["confidence"], f["role_w"], f["in_domain"],
+                f["confidence"], f["role_w"], f.get("fit_mult", 1.0), f["in_domain"],
                 f.get("seniority"), f["seniority_mult"],
                 (j.get("title") or "")[:60],
             )

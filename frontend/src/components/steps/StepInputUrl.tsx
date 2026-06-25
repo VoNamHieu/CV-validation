@@ -113,7 +113,7 @@ export default function StepInputUrl() {
         setStep, cvData, setJdData, setMatchResult,
         clearJdEntries, addJdEntry, updateJdEntry, setOptimizedCv, addJobRecord,
         setView, jobHistory, fullyAutoMode, setFullyAutoMode, setSelectedJdId,
-        targetJobTitle, targetLocation, targetLevel,
+        targetJobTitle, targetLocation, targetLevel, setSearchPivotNote,
     } = useAppStore();
 
     const [url, setUrl] = useState('');
@@ -149,6 +149,7 @@ export default function StepInputUrl() {
         setError('');
         setOptimizedCv(null);
         setInferredTitle('');
+        setSearchPivotNote('');   // cleared; the featured path re-sets it post-search
         clearJdEntries();
         const runId = ++runRef.current;
 
@@ -289,6 +290,10 @@ export default function StepInputUrl() {
                 const search = await searchFeaturedJobsWarm(
                     {
                         target_roles: targetTitle ? [targetTitle] : [],
+                        // Proven role (CV) as the fit CONSTRAINT — distinct from
+                        // target_roles (direction). Lets the engine shade jobs by
+                        // transferability when the target differs from the CV.
+                        cv_roles: [cvData.employment?.current_title].filter(Boolean) as string[],
                         // User's seniority pick overrides the CV-inferred level;
                         // empty → backend infers from the CV level.
                         level: targetLevel || cvData.employment?.current_level || '',
@@ -309,6 +314,20 @@ export default function StepInputUrl() {
                     company: j.company, title: j.title,
                 })));
                 console.groupEnd();
+
+                // ── Honest pivot hint ──
+                // The backend returns both the target role family (direction) and
+                // the CV's proven family (constraint). Disjoint → a career pivot:
+                // tell the user the jobs are stretch, ranked by CV fit. Generic
+                // (family comparison), no per-role-pair logic.
+                const prof = search.profile as
+                    { role_families?: string[]; cv_families?: string[] } | undefined;
+                const tFam = prof?.role_families?.[0];
+                const cvFams = prof?.cv_families ?? [];
+                const pivot = !!tFam && cvFams.length > 0 && !cvFams.includes(tFam);
+                setSearchPivotNote(pivot
+                    ? `Đây là vai trò khác hồ sơ của bạn — chúng tôi tìm theo vai trò bạn muốn, rồi xếp hạng theo độ phù hợp với CV. Một số job có thể là cơ hội "với tới".`
+                    : '');
 
                 if (results.length === 0) {
                     const why = search.warming
@@ -820,6 +839,7 @@ export default function StepInputUrl() {
         setError('');
         setOptimizedCv(null);
         setInferredTitle('');
+        setSearchPivotNote('');   // cleared; the featured path re-sets it post-search
         clearJdEntries();
         const runId = ++runRef.current;
 

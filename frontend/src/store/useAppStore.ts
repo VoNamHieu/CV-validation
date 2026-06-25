@@ -107,6 +107,10 @@ interface AppState {
   setTargetJobTitle: (title: string) => void;
   setTargetLocation: (cityKey: string) => void;
   setTargetLevel: (level: string) => void;
+  // Honest pivot hint: set after a search when the target role's family differs
+  // from the CV's proven family ('' = not a pivot / not yet searched).
+  searchPivotNote: string;
+  setSearchPivotNote: (note: string) => void;
 
   // Single JD (legacy, still used for text/pdf input)
   jdRawText: string;
@@ -167,6 +171,7 @@ const initialState = {
   targetJobTitle: '',
   targetLocation: '',
   targetLevel: '',
+  searchPivotNote: '',
   jdRawText: '',
   jdData: null,
   matchResult: null,
@@ -194,6 +199,7 @@ export const useAppStore = create<AppState>()(
       setTargetJobTitle: (title) => set({ targetJobTitle: title }),
       setTargetLocation: (cityKey) => set({ targetLocation: cityKey }),
       setTargetLevel: (level) => set({ targetLevel: level }),
+      setSearchPivotNote: (note) => set({ searchPivotNote: note }),
 
       setJdRawText: (text) => set({ jdRawText: text }),
       setJdData: (data) => set({ jdData: data }),

@@ -315,7 +315,7 @@ export default function StepUploadCV() {
                         />
                     </div>
                     <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: -12, marginBottom: 20 }}>
-                        Pre-filled from your CV — you can change it. We search this role and closely related ones.
+                        Choose the role you want next — even if it differs from your CV. We search by this role, then use your CV to estimate fit.
                     </p>
 
                     <label style={{

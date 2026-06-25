@@ -81,12 +81,33 @@ ROLE_ADJACENCY: dict[str, dict[str, float]] = {
 }
 
 
+# A reverse edge (B→family inferred from family→B... actually the other way) is
+# weaker than the authored forward edge — transferring back into a family you
+# only pivoted out of is a bit harder. Decay keeps the asymmetry without making
+# the graph a one-way street.
+_REVERSE_DECAY = 0.8
+
+
 def adjacent_families(family: str, threshold: float = 0.5) -> dict[str, float]:
-    """{adjacent_family: weight} the candidate could pivot into (self = 1.0)."""
+    """{adjacent_family: weight} the candidate could pivot into (self = 1.0).
+
+    Symmetric-closure: if some family `src` lists `family` as a neighbour
+    (src→family) but the reverse is not authored, treat family→src as a decayed
+    edge. This fixes one-directional dead-ends generically (e.g. Design→Product
+    authored but not Product→Design) — graph-structure, not per-pair tuning."""
     out = {family: 1.0}
     for fam, w in ROLE_ADJACENCY.get(family, {}).items():
         if w >= threshold:
             out[fam] = w
+    for src, edges in ROLE_ADJACENCY.items():
+        if src == family:
+            continue
+        w = edges.get(family)
+        if w is None:
+            continue
+        rev = w * _REVERSE_DECAY
+        if rev >= threshold and rev > out.get(src, 0.0):
+            out[src] = rev
     return out
 
 

@@ -12,7 +12,10 @@ import pytest
 
 from app.search import ranker, semantic
 from app.search.embed import build_job_doc
-from app.search.facet import score_job, rank_jobs, SearchProfile, _UNREACHABLE_FLOOR
+from app.search.facet import (
+    score_job, rank_jobs, SearchProfile, _UNREACHABLE_FLOOR,
+    _fit_mult, _effective_level, _seniority_mult, _FIT_FLOOR,
+)
 from app.search.profile import build_profile
 
 
@@ -103,6 +106,41 @@ def test_score_job_in_domain_beats_out_of_domain():
     out_dom = score_job(job, prof, rw, industry="Retail")
     assert in_dom["in_domain"] is True and out_dom["in_domain"] is False
     assert in_dom["score"] > out_dom["score"]
+
+
+def test_fit_mult_neutral_same_and_floored_far():
+    assert _fit_mult("Product", []) == 1.0                  # no CV → neutral (back-compat)
+    assert _fit_mult("Product", ["Product"]) == 1.0         # same family → 1.0
+    assert _fit_mult("Manufacturing & Technician", ["Product"]) == _FIT_FLOOR  # far → floor, not 0
+
+
+def test_effective_level_discounts_pivot_never_raises():
+    assert _effective_level("Senior", 1.0) == "Senior"              # same family → unchanged
+    assert _effective_level("Senior", 0.4) == "Mid"                 # pivot → discounted down
+    # 0.75 is a real edge weight (Eng↔Data); round-half-UP → drop 1, not 0.
+    assert _effective_level("Senior", 0.75) == "Mid"
+    assert _effective_level("Intern/Fresher", 0.4) == "Intern/Fresher"  # never raised
+    assert _effective_level("", 0.4) == ""                          # no level → neutral
+
+
+def test_seniority_mid_default_only_on_clear_gap():
+    # A bare title (no level word) is assumed Mid, but only acts on a >=2 gap.
+    assert _seniority_mult(None, "Mid") == 1.0          # gap 0
+    assert _seniority_mult(None, "Senior") == 1.0       # gap 1 → neutral (near-fit guard)
+    assert _seniority_mult(None, "Director/Head+") == 0.4   # gap 3 → demote
+    assert _seniority_mult(None, "") == 1.0             # unknown profile → neutral
+
+
+def test_one_to_one_unaffected_by_fit():
+    # Same target & CV family, in-domain → fit 1.0, score identical to no-CV.
+    prof_no_cv = build_profile(["Product Manager"], domains=["Fintech & Payments"])
+    prof_cv = build_profile(["Product Manager"], domains=["Fintech & Payments"])
+    prof_cv.cv_families = ["Product"]
+    rw = prof_cv.expanded_roles()
+    job = {"title": "Product Manager"}
+    a = score_job(job, prof_no_cv, prof_no_cv.expanded_roles(), industry="Fintech & Payments")
+    b = score_job(job, prof_cv, rw, industry="Fintech & Payments")
+    assert a["score"] == b["score"] and b["fit_mult"] == 1.0
 
 
 def test_rank_jobs_sorts_by_facet_score_desc():

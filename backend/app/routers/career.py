@@ -24,7 +24,7 @@ from app.services.career_finder import (
 from app.services import company_cache
 from app.services import cache
 from app.services import capture_jobs
-from app.search.profile import build_profile, distill_from_cv
+from app.search.profile import build_profile, distill_from_cv, families_from_roles
 from app.search.facet import rank_jobs
 from app.search.company_industry import classify_company
 from app.search.semantic import rerank_bucket
@@ -388,6 +388,9 @@ class SearchRequest(BaseModel):
     or explicit fields; explicit fields override CV-derived ones."""
     cv_text: str | None = None
     target_roles: list[str] = Field(default_factory=list)
+    # The candidate's PROVEN role titles (CV current/past) — used as the fit
+    # CONSTRAINT, distinct from target_roles (the DIRECTION). Empty → neutral.
+    cv_roles: list[str] = Field(default_factory=list)
     domains: list[str] = Field(default_factory=list)
     level: str = ""
     desired_locations: list[str] = Field(default_factory=list)
@@ -423,6 +426,11 @@ async def search(req: SearchRequest):
         profile.desired_locations = req.desired_locations or profile.desired_locations
         profile.level = req.level or profile.level
         profile.salary_floor = req.salary_floor or profile.salary_floor
+
+    # CV-as-constraint: the candidate's PROVEN families shade each job's fit.
+    # Direction (role_families) stays the target; this rides alongside.
+    if req.cv_roles:
+        profile.cv_families = families_from_roles(req.cv_roles)
 
     # Reuse the featured cache (L1 → Redis); kick a refresh if cold.
     now = time.time()

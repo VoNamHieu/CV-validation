@@ -77,7 +77,7 @@ export default function StepEditCv() {
     const {
         cvData, jdEntries, setStep, setCvData, updateJdEntry,
         fullyAutoMode, setFullyAutoMode,
-        userAvatarBase64, setUserAvatar, selectedJdId,
+        userAvatarBase64, setUserAvatar, selectedJdId, searchPivotNote,
     } = useAppStore();
     const fullAutoFiredRef = useRef(false);
 
@@ -642,6 +642,17 @@ export default function StepEditCv() {
 
     return (
         <div className="animate-fade-in" style={{ maxWidth: 1440, margin: '0 auto', padding: '40px 20px' }}>
+
+            {/* ── Career-pivot hint (honest framing: direction vs fit) ── */}
+            {searchPivotNote && (
+                <div style={{
+                    marginBottom: 16, padding: '10px 14px', borderRadius: 10,
+                    border: '1px solid rgba(234,179,8,0.35)', background: 'rgba(234,179,8,0.10)',
+                    color: '#fde68a', fontSize: '0.82rem', lineHeight: 1.5,
+                }}>
+                    💡 {searchPivotNote}
+                </div>
+            )}
 
             {/* ── Header ── */}
             <div style={{

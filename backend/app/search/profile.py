@@ -74,16 +74,23 @@ def canon_domains(domains: list[str] | None) -> list[str]:
     return out
 
 
+def families_from_roles(roles: list[str]) -> list[str]:
+    """Distinct role families for a list of role-title strings, order preserved.
+    Shared by build_profile (direction) and the CV-fit constraint (cv_families)."""
+    fams: list[str] = []
+    for r in roles or []:
+        fam, _ = classify_title(r)
+        if fam not in fams:
+            fams.append(fam)
+    return fams
+
+
 def build_profile(target_roles: list[str], domains: list[str] | None = None,
                   level: str = "", desired_locations: list[str] | None = None,
                   salary_floor: int = 0) -> SearchProfile:
     """Deterministic: map role strings → role families (primary order preserved),
     keep only canonical domains."""
-    fams: list[str] = []
-    for r in target_roles or []:
-        fam, _ = classify_title(r)
-        if fam not in fams:
-            fams.append(fam)
+    fams = families_from_roles(target_roles)
     domains = canon_domains(domains)
     return SearchProfile(
         role_families=fams or ["General & Management"],
