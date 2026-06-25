@@ -9,15 +9,41 @@
 import { useEffect, useState } from 'react';
 import { onMode1Result, triggerMode1Apply, type Mode1Result } from '@/lib/extension-sync';
 import { buildCvPdfCache } from '@/lib/cv-pdf-cache';
+import { useAppStore, type JDData, type MatchResult } from '@/store/useAppStore';
+import type { CvImprovement } from '@/lib/cv-improvements';
 
 export default function Mode1ResultBanner() {
     const [result, setResult] = useState<Mode1Result | null>(null);
     const [applying, setApplying] = useState(false);
     const [status, setStatus] = useState('');
+    const { addJdEntry, setSelectedJdId, setStep, setView } = useAppStore();
 
     useEffect(() => onMode1Result(setResult), []);
 
     if (!result) return null;
+
+    // Drop the tailored result into the editor (StepEditCv) so the user can
+    // review/edit/download it — the same view the featured flow uses, instead
+    // of only this summary banner.
+    const viewInEditor = () => {
+        const id = `mode1-${Date.now()}`;
+        const jdTitle = (result.jd as { title?: string } | undefined)?.title;
+        addJdEntry({
+            id,
+            source: 'mode1-tailor',
+            label: jdTitle || 'CV đã tailor (job page)',
+            status: 'done',
+            jdData: (result.jd as unknown as JDData) || undefined,
+            matchResult: result.match as unknown as MatchResult,
+            optimizedCv: result.improved_cv,
+            optimizedCvImprovements: result.improvements as CvImprovement[],
+            jobTitle: jdTitle || undefined,
+        });
+        setSelectedJdId(id);
+        setView('apply');
+        setStep(3);
+        setResult(null);
+    };
 
     const score = typeof result.match?.overall_score === 'number'
         ? (result.match.overall_score as number) : null;
@@ -64,17 +90,30 @@ export default function Mode1ResultBanner() {
             <div style={{ color: '#c7d2fe', marginBottom: 10 }}>
                 {name}{score != null ? ` · độ phù hợp ${score}/100` : ''}{nChanges ? ` · ${nChanges} chỉnh sửa` : ''}
             </div>
-            <button
-                onClick={apply}
-                disabled={applying}
-                style={{
-                    width: '100%', padding: '10px 14px', borderRadius: 10, border: 'none',
-                    cursor: applying ? 'default' : 'pointer', fontWeight: 700,
-                    background: applying ? '#4338ca' : 'linear-gradient(135deg,#8b5cf6,#6366f1)', color: '#fff',
-                }}
-            >
-                {applying ? '⏳ Đang xử lý…' : '🚀 Tự động ứng tuyển'}
-            </button>
+            <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                    onClick={viewInEditor}
+                    disabled={applying}
+                    style={{
+                        flex: 1, padding: '10px 14px', borderRadius: 10,
+                        border: '1px solid rgba(165,180,252,0.5)', cursor: 'pointer', fontWeight: 700,
+                        background: 'rgba(99,102,241,0.15)', color: '#e0e7ff',
+                    }}
+                >
+                    📄 Xem CV
+                </button>
+                <button
+                    onClick={apply}
+                    disabled={applying}
+                    style={{
+                        flex: 1, padding: '10px 14px', borderRadius: 10, border: 'none',
+                        cursor: applying ? 'default' : 'pointer', fontWeight: 700,
+                        background: applying ? '#4338ca' : 'linear-gradient(135deg,#8b5cf6,#6366f1)', color: '#fff',
+                    }}
+                >
+                    {applying ? '⏳…' : '🚀 Ứng tuyển'}
+                </button>
+            </div>
             {status && <div style={{ marginTop: 8, fontSize: 12, color: '#c7d2fe' }}>{status}</div>}
         </div>
     );

@@ -360,6 +360,7 @@ export interface TailorResult {
     improved_cv: Record<string, unknown>;
     improvements: unknown[];
     match: Record<string, unknown>;
+    jd: Record<string, unknown>;   // extracted JD — lets the editor show context + re-optimize
 }
 
 /**
@@ -381,5 +382,6 @@ export async function tailorForJob(
         improved_cv: best.cv,
         improvements: best.improvements,
         match,
+        jd: jd as Record<string, unknown>,
     };
 }

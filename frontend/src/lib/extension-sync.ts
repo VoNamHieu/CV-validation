@@ -97,6 +97,7 @@ export interface Mode1Result {
     improved_cv: CVData;
     improvements: unknown[];
     match: Record<string, unknown>;
+    jd?: Record<string, unknown>;
 }
 
 /**
