@@ -24,7 +24,7 @@ import {
     EMPTY_CONTACT, EMPTY_PERSONAL, EMPTY_EMPLOYMENT, EMPTY_PREFERENCES,
 } from '@/lib/types';
 import { cvToExtensionProfile } from '@/lib/extension-profile';
-import { syncProfileToExtension, syncCvFileToExtension } from '@/lib/extension-sync';
+import { syncProfileToExtension, syncCvFileToExtension, syncCvDataToExtension } from '@/lib/extension-sync';
 import { renderCvHtml, getTemplate, DEFAULT_TEMPLATE_ID } from '@/lib/cv-templates';
 import type { CvTemplateId } from '@/lib/cv-templates';
 import { resizeAvatarToDataUrl } from '@/lib/avatar';
@@ -667,6 +667,18 @@ export default function StepEditCv() {
                             // Wait for the extension's real ACK — a fire-and-forget
                             // postMessage shows "synced" even when nothing landed.
                             const profileRes = await syncProfileToExtension(profile, cv);
+
+                            // Also sync the structured CV (jobfitCv) that the
+                            // "Tailor CV on job board" feature needs — the ORIGINAL
+                            // cvData, since the BE re-optimizes per job at tailor
+                            // time. Without this, Resync left Tailor on "no CV synced".
+                            const cvDataRes = cvData
+                                ? await syncCvDataToExtension(cvData)
+                                : { ok: false, error: 'no CV' };
+                            const cvDataMsg = cvDataRes.ok
+                                ? '\n✅ CV (cho Tailor) đã sync.'
+                                : `\n⚠️ CV tailor sync lỗi: ${cvDataRes.error}`;
+
                             let cvFileMsg = '';
                             if (currentEntry?.optimizedCvPdfBase64 && currentEntry?.optimizedCvFileName) {
                                 const fileRes = await syncCvFileToExtension(
@@ -680,7 +692,7 @@ export default function StepEditCv() {
                                 cvFileMsg = '\nℹ️ Chưa có CV PDF cache — bấm Optimize để render trước.';
                             }
                             alert(profileRes.ok
-                                ? `✅ Profile đã sync sang extension.${cvFileMsg}`
+                                ? `✅ Profile đã sync sang extension.${cvDataMsg}${cvFileMsg}`
                                 : `❌ Sync profile thất bại: ${profileRes.error}`);
                         }}
                         style={{
