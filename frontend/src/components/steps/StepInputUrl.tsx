@@ -12,7 +12,7 @@ import {
     smartSearch, crawlUrl, extractJdStructured, scoreFit, fetchPage,
     extractJobLinks, rankJobsTournament, extensionCrawl, isExtensionAvailable,
     findCareer, discoverJobsWarm, inferSearchProfile, searchFeaturedJobsWarm,
-    optimizeCvVariants, type JobListing,
+    optimizeCvVariants, reportBrokenLink, type JobListing,
 } from '@/lib/api';
 import { buildSearchUrl, matchesCity, titleMatchScore, cityLabel, experienceGapExceeds } from '@/lib/job-targeting';
 import { buildCvPdfCache } from '@/lib/cv-pdf-cache';
@@ -669,6 +669,7 @@ export default function StepInputUrl() {
 
                 if (jobPageText.length < 100) {
                     updateJdEntry(entryId, { status: 'error', error: 'Could not load job page' });
+                    reportBrokenLink({ url: jobUrl, company: entryCompany, title: entryTitle, reason: 'could_not_load' });
                     return;
                 }
 
@@ -678,6 +679,7 @@ export default function StepInputUrl() {
                 if (Array.isArray(jdData)) jdData = jdData[0];
                 if (!jdData || (!jdData.must_have?.length && !jdData.responsibilities?.length)) {
                     updateJdEntry(entryId, { status: 'error', error: 'No JD found on page' });
+                    reportBrokenLink({ url: jobUrl, company: entryCompany, title: entryTitle, reason: 'no_jd_on_page' });
                     return;
                 }
 

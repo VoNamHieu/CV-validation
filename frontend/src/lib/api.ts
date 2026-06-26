@@ -151,6 +151,19 @@ export async function extractJobLinks(htmlText: string, siteUrl: string) {
     return res.json();
 }
 
+// ── Link-health monitor: report a job URL the pipeline failed to fetch ──
+// Fire-and-forget — never blocks or throws into the pipeline.
+export function reportBrokenLink(input: {
+    url: string; company?: string; title?: string; reason?: string;
+}): void {
+    if (!input.url) return;
+    void fetch('/api/monitor/report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: 'pipeline', ...input }),
+    }).catch(() => { /* monitoring must never break the flow */ });
+}
+
 export interface RankedJob {
     url: string;
     title: string;
