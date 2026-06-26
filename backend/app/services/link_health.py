@@ -14,6 +14,7 @@ Redis is absent (the log just won't persist across restarts in that case).
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import time
@@ -30,15 +31,22 @@ _INDEX_KEY = f"{_NS}:__index__"
 _TTL = 30 * 24 * 3600          # keep the log for 30 days
 _MAX_INDEX = 1000              # cap stored records
 
+# Browser renders are far heavier than the httpx pass, so cap how many run at
+# once even when the scan fans out wider.
+_RENDER_SEM = asyncio.Semaphore(4)
+
 _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
 _HEADERS = {"User-Agent": _UA, "Accept": "text/html,application/xhtml+xml,*/*"}
 
-# Explicit "this posting is gone" markers (status can still be 200).
+# Explicit "this posting is gone" markers (status can still be 200). Only
+# trusted on a RENDERED DOM — in raw server HTML of a JS app these strings are
+# often bundled 404-route boilerplate, not the actual page state.
 _GONE_MARKERS = (
     "không tìm thấy", "hết hạn", "đã đóng", "đã hết", "tin tuyển dụng không tồn tại",
     "job not found", "no longer available", "position has been filled",
     "this job is no longer", "page not found", "404 not found",
+    "page is missing", "looking for is missing", "page you are looking for",
 )
 # Anti-bot interstitials — the URL may be fine, we just can't see it server-side.
 _ANTIBOT_MARKERS = (
@@ -63,62 +71,149 @@ def _host(url: str) -> str:
     return (urlparse(url).netloc or "unknown").lower().removeprefix("www.")
 
 
-async def validate_job_url(url: str, expected_title: str = "") -> dict:
+def _title_ratio(body_low: str, words: set[str]) -> tuple[int, float]:
+    if not words:
+        return 0, 0.0
+    hits = sum(1 for w in words if w in body_low)
+    return hits, hits / len(words)
+
+
+async def _block_noise(route):
+    if route.request.resource_type in ("image", "media", "font"):
+        await route.abort()
+    else:
+        await route.continue_()
+
+
+async def _render_text(url: str) -> tuple[bool, str]:
+    """Headless-render `url` and return (ok, visible body text).
+
+    Tuned for job-detail SPAs: wait for network to settle (not a fixed content
+    selector — those vary per site and made shells look empty), then read the
+    body's inner_text. Uses the shared browser pool, capped by _RENDER_SEM.
+    """
+    try:
+        from app.services.browser_pool import get_browser
+    except Exception as e:  # Playwright not available in this env
+        return False, str(e)[:120]
+
+    async with _RENDER_SEM:
+        context = None
+        try:
+            browser = await get_browser()
+            context = await browser.new_context(
+                user_agent=_UA, viewport={"width": 1280, "height": 800}, locale="vi-VN",
+            )
+            await context.route("**/*", _block_noise)
+            page = await context.new_page()
+            await page.goto(url, timeout=40000, wait_until="domcontentloaded")
+            try:
+                await page.wait_for_load_state("networkidle", timeout=12000)
+            except Exception:
+                pass
+            await page.wait_for_timeout(1500)
+            text = await page.inner_text("body")
+            return True, text or ""
+        except Exception as e:
+            return False, str(e)[:160]
+        finally:
+            if context is not None:
+                try:
+                    await context.close()
+                except Exception:
+                    pass
+
+
+def _content_verdict(text: str, words: set[str], code: int, *, rendered: bool) -> dict:
+    """Judge a body of text (raw HTML or rendered DOM) against the role title.
+
+    On a RENDERED DOM the verdict is authoritative: the title is either there or
+    it isn't. On raw server HTML we only ever return a confident `ok` (the page
+    is server-rendered) — anything else is left for the render pass to settle.
+    """
+    low = text.lower()
+    method = "rendered" if rendered else "http"
+
+    if rendered and any(m in low for m in _GONE_MARKERS):
+        return {"status": "broken", "http_code": code, "reason": "posting_gone",
+                "detail": "rendered page says the posting is gone", "method": method}
+
+    if words:
+        hits, ratio = _title_ratio(low, words)
+        if ratio >= 0.5:
+            return {"status": "ok", "http_code": code, "reason": "title_present",
+                    "detail": f"{hits}/{len(words)} title words", "method": method}
+        if rendered:
+            return {"status": "broken", "http_code": code, "reason": "content_missing",
+                    "detail": f"rendered {len(text)} chars, only {hits}/{len(words)} title words",
+                    "method": method}
+        return {"status": "inconclusive", "http_code": code, "reason": "title_absent",
+                "detail": f"{len(text)}B, {hits}/{len(words)} title words", "method": method}
+
+    # No title to match on — fall back to a size heuristic.
+    if rendered:
+        if len(text) < _THIN_BYTES:
+            return {"status": "broken", "http_code": code, "reason": "thin_shell",
+                    "detail": f"rendered {len(text)} chars", "method": method}
+        return {"status": "ok", "http_code": code, "reason": "has_content",
+                "detail": f"rendered {len(text)} chars", "method": method}
+    return {"status": "inconclusive", "http_code": code, "reason": "no_title",
+            "detail": f"{len(text)}B body", "method": method}
+
+
+async def validate_job_url(url: str, expected_title: str = "", allow_render: bool = True) -> dict:
     """Fetch `url` and judge whether it renders a real job posting.
 
-    Returns {status, http_code, reason, detail} where status is one of:
-      ok       — looks like a live posting
-      broken   — bad HTTP, an explicit "gone" page, or a thin shell missing the
-                 expected title (the base.vn dead-link signature)
-      unknown  — couldn't tell (anti-bot wall, network error, or a large body
-                 that just didn't echo the title) — surfaced for manual review
+    Two-pass to avoid false positives on JS-rendered pages:
+      1. Cheap httpx GET — settles only the certain cases (bad HTTP, or the role
+         title already present in server HTML = SSR page that works).
+      2. For everything else (SPA shells, bundled 404 boilerplate, gone-markers
+         that might be boilerplate), headless-render the URL and judge the real
+         DOM. A rendered DOM is authoritative.
+
+    Returns {status, http_code, reason, detail, method} where status is one of:
+      ok       — a live posting (title present, server-side or rendered)
+      broken   — bad HTTP, or the rendered DOM has no posting / says it's gone
+      unknown  — couldn't decide (network/anti-bot, or render unavailable)
     """
+    words = set(_title_words(expected_title))
+
+    async def _render_verdict(code: int, fallback: dict) -> dict:
+        """Render the real DOM and judge it; fall back if rendering is off/fails."""
+        if allow_render:
+            ok, text = await _render_text(url)
+            if ok:
+                return _content_verdict(text, words, code, rendered=True)
+        return fallback
+
     try:
         async with httpx.AsyncClient(follow_redirects=True, timeout=25,
                                      headers=_HEADERS) as client:
             r = await client.get(url)
     except Exception as e:
-        return {"status": "unknown", "http_code": 0,
-                "reason": "fetch_failed", "detail": str(e)[:200]}
+        # The cheap fetch died — a render might still succeed (anti-bot / SPA).
+        return await _render_verdict(0, {
+            "status": "unknown", "http_code": 0, "reason": "fetch_failed",
+            "detail": str(e)[:200], "method": "http"})
 
     code = r.status_code
     body = r.text or ""
-    low = body.lower()
 
     if code >= 400:
-        return {"status": "broken", "http_code": code,
-                "reason": f"http_{code}", "detail": ""}
+        return {"status": "broken", "http_code": code, "reason": f"http_{code}",
+                "detail": "", "method": "http"}
 
-    if any(m in low for m in _ANTIBOT_MARKERS):
-        return {"status": "unknown", "http_code": code,
-                "reason": "anti_bot", "detail": "blocked by anti-bot wall"}
+    # Confident server-side verdict? (title present in raw HTML = real SSR page.)
+    cheap = _content_verdict(body, words, code, rendered=False)
+    if cheap["status"] == "ok":
+        return cheap
 
-    if any(m in low for m in _GONE_MARKERS):
-        return {"status": "broken", "http_code": code,
-                "reason": "posting_gone", "detail": "page says the posting is gone"}
-
-    # Content check: does the page actually contain the role? When we know the
-    # expected title, require a decent fraction of its words to appear in the
-    # body. A dead SPA shell (generic "Tuyển dụng" page) fails this even at 200.
-    words = _title_words(expected_title)
-    if words:
-        hits = sum(1 for w in set(words) if w in low)
-        ratio = hits / len(set(words))
-        if ratio >= 0.5:
-            return {"status": "ok", "http_code": code, "reason": "title_present",
-                    "detail": f"{hits}/{len(set(words))} title words"}
-        if len(body) < _THIN_BYTES:
-            return {"status": "broken", "http_code": code, "reason": "empty_shell",
-                    "detail": f"{len(body)}B, only {hits}/{len(set(words))} title words"}
-        return {"status": "unknown", "http_code": code, "reason": "title_absent",
-                "detail": f"{len(body)}B, {hits}/{len(set(words))} title words"}
-
-    # No expected title to match on — fall back to a size heuristic.
-    if len(body) < _THIN_BYTES:
-        return {"status": "broken", "http_code": code, "reason": "thin_shell",
-                "detail": f"{len(body)}B body"}
-    return {"status": "ok", "http_code": code, "reason": "has_content",
-            "detail": f"{len(body)}B body"}
+    # Inconclusive (SPA shell / boilerplate / anti-bot) → render the real DOM.
+    antibot = any(m in body.lower() for m in _ANTIBOT_MARKERS)
+    return await _render_verdict(code, {
+        "status": "unknown", "http_code": code,
+        "reason": "anti_bot" if antibot else f"{cheap['reason']}_unrendered",
+        "detail": cheap["detail"] + " (no render)", "method": "http"})
 
 
 async def _load_index() -> list[dict]:
