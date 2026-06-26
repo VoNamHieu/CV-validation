@@ -369,7 +369,13 @@ def _basevn(career_url: str, html: str | None) -> list[dict]:
         if not isinstance(o, dict):
             continue
         name = (o.get("name") or "").strip()
-        code = o.get("codename") or o.get("id") or ""
+        # The public detail page is keyed by the NUMERIC id, e.g.
+        # /job/10626 — that route SSRs the full posting. The codename
+        # (/job/VINPEARLJSC-J10626) returns only an empty 200 shell, so a
+        # codename-based URL looks alive (200) but is a dead end for the user.
+        # Prefer id; fall back to codename only when id is absent.
+        jid = str(o.get("id") or "").strip()
+        code = jid or str(o.get("codename") or "").strip()
         if not name or not code:
             continue
         out.append({
