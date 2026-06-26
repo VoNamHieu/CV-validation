@@ -492,7 +492,10 @@ def _workatsea(career_url: str) -> list[dict]:
                 seen.add(jid)
                 desc = _strip_html((j.get("job_description") or "") + " " +
                                    (j.get("requirements") or ""))
-                out.append({"title": title[:200], "url": f"{origin}/jobs/{jid}",
+                # Detail route is /job-detail/{id}/ — /jobs/{id} is NOT a route
+                # and the SPA just falls back to the careers home (verified via
+                # headless render). Same id-keyed-detail class as base.vn.
+                out.append({"title": title[:200], "url": f"{origin}/job-detail/{jid}/",
                             "location": "Vietnam", "description": desc})
             if len(jl) < 20 or len(out) >= 40:
                 break
@@ -620,7 +623,9 @@ _BD_FAMILY = {
         "hosts": ("joinbytedance.com", "www.joinbytedance.com", "jobs.bytedance.com"),
         "api": "https://jobs.bytedance.com/api/v1/public/supplier/search/job/posts",
         "website_path": "en",
-        "detail": "https://jobs.bytedance.com/en/position/{id}",
+        # Detail page needs the trailing /detail — /en/position/{id} alone
+        # renders "page is missing" (verified via headless render).
+        "detail": "https://jobs.bytedance.com/en/position/{id}/detail",
     },
 }
 
