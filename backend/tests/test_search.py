@@ -60,7 +60,10 @@ def test_rerank_missing_vec_treated_as_zero_cos():
 # ─────────────────────────── embed.build_job_doc ───────────────────────────
 
 def test_build_job_doc_title_only():
-    assert build_job_doc("Product Manager") == "Product Manager"
+    # rank word ("Manager") is stripped so the vector encodes domain, not rank
+    assert build_job_doc("Product Manager") == "Product"
+    # a title with no rank word is unchanged
+    assert build_job_doc("Data Engineer") == "Data Engineer"
 
 
 def test_build_job_doc_includes_jd_truncated():
@@ -100,6 +103,18 @@ def test_audit_batch_recoveries_and_guards():
     # Guard: a real "Data Steward" must stay Data & AI (the 'steward' hospitality
     # keyword was dropped precisely because it collided with this).
     assert classify_title("Senior Data Steward")[0] == "Data & AI"
+
+
+def test_strip_title_noise_keeps_domain_drops_rank():
+    from app.search.embed import strip_title_noise
+    # rank words gone, domain kept — so the embedding encodes field, not rank
+    assert strip_title_noise("Chuyên viên Xuất nhập khẩu") == "Xuất nhập khẩu"
+    assert strip_title_noise("CHUYÊN VIÊN VẬN HÀNH").lower() == "vận hành"
+    assert strip_title_noise("[Hanoi] - Chuyên viên Senior Data Engineer").lower() == "data engineer"
+    # trailing domain parens kept
+    assert "customs clearance" in strip_title_noise("Nhân viên Khai báo hải quan (Customs Clearance)").lower()
+    # never empties — a rank-only title falls back to the original
+    assert strip_title_noise("Chuyên viên") == "Chuyên viên"
 
 
 def test_garbage_title_filter():

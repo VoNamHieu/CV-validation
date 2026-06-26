@@ -12,7 +12,7 @@ import hashlib
 import logging
 
 from app.services import cache
-from app.search.embed import embed_jobs, embed_query, build_job_doc
+from app.search.embed import embed_jobs, embed_query, build_job_doc, strip_title_noise
 from app.search.ranker import rerank
 
 logger = logging.getLogger(__name__)
@@ -43,6 +43,9 @@ async def rerank_bucket(jobs: list[dict], query_text: str, top: int = 60) -> lis
     Capped at _MAX_RERANK for cost; we log if a tier is bigger than that."""
     if not jobs or not query_text:
         return jobs
+    # Strip rank words from the query too, so it matches the doc side (which
+    # embeds the de-ranked title) — domain-vs-domain cosine, not rank-vs-rank.
+    query_text = strip_title_noise(query_text)
     n_primary = sum(1 for j in jobs if (j.get("_facet") or {}).get("is_primary"))
     eff_top = min(max(top, n_primary), _MAX_RERANK)
     if n_primary > _MAX_RERANK:
