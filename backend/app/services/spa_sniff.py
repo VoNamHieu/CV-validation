@@ -10,7 +10,15 @@ from __future__ import annotations
 
 import logging
 import re
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
+
+# Some SPAs expose only a bare slug in their job API; the public detail page
+# lives under a fixed route prefix that a plain origin-join can't recover (so
+# the job 404s). Map such hosts → the detail-route prefix. VNG is a Next.js
+# i18n site whose job route is /vi/tim-kiem-viec-lam/chi-tiet/[slug].
+_SLUG_DETAIL_PREFIX = {
+    "career.vng.com.vn": "/vi/tim-kiem-viec-lam/chi-tiet/",
+}
 
 import requests
 
@@ -181,7 +189,18 @@ def _items_to_jobs(items, origin: str) -> list[dict]:
             # Make absolute: protocol-relative ("//host/x"), root-relative
             # ("/x"), or a bare slug ("6742-foo" — many SPAs put the slug in a
             # url/slug field). A bare slug left as-is is an uncrawlable URL.
-            url = ("https:" + url) if url.startswith("//") else urljoin(origin + "/", url.lstrip("/"))
+            if url.startswith("//"):
+                url = "https:" + url
+            else:
+                slug = url.lstrip("/")
+                host = (urlparse(origin).netloc or "").lower()
+                prefix = _SLUG_DETAIL_PREFIX.get(host)
+                # A bare slug (no path separators) on a host with a known detail
+                # route → prepend that route, else origin-join would 404.
+                if prefix and "/" not in slug:
+                    url = f"{origin}{prefix}{slug}"
+                else:
+                    url = urljoin(origin + "/", slug)
         if not url:
             jid = it.get("id") or it.get("jobId") or it.get("slug")
             if jid:
