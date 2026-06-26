@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import math
 
+from app.search.taxonomy import _norm
+
 
 def cosine(a: list[float], b: list[float]) -> float:
     if not a or not b:
@@ -28,21 +30,29 @@ _W_COS = 0.3
 def rerank(query_vec: list[float], jobs: list[dict],
            facet_key=lambda j: j["_facet"]["score"],
            vec_key=lambda j: j.get("_vec"),
-           tier_key=lambda j: j["_facet"].get("is_primary", False)) -> list[dict]:
+           tier_key=lambda j: j["_facet"].get("is_primary", False),
+           query_phrase: str = "") -> list[dict]:
     """Each job needs a facet score (Phase 1) + an embedding (_vec). Returns the
-    list re-sorted by blended score WITHIN the primary tier, annotating _cos and
-    _final.
+    list re-sorted by (literal, tier, blended score), annotating _cos/_final/_literal.
 
     Cosine orders within a tier — it must NOT cross it. Phase-1 puts the
-    candidate's own role family (primary) above adjacent families; if we sorted
-    the whole bucket by the blended score alone, an in-domain adjacent job (e.g.
-    a bank "Strategy"/"Project Manager"/consultant on the General & Management
-    catch-all, facet ~0.85) with a decent cosine would leapfrog an out-of-domain
-    PRIMARY job (e.g. an out-of-sector Product Manager, facet ~0.6) — exactly the
-    off-role leak we don't want. Tier first, blend within."""
+    candidate's own role family (primary) above adjacent families; sorting the
+    whole bucket by blended score alone lets an in-domain adjacent catch-all job
+    leapfrog an out-of-domain PRIMARY job — the off-role leak. Tier first.
+
+    LITERAL hybrid: if the job title contains the query's domain PHRASE verbatim
+    (e.g. a title that literally says "xuất nhập khẩu"), it joins the TOP tier
+    regardless of family — recovering exact matches the family/embedding layers
+    bury, while a contiguous-phrase test (not loose tokens) avoids Vietnamese
+    polysemy collisions ("thu nhập"=income, "sản xuất"=production)."""
+    qn = _norm(query_phrase)
+    # A 1-2 char phrase is too weak to anchor on; require something substantial.
+    use_literal = len(qn) >= 4
     for j in jobs:
         cos = cosine(query_vec, vec_key(j) or [])
+        lit = use_literal and qn in _norm(j.get("title", ""))
         j["_cos"] = round(cos, 4)
+        j["_literal"] = lit
         j["_final"] = round(_W_FACET * facet_key(j) + _W_COS * cos, 4)
-    jobs.sort(key=lambda j: (tier_key(j), j["_final"]), reverse=True)
+    jobs.sort(key=lambda j: (j.get("_literal", False), tier_key(j), j["_final"]), reverse=True)
     return jobs

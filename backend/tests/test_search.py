@@ -57,6 +57,20 @@ def test_rerank_missing_vec_treated_as_zero_cos():
     assert out[0]["_final"] == pytest.approx(0.35, abs=1e-3)  # 0.7*0.5
 
 
+def test_rerank_literal_phrase_beats_higher_facet():
+    jobs = [
+        {"title": "Senior Operations Manager", "_facet": {"score": 1.0, "is_primary": True}, "_vec": [1.0, 0.0]},
+        {"title": "Nhân viên Kinh doanh Xuất nhập khẩu", "_facet": {"score": 0.5, "is_primary": False}, "_vec": [0.0, 1.0]},
+    ]
+    # query_vec favours the Ops job (cos 1.0) AND it's primary w/ higher facet —
+    # yet the literal phrase-match wins, joining the top tier.
+    out = ranker.rerank([1.0, 0.0], jobs, query_phrase="Xuất nhập khẩu")
+    assert out[0]["title"].endswith("Xuất nhập khẩu") and out[0]["_literal"] is True
+    # no phrase → the primary higher-facet job wins (literal dimension off)
+    out2 = ranker.rerank([1.0, 0.0], jobs, query_phrase="")
+    assert out2[0]["title"] == "Senior Operations Manager"
+
+
 # ─────────────────────────── embed.build_job_doc ───────────────────────────
 
 def test_build_job_doc_title_only():

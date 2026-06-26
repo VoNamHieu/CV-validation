@@ -13,6 +13,7 @@ import logging
 
 from app.services import cache
 from app.search.embed import embed_jobs, embed_query, build_job_doc, strip_title_noise
+from app.search.taxonomy import _norm
 from app.search.ranker import rerank
 
 logger = logging.getLogger(__name__)
@@ -53,6 +54,20 @@ async def rerank_bucket(jobs: list[dict], query_text: str, top: int = 60) -> lis
                     f"reranking first {_MAX_RERANK}, rest stay in facet order")
     bucket, tail = jobs[:eff_top], jobs[eff_top:]
 
+    # Pull literal phrase-matches out of the tail into the bucket, so an exact
+    # "xuất nhập khẩu"-in-title job buried in a non-primary/low position still
+    # gets reranked and floated to the top tier (ranker marks it _literal). This
+    # is the hybrid: keyword recall on top of the semantic engine.
+    qn = _norm(query_text)
+    if len(qn) >= 4 and tail:
+        in_bucket = set(map(id, bucket))
+        pulled = [j for j in tail
+                  if id(j) not in in_bucket and qn in _norm(j.get("title", ""))]
+        if pulled:
+            pulled_ids = set(map(id, pulled))
+            bucket = bucket + pulled
+            tail = [j for j in tail if id(j) not in pulled_ids]
+
     # Title + JD snippet make the vector discriminative; many ATS adapters
     # populate `description`, search-result-only jobs leave it blank (→ title-only).
     docs = [build_job_doc(j.get("title", ""), jd=j.get("description", "")) for j in bucket]
@@ -81,4 +96,4 @@ async def rerank_bucket(jobs: list[dict], query_text: str, top: int = 60) -> lis
             return jobs
         await cache.set_json(f"{_NS}:q:{qk}", qv, _TTL)
 
-    return rerank(qv, bucket) + tail
+    return rerank(qv, bucket, query_phrase=query_text) + tail
