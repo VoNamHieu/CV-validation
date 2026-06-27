@@ -7,6 +7,7 @@ import Stepper from '@/components/Stepper';
 import StepUploadCV from '@/components/steps/StepUploadCV';
 import StepInputUrl from '@/components/steps/StepInputUrl';
 import StepEditCv from '@/components/steps/StepEditCv';
+import CvEditorView from '@/components/views/CvEditorView';
 import HistoryView from '@/components/views/HistoryView';
 import Mode1ResultBanner from '@/components/Mode1ResultBanner';
 
@@ -60,6 +61,7 @@ export default function Home() {
               {currentStep === 3 && <StepEditCv />}
             </>
           )}
+          {view === 'editor' && <CvEditorView />}
           {view === 'history' && <HistoryView />}
         </main>
 

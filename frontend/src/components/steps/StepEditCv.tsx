@@ -1727,8 +1727,9 @@ function CategoryRow({ label, data }: { label: string; data: CategoryScore }) {
 
 /* ─── Personal Info section — editable contact/personal/employment/preferences ───
    These fields are pre-filled by the LLM extractor when the CV is parsed and
-   are pushed to the extension automatically via the auto-push effect above. */
-function PersonalInfoSection({
+   are pushed to the extension automatically via the auto-push effect above.
+   Exported so the standalone CV Editor (CvEditorView) reuses the same fields. */
+export function PersonalInfoSection({
     cv, onChange,
 }: {
     cv: CVData;

@@ -77,7 +77,7 @@ export interface JDEntry {
 }
 
 type Step = 1 | 2 | 3 | 4;
-export type AppView = 'apply' | 'history';
+export type AppView = 'apply' | 'editor' | 'history';
 
 interface AppState {
   // Top-level navigation (sidebar)

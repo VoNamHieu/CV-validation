@@ -1,7 +1,7 @@
 'use client';
 
 import { useAppStore, AppView } from '@/store/useAppStore';
-import { Sparkle, MagicWand, Briefcase } from '@phosphor-icons/react';
+import { Sparkle, MagicWand, Briefcase, FileText } from '@phosphor-icons/react';
 import type { Icon } from '@phosphor-icons/react';
 
 interface NavItem {
@@ -13,6 +13,7 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
     { id: 'apply', label: 'Apply', icon: MagicWand, description: 'CV · Match · Optimize' },
+    { id: 'editor', label: 'CV Editor', icon: FileText, description: 'Build · Edit · Export' },
     { id: 'history', label: 'History', icon: Briefcase, description: 'Saved applications' },
 ];
 
