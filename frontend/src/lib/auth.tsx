@@ -59,7 +59,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const signUp = useCallback(async (email: string, password: string): Promise<AuthResult> => {
         if (!sb) return { error: 'Đăng ký chưa được cấu hình' };
-        const { data, error } = await sb.auth.signUp({ email, password });
+        // Send the email-confirmation link back to a dedicated callback route
+        // so the session is established and the token-bearing URL is cleaned up
+        // (instead of dumping #access_token=… on the landing page).
+        const emailRedirectTo = typeof window !== 'undefined'
+            ? `${window.location.origin}/auth/callback`
+            : undefined;
+        const { data, error } = await sb.auth.signUp({
+            email, password, options: { emailRedirectTo },
+        });
         if (error) return { error: error.message };
         // No session back → email confirmation required.
         return { needsConfirm: !data.session };
