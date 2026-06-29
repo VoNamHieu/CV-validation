@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from '@phosphor-icons/react';
 import { useAuth } from '@/lib/auth';
 
@@ -8,6 +9,10 @@ type Mode = 'signin' | 'signup';
 
 export default function AuthModal({ onClose }: { onClose: () => void }) {
     const { signIn, signUp } = useAuth();
+    // Portal to <body> so the overlay escapes the Sidebar's backdrop-filter,
+    // which would otherwise act as the containing block for position:fixed.
+    const [mounted, setMounted] = useState(false);
+    useEffect(() => setMounted(true), []);
     const [mode, setMode] = useState<Mode>('signin');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -36,7 +41,9 @@ export default function AuthModal({ onClose }: { onClose: () => void }) {
         color: 'var(--text-primary)', fontSize: '0.85rem', outline: 'none',
     };
 
-    return (
+    if (!mounted) return null;
+
+    return createPortal(
         <div
             onClick={onClose}
             style={{
@@ -120,6 +127,7 @@ export default function AuthModal({ onClose }: { onClose: () => void }) {
                     )}
                 </div>
             </div>
-        </div>
+        </div>,
+        document.body,
     );
 }
