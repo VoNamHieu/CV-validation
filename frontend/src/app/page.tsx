@@ -10,10 +10,12 @@ import StepEditCv from '@/components/steps/StepEditCv';
 import CvEditorView from '@/components/views/CvEditorView';
 import HistoryView from '@/components/views/HistoryView';
 import Mode1ResultBanner from '@/components/Mode1ResultBanner';
+import Landing from '@/components/Landing';
 
 export default function Home() {
   const view = useAppStore((s) => s.view);
   const currentStep = useAppStore((s) => s.currentStep);
+  const entered = useAppStore((s) => s.entered);
 
   // Global listener so __jobfitExtensionId is set as soon as the
   // extension's content-webapp.js posts JOBFIT_EXTENSION_READY,
@@ -29,6 +31,10 @@ export default function Home() {
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
   }, []);
+
+  // Front door: show the landing page until the visitor enters the app.
+  // `entered` is persisted, so returning users skip straight to the app.
+  if (!entered) return <Landing />;
 
   return (
     <div style={{ minHeight: '100vh', position: 'relative' }}>

@@ -7,7 +7,7 @@ import { useAuth } from '@/lib/auth';
 
 type Mode = 'signin' | 'signup';
 
-export default function AuthModal({ onClose }: { onClose: () => void }) {
+export default function AuthModal({ onClose, reason }: { onClose: () => void; reason?: string }) {
     const { signIn, signUp } = useAuth();
     // Portal to <body> so the overlay escapes the Sidebar's backdrop-filter,
     // which would otherwise act as the containing block for position:fixed.
@@ -75,6 +75,15 @@ export default function AuthModal({ onClose }: { onClose: () => void }) {
                 <h2 style={{ fontSize: '1.05rem', fontWeight: 700, marginBottom: 4, color: 'var(--text-primary)' }}>
                     {mode === 'signin' ? 'Đăng nhập' : 'Tạo tài khoản'}
                 </h2>
+                {reason && (
+                    <div style={{
+                        fontSize: '0.78rem', color: 'var(--accent-purple, #8b5cf6)', fontWeight: 600,
+                        marginBottom: 8, padding: '8px 10px', borderRadius: 8,
+                        background: 'var(--gradient-hero-subtle, rgba(139,92,246,0.1))',
+                    }}>
+                        {reason}
+                    </div>
+                )}
                 <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 18 }}>
                     Lưu CV, việc đã lưu và lịch sử ứng tuyển vào tài khoản của bạn.
                 </p>

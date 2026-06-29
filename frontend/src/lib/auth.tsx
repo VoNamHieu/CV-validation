@@ -4,7 +4,7 @@
 // sign in / sign up / sign out. When Supabase isn't configured, `enabled` is
 // false and the app runs anonymously.
 import {
-    createContext, useCallback, useContext, useEffect, useState, type ReactNode,
+    createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode,
 } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import { getSupabase } from './supabase';
@@ -22,6 +22,12 @@ interface AuthContextValue {
     signIn: (email: string, password: string) => Promise<AuthResult>;
     signUp: (email: string, password: string) => Promise<AuthResult>;
     signOut: () => Promise<void>;
+    // Global login prompt — the soft gate opens this when an anonymous user
+    // hits an action that needs an account. `promptReason` is shown in the modal.
+    promptOpen: boolean;
+    promptReason: string;
+    promptLogin: (reason?: string) => void;
+    closePrompt: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -31,6 +37,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const enabled = sb !== null;
     const [session, setSession] = useState<Session | null>(null);
     const [loading, setLoading] = useState(enabled);
+    const [promptOpen, setPromptOpen] = useState(false);
+    const [promptReason, setPromptReason] = useState('');
 
     useEffect(() => {
         if (!sb) return;
@@ -44,6 +52,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const { data: sub } = sb.auth.onAuthStateChange((_event, s) => {
             setSession(s);
             setLoading(false);
+            // Dismiss the soft-gate prompt the moment auth succeeds (covers
+            // sign-in in another tab / email-confirm landing while it's open).
+            if (s) setPromptOpen(false);
         });
         return () => {
             active = false;
@@ -77,17 +88,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (sb) await sb.auth.signOut();
     }, [sb]);
 
-    return (
-        <AuthContext.Provider
-            value={{ user: session?.user ?? null, session, loading, enabled, signIn, signUp, signOut }}
-        >
-            {children}
-        </AuthContext.Provider>
-    );
+    const promptLogin = useCallback((reason?: string) => {
+        setPromptReason(reason ?? '');
+        setPromptOpen(true);
+    }, []);
+    const closePrompt = useCallback(() => setPromptOpen(false), []);
+
+    const user = session?.user ?? null;
+    const value = useMemo<AuthContextValue>(() => ({
+        user, session, loading, enabled, signIn, signUp, signOut,
+        promptOpen, promptReason, promptLogin, closePrompt,
+    }), [user, session, loading, enabled, signIn, signUp, signOut,
+        promptOpen, promptReason, promptLogin, closePrompt]);
+
+    return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth(): AuthContextValue {
     const ctx = useContext(AuthContext);
     if (!ctx) throw new Error('useAuth must be used within <AuthProvider>');
     return ctx;
+}
+
+/**
+ * Soft-gate helper. Returns a function to call right before a gated action:
+ * if auth is configured and nobody is signed in, it opens the login prompt and
+ * returns false (caller should bail); otherwise returns true (proceed). When
+ * auth isn't configured (no Supabase env), it's a no-op that always allows.
+ */
+export function useAuthGate(): (reason?: string) => boolean {
+    const { enabled, user, loading, promptLogin } = useAuth();
+    return useCallback((reason?: string) => {
+        // Only block when we're certain the visitor is anonymous — never during
+        // the initial session-restore window, so a returning logged-in user
+        // doesn't get a spurious prompt.
+        if (enabled && !loading && !user) {
+            promptLogin(reason);
+            return false;
+        }
+        return true;
+    }, [enabled, loading, user, promptLogin]);
 }

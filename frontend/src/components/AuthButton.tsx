@@ -1,17 +1,14 @@
 'use client';
 
-import { useState } from 'react';
 import { SignIn, SignOut, UserCircle, Coins } from '@phosphor-icons/react';
 import { useAuth } from '@/lib/auth';
 import { useCredits } from '@/lib/credits-context';
-import AuthModal from './AuthModal';
 
 // Sidebar auth widget: a login button when signed out, or the user's email +
 // sign-out when signed in. Renders nothing if Supabase Auth isn't configured.
 export default function AuthButton() {
-    const { enabled, user, loading, signOut } = useAuth();
+    const { enabled, user, loading, signOut, promptLogin } = useAuth();
     const { balance } = useCredits();
-    const [open, setOpen] = useState(false);
 
     if (!enabled) return null;
 
@@ -58,16 +55,13 @@ export default function AuthButton() {
     }
 
     return (
-        <>
-            <button
-                onClick={() => setOpen(true)}
-                style={rowStyle}
-                onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-primary)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-secondary)'; }}
-            >
-                <SignIn size={15} weight="duotone" /> Đăng nhập
-            </button>
-            {open && <AuthModal onClose={() => setOpen(false)} />}
-        </>
+        <button
+            onClick={() => promptLogin()}
+            style={rowStyle}
+            onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-primary)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-secondary)'; }}
+        >
+            <SignIn size={15} weight="duotone" /> Đăng nhập
+        </button>
     );
 }

@@ -3,6 +3,7 @@ import { Inter, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth";
 import { CreditsProvider } from "@/lib/credits-context";
+import GlobalAuthModal from "@/components/GlobalAuthModal";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -39,7 +40,10 @@ export default function RootLayout({
         className={`${inter.variable} ${geistMono.variable} antialiased`}
       >
         <AuthProvider>
-          <CreditsProvider>{children}</CreditsProvider>
+          <CreditsProvider>
+            {children}
+            <GlobalAuthModal />
+          </CreditsProvider>
         </AuthProvider>
       </body>
     </html>

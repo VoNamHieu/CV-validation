@@ -7,6 +7,7 @@ import {
     Target, MapPin, Stack,
 } from '@phosphor-icons/react';
 import { useAppStore } from '@/store/useAppStore';
+import { useAuthGate } from '@/lib/auth';
 import { parsePdfWithAI } from '@/lib/api';
 import { cvToExtensionProfile } from '@/lib/extension-profile';
 import { syncProfileToExtension, syncCvDataToExtension } from '@/lib/extension-sync';
@@ -18,6 +19,8 @@ export default function StepUploadCV() {
         targetJobTitle, setTargetJobTitle, targetLocation, setTargetLocation,
         targetLevel, setTargetLevel,
     } = useAppStore();
+    const gate = useAuthGate();
+    const GATE_MSG = 'Đăng nhập để nhận 50 credit miễn phí và bắt đầu tìm việc.';
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [dragOver, setDragOver] = useState(false);
     const [error, setError] = useState('');
@@ -413,7 +416,7 @@ export default function StepUploadCV() {
                 <button
                     className="btn-primary"
                     disabled={!uploaded || processing}
-                    onClick={() => setStep(2)}
+                    onClick={() => { if (gate(GATE_MSG)) setStep(2); }}
                     style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '13px 28px' }}
                 >
                     Tìm việc phù hợp <ArrowRight size={16} weight="bold" />
@@ -421,7 +424,7 @@ export default function StepUploadCV() {
                 <button
                     className="btn-primary"
                     disabled={!uploaded || processing}
-                    onClick={() => { setFullyAutoMode(true); setStep(2); }}
+                    onClick={() => { if (gate(GATE_MSG)) { setFullyAutoMode(true); setStep(2); } }}
                     title="Tự động tìm việc, tối ưu CV và ứng tuyển — không cần thao tác thêm"
                     style={{
                         display: 'flex', alignItems: 'center', gap: 8, padding: '13px 22px',
