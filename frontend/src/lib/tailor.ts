@@ -6,7 +6,7 @@
 // Anti-hallucination guardrails live in the prompts; the optimize step ALSO
 // repairs any dropped entries/bullets/skills deterministically (repairOptimizedCv).
 
-import { callAI } from "@/lib/gemini";
+import { callAI, callAIExtract } from "@/lib/gemini";
 import { safeJsonParse } from "@/lib/safe-json";
 import { MAX_INPUT_TEXT_LENGTH } from "@/lib/validation";
 import { JD_EXTRACTION_RESPONSE_SCHEMA } from "@/lib/cv-extraction-schema";
@@ -34,7 +34,7 @@ export async function extractJd(rawText: unknown): Promise<Record<string, unknow
     const text = typeof rawText === "string" ? rawText.slice(0, MAX_INPUT_TEXT_LENGTH) : "";
     if (!text) throw new Error("raw_text is required");
     const userPrompt = `Extract the key requirements, nice-to-haves, responsibilities, seniority, minimum required years of experience, and domain from this Job Description:\n\n${text}`;
-    const result = await callAI(JD_SYSTEM_PROMPT, userPrompt, JD_EXTRACTION_RESPONSE_SCHEMA);
+    const result = await callAIExtract(JD_SYSTEM_PROMPT, userPrompt, JD_EXTRACTION_RESPONSE_SCHEMA);
     const parsed = safeJsonParse(result);
     if (!parsed) throw new Error("AI returned invalid JSON. Please retry.");
     return parsed as Record<string, unknown>;

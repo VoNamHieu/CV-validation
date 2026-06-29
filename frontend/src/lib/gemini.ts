@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, ThinkingLevel, type ThinkingConfig } from "@google/genai";
 
 let _client: GoogleGenAI | null = null;
 
@@ -14,8 +14,17 @@ function getClient(): GoogleGenAI {
 }
 
 // ── Models ──
-const MAIN_MODEL = "gemini-3.1-pro-preview";
-const FALLBACK_MODEL = "gemini-3-flash-preview";
+const PRO_MODEL = "gemini-3.1-pro-preview";
+const FLASH_MODEL = "gemini-3-flash-preview";
+
+// ── Cost tiers ──
+// Reasoning (score, optimize): Pro first, Flash fallback. Thinking ON — these
+// genuinely benefit from it.
+const REASON_MODELS = [PRO_MODEL, FLASH_MODEL];
+// Extraction & light tasks (parse PDF, extract CV/JD, search/rank/map): these
+// are deterministic schema-constrained transforms — no reasoning needed. Flash
+// with thinking DISABLED (~5-10× cheaper); Pro only as a reliability fallback.
+const LIGHT_MODELS = [FLASH_MODEL, PRO_MODEL];
 
 // ── Reliability knobs ──
 // A pipeline run is 10-20 LLM calls; without per-call retries a single
@@ -51,11 +60,19 @@ async function callModel(
     contents: Contents,
     schema?: GeminiSchema,
     tag = "gemini",
+    opts: { models?: string[]; noThinking?: boolean } = {},
 ): Promise<string> {
     const client = getClient();
+    const models = opts.models ?? REASON_MODELS;
 
     let lastErr: unknown;
-    for (const model of [MAIN_MODEL, FALLBACK_MODEL]) {
+    for (const model of models) {
+        // Disable thinking on the light tier. Flash accepts thinkingBudget:0;
+        // Pro rejects it ("only works in thinking mode"), so cap it via
+        // thinkingLevel:"low" when Pro is used as the fallback.
+        const thinkingConfig: ThinkingConfig | undefined = opts.noThinking
+            ? (model.includes("flash") ? { thinkingBudget: 0 } : { thinkingLevel: ThinkingLevel.LOW })
+            : undefined;
         for (let attempt = 1; attempt <= MAX_ATTEMPTS_PER_MODEL; attempt++) {
             try {
                 console.log(`[${tag}] Calling ${model} (attempt ${attempt})...`);
@@ -66,6 +83,7 @@ async function callModel(
                         systemInstruction: systemPrompt,
                         responseMimeType: "application/json",
                         ...(schema ? { responseSchema: schema } : {}),
+                        ...(thinkingConfig ? { thinkingConfig } : {}),
                         httpOptions: { timeout: REQUEST_TIMEOUT_MS },
                     },
                 });
@@ -88,31 +106,59 @@ async function callModel(
 }
 
 /**
- * Complex tasks: Gemini main → fallback, JSON mode
- * Use for: CV extraction, JD extraction, scoring, optimization
+ * Reasoning tasks: Pro (thinking ON) → Flash fallback, JSON mode.
+ * Use ONLY for tasks that genuinely reason: scoring, optimization/tailoring.
  */
 export async function callAI(
     systemPrompt: string,
     userPrompt: string,
     schema?: GeminiSchema,
 ): Promise<string> {
-    return callModel(systemPrompt, userPrompt, schema);
+    return callModel(systemPrompt, userPrompt, schema, "gemini", { models: REASON_MODELS });
 }
 
 /**
- * Simple tasks: Gemini main → fallback, JSON mode
- * Use for: search URL generation, job link extraction
+ * Extraction tasks: Flash (thinking OFF) → Pro fallback, JSON mode.
+ * Use for schema-constrained transforms: CV/JD extraction, profile distill,
+ * form mapping — no reasoning, so no thinking budget burned.
+ */
+export async function callAIExtract(
+    systemPrompt: string,
+    userPrompt: string,
+    schema?: GeminiSchema,
+): Promise<string> {
+    return callModel(systemPrompt, userPrompt, schema, "gemini-extract", { models: LIGHT_MODELS, noThinking: true });
+}
+
+/**
+ * Judgment tasks: Flash with thinking ON → Pro fallback, JSON mode.
+ * For tasks that need light reasoning but not Pro — ranking by fit, agent
+ * action planning, form-field mapping. A/B-tested: Flash+thinking matches Pro's
+ * ordering on nuanced fit calls; Flash WITHOUT thinking gets them wrong.
+ */
+export async function callAIJudge(
+    systemPrompt: string,
+    userPrompt: string,
+    schema?: GeminiSchema,
+): Promise<string> {
+    return callModel(systemPrompt, userPrompt, schema, "gemini-judge", { models: LIGHT_MODELS });
+}
+
+/**
+ * Simple mechanical tasks: Flash (thinking OFF) → Pro fallback, JSON mode.
+ * Use for: search URL generation, job-link extraction from markers.
  */
 export async function callAILight(
     systemPrompt: string,
     userPrompt: string,
     schema?: GeminiSchema,
 ): Promise<string> {
-    return callModel(systemPrompt, userPrompt, schema);
+    return callModel(systemPrompt, userPrompt, schema, "gemini-light", { models: LIGHT_MODELS, noThinking: true });
 }
 
 /**
- * PDF parsing: Gemini main → fallback with inline PDF input
+ * PDF parsing: Flash (thinking OFF) → Pro fallback, inline PDF input.
+ * Parsing a PDF into structured fields is extraction, not reasoning.
  */
 export async function callAIWithPdf(
     systemPrompt: string,
@@ -129,5 +175,5 @@ export async function callAIWithPdf(
             ],
         },
     ];
-    return callModel(systemPrompt, contents, schema, "gemini-pdf");
+    return callModel(systemPrompt, contents, schema, "gemini-pdf", { models: LIGHT_MODELS, noThinking: true });
 }
