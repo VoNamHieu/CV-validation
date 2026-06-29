@@ -147,6 +147,24 @@ def _first(d: dict, keys) -> str:
     return ""
 
 
+def _record_keys(rec) -> set:
+    """Lowercased keys of a record, including one level into sub-objects — so
+    nested shapes (e.g. {JobRequest:{JobName,…}, Company:{…}}) are recognised
+    as job records, not just flat {title,…} ones."""
+    ks = set()
+    if not isinstance(rec, dict):
+        return ks
+    for k, v in rec.items():
+        ks.add(k.lower())
+        if isinstance(v, dict):
+            ks.update(kk.lower() for kk in v)
+    return ks
+
+
+def _has_title_key(rec) -> bool:
+    return bool(_record_keys(rec) & set(_TITLE_KEYS))
+
+
 def _find_job_list(data):
     """Find the list of job objects in an arbitrary JSON payload."""
     if isinstance(data, list):
@@ -157,8 +175,9 @@ def _find_job_list(data):
         best = []
         for v in data.values():
             if isinstance(v, list) and v and isinstance(v[0], dict):
-                # a list whose items look job-like (have a title-ish key)
-                if any(any(k.lower() in _TITLE_KEYS for k in it) for it in v[:3]):
+                # a list whose items look job-like (a title key at the top level
+                # OR one level into a sub-object, for nested APIs).
+                if any(_has_title_key(it) for it in v[:3]):
                     if len(v) > len(best):
                         best = v
             elif isinstance(v, dict):
@@ -181,10 +200,20 @@ def _items_to_jobs(items, origin: str) -> list[dict]:
     for it in items:
         if not isinstance(it, dict):
             continue
-        title = _first(it, _TITLE_KEYS)
+        # Most APIs are flat; some (e.g. OutSystems) nest the posting under a
+        # sub-object. When the top level has no title, fall back to the first
+        # sub-dict that carries one — flat shapes keep their existing behaviour
+        # since `core` stays `it`.
+        core = it
+        if not _first(it, _TITLE_KEYS):
+            for v in it.values():
+                if isinstance(v, dict) and _first(v, _TITLE_KEYS):
+                    core = v
+                    break
+        title = _first(core, _TITLE_KEYS)
         if not title or len(title) < 3:
             continue
-        url = _first(it, _URL_KEYS)
+        url = _first(core, _URL_KEYS) or _first(it, _URL_KEYS)
         if url and not url.startswith("http"):
             # Make absolute: protocol-relative ("//host/x"), root-relative
             # ("/x"), or a bare slug ("6742-foo" — many SPAs put the slug in a
@@ -202,7 +231,8 @@ def _items_to_jobs(items, origin: str) -> list[dict]:
                 else:
                     url = urljoin(origin + "/", slug)
         if not url:
-            jid = it.get("id") or it.get("jobId") or it.get("slug")
+            jid = (core.get("id") or core.get("jobId") or core.get("Id")
+                   or it.get("id") or it.get("jobId") or it.get("slug"))
             if jid:
                 url = f"{origin}/job/{jid}"
             else:
@@ -210,9 +240,10 @@ def _items_to_jobs(items, origin: str) -> list[dict]:
                 # distinct with a title fragment so they don't collapse on dedupe.
                 from urllib.parse import quote
                 url = f"{origin}#{quote(title[:40])}"
-        out.append({"title": title[:200], "url": url,
-                    "location": _first(it, _LOC_KEYS)[:120],
-                    "description": _strip(_first(it, _DESC_KEYS))})
+        out.append({"title": title[:200],
+                    "url": url,
+                    "location": (_first(core, _LOC_KEYS) or _first(it, _LOC_KEYS))[:120],
+                    "description": _strip(_first(core, _DESC_KEYS) or _first(it, _DESC_KEYS))})
     return out
 
 
@@ -231,8 +262,9 @@ def _looks_like_job_list(items) -> bool:
     dicts = [x for x in items if isinstance(x, dict)][:5]
     if len(dicts) < 1:
         return False
-    has_title = sum(1 for d in dicts if any(k.lower() in _TITLE_KEYS for k in d))
-    has_signal = sum(1 for d in dicts if any(k.lower() in _JOB_SIGNAL_KEYS for k in d))
+    # Nested-aware: title/signal keys may live one level into a sub-object.
+    has_title = sum(1 for d in dicts if _record_keys(d) & set(_TITLE_KEYS))
+    has_signal = sum(1 for d in dicts if _record_keys(d) & _JOB_SIGNAL_KEYS)
     avg_keys = sum(len(d) for d in dicts) / len(dicts)
     # Real postings carry a title, at least one job-specific field, and several
     # fields overall (menus/categories/addresses are thin title-only lists).
