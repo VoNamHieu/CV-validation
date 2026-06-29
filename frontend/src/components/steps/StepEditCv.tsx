@@ -9,6 +9,7 @@ import {
     ArrowsClockwise,
 } from '@phosphor-icons/react';
 import { useAppStore } from '@/store/useAppStore';
+import { useAuthGate } from '@/lib/auth';
 import CvDocumentPreview from '@/components/CvDocumentPreview';
 import EditableTemplateFrame from '@/components/EditableTemplateFrame';
 import { applyCvFieldEdit } from '@/lib/cv-inline-edit';
@@ -79,6 +80,7 @@ export default function StepEditCv() {
         fullyAutoMode, setFullyAutoMode,
         userAvatarBase64, setUserAvatar, selectedJdId, searchPivotNote,
     } = useAppStore();
+    const gate = useAuthGate();
     const fullAutoFiredRef = useRef(false);
 
     // All entries that have optimized CVs, sorted by score
@@ -219,6 +221,8 @@ export default function StepEditCv() {
        download reflect the new version. */
     const handleReoptimize = useCallback(async () => {
         if (!currentEntry || !cvData || !currentEntry.jdData || !currentEntry.matchResult) return;
+        // Re-optimize is a paid AI call — gate it for anonymous users.
+        if (!gate('Đăng nhập để tối ưu CV bằng AI (tặng 50 credit).')) return;
         setReoptimizing(true);
         setReoptimizeError(null);
         try {
@@ -242,7 +246,7 @@ export default function StepEditCv() {
         } finally {
             setReoptimizing(false);
         }
-    }, [currentEntry, cvData, reoptPoints, updateJdEntry]);
+    }, [currentEntry, cvData, reoptPoints, updateJdEntry, gate]);
 
     /* ─── Inline edits made directly on the rendered template preview ───
        Committed into both editedCv (what the preview/download shows) and the
