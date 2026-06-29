@@ -13,7 +13,7 @@ from starlette.responses import JSONResponse
 
 from app.routers import (
     extract, crawl, smart_crawl, render, career, debug_capture, link_monitor,
-    compat_monitor, store, account,
+    compat_monitor, store, account, credits,
 )
 from app.services.browser_pool import close_browser
 from app.db.pool import close_pool
@@ -106,3 +106,4 @@ app.include_router(link_monitor.router)
 app.include_router(compat_monitor.router)
 app.include_router(store.router)
 app.include_router(account.router)
+app.include_router(credits.router)
