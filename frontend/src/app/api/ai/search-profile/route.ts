@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { callAI } from "@/lib/gemini";
+import { spendCredits, creditErrorResponse } from "@/lib/credits-guard";
+import { callAIExtract } from "@/lib/gemini";
 import { safeJsonParse } from "@/lib/safe-json";
 import { SEARCH_PROFILE_RESPONSE_SCHEMA } from "@/lib/cv-extraction-schema";
 
@@ -33,13 +34,15 @@ Rules:
 
         const userPrompt = `Infer the candidate's job-search profile from this CV (JSON):\n\n${JSON.stringify(cv)}`;
 
-        const result = await callAI(systemPrompt, userPrompt, SEARCH_PROFILE_RESPONSE_SCHEMA);
+        await spendCredits(request, "search_profile");
+        const result = await callAIExtract(systemPrompt, userPrompt, SEARCH_PROFILE_RESPONSE_SCHEMA);
         let parsed;
         try { parsed = safeJsonParse(result); }
         catch { return NextResponse.json({ detail: "AI returned invalid JSON. Please retry." }, { status: 502 }); }
 
         return NextResponse.json(parsed);
     } catch (e: unknown) {
+        const cr = creditErrorResponse(e); if (cr) return cr;
         const message = e instanceof Error ? e.message : "Failed to infer search profile";
         return NextResponse.json({ detail: message }, { status: 500 });
     }

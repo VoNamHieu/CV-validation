@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { spendCredits, creditErrorResponse } from "@/lib/credits-guard";
 import { callAILight } from "@/lib/gemini";
 import { safeJsonParse } from "@/lib/safe-json";
 
@@ -58,6 +59,7 @@ TARGET JOB SITE URL: ${siteUrl}
 
 Generate the most relevant job search URL for this candidate on this site.`;
 
+        await spendCredits(request, "smart_search");
         const raw = await callAILight(systemPrompt, userPrompt);
         let parsed: Record<string, unknown> | Record<string, unknown>[];
         try { parsed = safeJsonParse<Record<string, unknown> | Record<string, unknown>[]>(raw); }
@@ -82,6 +84,7 @@ Generate the most relevant job search URL for this candidate on this site.`;
 
         return NextResponse.json(parsed);
     } catch (e: unknown) {
+        const cr = creditErrorResponse(e); if (cr) return cr;
         const message =
             e instanceof Error ? e.message : "Failed to generate search";
         return NextResponse.json({ detail: message }, { status: 500 });

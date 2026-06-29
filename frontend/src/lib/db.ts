@@ -94,30 +94,17 @@ export interface Application {
 }
 
 // ── Auth seam ────────────────────────────────────────────────────────────────
-// When Supabase Auth is configured, user-scoped calls carry the session JWT
-// (Authorization: Bearer …) — the backend verifies it against the project JWKS.
-// Otherwise they fall back to the dev X-User-Id header (set via setUserId).
-import { getSupabase } from './supabase';
+// Shared with the AI calls (api.ts) — see lib/auth-headers.ts. Prefers the
+// Supabase session JWT; falls back to the dev X-User-Id header. setUserId is
+// kept as the public name used elsewhere.
+import { getAuthHeaders, setDevUserId } from './auth-headers';
 
-let _devUserId: string | null = null;
-export function setUserId(id: string | null) {
-    _devUserId = id;
-}
-
-async function authHeaders(): Promise<Record<string, string>> {
-    const sb = getSupabase();
-    if (sb) {
-        const { data } = await sb.auth.getSession();
-        const token = data.session?.access_token;
-        if (token) return { Authorization: `Bearer ${token}` };
-    }
-    return _devUserId ? { 'X-User-Id': _devUserId } : {};
-}
+export const setUserId = setDevUserId;
 
 async function req<T>(path: string, init?: RequestInit & { auth?: boolean }): Promise<T> {
     const headers: Record<string, string> = { ...(init?.headers as Record<string, string>) };
     if (init?.body) headers['Content-Type'] = 'application/json';
-    if (init?.auth) Object.assign(headers, await authHeaders());
+    if (init?.auth) Object.assign(headers, await getAuthHeaders());
     const res = await fetch(path, { ...init, headers });
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -162,6 +149,12 @@ export const catalog = {
             role_family: body.roleFamily, industry: body.industry, limit: body.limit,
         }),
     }),
+};
+
+// ── Credits (user-scoped, requires auth) ──────────────────────────────────────
+export const credits = {
+    balance: () => req<{ balance: number; signup_grant: number }>(`/api/credits/balance`, { auth: true }),
+    costs: () => req<Record<string, number>>(`/api/credits/costs`),
 };
 
 // ── Account (user-scoped, requires auth) ──────────────────────────────────────

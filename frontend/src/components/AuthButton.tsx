@@ -1,14 +1,16 @@
 'use client';
 
 import { useState } from 'react';
-import { SignIn, SignOut, UserCircle } from '@phosphor-icons/react';
+import { SignIn, SignOut, UserCircle, Coins } from '@phosphor-icons/react';
 import { useAuth } from '@/lib/auth';
+import { useCredits } from '@/lib/credits-context';
 import AuthModal from './AuthModal';
 
 // Sidebar auth widget: a login button when signed out, or the user's email +
 // sign-out when signed in. Renders nothing if Supabase Auth isn't configured.
 export default function AuthButton() {
     const { enabled, user, loading, signOut } = useAuth();
+    const { balance } = useCredits();
     const [open, setOpen] = useState(false);
 
     if (!enabled) return null;
@@ -32,6 +34,15 @@ export default function AuthButton() {
                     <UserCircle size={16} weight="duotone" />
                     <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {user.email}
+                    </span>
+                </div>
+                <div style={{ ...rowStyle, cursor: 'default', justifyContent: 'space-between' }}
+                    title="Credit còn lại cho các thao tác AI">
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <Coins size={15} weight="duotone" /> Credit
+                    </span>
+                    <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
+                        {balance ?? '…'}
                     </span>
                 </div>
                 <button

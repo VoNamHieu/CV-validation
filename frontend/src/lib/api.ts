@@ -1,4 +1,5 @@
 // All API calls use Next.js API routes (relative paths)
+import { getAuthHeaders } from './auth-headers';
 import type { CVData } from './types';
 import type { CvImprovement } from './cv-improvements';
 
@@ -39,7 +40,7 @@ export async function parsePdfWithAI(file: File, type: 'cv' | 'jd') {
 
     const res = await fetch('/api/parse-pdf', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
         body: JSON.stringify({ pdf_base64: base64, type }),
     });
 
@@ -53,7 +54,7 @@ export async function parsePdfWithAI(file: File, type: 'cv' | 'jd') {
 export async function extractCvStructured(rawText: string) {
     const res = await fetch('/api/ai/extract-cv', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
         body: JSON.stringify({ raw_text: rawText }),
     });
     if (!res.ok) {
@@ -66,7 +67,7 @@ export async function extractCvStructured(rawText: string) {
 export async function extractJdStructured(rawText: string) {
     const res = await fetch('/api/ai/extract-jd', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
         body: JSON.stringify({ raw_text: rawText }),
     });
     if (!res.ok) {
@@ -79,7 +80,7 @@ export async function extractJdStructured(rawText: string) {
 export async function scoreFit(cv: unknown, jd: unknown) {
     const res = await fetch('/api/ai/score', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
         body: JSON.stringify({ cv, jd }),
     });
     if (!res.ok) {
@@ -97,7 +98,7 @@ export async function optimizeCvVariants(
 ): Promise<OptimizeResponse> {
     const res = await fetch('/api/ai/optimize', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
         body: JSON.stringify({ cv, jd, match, options }),
     });
     if (!res.ok) {
@@ -127,7 +128,7 @@ export async function crawlUrl(url: string, keepLinks = false): Promise<{ text: 
 export async function smartSearch(cv: unknown, siteUrl: string, jobTitle?: string) {
     const res = await fetch('/api/ai/smart-search', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
         body: JSON.stringify({ cv, siteUrl, jobTitle }),
     });
     if (!res.ok) {
@@ -141,7 +142,7 @@ export async function smartSearch(cv: unknown, siteUrl: string, jobTitle?: strin
 export async function extractJobLinks(htmlText: string, siteUrl: string) {
     const res = await fetch('/api/ai/extract-job-links', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
         body: JSON.stringify({ html_text: htmlText, site_url: siteUrl }),
     });
     if (!res.ok) {
@@ -180,7 +181,7 @@ export async function rankJobsByFit(
 ): Promise<RankedJob[]> {
     const res = await fetch('/api/ai/rank-jobs', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
         body: JSON.stringify({ cv, jobs }),
     });
     if (!res.ok) {
@@ -506,7 +507,7 @@ export interface SearchProfile {
 export async function inferSearchProfile(cv: unknown): Promise<SearchProfile> {
     const res = await fetch('/api/ai/search-profile', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
         body: JSON.stringify({ cv }),
     });
     if (!res.ok) {

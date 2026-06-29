@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { spendCredits, creditErrorResponse } from "@/lib/credits-guard";
 import { callAIWithPdf } from "@/lib/gemini";
 import { safeJsonParse } from "@/lib/safe-json";
 import { MAX_PDF_BASE64_LENGTH } from "@/lib/validation";
@@ -39,6 +40,7 @@ Return ONLY valid JSON matching this exact schema:
             : "Extract the key requirements, nice-to-haves, responsibilities, seniority, and domain from this Job Description PDF.";
 
         const responseSchema = isCV ? CV_EXTRACTION_RESPONSE_SCHEMA : JD_EXTRACTION_RESPONSE_SCHEMA;
+        await spendCredits(request, "parse_pdf");
         const result = await callAIWithPdf(systemPrompt, userPrompt, pdf_base64, responseSchema);
 
         let parsed;
@@ -50,6 +52,7 @@ Return ONLY valid JSON matching this exact schema:
 
         return NextResponse.json(isCV ? normalizeCVResponse(parsed) : parsed);
     } catch (e: unknown) {
+        const cr = creditErrorResponse(e); if (cr) return cr;
         const message = e instanceof Error ? e.message : "Failed to parse PDF";
         return NextResponse.json({ detail: message }, { status: 500 });
     }
