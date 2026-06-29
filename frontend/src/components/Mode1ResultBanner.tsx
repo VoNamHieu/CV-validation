@@ -39,7 +39,7 @@ export default function Mode1ResultBanner() {
                 id,
                 source: 'mode1-tailor',
                 applyUrl: r.jobUrl || undefined,
-                label: title || 'CV đã tailor (job page)',
+                label: title || 'CV đã tinh chỉnh (trang tuyển dụng)',
                 status: 'done',
                 jdData: (r.jd as unknown as JDData) || undefined,
                 matchResult: r.match as unknown as MatchResult,
@@ -54,7 +54,7 @@ export default function Mode1ResultBanner() {
         if ((r.jobUrl || title) && !store.jobHistory.some(j => j.id === recId)) {
             addJobRecord({
                 id: recId,
-                jobTitle: title || 'Tailored job',
+                jobTitle: title || 'Việc đã tinh chỉnh',
                 company: '',
                 jobUrl: r.jobUrl || '',
                 siteName: hostnameOf(r.jobUrl || ''),
@@ -99,7 +99,7 @@ export default function Mode1ResultBanner() {
         // so the extension stores it ATOMICALLY with the pending-apply flag —
         // the agent then uploads THIS CV, not a stale one. Non-fatal: on render
         // failure the agent falls back to whatever PDF was last synced.
-        setStatus('📄 Đang tạo PDF từ CV đã tailor…');
+        setStatus('📄 Đang tạo PDF từ CV đã tinh chỉnh…');
         let cvFileBase64: string | undefined;
         let cvFileName: string | undefined;
         try {
@@ -122,7 +122,7 @@ export default function Mode1ResultBanner() {
             border: '1px solid rgba(139,92,246,0.35)', fontSize: 14, lineHeight: 1.5,
         }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                <strong>✨ CV đã tailor cho 1 job</strong>
+                <strong>✨ CV đã tinh chỉnh cho 1 việc</strong>
                 <button
                     onClick={() => { setResult(null); setStatus(''); }}
                     style={{ background: 'transparent', border: 'none', color: '#a5b4fc', cursor: 'pointer', fontSize: 16 }}

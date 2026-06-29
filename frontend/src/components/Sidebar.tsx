@@ -1,7 +1,8 @@
 'use client';
 
+import { useState } from 'react';
 import { useAppStore, AppView } from '@/store/useAppStore';
-import { Sparkle, MagicWand, Briefcase, FileText } from '@phosphor-icons/react';
+import { Sparkle, MagicWand, Briefcase, FileText, List, X } from '@phosphor-icons/react';
 import type { Icon } from '@phosphor-icons/react';
 
 interface NavItem {
@@ -12,9 +13,9 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-    { id: 'apply', label: 'Apply', icon: MagicWand, description: 'CV · Match · Optimize' },
-    { id: 'editor', label: 'CV Editor', icon: FileText, description: 'Build · Edit · Export' },
-    { id: 'history', label: 'History', icon: Briefcase, description: 'Saved applications' },
+    { id: 'apply', label: 'Ứng tuyển', icon: MagicWand, description: 'CV · So khớp · Tối ưu' },
+    { id: 'editor', label: 'Sửa CV', icon: FileText, description: 'Tạo · Sửa · Xuất PDF' },
+    { id: 'history', label: 'Lịch sử', icon: Briefcase, description: 'Hồ sơ đã lưu' },
 ];
 
 export const SIDEBAR_WIDTH = 232;
@@ -23,9 +24,29 @@ export default function Sidebar() {
     const view = useAppStore((s) => s.view);
     const setView = useAppStore((s) => s.setView);
     const historyCount = useAppStore((s) => s.jobHistory.length);
+    const [mobileOpen, setMobileOpen] = useState(false);
 
     return (
+      <>
+        {/* Hamburger — only shown on mobile (CSS-gated) */}
+        <button
+            className="sidebar-toggle"
+            aria-label={mobileOpen ? 'Đóng menu' : 'Mở menu'}
+            aria-expanded={mobileOpen}
+            onClick={() => setMobileOpen((v) => !v)}
+        >
+            {mobileOpen ? <X size={20} weight="bold" /> : <List size={20} weight="bold" />}
+        </button>
+
+        {/* Backdrop behind the open drawer (mobile only) */}
+        <div
+            className={`sidebar-backdrop ${mobileOpen ? 'open' : ''}`}
+            onClick={() => setMobileOpen(false)}
+            aria-hidden="true"
+        />
+
         <aside
+            className={`app-sidebar ${mobileOpen ? 'open' : ''}`}
             style={{
                 position: 'fixed',
                 top: 0,
@@ -79,7 +100,7 @@ export default function Sidebar() {
                     return (
                         <button
                             key={item.id}
-                            onClick={() => setView(item.id)}
+                            onClick={() => { setView(item.id); setMobileOpen(false); }}
                             aria-current={isActive ? 'page' : undefined}
                             style={{
                                 display: 'flex',
@@ -163,12 +184,13 @@ export default function Sidebar() {
                     }}
                 >
                     <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent-green)' }} />
-                    AI Online
+                    AI đang hoạt động
                 </div>
                 <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', padding: '0 8px', opacity: 0.7 }}>
-                    Powered by Gemini · No hallucination
+                    Vận hành bởi AI · Không bịa nội dung
                 </div>
             </div>
         </aside>
+      </>
     );
 }

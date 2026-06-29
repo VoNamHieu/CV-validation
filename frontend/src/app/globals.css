@@ -76,6 +76,15 @@
   box-sizing: border-box;
 }
 
+/* Keyboard focus ring — visible only for keyboard users, never on mouse click.
+   Many buttons here are ghost-styled (no border), so without this they give no
+   focus feedback at all. */
+:focus-visible {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
 body {
   background: var(--bg-primary);
   color: var(--text-primary);
@@ -486,6 +495,64 @@ body {
 /* ═══════════════════════════════════════
    RESPONSIVE
    ═══════════════════════════════════════ */
+
+/* Sidebar drawer (off-canvas on mobile) */
+.app-sidebar {
+  transition: transform var(--duration-normal) var(--ease-out-expo);
+}
+
+.sidebar-toggle {
+  display: none;
+  position: fixed;
+  top: 14px;
+  left: 14px;
+  z-index: 60;
+  width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  background: rgba(17, 17, 17, 0.92);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border-default);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.sidebar-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(2px);
+}
+
+@media (max-width: 860px) {
+  /* Content reclaims full width — sidebar floats above it */
+  .app-main {
+    margin-left: 0 !important;
+  }
+
+  .app-sidebar {
+    transform: translateX(-100%);
+    box-shadow: 8px 0 32px rgba(0, 0, 0, 0.5);
+  }
+
+  .app-sidebar.open {
+    transform: translateX(0);
+  }
+
+  .sidebar-toggle {
+    display: flex;
+  }
+
+  .sidebar-backdrop.open {
+    display: block;
+  }
+}
+
 @media (max-width: 768px) {
   .report-grid-2col {
     grid-template-columns: 1fr !important;

@@ -40,7 +40,7 @@ export default function CvEditorView() {
                     margin: '0 0 4px', display: 'flex', alignItems: 'center', gap: 10,
                 }}>
                     <FileText size={22} weight="duotone" style={{ color: 'var(--accent-blue)' }} />
-                    CV Editor
+                    Sửa CV
                 </h1>
                 <p style={{ fontSize: '0.84rem', color: 'var(--text-muted)', margin: 0 }}>
                     Chỉnh sửa CV, chọn mẫu và xuất PDF — không cần qua luồng ứng tuyển.
@@ -159,6 +159,7 @@ function CvEditorWorkspace({ cv }: { cv: CVData }) {
     const [avatarBusy, setAvatarBusy] = useState(false);
     const [avatarError, setAvatarError] = useState<string | null>(null);
     const [downloadingPdf, setDownloadingPdf] = useState(false);
+    const [pdfError, setPdfError] = useState('');
 
     const workingCv = editedCv ?? cv;
     // Personal-info edits (contact/personal/employment/preferences) go to cvData
@@ -210,6 +211,7 @@ function CvEditorWorkspace({ cv }: { cv: CVData }) {
     const handleDownload = useCallback(async (cvToRender: CVData) => {
         if (downloadingPdf) return;
         setDownloadingPdf(true);
+        setPdfError('');
         try {
             const merged: CVData = {
                 ...cvToRender,
@@ -234,8 +236,8 @@ function CvEditorWorkspace({ cv }: { cv: CVData }) {
             a.click();
             URL.revokeObjectURL(urlObj);
         } catch (e) {
-            const msg = e instanceof Error ? e.message : 'PDF export failed';
-            alert(`❌ Export PDF lỗi: ${msg}`);
+            const msg = e instanceof Error ? e.message : 'Xuất PDF thất bại';
+            setPdfError(`Xuất PDF lỗi: ${msg}`);
         } finally {
             setDownloadingPdf(false);
         }
@@ -251,7 +253,7 @@ function CvEditorWorkspace({ cv }: { cv: CVData }) {
                 display: 'flex', alignItems: 'center', gap: 6,
             }}>
                 <Warning size={12} />
-                Click any text to edit, hover items to reorder/remove — nội dung do bạn kiểm soát.
+                Bấm vào nội dung bất kỳ để sửa, di chuột vào mục để sắp xếp/xoá — nội dung do bạn kiểm soát.
             </div>
 
             {/* ══════ Personal Info — editable, auto-synced to extension ══════ */}
@@ -388,9 +390,19 @@ function CvEditorWorkspace({ cv }: { cv: CVData }) {
                                 }}
                             >
                                 {downloadingPdf ? <CircleNotch size={14} className="spin" /> : <FloppyDisk size={14} weight="fill" />}
-                                {downloadingPdf ? 'Đang xuất PDF…' : 'Save & Download'}
+                                {downloadingPdf ? 'Đang xuất PDF…' : 'Lưu & Tải xuống'}
                             </button>
                         </div>
+                        {pdfError && (
+                            <div role="alert" style={{
+                                marginTop: 8, padding: '8px 12px', borderRadius: 6,
+                                background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)',
+                                color: 'var(--accent-red)', fontSize: '0.78rem',
+                                display: 'flex', alignItems: 'center', gap: 6,
+                            }}>
+                                <Warning size={13} /> {pdfError}
+                            </div>
+                        )}
                         <div style={{ marginTop: 8, fontSize: '0.74rem', color: 'var(--text-muted)' }}>
                             ✏️ Click vào nội dung trên CV để sửa trực tiếp — Enter để lưu, Esc để huỷ.
                         </div>

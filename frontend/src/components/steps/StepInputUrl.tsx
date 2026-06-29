@@ -27,11 +27,11 @@ type Phase = 'idle' | 'analyzing_cv' | 'searching' | 'extracting_links'
 // all run inside the parallel 'crawling_job' phase — jobs are in different
 // stages at the same time, so a single chip represents them.
 const PHASE_CONFIG: Record<Exclude<Phase, 'idle'>, { label: string; icon: Icon }> = {
-    analyzing_cv: { label: 'AI analyzing your CV...', icon: Brain },
-    searching: { label: 'Searching for matching openings...', icon: MagnifyingGlass },
-    extracting_links: { label: 'Compiling job listings...', icon: LinkSimple },
-    ranking: { label: 'Ranking jobs by CV fit...', icon: Sparkle },
-    crawling_job: { label: 'Analyzing jobs in parallel...', icon: Lightning },
+    analyzing_cv: { label: 'AI đang phân tích CV của bạn...', icon: Brain },
+    searching: { label: 'Đang tìm tin tuyển dụng phù hợp...', icon: MagnifyingGlass },
+    extracting_links: { label: 'Đang tổng hợp danh sách việc làm...', icon: LinkSimple },
+    ranking: { label: 'Đang xếp hạng việc theo độ phù hợp CV...', icon: Sparkle },
+    crawling_job: { label: 'Đang phân tích các việc song song...', icon: Lightning },
 };
 
 const PHASE_ORDER: Exclude<Phase, 'idle'>[] = [
@@ -142,7 +142,7 @@ export default function StepInputUrl() {
     //     curated list of VN employers, but UI presents this as a general AI
     //     search. No phase label or detail string may name the source list. ───
     const handleFeaturedAnalyze = async (mode: 'featured' | 'ground' = 'featured') => {
-        if (!cvData) { setError('Please upload your CV first.'); return; }
+        if (!cvData) { setError('Vui lòng tải CV lên trước.'); return; }
 
         const isFullAuto = useAppStore.getState().fullyAutoMode;
 
@@ -166,22 +166,22 @@ export default function StepInputUrl() {
             setPhase('analyzing_cv');
             setInferredTitle(targetTitle);
             setPhaseDetail(targetTitle
-                ? `Matching openings to "${targetTitle}"${cityName ? ` in ${cityName}` : ''}...`
-                : 'Matching openings to your CV...');
+                ? `Đang tìm tin tuyển dụng phù hợp với "${targetTitle}"${cityName ? ` tại ${cityName}` : ''}...`
+                : 'Đang tìm tin tuyển dụng phù hợp với CV của bạn...');
 
             // ── Phase 2 (presented as "searching"): pull aggregated jobs. ──
             setPhase('searching');
             setPhaseDetail(targetTitle
-                ? `Scanning live openings for "${targetTitle}"...`
-                : 'Scanning live openings...');
+                ? `Đang quét tin tuyển dụng cho "${targetTitle}"...`
+                : 'Đang quét tin tuyển dụng...');
             // Poll while the backend warms its cache (first run / cold start)
             // instead of blocking on one long request that times out.
             const onWaiting = (attempt: number) => {
                 if (runRef.current !== runId) return;
                 setPhaseDetail(
                     targetTitle
-                        ? `Preparing live openings for "${targetTitle}"… (${attempt})`
-                        : `Preparing live openings… (${attempt})`,
+                        ? `Đang chuẩn bị tin tuyển dụng cho "${targetTitle}"… (${attempt})`
+                        : `Đang chuẩn bị tin tuyển dụng… (${attempt})`,
                 );
             };
             // A ranked opening, carrying the taxonomy role family so the
@@ -210,7 +210,7 @@ export default function StepInputUrl() {
                 // No curated pool to facet-rank, so we keep the strict title pair
                 // + LLM tournament here.
                 setPhase('analyzing_cv');
-                setPhaseDetail('Reading your CV to understand your fit…');
+                setPhaseDetail('Đang đọc CV của bạn để hiểu mức độ phù hợp…');
                 let roles = targetTitle ? [targetTitle] : [];
                 let domains: string[] = [];
                 let strengths: string[] = [];
@@ -225,11 +225,11 @@ export default function StepInputUrl() {
                     console.warn('[ground-search] profile inference failed, using title only:', e);
                 }
                 if (roles.length === 0) {
-                    throw new Error('Ground search needs a target role — set one on the upload step.');
+                    throw new Error('Tìm trên web cần một vai trò mục tiêu — hãy thiết lập ở bước tải CV.');
                 }
                 setInferredTitle(roles[0]);
                 setPhase('searching');
-                setPhaseDetail(`Searching: ${roles.slice(0, 3).join(', ')}${domains.length ? ` · ${domains.slice(0, 2).join(', ')}` : ''}`);
+                setPhaseDetail(`Đang tìm: ${roles.slice(0, 3).join(', ')}${domains.length ? ` · ${domains.slice(0, 2).join(', ')}` : ''}`);
                 console.log('[ground-search] profile:', { roles, domains, strengths, city: cityName || '(any)' });
                 const discovered = await discoverJobsWarm({ roles, domains, strengths }, cityName, onWaiting);
 
@@ -246,11 +246,11 @@ export default function StepInputUrl() {
                 }
                 if (allJobs.length === 0) {
                     const why = discovered.warming
-                        ? 'still preparing (timed out) — try again in a moment'
+                        ? 'vẫn đang chuẩn bị (hết thời gian chờ) — hãy thử lại sau giây lát'
                         : discovered.companies.length === 0
-                            ? `grounded search found no companies for "${targetTitle}"`
-                            : `${discovered.companies.length} companies found but none list any openings right now`;
-                    throw new Error(`No matching openings: ${why}.`);
+                            ? `tìm trên web không thấy công ty nào cho "${targetTitle}"`
+                            : `tìm thấy ${discovered.companies.length} công ty nhưng hiện chưa có tin tuyển dụng nào`;
+                    throw new Error(`Không có tin tuyển dụng phù hợp: ${why}.`);
                 }
 
                 // Strict title pairing → city → LLM tournament.
@@ -262,7 +262,7 @@ export default function StepInputUrl() {
                 offCity = paired.offCity;
 
                 setPhase('ranking');
-                setPhaseDetail(`Ranking ${paired.pool.length} jobs by fit to your CV...`);
+                setPhaseDetail(`Đang xếp hạng ${paired.pool.length} việc theo độ phù hợp với CV của bạn...`);
                 let ranked: { url: string; title?: string; fit_score?: number }[] = [];
                 try {
                     ranked = await rankJobsTournament(
@@ -285,8 +285,8 @@ export default function StepInputUrl() {
                 //    marketing/intern roles, and the pool stays relevance-ordered. ──
                 setPhase('searching');
                 setPhaseDetail(targetTitle
-                    ? `Matching openings to "${targetTitle}"${cityName ? ` in ${cityName}` : ''}...`
-                    : 'Matching openings to your CV...');
+                    ? `Đang tìm tin tuyển dụng phù hợp với "${targetTitle}"${cityName ? ` tại ${cityName}` : ''}...`
+                    : 'Đang tìm tin tuyển dụng phù hợp với CV của bạn...');
                 const search = await searchFeaturedJobsWarm(
                     {
                         target_roles: targetTitle ? [targetTitle] : [],
@@ -331,9 +331,9 @@ export default function StepInputUrl() {
 
                 if (results.length === 0) {
                     const why = search.warming
-                        ? 'still preparing (timed out) — try again in a moment'
-                        : 'no openings match your role right now';
-                    throw new Error(`No matching openings: ${why}.`);
+                        ? 'vẫn đang chuẩn bị (hết thời gian chờ) — hãy thử lại sau giây lát'
+                        : 'hiện chưa có tin tuyển dụng nào khớp với vai trò của bạn';
+                    throw new Error(`Không có tin tuyển dụng phù hợp: ${why}.`);
                 }
 
                 const ranked: FeaturedJob[] = results.map((j) => ({
@@ -359,8 +359,8 @@ export default function StepInputUrl() {
             const topJobs = orderedJobs.slice(0, MAX_JOBS);
             const backfillJobs = orderedJobs.slice(MAX_JOBS);
             setPhaseDetail(offCity
-                ? `No "${targetTitle}" in ${cityName} — showing this role in other cities...`
-                : `Top ${topJobs.length} by CV fit selected`);
+                ? `Không có "${targetTitle}" tại ${cityName} — đang hiển thị vai trò này ở các thành phố khác...`
+                : `Đã chọn ${topJobs.length} việc phù hợp nhất với CV`);
 
             // Build a JD entry from a featured job. Off-city listings get a label
             // so the editor can flag them — an empty location is "unknown", not
@@ -451,10 +451,10 @@ export default function StepInputUrl() {
                     (e) => e.status === 'done' && e.jdData && e.matchResult,
                 );
                 if (done.length === 0) {
-                    throw new Error('No scorable jobs to optimize.');
+                    throw new Error('Không có việc nào để chấm điểm và tối ưu.');
                 }
                 const optimizedCount = done.filter((e) => e.optimizedCv).length;
-                setPhaseDetail(`Optimized ${optimizedCount}/${done.length} CVs. Handing off to extension...`);
+                setPhaseDetail(`Đã tối ưu ${optimizedCount}/${done.length} CV. Đang chuyển sang extension...`);
                 if (runRef.current === runId) {
                     setPhase('idle');
                     setStep(3);
@@ -469,7 +469,7 @@ export default function StepInputUrl() {
                 if (!navigated) setStep(3);
             }
         } catch (e: unknown) {
-            const msg = e instanceof Error ? e.message : 'Analysis failed';
+            const msg = e instanceof Error ? e.message : 'Phân tích thất bại';
             setError(msg);
             setPhase('idle');
             setPhaseDetail('');
@@ -509,7 +509,7 @@ export default function StepInputUrl() {
         } = opts;
 
         setPhase('crawling_job');
-        setPhaseDetail(`Processing ${queueLen} jobs in parallel — opening results as soon as the first is ready...`);
+        setPhaseDetail(`Đang xử lý ${queueLen} việc song song — sẽ mở kết quả ngay khi việc đầu tiên sẵn sàng...`);
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const buildJdFromLd = (ld: any): string => [
@@ -552,7 +552,7 @@ export default function StepInputUrl() {
                         if (seenCompanies.has(companyKey)) {
                             updateJdEntry(entryId, {
                                 status: 'error',
-                                error: `Duplicate company: ${company}`,
+                                error: `Công ty trùng lặp: ${company}`,
                             });
                             return;
                         }
@@ -562,8 +562,8 @@ export default function StepInputUrl() {
                         updateJdEntry(entryId, {
                             status: 'error',
                             error: company
-                                ? `${company} — career page not found`
-                                : 'Could not resolve company from posting',
+                                ? `${company} — không tìm thấy trang tuyển dụng`
+                                : 'Không xác định được công ty từ tin tuyển dụng',
                             company: company || undefined,
                         });
                         return;
@@ -571,7 +571,7 @@ export default function StepInputUrl() {
                     if (!finder.jobs.length) {
                         updateJdEntry(entryId, {
                             status: 'error',
-                            error: `${company || 'Company'} — no openings on their career page`,
+                            error: `${company || 'Công ty'} — không có tin tuyển dụng trên trang tuyển dụng`,
                             company: company || undefined,
                         });
                         return;
@@ -582,7 +582,7 @@ export default function StepInputUrl() {
                     if (!bestMatch) {
                         updateJdEntry(entryId, {
                             status: 'error',
-                            error: `${company} — no matching role on career page`,
+                            error: `${company} — không có vai trò phù hợp trên trang tuyển dụng`,
                             company: company || undefined,
                         });
                         return;
@@ -668,7 +668,7 @@ export default function StepInputUrl() {
                 }
 
                 if (jobPageText.length < 100) {
-                    updateJdEntry(entryId, { status: 'error', error: 'Could not load job page' });
+                    updateJdEntry(entryId, { status: 'error', error: 'Không tải được trang tuyển dụng' });
                     reportBrokenLink({ url: jobUrl, company: entryCompany, title: entryTitle, reason: 'could_not_load' });
                     return;
                 }
@@ -678,7 +678,7 @@ export default function StepInputUrl() {
                 let jdData = await withRetry(() => extractJdStructured(jobPageText));
                 if (Array.isArray(jdData)) jdData = jdData[0];
                 if (!jdData || (!jdData.must_have?.length && !jdData.responsibilities?.length)) {
-                    updateJdEntry(entryId, { status: 'error', error: 'No JD found on page' });
+                    updateJdEntry(entryId, { status: 'error', error: 'Không tìm thấy mô tả công việc trên trang' });
                     reportBrokenLink({ url: jobUrl, company: entryCompany, title: entryTitle, reason: 'no_jd_on_page' });
                     return;
                 }
@@ -703,7 +703,7 @@ export default function StepInputUrl() {
                 let matchResult = await withRetry(() => scoreFit(cvData!, jdData));
                 if (Array.isArray(matchResult)) matchResult = matchResult[0];
                 if (!matchResult?.overall_score) {
-                    updateJdEntry(entryId, { status: 'error', error: 'Scoring failed' });
+                    updateJdEntry(entryId, { status: 'error', error: 'Chấm điểm thất bại' });
                     return;
                 }
 
@@ -790,12 +790,12 @@ export default function StepInputUrl() {
             } catch (err) {
                 updateJdEntry(entryId, {
                     status: 'error',
-                    error: err instanceof Error ? err.message : 'Unknown error',
+                    error: err instanceof Error ? err.message : 'Lỗi không xác định',
                 });
             } finally {
                 doneCount++;
                 if (!navigated && runRef.current === runId) {
-                    setPhaseDetail(`Scored ${scoredCount}/${targetScored} — processed ${doneCount} jobs...`);
+                    setPhaseDetail(`Đã chấm ${scoredCount}/${targetScored} — đã xử lý ${doneCount} việc...`);
                 }
             }
         };
@@ -834,9 +834,9 @@ export default function StepInputUrl() {
         // Suppress the aggregator hostname in all user-facing copy so we never
         // leak which site we're scraping.
         const isAuto = !!overrideUrl;
-        if (!trimmed) { setError('Please enter a job site URL.'); return; }
-        if (!isValidUrl(trimmed)) { setError('Please enter a valid URL (http:// or https://)'); return; }
-        if (!cvData) { setError('Please upload your CV first.'); return; }
+        if (!trimmed) { setError('Vui lòng nhập URL trang tuyển dụng.'); return; }
+        if (!isValidUrl(trimmed)) { setError('Vui lòng nhập URL hợp lệ (http:// hoặc https://)'); return; }
+        if (!cvData) { setError('Vui lòng tải CV lên trước.'); return; }
 
         setError('');
         setOptimizedCv(null);
@@ -851,17 +851,17 @@ export default function StepInputUrl() {
             const targetTitle = (
                 targetJobTitle || cvData.desired_job_title || cvData.employment?.current_title || ''
             ).trim();
-            if (!targetTitle) throw new Error('Add a target role on the upload step first.');
+            if (!targetTitle) throw new Error('Hãy thêm vai trò mục tiêu ở bước tải CV trước.');
             setPhase('analyzing_cv');
             // Known site → instant template URL. Unknown site → fall back to the
             // LLM, anchored to the confirmed role so it can't pick a different one.
             const built = buildSearchUrl(trimmed, targetTitle, targetLocation);
             let searchResult: { inferred_job_title: string; search_keyword: string; search_url: string } = built;
             if (!built.known) {
-                setPhaseDetail('Preparing search for this site...');
+                setPhaseDetail('Đang chuẩn bị tìm kiếm cho trang này...');
                 let r = await smartSearch(cvData, trimmed, targetTitle);
                 if (Array.isArray(r)) r = r[0];
-                if (!r?.search_url) throw new Error('AI could not generate a search URL for this site.');
+                if (!r?.search_url) throw new Error('AI không tạo được URL tìm kiếm cho trang này.');
                 searchResult = {
                     inferred_job_title: r.inferred_job_title || targetTitle,
                     search_keyword: r.search_keyword || '',
@@ -869,12 +869,12 @@ export default function StepInputUrl() {
                 };
             }
             setInferredTitle(searchResult.inferred_job_title);
-            setPhaseDetail(`Looking for: "${searchResult.inferred_job_title}"`);
+            setPhaseDetail(`Đang tìm: "${searchResult.inferred_job_title}"`);
 
             // ─── Phase 2: Crawl the search results page ───
             setPhase('searching');
             const hostname = getHostname(trimmed);
-            setPhaseDetail(isAuto ? 'Searching for matching companies...' : `Searching on ${hostname}...`);
+            setPhaseDetail(isAuto ? 'Đang tìm các công ty phù hợp...' : `Đang tìm trên ${hostname}...`);
 
             let searchPage: { text: string; textWithLinks?: string } = { text: '', textWithLinks: '' };
             let searchBlocked = false;
@@ -898,7 +898,7 @@ export default function StepInputUrl() {
             // ── Extension fallback: open in user's browser (Cloudflare bypass) ──
             const noContent = !searchPage.text && !searchPage.textWithLinks;
             if ((searchBlocked || noContent) && isExtensionAvailable()) {
-                setPhaseDetail(`Site is anti-bot protected → opening via your browser extension...`);
+                setPhaseDetail(`Trang có bảo vệ chống bot → đang mở qua extension trình duyệt của bạn...`);
                 console.log('[StepInputUrl] Trying extension crawl for search page');
                 const ext = await extensionCrawl(searchResult.search_url);
                 if (ext.success && ext.text.length >= 200) {
@@ -929,17 +929,17 @@ export default function StepInputUrl() {
 
             // ─── Phase 3: Extract job links ───
             setPhase('extracting_links');
-            setPhaseDetail('AI is finding job listings...');
+            setPhaseDetail('AI đang tìm các tin tuyển dụng...');
 
             // Guard: don't call AI with empty text
             if (!searchPage.text && !searchPage.textWithLinks) {
                 const tail = isExtensionAvailable()
-                    ? 'Even the browser-extension bypass failed — try again later or install the extension.'
-                    : 'Install the JobFit AI Chrome extension to bypass anti-bot protection.';
+                    ? 'Ngay cả cách vượt qua bằng extension cũng thất bại — hãy thử lại sau hoặc cài extension.'
+                    : 'Hãy cài extension JobFit AI cho Chrome để vượt qua bảo vệ chống bot.';
                 throw new Error(
                     isAuto
-                        ? `Could not load matching jobs. ${tail}`
-                        : `Could not load search results from ${hostname}. ${tail}`,
+                        ? `Không tải được các việc phù hợp. ${tail}`
+                        : `Không tải được kết quả tìm kiếm từ ${hostname}. ${tail}`,
                 );
             }
 
@@ -964,8 +964,8 @@ export default function StepInputUrl() {
             if (!linksResult.found || candidates.length === 0) {
                 throw new Error(
                     isAuto
-                        ? 'No matching jobs found. Try uploading a different CV or check back later.'
-                        : `No job listings found on ${hostname}. Try a different job site.`,
+                        ? 'Không tìm thấy việc phù hợp. Hãy thử tải CV khác hoặc quay lại sau.'
+                        : `Không tìm thấy tin tuyển dụng trên ${hostname}. Hãy thử trang khác.`,
                 );
             }
 
@@ -973,7 +973,7 @@ export default function StepInputUrl() {
             // The site lists jobs by its own relevance; this re-orders them by
             // fit to THIS candidate's CV so we crawl the most promising first.
             setPhase('ranking');
-            setPhaseDetail(`Ranking ${candidates.length} jobs by fit to your CV...`);
+            setPhaseDetail(`Đang xếp hạng ${candidates.length} việc theo độ phù hợp với CV của bạn...`);
 
             const MAX_JOBS = 5;
             let ranked: { url: string; title?: string; fit_score?: number; reason?: string }[] = [];
@@ -988,8 +988,8 @@ export default function StepInputUrl() {
             const jobUrls: string[] = topJobs.map((j) => j.url);
             setPhaseDetail(
                 ranked.length
-                    ? `Found ${candidates.length} jobs → crawling top ${jobUrls.length} by CV fit`
-                    : `Found ${candidates.length} jobs → processing top ${jobUrls.length}`,
+                    ? `Tìm thấy ${candidates.length} việc → đang xử lý ${jobUrls.length} việc phù hợp nhất với CV`
+                    : `Tìm thấy ${candidates.length} việc → đang xử lý ${jobUrls.length} việc đầu`,
             );
 
             // Create placeholder entries — pre-filled with the ranked title so
@@ -1025,7 +1025,7 @@ export default function StepInputUrl() {
                 if (!navigated) setStep(3);
             }
         } catch (e: unknown) {
-            const msg = e instanceof Error ? e.message : 'Analysis failed';
+            const msg = e instanceof Error ? e.message : 'Phân tích thất bại';
             setError(msg);
             setPhase('idle');
             setPhaseDetail('');
@@ -1052,11 +1052,11 @@ export default function StepInputUrl() {
         <div className="animate-fade-in" style={{ maxWidth: 660, margin: '0 auto', padding: '40px 20px' }}>
             <h2 style={{ fontSize: '1.6rem', fontWeight: 700, marginBottom: 8 }}>
                 <MagicWand size={22} weight="duotone" style={{ display: 'inline', marginRight: 8, color: 'var(--accent-purple)' }} />
-                Smart Job Finder
+                Tìm việc thông minh
             </h2>
             <p style={{ color: 'var(--text-secondary)', marginBottom: 32, fontSize: '0.95rem', lineHeight: 1.6 }}>
-                AI reads your CV, finds companies hiring for your role, and scores each opening
-                directly from the company&apos;s official career page.
+                AI đọc CV của bạn, tìm các công ty đang tuyển vai trò của bạn, và chấm điểm từng
+                tin tuyển dụng trực tiếp từ trang tuyển dụng chính thức của công ty.
             </p>
 
             {/* How it works */}
@@ -1065,10 +1065,10 @@ export default function StepInputUrl() {
                 background: 'linear-gradient(135deg, rgba(139,92,246,0.05), rgba(59,130,246,0.04))',
             }}>
                 <p style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                    How it works
+                    Cách hoạt động
                 </p>
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                    {['CV → AI infers role', 'Find matching companies', 'Resolve career pages', 'Score JD vs CV'].map((step, i) => (
+                    {['CV → AI suy ra vai trò', 'Tìm công ty phù hợp', 'Tìm trang tuyển dụng', 'Chấm điểm so với CV'].map((step, i) => (
                         <span key={i} style={{
                             fontSize: '0.75rem', padding: '3px 10px', borderRadius: 20,
                             background: 'var(--bg-secondary)', color: 'var(--text-secondary)',
@@ -1101,11 +1101,11 @@ export default function StepInputUrl() {
                     {isProcessing ? (
                         <>
                             <SpinnerGap size={18} style={{ animation: 'spin 1s linear infinite' }} />
-                            Processing...
+                            Đang xử lý...
                         </>
                     ) : (
                         <>
-                            <Buildings size={18} weight="fill" /> Featured Companies
+                            <Buildings size={18} weight="fill" /> Công ty nổi bật
                         </>
                     )}
                 </button>
@@ -1113,7 +1113,7 @@ export default function StepInputUrl() {
                     className="btn-secondary"
                     onClick={() => handleFeaturedAnalyze('ground')}
                     disabled={isProcessing || !cvData}
-                    title="Find companies hiring for your role via live web search"
+                    title="Tìm các công ty đang tuyển vai trò của bạn qua tìm kiếm trên web trực tiếp"
                     style={{
                         flex: 1,
                         height: 56,
@@ -1123,8 +1123,17 @@ export default function StepInputUrl() {
                         borderRadius: 'var(--radius-lg)',
                     }}
                 >
-                    <MagnifyingGlass size={18} weight="bold" /> Ground Search
+                    <MagnifyingGlass size={18} weight="bold" /> Tìm trên web
                 </button>
+            </div>
+
+            {/* Microcopy: explain when to use each mode */}
+            <div style={{
+                display: 'flex', gap: 10, marginBottom: 4,
+                fontSize: '0.72rem', color: 'var(--text-muted)', lineHeight: 1.4,
+            }}>
+                <span style={{ flex: 1, textAlign: 'center' }}>Nhanh · từ danh sách công ty tuyển chọn</span>
+                <span style={{ flex: 1, textAlign: 'center' }}>Tìm rộng hơn theo vai trò của bạn</span>
             </div>
 
             {/* Divider */}
@@ -1134,7 +1143,7 @@ export default function StepInputUrl() {
                 color: 'var(--text-muted)', fontSize: '0.75rem',
             }}>
                 <div style={{ flex: 1, height: 1, background: 'var(--border-subtle)' }} />
-                <span style={{ textTransform: 'uppercase', letterSpacing: '0.08em' }}>or paste a specific URL</span>
+                <span style={{ textTransform: 'uppercase', letterSpacing: '0.08em' }}>hoặc dán một URL cụ thể</span>
                 <div style={{ flex: 1, height: 1, background: 'var(--border-subtle)' }} />
             </div>
 
@@ -1154,6 +1163,8 @@ export default function StepInputUrl() {
                         onChange={(e) => { setUrl(e.target.value); setError(''); }}
                         onKeyDown={(e) => { if (e.key === 'Enter' && !isProcessing) handleSmartAnalyze(); }}
                         disabled={isProcessing}
+                        placeholder="Dán link trang tuyển dụng (vd: company.com/careers)"
+                        aria-label="Link trang tuyển dụng cần tìm"
                         style={{
                             paddingLeft: 42,
                             height: 48,
@@ -1172,7 +1183,7 @@ export default function StepInputUrl() {
                         display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.88rem',
                     }}
                 >
-                    Search this URL
+                    Tìm trên URL này
                 </button>
             </div>
 
@@ -1184,7 +1195,7 @@ export default function StepInputUrl() {
                     background: 'rgba(139,92,246,0.1)', border: '1px solid rgba(139,92,246,0.25)',
                     fontSize: '0.82rem', color: 'var(--accent-purple)', fontWeight: 500,
                 }}>
-                    <Brain size={13} weight="duotone" /> AI detected: {inferredTitle}
+                    <Brain size={13} weight="duotone" /> AI nhận diện: {inferredTitle}
                 </div>
             )}
 
@@ -1256,7 +1267,7 @@ export default function StepInputUrl() {
 
             {/* Error */}
             {error && (
-                <div style={{
+                <div role="alert" style={{
                     background: 'rgba(239, 68, 68, 0.08)',
                     border: '1px solid rgba(239, 68, 68, 0.25)',
                     borderRadius: 'var(--radius-md)',
@@ -1274,7 +1285,7 @@ export default function StepInputUrl() {
             <div style={{ marginTop: 24, display: 'flex', justifyContent: 'space-between' }}>
                 <button className="btn-secondary" onClick={() => setStep(1)} disabled={isProcessing}
                     style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <ArrowLeft size={16} weight="bold" /> Back
+                    <ArrowLeft size={16} weight="bold" /> Quay lại
                 </button>
             </div>
 
@@ -1305,8 +1316,9 @@ export default function StepInputUrl() {
                 >
                     <Briefcase size={15} weight="duotone" style={{ color: 'var(--accent-blue)' }} />
                     <span style={{ flex: 1, textAlign: 'left' }}>
+                        Đã lưu{' '}
                         <strong style={{ color: 'var(--text-primary)' }}>{jobHistory.length}</strong>
-                        {' '}application{jobHistory.length === 1 ? '' : 's'} saved · view all in History
+                        {' '}hồ sơ ứng tuyển · xem tất cả trong Lịch sử
                     </span>
                     <ArrowRight size={14} weight="bold" />
                 </button>

@@ -120,6 +120,8 @@ export default function StepEditCv() {
     }, [selectedJdId, sortedEntries]);
     const [autoApplyStatus, setAutoApplyStatus] = useState<AutoApplyStatus>('idle');
     const [autoApplyMessage, setAutoApplyMessage] = useState('');
+    // Inline feedback for the "Đồng bộ extension" action (replaces a blocking alert()).
+    const [resyncMsg, setResyncMsg] = useState('');
 
     // ── User-driven re-optimization ──
     // Free-text points the candidate wants emphasized; fed to the optimizer.
@@ -227,7 +229,7 @@ export default function StepEditCv() {
                 { notes: reoptPoints.trim() || undefined, useGaps: true },
             );
             const variant = data.variants[0];
-            if (!variant?.cv) throw new Error('Optimizer returned no CV');
+            if (!variant?.cv) throw new Error('Trình tối ưu không trả về CV nào');
             updateJdEntry(currentEntry.id, {
                 optimizedCv: variant.cv,
                 optimizedCvImprovements: variant.improvements,
@@ -236,7 +238,7 @@ export default function StepEditCv() {
             });
             setEditedCv(null); // drop stale inline edits so the new version shows
         } catch (err) {
-            setReoptimizeError(err instanceof Error ? err.message : 'Failed to re-optimize');
+            setReoptimizeError(err instanceof Error ? err.message : 'Tối ưu lại thất bại');
         } finally {
             setReoptimizing(false);
         }
@@ -281,8 +283,8 @@ export default function StepEditCv() {
             a.click();
             URL.revokeObjectURL(urlObj);
         } catch (e) {
-            const msg = e instanceof Error ? e.message : 'PDF export failed';
-            alert(`❌ Export PDF lỗi: ${msg}`);
+            const msg = e instanceof Error ? e.message : 'Xuất PDF thất bại';
+            setResyncMsg(`❌ Xuất PDF lỗi: ${msg}`);
         } finally {
             setDownloadingPdf(false);
         }
@@ -352,7 +354,7 @@ export default function StepEditCv() {
         const jobUrl = currentEntry?.applyUrl || currentEntry?.source;
         if (!cv || !jobUrl) {
             setAutoApplyStatus('error');
-            setAutoApplyMessage('Thiếu dữ liệu CV hoặc Job URL.');
+            setAutoApplyMessage('Thiếu dữ liệu CV hoặc URL công việc.');
             return;
         }
 
@@ -365,7 +367,7 @@ export default function StepEditCv() {
             if (!isExtensionAvailable()) throw new Error('NO_EXTENSION');
 
             setAutoApplyStatus('sending');
-            setAutoApplyMessage('Đang gửi lệnh Auto Apply...');
+            setAutoApplyMessage('Đang gửi lệnh tự động ứng tuyển...');
 
             const responsePromise = new Promise<{ success?: boolean; error?: string; detail?: string }>((resolve, reject) => {
                 const handler = (event: MessageEvent) => {
@@ -399,13 +401,13 @@ export default function StepEditCv() {
                 setAutoApplyMessage('✅ Tab đã mở! AI Agent đang tự động phân tích và điền form.');
                 setTimeout(() => setAutoApplyStatus('idle'), 6000);
             } else {
-                throw new Error(response?.error || 'Unknown error');
+                throw new Error(response?.error || 'Lỗi không xác định');
             }
         } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : 'Unknown error';
+            const message = err instanceof Error ? err.message : 'Lỗi không xác định';
             if (message === 'NO_EXTENSION') {
                 setAutoApplyStatus('no-extension');
-                setAutoApplyMessage('Extension chưa cài. Đang mở trang apply...');
+                setAutoApplyMessage('Extension chưa cài. Đang mở trang ứng tuyển...');
                 window.open(jobUrl, '_blank');
             } else {
                 setAutoApplyStatus('error');
@@ -443,14 +445,14 @@ export default function StepEditCv() {
             }));
 
         if (jobs.length === 0) {
-            setAutoApplyMessage('Không có job nào có URL để apply.');
+            setAutoApplyMessage('Không có công việc nào có URL để ứng tuyển.');
             return;
         }
 
         const withFile = jobs.filter(j => j.cvFileBase64).length;
         if (withFile < jobs.length) {
             setAutoApplyMessage(
-                `${withFile}/${jobs.length} job có sẵn CV PDF. Các job thiếu file sẽ apply text-only — dùng "Fully Auto Apply All" để render đủ.`,
+                `${withFile}/${jobs.length} công việc có sẵn CV PDF. Các công việc thiếu file sẽ ứng tuyển chỉ với văn bản — dùng "Ứng tuyển tự động hoàn toàn" để tạo đủ PDF.`,
             );
         }
 
@@ -480,7 +482,7 @@ export default function StepEditCv() {
 
         const candidates = sortedEntries.filter(e => e.optimizedCv && e.source);
         if (candidates.length === 0) {
-            setFullAutoError('Không có job nào có CV optimize + URL.');
+            setFullAutoError('Không có công việc nào có CV đã tối ưu kèm URL.');
             setTimeout(() => setFullAutoError(null), 4000);
             return;
         }
@@ -570,12 +572,12 @@ export default function StepEditCv() {
 
     // Auto Apply button config based on status
     const autoApplyBtn = {
-        idle: { label: 'Auto Apply', icon: <RocketLaunch size={14} weight="fill" />, disabled: false, bg: 'linear-gradient(135deg, #059669, #10B981)' },
+        idle: { label: 'Tự động ứng tuyển', icon: <RocketLaunch size={14} weight="fill" />, disabled: false, bg: 'linear-gradient(135deg, #059669, #10B981)' },
         checking: { label: 'Kiểm tra...', icon: <CircleNotch size={14} className="spin" />, disabled: true, bg: 'linear-gradient(135deg, #6366f1, #818cf8)' },
         sending: { label: 'Đang gửi...', icon: <CircleNotch size={14} className="spin" />, disabled: true, bg: 'linear-gradient(135deg, #6366f1, #818cf8)' },
         opened: { label: 'Đã mở tab!', icon: <CheckCircle size={14} weight="fill" />, disabled: true, bg: 'linear-gradient(135deg, #059669, #34d399)' },
         error: { label: 'Lỗi', icon: <Warning size={14} />, disabled: true, bg: 'linear-gradient(135deg, #dc2626, #ef4444)' },
-        'no-extension': { label: 'Cần Extension', icon: <Lightning size={14} />, disabled: true, bg: 'linear-gradient(135deg, #d97706, #f59e0b)' },
+        'no-extension': { label: 'Cần cài extension', icon: <Lightning size={14} />, disabled: true, bg: 'linear-gradient(135deg, #d97706, #f59e0b)' },
     }[autoApplyStatus];
 
     // Is batch running?
@@ -608,10 +610,10 @@ export default function StepEditCv() {
                         <CircleNotch size={28} className="spin" style={{ color: 'var(--accent-blue)' }} />
                     </div>
                     <h3 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: 8 }}>
-                        Optimizing your CVs…
+                        Đang tối ưu CV của bạn…
                     </h3>
                     <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: 24, lineHeight: 1.6 }}>
-                        Jobs are matched — we&apos;re tailoring a CV for each one. They&apos;ll appear here as they finish.
+                        Đã ghép việc xong — chúng tôi đang điều chỉnh CV cho từng công việc. Chúng sẽ hiện ra ở đây ngay khi hoàn tất.
                     </p>
                 </div>
             );
@@ -628,13 +630,13 @@ export default function StepEditCv() {
                     <FilePdf size={28} weight="duotone" style={{ color: 'var(--accent-blue)' }} />
                 </div>
                 <h3 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: 8 }}>
-                    No Optimized CVs Yet
+                    Chưa có CV tối ưu nào
                 </h3>
                 <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: 24, lineHeight: 1.6 }}>
-                    No jobs have been analyzed and optimized yet. Go back to find jobs — each scored job is optimized automatically.
+                    Chưa có công việc nào được phân tích và tối ưu. Quay lại tìm việc — mỗi công việc được chấm điểm sẽ tự động tối ưu CV.
                 </p>
                 <button className="btn-secondary" onClick={() => setStep(2)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                    <ArrowLeft size={16} /> Back to Find Jobs
+                    <ArrowLeft size={16} /> Quay lại Tìm việc
                 </button>
             </div>
         );
@@ -665,10 +667,10 @@ export default function StepEditCv() {
                         display: 'flex', alignItems: 'center', gap: 10,
                     }}>
                         <Sparkle size={22} weight="duotone" style={{ color: 'var(--accent-purple)' }} />
-                        Optimized CVs
+                        CV đã tối ưu
                     </h2>
                     <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>
-                        {sortedEntries.length} CV{sortedEntries.length !== 1 ? 's' : ''} optimized — switch between jobs to view each version
+                        Đã tối ưu {sortedEntries.length} CV — chuyển giữa các công việc để xem từng phiên bản
                     </p>
                 </div>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
@@ -677,7 +679,7 @@ export default function StepEditCv() {
                         onClick={() => setStep(2)}
                         style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem' }}
                     >
-                        <ArrowLeft size={14} /> Find Jobs
+                        <ArrowLeft size={14} /> Tìm việc
                     </button>
                     <button
                         className="btn-secondary"
@@ -700,10 +702,10 @@ export default function StepEditCv() {
                             // time. Without this, Resync left Tailor on "no CV synced".
                             const cvDataRes = cvData
                                 ? await syncCvDataToExtension(cvData)
-                                : { ok: false, error: 'no CV' };
+                                : { ok: false, error: 'không có CV' };
                             const cvDataMsg = cvDataRes.ok
-                                ? '\n✅ CV (cho Tailor) đã sync.'
-                                : `\n⚠️ CV tailor sync lỗi: ${cvDataRes.error}`;
+                                ? '\n✅ CV (cho tính năng tinh chỉnh) đã đồng bộ.'
+                                : `\n⚠️ Đồng bộ CV tinh chỉnh lỗi: ${cvDataRes.error}`;
 
                             let cvFileMsg = '';
                             if (currentEntry?.optimizedCvPdfBase64 && currentEntry?.optimizedCvFileName) {
@@ -712,29 +714,26 @@ export default function StepEditCv() {
                                     currentEntry.optimizedCvFileName,
                                 );
                                 cvFileMsg = fileRes.ok
-                                    ? '\n✅ File CV PDF đã sync.'
-                                    : `\n⚠️ File CV PDF sync lỗi: ${fileRes.error}`;
+                                    ? '\n✅ File CV PDF đã đồng bộ.'
+                                    : `\n⚠️ Đồng bộ file CV PDF lỗi: ${fileRes.error}`;
                             } else {
-                                cvFileMsg = '\nℹ️ Chưa có CV PDF cache — bấm Optimize để render trước.';
+                                cvFileMsg = '\nℹ️ Chưa có CV PDF lưu sẵn — bấm tối ưu để tạo trước.';
                             }
-                            alert(profileRes.ok
-                                ? `✅ Profile đã sync sang extension.${cvDataMsg}${cvFileMsg}`
-                                : `❌ Sync profile thất bại: ${profileRes.error}`);
+                            setResyncMsg(profileRes.ok
+                                ? `✅ Profile đã đồng bộ sang extension.${cvDataMsg}${cvFileMsg}`
+                                : `❌ Đồng bộ profile thất bại: ${profileRes.error}`);
                         }}
-                        style={{
-                            display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem',
-                            background: 'linear-gradient(135deg, #4F46E5, #7C3AED)',
-                            color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 8,
-                            cursor: 'pointer',
-                        }}
+                        title="Đẩy lại profile + CV sang extension để điền form nhanh"
+                        style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', padding: '8px 16px' }}
                     >
-                        ⚡ Resync to Extension
+                        ⚡ Đồng bộ extension
                     </button>
 
                     {/* ── Single Auto Apply Button ── */}
                     <button
                         onClick={triggerAutoApply}
                         disabled={autoApplyBtn.disabled || isBatchActive}
+                        title="Chỉ ứng tuyển công việc bạn đang xem"
                         style={{
                             display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem',
                             background: autoApplyBtn.bg,
@@ -749,28 +748,9 @@ export default function StepEditCv() {
                         {autoApplyBtn.icon} {autoApplyBtn.label}
                     </button>
 
-                    {/* ── 🚀 AUTO APPLY ALL Button ── */}
-                    {!isBatchActive ? (
-                        <button
-                            onClick={triggerAutoApplyAll}
-                            disabled={batchStarting || sortedEntries.filter(e => e.source).length === 0}
-                            style={{
-                                display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem',
-                                background: 'linear-gradient(135deg, #7C3AED, #EC4899)',
-                                color: '#fff', border: 'none', padding: '8px 20px', borderRadius: 8,
-                                cursor: batchStarting ? 'not-allowed' : 'pointer',
-                                fontWeight: 700,
-                                boxShadow: '0 2px 16px rgba(124,58,237,0.4)',
-                                transition: 'all 0.2s ease',
-                                opacity: batchStarting ? 0.7 : 1,
-                            }}
-                        >
-                            {batchStarting
-                                ? <><CircleNotch size={14} className="spin" /> Starting...</>
-                                : <><RocketLaunch size={14} weight="fill" /> Auto Apply All ({sortedEntries.filter(e => e.source).length})</>
-                            }
-                        </button>
-                    ) : (
+                    {/* ── Apply-all cluster: one primary action with two variants,
+                         grouped + labelled so users see them as ONE choice, not three. ── */}
+                    {isBatchActive ? (
                         <button
                             onClick={cancelBatchApply}
                             style={{
@@ -781,36 +761,58 @@ export default function StepEditCv() {
                                 transition: 'all 0.2s ease',
                             }}
                         >
-                            <Stop size={14} weight="fill" /> Cancel Batch
+                            <Stop size={14} weight="fill" /> Huỷ hàng loạt
                         </button>
-                    )}
-
-                    {/* ── 🤖 FULLY AUTONOMOUS APPLY — render PDFs + sync + launch ── */}
-                    {!isBatchActive && (
-                        <button
-                            onClick={triggerFullyAutoApply}
-                            disabled={isFullAutoBusy || sortedEntries.filter(e => e.optimizedCv && e.source).length === 0}
-                            title="Tự render PDF từ CV optimize, đẩy sang extension, rồi launch Apply All — không cần upload thủ công."
-                            style={{
-                                display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem',
-                                background: 'linear-gradient(135deg, #f59e0b, #dc2626)',
-                                color: '#fff', border: 'none', padding: '8px 20px', borderRadius: 8,
-                                cursor: isFullAutoBusy ? 'not-allowed' : 'pointer',
-                                fontWeight: 700,
-                                boxShadow: '0 2px 16px rgba(245,158,11,0.4)',
-                                transition: 'all 0.2s ease',
-                                opacity: isFullAutoBusy ? 0.7 : 1,
-                            }}
-                        >
-                            {fullAutoStatus === 'rendering'
-                                ? <><CircleNotch size={14} className="spin" /> Render PDF {fullAutoProgress.done}/{fullAutoProgress.total}</>
-                                : fullAutoStatus === 'syncing'
-                                    ? <><CircleNotch size={14} className="spin" /> Đang sync...</>
-                                    : fullAutoStatus === 'launching'
-                                        ? <><CircleNotch size={14} className="spin" /> Launching batch...</>
-                                        : <><RocketLaunch size={14} weight="fill" /> Fully Auto Apply All</>
-                            }
-                        </button>
+                    ) : (
+                        <div style={{
+                            display: 'flex', alignItems: 'center', gap: 1,
+                            borderRadius: 8, overflow: 'hidden',
+                            boxShadow: '0 2px 16px rgba(245,158,11,0.4)',
+                        }}>
+                            {/* Primary: renders fresh PDFs then applies to all (no manual upload) */}
+                            <button
+                                onClick={triggerFullyAutoApply}
+                                disabled={isFullAutoBusy || sortedEntries.filter(e => e.optimizedCv && e.source).length === 0}
+                                title="Tự tạo PDF mới từ CV đã tối ưu rồi ứng tuyển tất cả — không cần PDF lưu sẵn"
+                                style={{
+                                    display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem',
+                                    background: 'linear-gradient(135deg, #f59e0b, #dc2626)',
+                                    color: '#fff', border: 'none', padding: '8px 18px',
+                                    cursor: isFullAutoBusy ? 'not-allowed' : 'pointer',
+                                    fontWeight: 700,
+                                    transition: 'all 0.2s ease',
+                                    opacity: isFullAutoBusy ? 0.7 : 1,
+                                }}
+                            >
+                                {fullAutoStatus === 'rendering'
+                                    ? <><CircleNotch size={14} className="spin" /> Đang tạo PDF {fullAutoProgress.done}/{fullAutoProgress.total}</>
+                                    : fullAutoStatus === 'syncing'
+                                        ? <><CircleNotch size={14} className="spin" /> Đang đồng bộ...</>
+                                        : fullAutoStatus === 'launching'
+                                            ? <><CircleNotch size={14} className="spin" /> Đang khởi chạy...</>
+                                            : <><RocketLaunch size={14} weight="fill" /> Ứng tuyển tất cả ({sortedEntries.filter(e => e.optimizedCv && e.source).length})</>
+                                }
+                            </button>
+                            {/* Variant: faster path that reuses already-rendered PDFs */}
+                            <button
+                                onClick={triggerAutoApplyAll}
+                                disabled={batchStarting || sortedEntries.filter(e => e.source).length === 0}
+                                title="Nhanh hơn — dùng lại CV PDF đã tạo sẵn (không render lại)"
+                                style={{
+                                    display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.78rem',
+                                    background: 'rgba(0,0,0,0.25)',
+                                    color: '#fff', border: 'none', padding: '8px 12px',
+                                    cursor: batchStarting ? 'not-allowed' : 'pointer',
+                                    fontWeight: 600,
+                                    transition: 'all 0.2s ease',
+                                    opacity: batchStarting ? 0.7 : 1,
+                                }}
+                            >
+                                {batchStarting
+                                    ? <CircleNotch size={13} className="spin" />
+                                    : 'PDF có sẵn'}
+                            </button>
+                        </div>
                     )}
                 </div>
             </div>
@@ -850,7 +852,7 @@ export default function StepEditCv() {
                             }
                             <span style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--text-primary)' }}>
                                 {batchProgress.isProcessing
-                                    ? `⚡ Batch Apply — ${batchProgress.completed}/${batchProgress.total} jobs`
+                                    ? `⚡ Ứng tuyển hàng loạt — ${batchProgress.completed}/${batchProgress.total} công việc`
                                     : `✅ Hoàn tất — ${batchSubmitted} đã nộp · ${batchFilled} đã điền (chờ bạn nộp)`
                                 }
                             </span>
@@ -960,7 +962,7 @@ export default function StepEditCv() {
 
             {/* ── Single Auto Apply Status Bar ── */}
             {autoApplyStatus !== 'idle' && (
-                <div style={{
+                <div role="status" aria-live="polite" style={{
                     background: autoApplyStatus === 'opened'
                         ? 'rgba(16,185,129,0.1)'
                         : autoApplyStatus === 'error' || autoApplyStatus === 'no-extension'
@@ -1000,6 +1002,31 @@ export default function StepEditCv() {
                 </div>
             )}
 
+            {/* ── Resync feedback (inline, replaces blocking alert) ── */}
+            {resyncMsg && (
+                <div role="status" aria-live="polite" style={{
+                    background: resyncMsg.startsWith('❌') ? 'rgba(239,68,68,0.1)' : 'rgba(16,185,129,0.1)',
+                    border: `1px solid ${resyncMsg.startsWith('❌') ? 'rgba(239,68,68,0.3)' : 'rgba(16,185,129,0.3)'}`,
+                    borderRadius: 'var(--radius-sm)',
+                    padding: '10px 16px',
+                    marginBottom: 16,
+                    fontSize: '0.82rem',
+                    color: resyncMsg.startsWith('❌') ? '#ef4444' : '#10b981',
+                    whiteSpace: 'pre-line',
+                    display: 'flex', alignItems: 'flex-start', gap: 8,
+                }}>
+                    <span style={{ flex: 1 }}>{resyncMsg}</span>
+                    <button
+                        onClick={() => setResyncMsg('')}
+                        aria-label="Đóng thông báo"
+                        style={{
+                            background: 'none', border: 'none', color: 'inherit',
+                            cursor: 'pointer', fontSize: '1rem', lineHeight: 1, opacity: 0.7,
+                        }}
+                    >✕</button>
+                </div>
+            )}
+
             {/* CSS for spin + fadeIn animation */}
             <style>{`
                 @keyframes spin { to { transform: rotate(360deg); } }
@@ -1017,6 +1044,7 @@ export default function StepEditCv() {
                 {sortedEntries.length > 3 && (
                     <button
                         onClick={goPrev}
+                        aria-label="CV trước"
                         disabled={selectedIdx === 0}
                         style={{
                             width: 32, height: 32, borderRadius: 8,
@@ -1074,7 +1102,7 @@ export default function StepEditCv() {
                                         overflow: 'hidden', textOverflow: 'ellipsis',
                                         maxWidth: 180,
                                     }}>
-                                        {entry.jobTitle || 'Unknown Position'}
+                                        {entry.jobTitle || 'Chưa rõ vị trí'}
                                     </p>
                                     <p style={{
                                         fontSize: '0.7rem',
@@ -1112,6 +1140,7 @@ export default function StepEditCv() {
                 {sortedEntries.length > 3 && (
                     <button
                         onClick={goNext}
+                        aria-label="CV tiếp theo"
                         disabled={selectedIdx === sortedEntries.length - 1}
                         style={{
                             width: 32, height: 32, borderRadius: 8,
@@ -1171,6 +1200,7 @@ export default function StepEditCv() {
                 }}>
                     <button
                         onClick={goPrev}
+                        aria-label="CV trước"
                         disabled={selectedIdx === 0}
                         style={{
                             background: 'none', border: 'none', cursor: selectedIdx === 0 ? 'default' : 'pointer',
@@ -1183,6 +1213,7 @@ export default function StepEditCv() {
                     <span style={{ fontWeight: 600 }}>{selectedIdx + 1} / {sortedEntries.length}</span>
                     <button
                         onClick={goNext}
+                        aria-label="CV tiếp theo"
                         disabled={selectedIdx === sortedEntries.length - 1}
                         style={{
                             background: 'none', border: 'none',
@@ -1210,7 +1241,7 @@ export default function StepEditCv() {
                 display: 'flex', alignItems: 'center', gap: 6,
             }}>
                 <Warning size={12} />
-                AI-optimized for &quot;{currentEntry.jobTitle || 'this position'}&quot; — Click any text to edit, hover items to reorder/remove
+                Được AI tối ưu cho &quot;{currentEntry.jobTitle || 'vị trí này'}&quot; — Bấm vào nội dung bất kỳ để sửa, di chuột lên từng mục để sắp xếp lại / xoá
             </div>
 
             {/* ══════ Personal Info — pre-filled from CV, editable, auto-synced ══════ */}
@@ -1224,7 +1255,7 @@ export default function StepEditCv() {
                 </div>
                 <p style={{ fontSize: '0.74rem', color: 'var(--text-muted)', margin: '0 0 8px', lineHeight: 1.5 }}>
                     Nhập những điểm bạn muốn nhấn mạnh hoặc bổ sung (dựa trên kinh nghiệm thật của bạn).
-                    AI sẽ viết lại CV cho job này theo các điểm đó — không bịa thêm thông tin không có trong CV.
+                    AI sẽ viết lại CV cho công việc này theo các điểm đó — không bịa thêm thông tin không có trong CV.
                 </p>
                 <textarea
                     value={reoptPoints}
@@ -1396,7 +1427,7 @@ export default function StepEditCv() {
                     <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: '0.72rem' }}>
                         {livePreviewOpen
                             ? '— CV đang hiển thị đúng theo mẫu sẽ xuất PDF'
-                            : '— xem CV render theo mẫu trước khi tải xuống'}
+                            : '— xem CV hiển thị theo mẫu trước khi tải xuống'}
                     </span>
                 </button>
 
@@ -1417,7 +1448,7 @@ export default function StepEditCv() {
                                 }}
                             >
                                 <FloppyDisk size={14} weight="fill" />
-                                {downloadingPdf ? 'Đang xuất PDF…' : 'Save & Download'}
+                                {downloadingPdf ? 'Đang xuất PDF…' : 'Lưu & Tải xuống'}
                             </button>
                         </div>
                         <div style={{
@@ -1544,8 +1575,8 @@ function ImprovementsPanel({
                     : <Sparkle size={15} weight="fill" style={{ color: 'var(--accent-blue)', flexShrink: 0 }} />}
                 <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)', flex: 1, minWidth: 0 }}>
                     {unchanged
-                        ? 'CV này chưa được tinh chỉnh theo job — nội dung giống hệt CV gốc'
-                        : `Đã tối ưu cho ${jobTitle || 'job này'}`}
+                        ? 'CV này chưa được tinh chỉnh theo công việc — nội dung giống hệt CV gốc'
+                        : `Đã tối ưu cho ${jobTitle || 'công việc này'}`}
                     {!unchanged && (
                         <span style={{ color: 'var(--text-muted)', fontWeight: 400, marginLeft: 6, fontSize: '0.72rem' }}>
                             {hasLlmExplanation ? `${improvements!.length} thay đổi` : `${diff.length} thay đổi`}
@@ -1624,12 +1655,12 @@ function MatchAnalysisPanel({
         <div className="glass-card" style={{ padding: '16px 18px' }}>
             <h3 style={{ fontSize: '0.95rem', fontWeight: 700, margin: '0 0 14px', display: 'flex', alignItems: 'center', gap: 8 }}>
                 <ChartBar size={16} weight="duotone" style={{ color: 'var(--accent-blue)' }} />
-                Job Match
+                Độ phù hợp
             </h3>
 
             {/* ── Must-Have coverage ── */}
             <p style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)', margin: '0 0 8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                Must-Have ({aligned.length}/{mustHave.length} matched)
+                Kỹ năng bắt buộc ({aligned.length}/{mustHave.length} khớp)
             </p>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 18 }}>
                 {aligned.map((s, i) => (
@@ -1649,19 +1680,19 @@ function MatchAnalysisPanel({
 
             {/* ── Scoring breakdown ── */}
             <p style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)', margin: '0 0 4px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                Scoring Breakdown
+                Chi tiết điểm
             </p>
-            <CategoryRow label="Must-Have Skills (40%)" data={m.must_have_match} />
-            <CategoryRow label="Experience (25%)" data={m.experience_match} />
-            <CategoryRow label="Domain (15%)" data={m.domain_match} />
-            <CategoryRow label="Seniority (10%)" data={m.seniority_match} />
-            <CategoryRow label="Nice-to-Have (10%)" data={m.nice_to_have_match} />
+            <CategoryRow label="Kỹ năng bắt buộc (40%)" data={m.must_have_match} />
+            <CategoryRow label="Kinh nghiệm (25%)" data={m.experience_match} />
+            <CategoryRow label="Lĩnh vực (15%)" data={m.domain_match} />
+            <CategoryRow label="Cấp bậc (10%)" data={m.seniority_match} />
+            <CategoryRow label="Kỹ năng cộng điểm (10%)" data={m.nice_to_have_match} />
 
             {/* ── Risk flags ── */}
             {(m.risk_flags || []).length > 0 && (
                 <div style={{ marginTop: 16 }}>
                     <p style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--accent-red)', margin: '0 0 6px', display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <ShieldWarning size={13} /> Risk Flags
+                        <ShieldWarning size={13} /> Cảnh báo rủi ro
                     </p>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                         {m.risk_flags.map((flag, i) => (
@@ -1775,9 +1806,9 @@ export function PersonalInfoSection({
             >
                 <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <Briefcase size={14} weight="duotone" style={{ color: 'var(--accent-blue)' }} />
-                    Personal Info
+                    Thông tin cá nhân
                     <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: '0.78rem' }}>
-                        {fillCount} / 8 key fields filled · auto-synced to extension
+                        Đã điền {fillCount} / 8 trường quan trọng · tự động đồng bộ sang extension
                     </span>
                 </span>
                 <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>
@@ -1791,8 +1822,8 @@ export function PersonalInfoSection({
                 }}>
                     {/* ── Contact ── */}
                     <ProfileInput label="Email" value={contact.email}
-                        onChange={(v) => patchContact({ email: v })} placeholder="you@example.com" />
-                    <ProfileInput label="Phone" value={contact.phone}
+                        onChange={(v) => patchContact({ email: v })} placeholder="ban@example.com" />
+                    <ProfileInput label="Số điện thoại" value={contact.phone}
                         onChange={(v) => patchContact({ phone: v })} placeholder="+84 …" />
                     <ProfileInput label="LinkedIn" value={contact.linkedin}
                         onChange={(v) => patchContact({ linkedin: v })} placeholder="linkedin.com/in/…" />
@@ -1800,45 +1831,45 @@ export function PersonalInfoSection({
                         onChange={(v) => patchContact({ github: v })} placeholder="github.com/…" />
                     <ProfileInput label="Portfolio" value={contact.portfolio}
                         onChange={(v) => patchContact({ portfolio: v })} placeholder="https://…" />
-                    <ProfileInput label="Province / City" value={contact.address_province}
+                    <ProfileInput label="Tỉnh / Thành phố" value={contact.address_province}
                         onChange={(v) => patchContact({ address_province: v })} />
-                    <ProfileInput label="District / Ward" value={contact.address_district}
+                    <ProfileInput label="Quận / Phường" value={contact.address_district}
                         onChange={(v) => patchContact({ address_district: v })} />
-                    <ProfileInput label="Street" value={contact.address_street}
+                    <ProfileInput label="Đường / Phố" value={contact.address_street}
                         onChange={(v) => patchContact({ address_street: v })} />
 
                     {/* ── Personal ── */}
-                    <ProfileInput label="Date of birth" value={personal.date_of_birth}
+                    <ProfileInput label="Ngày sinh" value={personal.date_of_birth}
                         onChange={(v) => patchPersonal({ date_of_birth: v })} placeholder="YYYY-MM-DD" />
-                    <ProfileInput label="Gender" value={personal.gender}
+                    <ProfileInput label="Giới tính" value={personal.gender}
                         onChange={(v) => patchPersonal({ gender: v })} />
-                    <ProfileInput label="Nationality" value={personal.nationality}
+                    <ProfileInput label="Quốc tịch" value={personal.nationality}
                         onChange={(v) => patchPersonal({ nationality: v })} />
-                    <ProfileInput label="Marital status" value={personal.marital_status}
+                    <ProfileInput label="Tình trạng hôn nhân" value={personal.marital_status}
                         onChange={(v) => patchPersonal({ marital_status: v })} />
 
                     {/* ── Employment ── */}
-                    <ProfileInput label="Current title" value={employment.current_title}
+                    <ProfileInput label="Chức danh hiện tại" value={employment.current_title}
                         onChange={(v) => patchEmployment({ current_title: v })} />
-                    <ProfileInput label="Current company" value={employment.current_company}
+                    <ProfileInput label="Công ty hiện tại" value={employment.current_company}
                         onChange={(v) => patchEmployment({ current_company: v })} />
-                    <ProfileInput label="Current level" value={employment.current_level}
+                    <ProfileInput label="Cấp bậc hiện tại" value={employment.current_level}
                         onChange={(v) => patchEmployment({ current_level: v })} placeholder="Junior / Mid / Senior" />
-                    <ProfileInput label="Current industry" value={employment.current_industry}
+                    <ProfileInput label="Ngành hiện tại" value={employment.current_industry}
                         onChange={(v) => patchEmployment({ current_industry: v })} />
-                    <ProfileInput label="Current fields" value={employment.current_fields}
+                    <ProfileInput label="Lĩnh vực hiện tại" value={employment.current_fields}
                         onChange={(v) => patchEmployment({ current_fields: v })} placeholder="Backend, Data, Product…" />
-                    <ProfileInput label="Current salary" value={employment.current_salary}
+                    <ProfileInput label="Lương hiện tại" value={employment.current_salary}
                         onChange={(v) => patchEmployment({ current_salary: v })} />
-                    <ProfileInput label="Years of experience" value={String(employment.years_of_experience || '')}
+                    <ProfileInput label="Số năm kinh nghiệm" value={String(employment.years_of_experience || '')}
                         onChange={(v) => patchEmployment({ years_of_experience: parseInt(v, 10) || 0 })} />
-                    <ProfileInput label="Highest degree" value={employment.highest_degree}
+                    <ProfileInput label="Bằng cấp cao nhất" value={employment.highest_degree}
                         onChange={(v) => patchEmployment({ highest_degree: v })} />
 
                     {/* ── Preferences ── */}
-                    <ProfileInput label="Desired locations" value={preferences.desired_locations}
+                    <ProfileInput label="Địa điểm mong muốn" value={preferences.desired_locations}
                         onChange={(v) => patchPreferences({ desired_locations: v })} />
-                    <ProfileInput label="Desired salary" value={preferences.desired_salary}
+                    <ProfileInput label="Mức lương mong muốn" value={preferences.desired_salary}
                         onChange={(v) => patchPreferences({ desired_salary: v })} />
                 </div>
             )}

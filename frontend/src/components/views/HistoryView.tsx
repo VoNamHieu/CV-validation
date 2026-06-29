@@ -10,11 +10,11 @@ import { useAppStore, JobRecord, JobStatus, JOB_STATUS_ORDER } from '@/store/use
 
 // ── Status presentation ──
 const STATUS_META: Record<JobStatus, { label: string; color: string; bg: string; border: string }> = {
-    saved: { label: 'Saved', color: 'var(--text-secondary)', bg: 'var(--bg-elevated)', border: 'var(--border-default)' },
-    applied: { label: 'Applied', color: 'var(--accent-blue)', bg: 'rgba(99, 102, 241, 0.12)', border: 'rgba(99, 102, 241, 0.3)' },
-    interviewing: { label: 'Interviewing', color: 'var(--accent-purple)', bg: 'rgba(167, 139, 250, 0.12)', border: 'rgba(167, 139, 250, 0.3)' },
-    offer: { label: 'Offer', color: 'var(--accent-green)', bg: 'rgba(52, 211, 153, 0.12)', border: 'rgba(52, 211, 153, 0.3)' },
-    rejected: { label: 'Rejected', color: 'var(--accent-red)', bg: 'rgba(248, 113, 113, 0.1)', border: 'rgba(248, 113, 113, 0.25)' },
+    saved: { label: 'Đã lưu', color: 'var(--text-secondary)', bg: 'var(--bg-elevated)', border: 'var(--border-default)' },
+    applied: { label: 'Đã ứng tuyển', color: 'var(--accent-blue)', bg: 'rgba(99, 102, 241, 0.12)', border: 'rgba(99, 102, 241, 0.3)' },
+    interviewing: { label: 'Phỏng vấn', color: 'var(--accent-purple)', bg: 'rgba(167, 139, 250, 0.12)', border: 'rgba(167, 139, 250, 0.3)' },
+    offer: { label: 'Nhận offer', color: 'var(--accent-green)', bg: 'rgba(52, 211, 153, 0.12)', border: 'rgba(52, 211, 153, 0.3)' },
+    rejected: { label: 'Bị từ chối', color: 'var(--accent-red)', bg: 'rgba(248, 113, 113, 0.1)', border: 'rgba(248, 113, 113, 0.25)' },
 };
 
 type StatusFilter = 'all' | JobStatus;
@@ -48,7 +48,7 @@ function StatusPill({
             value={status}
             onChange={(e) => onChange(e.target.value as JobStatus)}
             onClick={(e) => e.stopPropagation()}
-            aria-label="Application status"
+            aria-label="Trạng thái ứng tuyển"
             style={{
                 appearance: 'none',
                 background: meta.bg,
@@ -85,16 +85,16 @@ function ScoreBreakdown({ record }: { record: JobRecord }) {
     if (!match) {
         return (
             <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontStyle: 'italic', margin: 0 }}>
-                Score breakdown unavailable for this record.
+                Không có chi tiết điểm cho mục này.
             </p>
         );
     }
 
     const categories = [
-        { label: 'Must-Have Skills', data: match.must_have_match, icon: Crosshair },
-        { label: 'Experience', data: match.experience_match, icon: TrendUp },
-        { label: 'Domain Fit', data: match.domain_match, icon: Globe },
-        { label: 'Seniority', data: match.seniority_match, icon: Trophy },
+        { label: 'Kỹ năng bắt buộc', data: match.must_have_match, icon: Crosshair },
+        { label: 'Kinh nghiệm', data: match.experience_match, icon: TrendUp },
+        { label: 'Lĩnh vực', data: match.domain_match, icon: Globe },
+        { label: 'Cấp bậc', data: match.seniority_match, icon: Trophy },
     ];
 
     return (
@@ -158,7 +158,7 @@ function NotesEditor({ recordId, initial }: { recordId: string; initial: string 
                 textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600,
                 marginBottom: 6,
             }}>
-                <NotePencil size={12} weight="duotone" /> Notes
+                <NotePencil size={12} weight="duotone" /> Ghi chú
             </label>
             <textarea
                 value={value}
@@ -167,7 +167,7 @@ function NotesEditor({ recordId, initial }: { recordId: string; initial: string 
                     if (value !== initial) updateJobRecord(recordId, { notes: value });
                 }}
                 onClick={(e) => e.stopPropagation()}
-                placeholder="Recruiter contact, interview prep, next steps..."
+                placeholder="Liên hệ nhà tuyển dụng, chuẩn bị phỏng vấn, bước tiếp theo..."
                 rows={2}
                 className="input-field"
                 style={{
@@ -200,10 +200,10 @@ function EmptyState() {
                 <Briefcase size={24} weight="duotone" style={{ color: 'var(--accent-blue)' }} />
             </div>
             <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 6, letterSpacing: '-0.02em' }}>
-                No applications yet
+                Chưa có hồ sơ ứng tuyển nào
             </h3>
             <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem', maxWidth: 360, margin: '0 auto' }}>
-                Run a job search from the Apply tab — scored jobs land here so you can track them through the pipeline.
+                Hãy tìm việc ở tab Ứng tuyển — các việc đã chấm điểm sẽ hiện ở đây để bạn theo dõi tiến trình.
             </p>
         </div>
     );
@@ -266,23 +266,23 @@ export default function HistoryView() {
                         display: 'flex', alignItems: 'center', gap: 10,
                     }}>
                         <Briefcase size={24} weight="duotone" style={{ color: 'var(--accent-blue)' }} />
-                        Applications
+                        Hồ sơ ứng tuyển
                     </h1>
                     <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-                        Track every job you’ve scored — status, notes, and one-click re-open.
+                        Theo dõi mọi việc bạn đã chấm điểm — trạng thái, ghi chú và mở lại chỉ với một cú bấm.
                     </p>
                 </div>
                 {jobHistory.length > 0 && (
                     <button
                         onClick={() => {
-                            if (confirm(`Delete all ${jobHistory.length} application${jobHistory.length === 1 ? '' : 's'}? This cannot be undone.`)) {
+                            if (confirm(`Xoá toàn bộ ${jobHistory.length} hồ sơ ứng tuyển? Hành động này không thể hoàn tác.`)) {
                                 clearJobHistory();
                             }
                         }}
                         className="btn-secondary"
                         style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.82rem' }}
                     >
-                        <Trash size={14} weight="bold" /> Clear all
+                        <Trash size={14} weight="bold" /> Xoá tất cả
                     </button>
                 )}
             </div>
@@ -309,7 +309,7 @@ export default function HistoryView() {
                             <input
                                 className="input-field"
                                 type="search"
-                                placeholder="Search job, company, notes…"
+                                placeholder="Tìm theo việc, công ty, ghi chú…"
                                 value={query}
                                 onChange={(e) => setQuery(e.target.value)}
                                 style={{ paddingLeft: 36, fontSize: '0.85rem', padding: '10px 14px 10px 36px' }}
@@ -324,9 +324,9 @@ export default function HistoryView() {
                                 onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
                                 className="input-field"
                                 style={{ padding: '9px 12px', fontSize: '0.82rem', width: 'auto', cursor: 'pointer' }}
-                                aria-label="Filter by status"
+                                aria-label="Lọc theo trạng thái"
                             >
-                                <option value="all">All statuses ({statusCounts.all})</option>
+                                <option value="all">Tất cả trạng thái ({statusCounts.all})</option>
                                 {JOB_STATUS_ORDER.map((s) => (
                                     <option key={s} value={s}>
                                         {STATUS_META[s].label} ({statusCounts[s]})
@@ -341,19 +341,19 @@ export default function HistoryView() {
                             onChange={(e) => setSortKey(e.target.value as SortKey)}
                             className="input-field"
                             style={{ padding: '9px 12px', fontSize: '0.82rem', width: 'auto', cursor: 'pointer' }}
-                            aria-label="Sort by"
+                            aria-label="Sắp xếp theo"
                         >
-                            <option value="date-desc">Newest first</option>
-                            <option value="date-asc">Oldest first</option>
-                            <option value="score-desc">Highest score</option>
-                            <option value="score-asc">Lowest score</option>
+                            <option value="date-desc">Mới nhất</option>
+                            <option value="date-asc">Cũ nhất</option>
+                            <option value="score-desc">Điểm cao nhất</option>
+                            <option value="score-asc">Điểm thấp nhất</option>
                         </select>
                     </div>
 
                     {/* Result count when filtered */}
                     {(query || statusFilter !== 'all') && (
                         <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 12 }}>
-                            Showing {visible.length} of {jobHistory.length}
+                            Hiển thị {visible.length} / {jobHistory.length}
                         </p>
                     )}
 
@@ -364,7 +364,7 @@ export default function HistoryView() {
                             borderRadius: 'var(--radius-lg)',
                             fontSize: '0.88rem', color: 'var(--text-muted)',
                         }}>
-                            No applications match your filters.
+                            Không có hồ sơ nào khớp bộ lọc.
                         </div>
                     ) : (
                         <div style={{
@@ -388,11 +388,11 @@ export default function HistoryView() {
                                 background: 'rgba(0,0,0,0.15)',
                                 alignItems: 'center',
                             }}>
-                                <span>Job</span>
-                                <span>Site</span>
-                                <span>Status</span>
-                                <span>Score</span>
-                                <span>Date</span>
+                                <span>Việc làm</span>
+                                <span>Nguồn</span>
+                                <span>Trạng thái</span>
+                                <span>Điểm</span>
+                                <span>Ngày</span>
                                 <span></span>
                             </div>
 
@@ -425,7 +425,7 @@ export default function HistoryView() {
                                                     fontWeight: 600, fontSize: '0.88rem', lineHeight: 1.3,
                                                     whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                                                 }}>
-                                                    {record.jobTitle || 'Untitled Job'}
+                                                    {record.jobTitle || 'Việc chưa đặt tên'}
                                                 </div>
                                                 {record.company && (
                                                     <div style={{
@@ -493,17 +493,17 @@ export default function HistoryView() {
                                                         className="btn-primary"
                                                         style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', fontSize: '0.82rem' }}
                                                     >
-                                                        <ArrowClockwise size={13} weight="bold" /> Re-open in wizard
+                                                        <ArrowClockwise size={13} weight="bold" /> Mở lại
                                                     </button>
                                                     <button
                                                         onClick={(e) => {
                                                             e.stopPropagation();
-                                                            if (confirm(`Delete this application?`)) removeJobRecord(record.id);
+                                                            if (confirm(`Xoá hồ sơ ứng tuyển này?`)) removeJobRecord(record.id);
                                                         }}
                                                         className="btn-secondary"
                                                         style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', fontSize: '0.82rem', color: 'var(--accent-red)' }}
                                                     >
-                                                        <Trash size={13} weight="bold" /> Delete
+                                                        <Trash size={13} weight="bold" /> Xoá
                                                     </button>
                                                 </div>
                                             </div>

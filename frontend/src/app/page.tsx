@@ -44,7 +44,7 @@ export default function Home() {
       <Mode1ResultBanner />
 
       {/* Main content area */}
-      <div style={{
+      <div className="app-main" style={{
         marginLeft: SIDEBAR_WIDTH,
         minHeight: '100vh',
         position: 'relative',
@@ -74,7 +74,7 @@ export default function Home() {
           background: 'rgba(17, 17, 17, 0.6)',
           opacity: 0.7,
         }}>
-          JobFit AI · Powered by Gemini · No hallucination policy
+          JobFit AI · Vận hành bởi AI · Cam kết không bịa nội dung
         </footer>
       </div>
     </div>

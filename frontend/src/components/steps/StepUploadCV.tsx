@@ -31,7 +31,7 @@ export default function StepUploadCV() {
 
     const handleFile = useCallback(async (file: File) => {
         if (!file.name.toLowerCase().endsWith('.pdf')) {
-            setError('Only PDF files are supported.');
+            setError('Chỉ hỗ trợ file PDF.');
             return;
         }
         setError('');
@@ -72,7 +72,7 @@ export default function StepUploadCV() {
             setUploaded(true);
             setProcessing(false);
         } catch (e: unknown) {
-            setError(e instanceof Error ? e.message : 'Upload failed');
+            setError(e instanceof Error ? e.message : 'Tải lên thất bại');
             setProcessing(false);
             setProcessingFile('');
         }
@@ -102,16 +102,16 @@ export default function StepUploadCV() {
                     fontSize: '0.72rem', fontWeight: 500, color: 'var(--accent-purple)',
                     marginBottom: 16,
                 }}>
-                    <Sparkle size={12} weight="fill" /> Step 1 of 3
+                    <Sparkle size={12} weight="fill" /> Bước 1 / 3
                 </div>
                 <h2 style={{
                     fontSize: '1.8rem', fontWeight: 800, marginBottom: 10,
                     letterSpacing: '-0.03em', lineHeight: 1.2,
                 }}>
-                    Upload Your CV
+                    Tải CV của bạn lên
                 </h2>
                 <p style={{ color: 'var(--text-secondary)', fontSize: '0.92rem', lineHeight: 1.6, maxWidth: 420, margin: '0 auto' }}>
-                    Drop your resume as PDF. Our AI will extract skills, experience, and education to match against jobs.
+                    Thả CV dạng PDF vào đây. AI sẽ trích xuất kỹ năng, kinh nghiệm và học vấn để so khớp với các việc làm.
                 </p>
             </div>
 
@@ -133,10 +133,10 @@ export default function StepUploadCV() {
                     </div>
 
                     <p style={{ fontWeight: 700, fontSize: '1.1rem', marginBottom: 6, letterSpacing: '-0.02em' }}>
-                        AI is analyzing your CV
+                        AI đang phân tích CV của bạn
                     </p>
                     <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: 28 }}>
-                        Extracting skills, experience, education & projects...
+                        Đang trích xuất kỹ năng, kinh nghiệm, học vấn & dự án...
                     </p>
 
                     {/* File badge */}
@@ -156,9 +156,9 @@ export default function StepUploadCV() {
                         marginTop: 28, maxWidth: 260, margin: '28px auto 0',
                     }}>
                         {[
-                            { label: 'PDF uploaded', done: true },
-                            { label: 'AI parsing document', done: false, active: true },
-                            { label: 'Structuring data', done: false },
+                            { label: 'Đã tải PDF lên', done: true },
+                            { label: 'AI đang đọc tài liệu', done: false, active: true },
+                            { label: 'Đang cấu trúc dữ liệu', done: false },
                         ].map((step, i) => (
                             <div key={i} style={{
                                 display: 'flex', alignItems: 'center', gap: 12,
@@ -214,10 +214,10 @@ export default function StepUploadCV() {
                         fontSize: '1rem', fontWeight: 600, marginBottom: 6,
                         letterSpacing: '-0.01em', position: 'relative',
                     }}>
-                        Drag & drop your CV here
+                        Kéo & thả CV vào đây
                     </p>
                     <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', position: 'relative' }}>
-                        or click to browse · <span style={{ color: 'var(--text-secondary)' }}>PDF only</span>
+                        hoặc bấm để chọn file · <span style={{ color: 'var(--text-secondary)' }}>chỉ PDF</span>
                     </p>
                     <input
                         ref={fileInputRef}
@@ -251,7 +251,7 @@ export default function StepUploadCV() {
                             color: 'var(--accent-green)', fontSize: '0.8rem',
                             display: 'flex', alignItems: 'center', gap: 4, marginTop: 2,
                         }}>
-                            <CheckCircle size={12} weight="fill" /> Parsed & structured
+                            <CheckCircle size={12} weight="fill" /> Đã đọc & cấu trúc xong
                         </p>
                         {extSynced !== null && (
                             <p
@@ -269,7 +269,7 @@ export default function StepUploadCV() {
                         )}
                     </div>
                     <button
-                        aria-label="Remove uploaded CV"
+                        aria-label="Xoá CV đã tải lên"
                         onClick={() => { setUploaded(false); setCvRawText('', ''); }}
                         style={{
                             background: 'var(--bg-secondary)', border: '1px solid var(--border-default)',
@@ -296,7 +296,7 @@ export default function StepUploadCV() {
                         textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10,
                     }}>
                         <Target size={14} weight="duotone" style={{ color: 'var(--accent-purple)' }} />
-                        Target role
+                        Vị trí mong muốn
                     </label>
                     <div style={{ position: 'relative', marginBottom: 20 }}>
                         <div style={{
@@ -310,12 +310,12 @@ export default function StepUploadCV() {
                             type="text"
                             value={targetJobTitle}
                             onChange={(e) => setTargetJobTitle(e.target.value)}
-                            placeholder="e.g. Frontend Engineer"
+                            placeholder="VD: Frontend Engineer"
                             style={{ paddingLeft: 42, height: 48, fontSize: '0.92rem', width: '100%', borderRadius: 'var(--radius-lg)' }}
                         />
                     </div>
                     <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: -12, marginBottom: 20 }}>
-                        Choose the role you want next — even if it differs from your CV. We search by this role, then use your CV to estimate fit.
+                        Chọn vị trí bạn muốn ứng tuyển — kể cả khác với CV. Chúng tôi tìm việc theo vị trí này, rồi dùng CV để ước lượng độ phù hợp.
                     </p>
 
                     <label style={{
@@ -324,7 +324,7 @@ export default function StepUploadCV() {
                         textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10,
                     }}>
                         <Stack size={14} weight="duotone" style={{ color: 'var(--accent-purple)' }} />
-                        Seniority <span style={{ textTransform: 'none', fontWeight: 400, letterSpacing: 0 }}>· optional</span>
+                        Cấp bậc <span style={{ textTransform: 'none', fontWeight: 400, letterSpacing: 0 }}>· không bắt buộc</span>
                     </label>
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
                         {SENIORITY_OPTIONS.map((s) => {
@@ -350,8 +350,8 @@ export default function StepUploadCV() {
                     </div>
                     <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 20 }}>
                         {targetLevel
-                            ? 'Roles far from this level are ranked lower.'
-                            : 'No level selected — we infer it from your CV.'}
+                            ? 'Các vị trí lệch xa cấp bậc này sẽ bị xếp hạng thấp hơn.'
+                            : 'Chưa chọn cấp bậc — chúng tôi sẽ suy ra từ CV của bạn.'}
                     </p>
 
                     <label style={{
@@ -360,7 +360,7 @@ export default function StepUploadCV() {
                         textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10,
                     }}>
                         <MapPin size={14} weight="duotone" style={{ color: 'var(--accent-blue)' }} />
-                        Location <span style={{ textTransform: 'none', fontWeight: 400, letterSpacing: 0 }}>· optional</span>
+                        Địa điểm <span style={{ textTransform: 'none', fontWeight: 400, letterSpacing: 0 }}>· không bắt buộc</span>
                     </label>
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                         {CITY_OPTIONS.map((c) => {
@@ -386,8 +386,8 @@ export default function StepUploadCV() {
                     </div>
                     <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 10 }}>
                         {targetLocation
-                            ? 'Jobs are matched to this role and city. No exact-city match → we still show this role elsewhere.'
-                            : 'No city selected — jobs are matched to this role in any location.'}
+                            ? 'Việc được so khớp theo vị trí và thành phố này. Nếu không có đúng thành phố → vẫn hiển thị vị trí này ở nơi khác.'
+                            : 'Chưa chọn thành phố — việc được so khớp theo vị trí này ở mọi địa điểm.'}
                     </p>
                 </div>
             )}
@@ -416,20 +416,20 @@ export default function StepUploadCV() {
                     onClick={() => setStep(2)}
                     style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '13px 28px' }}
                 >
-                    Find Matching Jobs <ArrowRight size={16} weight="bold" />
+                    Tìm việc phù hợp <ArrowRight size={16} weight="bold" />
                 </button>
                 <button
                     className="btn-primary"
                     disabled={!uploaded || processing}
                     onClick={() => { setFullyAutoMode(true); setStep(2); }}
-                    title="Auto-search, optimize, and apply with no further clicks"
+                    title="Tự động tìm việc, tối ưu CV và ứng tuyển — không cần thao tác thêm"
                     style={{
                         display: 'flex', alignItems: 'center', gap: 8, padding: '13px 22px',
                         background: 'linear-gradient(135deg, #059669, #10b981)',
                         boxShadow: '0 2px 12px rgba(5,150,105,0.3)',
                     }}
                 >
-                    <Lightning size={16} weight="fill" /> Fully Auto Apply
+                    <Lightning size={16} weight="fill" /> Ứng tuyển tự động hoàn toàn
                 </button>
             </div>
         </div>

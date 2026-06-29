@@ -65,7 +65,7 @@ function Section({
                 {isChanged && (
                     <span
                         onClick={(e) => { e.stopPropagation(); onRevert(); }}
-                        title="Revert to original"
+                        title="Khôi phục bản gốc"
                         style={{
                             display: 'flex', alignItems: 'center', gap: 4,
                             padding: '3px 10px', borderRadius: 12,
@@ -74,14 +74,14 @@ function Section({
                             border: '1px solid rgba(245,158,11,0.2)',
                         }}
                     >
-                        <ArrowCounterClockwise size={10} /> Revert
+                        <ArrowCounterClockwise size={10} /> Khôi phục
                     </span>
                 )}
                 {isChanged && (
                     <span style={{
                         width: 8, height: 8, borderRadius: '50%',
                         background: 'var(--accent-green)', flexShrink: 0,
-                    }} title="Modified by AI" />
+                    }} title="Đã được AI chỉnh sửa" />
                 )}
                 {open ? <CaretUp size={14} style={{ color: 'var(--text-muted)' }} /> : <CaretDown size={14} style={{ color: 'var(--text-muted)' }} />}
             </button>
@@ -237,7 +237,7 @@ function SkillsEditor({
                     value={newSkill}
                     onChange={(e) => setNewSkill(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addSkill(); } }}
-                    placeholder="Add a skill..."
+                    placeholder="Thêm kỹ năng..."
                     style={{
                         flex: 1, padding: '6px 10px',
                         background: 'var(--bg-secondary)',
@@ -259,7 +259,7 @@ function SkillsEditor({
                         opacity: newSkill.trim() ? 1 : 0.4,
                     }}
                 >
-                    <Plus size={12} /> Add
+                    <Plus size={12} /> Thêm
                 </button>
             </div>
         </div>
@@ -313,7 +313,7 @@ function ExperienceEditor({
                                 padding: '6px 10px', fontSize: '0.78rem',
                                 color: 'var(--text-muted)', whiteSpace: 'nowrap',
                             }}>
-                                {exp.duration_months}mo
+                                {exp.duration_months} tháng
                             </span>
                         </div>
                         <EditableTextArea
@@ -321,7 +321,7 @@ function ExperienceEditor({
                             onChange={(v) => updateItem(i, 'description', v)}
                             original={orig?.description || ''}
                             rows={4}
-                            placeholder="Describe responsibilities and achievements..."
+                            placeholder="Mô tả trách nhiệm và thành tích..."
                         />
                     </div>
                 );
@@ -367,13 +367,13 @@ export default function EditableCvPreview({ originalCv, optimizedCv, onSave }: E
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16, fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                     <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                         <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent-green)' }} />
-                        AI Modified
+                        Đã chỉnh sửa bởi AI
                     </span>
                     <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                         <span style={{ width: 8, height: 8, borderRadius: 2, background: 'var(--bg-secondary)', border: '1px solid var(--border-subtle)' }} />
-                        Unchanged
+                        Giữ nguyên
                     </span>
-                    <span>{totalChanges} section{totalChanges !== 1 ? 's' : ''} modified</span>
+                    <span>Đã chỉnh sửa {totalChanges} mục</span>
                 </div>
                 <button
                     onClick={() => onSave(edited)}
@@ -383,7 +383,7 @@ export default function EditableCvPreview({ originalCv, optimizedCv, onSave }: E
                         display: 'flex', alignItems: 'center', gap: 6,
                     }}
                 >
-                    <CheckCircle size={14} weight="fill" /> Save & Download
+                    <CheckCircle size={14} weight="fill" /> Lưu & Tải xuống
                 </button>
             </div>
 
@@ -401,7 +401,7 @@ export default function EditableCvPreview({ originalCv, optimizedCv, onSave }: E
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 {/* Summary */}
                 <Section
-                    title="Professional Summary"
+                    title="Tóm tắt nghề nghiệp"
                     icon={User}
                     isChanged={summaryChanged}
                     onRevert={() => update('summary', originalCv.summary)}
@@ -414,7 +414,7 @@ export default function EditableCvPreview({ originalCv, optimizedCv, onSave }: E
                     />
                     {summaryChanged && (
                         <div style={{ marginTop: 8, padding: '8px 12px', background: 'rgba(239,68,68,0.04)', borderRadius: 6, fontSize: '0.78rem' }}>
-                            <p style={{ color: 'var(--text-muted)', marginBottom: 4, fontSize: '0.7rem', textTransform: 'uppercase' }}>Original:</p>
+                            <p style={{ color: 'var(--text-muted)', marginBottom: 4, fontSize: '0.7rem', textTransform: 'uppercase' }}>Bản gốc:</p>
                             <p style={{ color: 'var(--text-muted)', lineHeight: 1.5, textDecoration: 'line-through', opacity: 0.6 }}>
                                 {originalCv.summary}
                             </p>
@@ -424,7 +424,7 @@ export default function EditableCvPreview({ originalCv, optimizedCv, onSave }: E
 
                 {/* Skills */}
                 <Section
-                    title="Skills"
+                    title="Kỹ năng"
                     icon={Lightbulb}
                     isChanged={skillsChanged}
                     onRevert={() => update('skills', [...originalCv.skills])}
@@ -438,7 +438,7 @@ export default function EditableCvPreview({ originalCv, optimizedCv, onSave }: E
 
                 {/* Experience */}
                 <Section
-                    title="Work Experience"
+                    title="Kinh nghiệm làm việc"
                     icon={Briefcase}
                     isChanged={expChanged}
                     onRevert={() => update('experience', JSON.parse(JSON.stringify(originalCv.experience)))}
@@ -452,7 +452,7 @@ export default function EditableCvPreview({ originalCv, optimizedCv, onSave }: E
 
                 {/* Education */}
                 <Section
-                    title="Education"
+                    title="Học vấn"
                     icon={GraduationCap}
                     isChanged={eduChanged}
                     onRevert={() => update('education', JSON.parse(JSON.stringify(originalCv.education)))}
@@ -499,7 +499,7 @@ export default function EditableCvPreview({ originalCv, optimizedCv, onSave }: E
                 {/* Projects */}
                 {(edited.projects || []).length > 0 && (
                     <Section
-                        title="Projects"
+                        title="Dự án"
                         icon={ListBullets}
                         isChanged={projChanged}
                         onRevert={() => update('projects', JSON.parse(JSON.stringify(originalCv.projects)))}

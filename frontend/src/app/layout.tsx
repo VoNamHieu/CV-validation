@@ -4,7 +4,7 @@ import "./globals.css";
 
 const inter = Inter({
   variable: "--font-inter",
-  subsets: ["latin"],
+  subsets: ["latin", "vietnamese"],
 });
 
 const geistMono = Geist_Mono({
@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AI Job Fit Optimizer | Career Intelligence Tool",
-  description: "Upload your CV, paste a job description, and get an AI-powered match score with optimized CV suggestions. No hallucination, no fabrication.",
+  title: "JobFit AI | Trợ lý tìm việc & tối ưu CV",
+  description: "Tải CV lên, để AI tìm việc phù hợp, chấm điểm độ khớp và gợi ý tối ưu CV — cam kết không bịa nội dung.",
 };
 
 export default function RootLayout({
@@ -23,7 +23,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="vi">
       <body
         className={`${inter.variable} ${geistMono.variable} antialiased`}
       >

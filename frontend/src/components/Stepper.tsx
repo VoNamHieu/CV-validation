@@ -3,9 +3,9 @@
 import { Check, Upload, Globe, PencilSimple } from '@phosphor-icons/react';
 
 const steps = [
-    { num: 1, label: 'Upload CV', icon: Upload },
-    { num: 2, label: 'Find Jobs', icon: Globe },
-    { num: 3, label: 'Edit CV', icon: PencilSimple },
+    { num: 1, label: 'Tải CV', icon: Upload },
+    { num: 2, label: 'Tìm việc', icon: Globe },
+    { num: 3, label: 'Sửa CV', icon: PencilSimple },
 ];
 
 interface StepperProps {

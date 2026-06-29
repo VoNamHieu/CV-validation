@@ -137,11 +137,11 @@ function InlineEdit({
                 ...extraStyle,
             }}
             className="cv-editable-text"
-            title="Click to edit"
+            title="Bấm để sửa"
         >
             {value
                 ? <HighlightedText text={value} keywords={keywords} />
-                : <span style={{ color: '#999', fontStyle: 'italic' }}>{placeholder || 'Click to edit...'}</span>}
+                : <span style={{ color: '#999', fontStyle: 'italic' }}>{placeholder || 'Bấm để sửa...'}</span>}
         </span>
     );
 }
@@ -191,7 +191,7 @@ function BulletEditor({
                     color: '#888', cursor: 'pointer',
                 }}
             >
-                <Plus size={10} /> {placeholder || 'Add detail'}
+                <Plus size={10} /> {placeholder || 'Thêm chi tiết'}
             </button>
         );
     }
@@ -208,7 +208,7 @@ function BulletEditor({
                         <InlineEdit
                             value={b}
                             onChange={(v) => updateBullet(i, v)}
-                            placeholder="Add detail…"
+                            placeholder="Thêm chi tiết…"
                             keywords={keywords}
                             multiline={false}
                         />
@@ -217,13 +217,13 @@ function BulletEditor({
                         display: 'inline-flex', gap: 2, flexShrink: 0,
                         opacity: 0, transition: 'opacity 0.15s',
                     }}>
-                        <IconBtn title="Move up" onClick={() => move(i, -1)} disabled={i === 0}>
+                        <IconBtn title="Di chuyển lên" onClick={() => move(i, -1)} disabled={i === 0}>
                             <ArrowUp size={11} />
                         </IconBtn>
-                        <IconBtn title="Move down" onClick={() => move(i, 1)} disabled={i === bullets.length - 1}>
+                        <IconBtn title="Di chuyển xuống" onClick={() => move(i, 1)} disabled={i === bullets.length - 1}>
                             <ArrowDown size={11} />
                         </IconBtn>
-                        <IconBtn title="Remove bullet" onClick={() => removeBullet(i)} danger>
+                        <IconBtn title="Xoá dòng" onClick={() => removeBullet(i)} danger>
                             <X size={11} />
                         </IconBtn>
                     </span>
@@ -240,7 +240,7 @@ function BulletEditor({
                         color: '#888', cursor: 'pointer', marginTop: 4,
                     }}
                 >
-                    <Plus size={10} /> Add bullet
+                    <Plus size={10} /> Thêm dòng
                 </button>
             </li>
         </ul>
@@ -328,7 +328,7 @@ function SkillsTags({
                                 marginLeft: 2,
                             }}
                             className="cv-skill-remove"
-                            title="Remove skill"
+                            title="Xoá kỹ năng"
                         >
                             <X size={10} />
                         </button>
@@ -347,7 +347,7 @@ function SkillsTags({
                         }}
                         autoFocus
                         onBlur={() => { if (!newSkill.trim()) setAdding(false); }}
-                        placeholder="Skill name..."
+                        placeholder="Tên kỹ năng..."
                         style={{
                             width: 120, padding: '3px 8px', fontSize: '0.82rem',
                             border: '1.5px solid #6366f1', borderRadius: 4,
@@ -362,7 +362,7 @@ function SkillsTags({
                             fontSize: '0.75rem', fontWeight: 600,
                         }}
                     >
-                        Add
+                        Thêm
                     </button>
                 </span>
             ) : (
@@ -377,7 +377,7 @@ function SkillsTags({
                     }}
                     className="cv-add-skill-btn"
                 >
-                    <Plus size={10} /> Add skill
+                    <Plus size={10} /> Thêm kỹ năng
                 </button>
             )}
         </div>
@@ -398,9 +398,9 @@ function ItemActions({
         <div className="cv-item-actions" style={{
             display: 'inline-flex', gap: 4, opacity: 0, transition: 'opacity 0.15s',
         }}>
-            <IconBtn title="Move up" onClick={onUp} disabled={isFirst}><ArrowUp size={11} /></IconBtn>
-            <IconBtn title="Move down" onClick={onDown} disabled={isLast}><ArrowDown size={11} /></IconBtn>
-            <IconBtn title="Remove" onClick={onRemove} danger><Trash size={11} /></IconBtn>
+            <IconBtn title="Di chuyển lên" onClick={onUp} disabled={isFirst}><ArrowUp size={11} /></IconBtn>
+            <IconBtn title="Di chuyển xuống" onClick={onDown} disabled={isLast}><ArrowDown size={11} /></IconBtn>
+            <IconBtn title="Xoá" onClick={onRemove} danger><Trash size={11} /></IconBtn>
         </div>
     );
 }
@@ -533,7 +533,7 @@ export default function CvDocumentPreview({
                             color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '0.78rem',
                         }}
                     >
-                        <ArrowCounterClockwise size={12} /> Revert
+                        <ArrowCounterClockwise size={12} /> Khôi phục bản gốc
                     </button>
                 )}
                 <button
@@ -544,9 +544,9 @@ export default function CvDocumentPreview({
                         background: 'var(--bg-secondary)', border: '1px solid var(--border-default)',
                         color: 'var(--text-primary)', cursor: 'pointer',
                     }}
-                    title="Print to PDF (use the system print dialog)"
+                    title="In ra PDF (dùng hộp thoại in của hệ thống)"
                 >
-                    <Printer size={14} /> Print PDF
+                    <Printer size={14} /> In PDF
                 </button>
                 <button
                     onClick={() => onSave(edited)}
@@ -556,7 +556,7 @@ export default function CvDocumentPreview({
                         padding: '8px 20px', fontSize: '0.82rem',
                     }}
                 >
-                    <FloppyDisk size={14} weight="fill" /> Save & Download
+                    <FloppyDisk size={14} weight="fill" /> Lưu & Tải xuống
                 </button>
             </div>
 
@@ -603,7 +603,7 @@ export default function CvDocumentPreview({
                         multiline
                         keywords={keywords}
                         style={{ fontSize: '0.92rem', color: '#333', lineHeight: 1.65 }}
-                        placeholder="Write your professional summary..."
+                        placeholder="Viết tóm tắt nghề nghiệp của bạn..."
                     />
                 </div>
 
@@ -621,7 +621,7 @@ export default function CvDocumentPreview({
                                 color: '#888', cursor: 'pointer',
                             }}
                         >
-                            <Plus size={10} /> Add
+                            <Plus size={10} /> Thêm
                         </button>
                     }
                 />
@@ -637,7 +637,7 @@ export default function CvDocumentPreview({
                                 <InlineEdit
                                     value={edu.year}
                                     onChange={(v) => updateEducation(i, 'year', v)}
-                                    placeholder="Year"
+                                    placeholder="Năm"
                                 />
                             </div>
                             <div>
@@ -645,14 +645,14 @@ export default function CvDocumentPreview({
                                     <InlineEdit
                                         value={edu.institution}
                                         onChange={(v) => updateEducation(i, 'institution', v)}
-                                        placeholder="Institution"
+                                        placeholder="Trường/Đơn vị đào tạo"
                                     />
                                 </div>
                                 <div style={{ color: '#444', fontSize: '0.88rem' }}>
                                     <InlineEdit
                                         value={edu.degree}
                                         onChange={(v) => updateEducation(i, 'degree', v)}
-                                        placeholder="Degree"
+                                        placeholder="Bằng cấp/Chuyên ngành"
                                     />
                                 </div>
                             </div>
@@ -690,7 +690,7 @@ export default function CvDocumentPreview({
                                 color: '#888', cursor: 'pointer',
                             }}
                         >
-                            <Plus size={10} /> Add
+                            <Plus size={10} /> Thêm
                         </button>
                     }
                 />
@@ -709,21 +709,21 @@ export default function CvDocumentPreview({
                                     placeholder="0"
                                     style={{ display: 'inline' }}
                                 />
-                                <span style={{ marginLeft: 4 }}>months</span>
+                                <span style={{ marginLeft: 4 }}>tháng</span>
                             </div>
                             <div>
                                 <div style={{ fontWeight: 700, fontSize: '0.92rem', color: '#111' }}>
                                     <InlineEdit
                                         value={exp.title}
                                         onChange={(v) => updateExperience(i, 'title', v)}
-                                        placeholder="Job Title"
+                                        placeholder="Chức danh"
                                     />
                                 </div>
                                 <div style={{ fontWeight: 700, fontSize: '0.88rem', color: '#333', marginBottom: 6 }}>
                                     <InlineEdit
                                         value={exp.company}
                                         onChange={(v) => updateExperience(i, 'company', v)}
-                                        placeholder="Company"
+                                        placeholder="Công ty"
                                     />
                                 </div>
                                 <div style={{ paddingLeft: 0, fontSize: '0.88rem', color: '#333', lineHeight: 1.65 }}>
@@ -731,7 +731,7 @@ export default function CvDocumentPreview({
                                         value={exp.description}
                                         onChange={(v) => updateExperience(i, 'description', v)}
                                         keywords={keywords}
-                                        placeholder="Add achievement"
+                                        placeholder="Thêm thành tích"
                                     />
                                 </div>
                             </div>
@@ -760,7 +760,7 @@ export default function CvDocumentPreview({
                                 color: '#888', cursor: 'pointer',
                             }}
                         >
-                            <Plus size={10} /> Add
+                            <Plus size={10} /> Thêm
                         </button>
                     }
                 />
@@ -774,7 +774,7 @@ export default function CvDocumentPreview({
                                     <InlineEdit
                                         value={proj.name}
                                         onChange={(v) => updateProject(i, 'name', v)}
-                                        placeholder="Project Name"
+                                        placeholder="Tên dự án"
                                     />
                                 </div>
                                 <div style={{ fontSize: '0.88rem', color: '#333', lineHeight: 1.6, paddingLeft: 0 }}>
@@ -782,7 +782,7 @@ export default function CvDocumentPreview({
                                         value={proj.description}
                                         onChange={(v) => updateProject(i, 'description', v)}
                                         keywords={keywords}
-                                        placeholder="Add detail"
+                                        placeholder="Thêm chi tiết"
                                     />
                                 </div>
                             </div>
@@ -804,7 +804,7 @@ export default function CvDocumentPreview({
                     fontSize: '0.7rem', color: '#bbb',
                     textAlign: 'center',
                 }}>
-                    AI-assisted optimization · Generated by JobFit AI
+                    Tối ưu với sự hỗ trợ của AI · Tạo bởi JobFit AI
                 </div>
             </div>
 
