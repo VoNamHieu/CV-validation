@@ -195,7 +195,8 @@ def _strip(s: str) -> str:
     return s
 
 
-def _items_to_jobs(items, origin: str) -> list[dict]:
+def _items_to_jobs(items, origin: str, title_keys=_TITLE_KEYS, url_keys=_URL_KEYS,
+                   loc_keys=_LOC_KEYS, desc_keys=_DESC_KEYS, detail_prefix=None) -> list[dict]:
     out = []
     for it in items:
         if not isinstance(it, dict):
@@ -205,15 +206,15 @@ def _items_to_jobs(items, origin: str) -> list[dict]:
         # sub-dict that carries one — flat shapes keep their existing behaviour
         # since `core` stays `it`.
         core = it
-        if not _first(it, _TITLE_KEYS):
+        if not _first(it, title_keys):
             for v in it.values():
-                if isinstance(v, dict) and _first(v, _TITLE_KEYS):
+                if isinstance(v, dict) and _first(v, title_keys):
                     core = v
                     break
-        title = _first(core, _TITLE_KEYS)
+        title = _first(core, title_keys)
         if not title or len(title) < 3:
             continue
-        url = _first(core, _URL_KEYS) or _first(it, _URL_KEYS)
+        url = _first(core, url_keys) or _first(it, url_keys)
         if url and not url.startswith("http"):
             # Make absolute: protocol-relative ("//host/x"), root-relative
             # ("/x"), or a bare slug ("6742-foo" — many SPAs put the slug in a
@@ -223,17 +224,19 @@ def _items_to_jobs(items, origin: str) -> list[dict]:
             else:
                 slug = url.lstrip("/")
                 host = (urlparse(origin).netloc or "").lower()
-                prefix = _SLUG_DETAIL_PREFIX.get(host)
+                prefix = detail_prefix or _SLUG_DETAIL_PREFIX.get(host)
                 # A bare slug (no path separators) on a host with a known detail
                 # route → prepend that route, else origin-join would 404.
                 if prefix and "/" not in slug:
-                    url = f"{origin}{prefix}{slug}"
+                    url = f"{origin}/{prefix.strip('/')}/{slug}"
                 else:
                     url = urljoin(origin + "/", slug)
         if not url:
             jid = (core.get("id") or core.get("jobId") or core.get("Id")
                    or it.get("id") or it.get("jobId") or it.get("slug"))
-            if jid:
+            if jid and detail_prefix:
+                url = f"{origin}/{detail_prefix.strip('/')}/{jid}"
+            elif jid:
                 url = f"{origin}/job/{jid}"
             else:
                 # No url and no id (e.g. 247Express table JSON) — keep rows
@@ -242,8 +245,8 @@ def _items_to_jobs(items, origin: str) -> list[dict]:
                 url = f"{origin}#{quote(title[:40])}"
         out.append({"title": title[:200],
                     "url": url,
-                    "location": (_first(core, _LOC_KEYS) or _first(it, _LOC_KEYS))[:120],
-                    "description": _strip(_first(core, _DESC_KEYS) or _first(it, _DESC_KEYS))})
+                    "location": (_first(core, loc_keys) or _first(it, loc_keys))[:120],
+                    "description": _strip(_first(core, desc_keys) or _first(it, desc_keys))})
     return out
 
 
@@ -357,10 +360,14 @@ async def phenom_jobs(career_url: str) -> list[dict]:
 _OUTSYSTEMS_DETAIL_PREFIX = {
     "careers.onemount.com": "/jobs/",   # detail page = /jobs/{JobRequest.Id}
 }
-_OS_SIZE_KEYS = ("maxrecord", "maxrecords", "pagesize", "recordsperpage",
-                 "top", "limit", "pagelength", "rowcount")
-_OS_OFFSET_KEYS = ("startindex", "startrow", "skip", "offset",
-                   "pageindex", "pagenumber", "currentpage")
+# Paging params (shared by the OutSystems adapter and the generic replay).
+# Size keys get bumped high; offset keys get zeroed — so a replay returns the
+# full list, not just the first page. Page-number keys are left alone (zeroing
+# a 1-based page index would fetch nothing).
+_PAGE_SIZE_KEYS = ("maxrecord", "maxrecords", "pagesize", "page_size", "recordsperpage",
+                   "per_page", "perpage", "top", "limit", "pagelength", "rowcount",
+                   "size", "count", "rows", "take", "num", "length")
+_PAGE_OFFSET_KEYS = ("startindex", "startrow", "skip", "offset", "from", "start")
 
 
 def is_outsystems(html: str) -> bool:
@@ -431,23 +438,63 @@ def _os_records_to_jobs(records, origin: str, host: str) -> list[dict]:
     return out
 
 
-def _os_bump(obj):
-    """Raise page-size keys + zero offset keys so a replay pulls all records."""
+def _bump_paging(obj):
+    """Raise page-size keys + zero offset keys (recursively) so a replay pulls
+    all records, not just the first page. Used for JSON request bodies."""
     if isinstance(obj, dict):
         for k, v in obj.items():
             kl = k.lower()
             if isinstance(v, bool):
                 continue
-            if kl in _OS_SIZE_KEYS and isinstance(v, (int, float)):
+            if kl in _PAGE_SIZE_KEYS and isinstance(v, (int, float)):
                 obj[k] = 200
-            elif kl in _OS_OFFSET_KEYS and isinstance(v, (int, float)):
+            elif kl in _PAGE_OFFSET_KEYS and isinstance(v, (int, float)):
                 obj[k] = 0
             else:
-                _os_bump(v)
+                _bump_paging(v)
     elif isinstance(obj, list):
         for i in obj:
-            _os_bump(i)
+            _bump_paging(i)
     return obj
+
+
+def _bump_query(url: str) -> str:
+    """GET counterpart of _bump_paging: raise size / zero offset query params."""
+    from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
+    p = urlparse(url)
+    if not p.query:
+        return url
+    changed, newq = False, []
+    for k, v in parse_qsl(p.query, keep_blank_values=True):
+        kl = k.lower()
+        if kl in _PAGE_SIZE_KEYS and v.isdigit():
+            newq.append((k, "200")); changed = True
+        elif kl in _PAGE_OFFSET_KEYS and v.isdigit():
+            newq.append((k, "0")); changed = True
+        else:
+            newq.append((k, v))
+    return urlunparse(p._replace(query=urlencode(newq))) if changed else url
+
+
+# Headers worth replaying so a refetch isn't rejected (CSRF / auth / XHR marker).
+def _replay_headers(headers: dict) -> dict:
+    keep = {}
+    for k, v in (headers or {}).items():
+        kl = k.lower()
+        if kl in ("content-type", "x-csrftoken", "x-xsrf-token", "x-csrf-token",
+                  "authorization", "x-requested-with", "accept", "apollographql-client-name"):
+            keep[k] = v
+    return keep
+
+
+_REPLAY_POST_JS = """async ({url, body, headers}) => {
+    const r = await fetch(url, {method:'POST', headers, body: JSON.stringify(body), credentials:'include'});
+    return await r.text();
+}"""
+_REPLAY_GET_JS = """async (url) => {
+    const r = await fetch(url, {credentials:'include'});
+    return await r.text();
+}"""
 
 
 def _os_score(jobs: list[dict]) -> tuple[int, int]:
@@ -530,7 +577,7 @@ async def outsystems_jobs(career_url: str) -> list[dict]:
         meta = reqs.get(best_url)
         if best_jobs and meta and meta["body"]:
             try:
-                bumped = _os_bump(json.loads(meta["body"]))
+                bumped = _bump_paging(json.loads(meta["body"]))
                 full = await page.evaluate(
                     """async ({url, body, csrf}) => {
                         const r = await fetch(url, {method:'POST',
@@ -561,6 +608,108 @@ async def outsystems_jobs(career_url: str) -> list[dict]:
     return best_jobs[:200]
 
 
+def _walk_path(data, path):
+    """Follow a JSON path (list of dict keys / list indices) into `data`."""
+    cur = data
+    for k in path or []:
+        if isinstance(cur, dict):
+            cur = cur.get(k)
+        elif isinstance(cur, list) and isinstance(k, int) and 0 <= k < len(cur):
+            cur = cur[k]
+        else:
+            return None
+    return cur
+
+
+async def _replay_for_more(page, url: str, meta: dict, origin: str) -> list[dict]:
+    """Re-issue the winning job request with paging bumped, in the page context
+    (so cookies / CSRF / module version are valid), and parse the fuller list.
+    Returns [] if the endpoint isn't replayable or yields no more."""
+    import json
+    method = (meta.get("method") or "GET").upper()
+    if method == "POST" and meta.get("post_data"):
+        try:
+            body = _bump_paging(json.loads(meta["post_data"]))
+        except Exception:
+            return []
+        text = await page.evaluate(
+            _REPLAY_POST_JS,
+            {"url": url, "body": body, "headers": _replay_headers(meta.get("headers"))},
+        )
+    elif method == "GET":
+        bumped = _bump_query(url)
+        if bumped == url:
+            return []
+        text = await page.evaluate(_REPLAY_GET_JS, bumped)
+    else:
+        return []
+    try:
+        return _items_to_jobs(_find_job_list(json.loads(text)), origin)
+    except Exception:
+        return []
+
+
+_LLM_MAP_SYS = (
+    "You map a website's raw JSON API response to its job-posting list. "
+    "You never invent data — you only point at where the jobs already are."
+)
+
+
+async def _llm_map_jobs(parsed, origin: str) -> list[dict]:
+    """Last-resort: when heuristics can't find the job list in any captured
+    JSON, ask the LLM which response holds the jobs and which fields are the
+    title/location/url/id — then extract deterministically with those keys.
+    The LLM only returns a field MAP, so it can't hallucinate postings."""
+    import asyncio
+    import json
+    from app.services.gemini_client import generate_json, _extract_json_object
+
+    cands = sorted(parsed, key=lambda kv: len(json.dumps(kv[1])), reverse=True)[:4]
+    if not cands:
+        return []
+    blocks = []
+    for i, (url, data) in enumerate(cands):
+        blocks.append(f"[RESPONSE {i}] url={url}\n" + json.dumps(data, ensure_ascii=False)[:3500])
+    instr = (
+        "From the API responses above, find the array of JOB POSTINGS (not "
+        "categories, companies, locations or menus). Return ONLY this JSON:\n"
+        '{"response_index": <int>, "array_path": [<keys from the response root to the array>], '
+        '"title_key": "<field>", "location_key": "<field|empty>", "url_key": "<field|empty>", '
+        '"id_key": "<field|empty>"}\n'
+        "array_path uses object keys (and integer indices for arrays). Keys may "
+        "name fields nested inside each record. If no response holds real job "
+        'postings, return {"response_index": -1}.'
+    )
+    try:
+        raw = await asyncio.to_thread(generate_json, _LLM_MAP_SYS, "\n\n".join(blocks) + "\n\n" + instr)
+    except Exception as e:
+        logger.info(f"[spa_sniff] llm-map call failed: {str(e)[:60]}")
+        return []
+    m = _extract_json_object(raw)
+    if not m:
+        return []
+    idx = m.get("response_index", -1)
+    if not isinstance(idx, int) or not (0 <= idx < len(cands)):
+        return []
+    data = cands[idx][1]
+    arr = _walk_path(data, m.get("array_path"))
+    if not isinstance(arr, list) or not arr:
+        arr = _find_job_list(data)
+    if not isinstance(arr, list) or not arr:
+        return []
+    # Fold the LLM's field names into the heuristic key lists for a one-off
+    # extraction — heuristics still apply, the LLM just adds the odd names.
+    def _ext(base, key):
+        k = (m.get(key) or "").strip().lower()
+        return (k, *base) if k and k not in base else base
+    return _items_to_jobs(
+        arr, origin,
+        title_keys=_ext(_TITLE_KEYS, "title_key"),
+        url_keys=_ext(_URL_KEYS, "url_key"),
+        loc_keys=_ext(_LOC_KEYS, "location_key"),
+    )
+
+
 async def sniff_jobs(career_url: str) -> list[dict]:
     """Render the SPA, capture its job-list JSON endpoint(s), re-fetch + parse.
     First tries __NEXT_DATA__ (cheap, no render) for Next.js SSG sites."""
@@ -587,6 +736,7 @@ async def sniff_jobs(career_url: str) -> list[dict]:
     page = await ctx.new_page()
 
     read_tasks: list = []
+    reqs: dict = {}   # url -> {method, post_data, headers} for paging replay
 
     async def _read(resp):
         try:
@@ -594,48 +744,32 @@ async def sniff_jobs(career_url: str) -> list[dict]:
         except Exception:
             return resp.url, ""
 
+    def _is_jobish(u: str) -> bool:
+        ul = u.lower()
+        if any(n in ul for n in _NOISE):
+            return False
+        return bool(_JOB_URL_RX.search(u)) or "graphql" in ul or "/api/" in ul or "/screenservices/" in ul
+
+    def on_req(req):
+        # Remember the request shape so we can replay the winning endpoint with
+        # paging bumped (defeats first-page-only APIs).
+        try:
+            if _is_jobish(req.url):
+                reqs[req.url] = {"method": req.method, "post_data": req.post_data or "",
+                                 "headers": req.headers}
+        except Exception:
+            pass
+
     def on_resp(r):
         # Capture any JSON the page fetches that could be a job list — covers
-        # GET, POST and GraphQL (read the body directly, no re-fetch/replay).
+        # GET, POST and GraphQL (read the body directly).
         try:
-            u = r.url
-            ct = r.headers.get("content-type", "")
-            if "json" not in ct or any(n in u.lower() for n in _NOISE):
+            if "json" not in r.headers.get("content-type", ""):
                 return
-            ul = u.lower()
-            if _JOB_URL_RX.search(u) or "graphql" in ul or "/api/" in ul:
-                if len(read_tasks) < 30:
-                    read_tasks.append(asyncio.ensure_future(_read(r)))
+            if _is_jobish(r.url) and len(read_tasks) < 30:
+                read_tasks.append(asyncio.ensure_future(_read(r)))
         except Exception:
             pass
-    page.on("response", on_resp)
-    try:
-        await page.goto(career_url, timeout=35000, wait_until="domcontentloaded")
-        try:
-            await page.wait_for_load_state("networkidle", timeout=9000)
-        except Exception:
-            pass
-        await page.wait_for_timeout(2000)
-        bodies = []
-        if read_tasks:
-            done = await asyncio.gather(*read_tasks, return_exceptions=True)
-            bodies = [d for d in done if isinstance(d, tuple) and d[1]]
-        # Also harvest job-detail anchors from the RENDERED DOM — covers SSR /
-        # Next.js App-Router sites (e.g. VPS) that have no clean JSON job API but
-        # render <a href=".../chi-tiet-cong-viec/…">Title</a> links.
-        dom_jobs = await page.evaluate(_DOM_JOBS_JS)
-    except Exception as e:
-        logger.info(f"[spa_sniff] render failed {career_url}: {str(e)[:60]}")
-        bodies, dom_jobs = [], []
-    finally:
-        await ctx.close()
-
-    parsed = []
-    for url, body in bodies:
-        try:
-            parsed.append((url, json.loads(body)))
-        except Exception:
-            continue
 
     # Score a candidate list by how many of its titles read like real job titles.
     # A title counts when it contains a role word (chuyên viên / manager / …) or
@@ -653,18 +787,67 @@ async def sniff_jobs(career_url: str) -> list[dict]:
                 n += 1
         return n
 
+    page.on("request", on_req)
+    page.on("response", on_resp)
     best: list[dict] = []
     best_src = ""
-    best_score = (-1, -1)  # (quality, count)
-    for url, data in parsed:
-        jobs = _items_to_jobs(_find_job_list(data), origin)
-        score = (_quality(jobs), len(jobs))
-        if jobs and score > best_score:
-            best, best_src, best_score = jobs, url, score
-    # Rendered DOM (role/job anchors + JS-only table rows). Prefer it when the
-    # best JSON list looks like junk (low quality) or is thin.
-    if dom_jobs and (_quality(dom_jobs), len(dom_jobs)) > best_score:
-        best, best_src = dom_jobs, "rendered-DOM"
+    try:
+        await page.goto(career_url, timeout=35000, wait_until="domcontentloaded")
+        try:
+            await page.wait_for_load_state("networkidle", timeout=9000)
+        except Exception:
+            pass
+        await page.wait_for_timeout(2000)
+        bodies = []
+        if read_tasks:
+            done = await asyncio.gather(*read_tasks, return_exceptions=True)
+            bodies = [d for d in done if isinstance(d, tuple) and d[1]]
+        # Also harvest job-detail anchors from the RENDERED DOM — covers SSR /
+        # Next.js App-Router sites (e.g. VPS) that have no clean JSON job API but
+        # render <a href=".../chi-tiet-cong-viec/…">Title</a> links.
+        dom_jobs = await page.evaluate(_DOM_JOBS_JS)
+
+        parsed = []
+        for url, body in bodies:
+            try:
+                parsed.append((url, json.loads(body)))
+            except Exception:
+                continue
+
+        best_score = (-1, -1)  # (quality, count)
+        for url, data in parsed:
+            jobs = _items_to_jobs(_find_job_list(data), origin)
+            score = (_quality(jobs), len(jobs))
+            if jobs and score > best_score:
+                best, best_src, best_score = jobs, url, score
+
+        # Paging replay: re-issue the winning endpoint with size bumped so a
+        # first-page-only API (e.g. 10 of 59) returns the whole list.
+        if best and best_src in reqs:
+            try:
+                more = await _replay_for_more(page, best_src, reqs[best_src], origin)
+                if len(more) > len(best):
+                    logger.info(f"[spa_sniff] {origin} paging replay {len(best)}→{len(more)} jobs")
+                    best, best_score = more, (_quality(more), len(more))
+            except Exception as e:
+                logger.info(f"[spa_sniff] replay failed {origin}: {str(e)[:60]}")
+
+        # Rendered DOM (role/job anchors + JS-only table rows). Prefer it when the
+        # best JSON list looks like junk (low quality) or is thin.
+        if dom_jobs and (_quality(dom_jobs), len(dom_jobs)) > best_score:
+            best, best_src, best_score = dom_jobs, "rendered-DOM", (_quality(dom_jobs), len(dom_jobs))
+
+        # LLM-map: nothing heuristically usable but the page DID fetch JSON — ask
+        # the LLM which response/fields are the jobs, then extract with those.
+        if best_score[0] == 0 and parsed:
+            mapped = await _llm_map_jobs(parsed, origin)
+            if mapped and (_quality(mapped), len(mapped)) > best_score:
+                best, best_src = mapped, "llm-map"
+    except Exception as e:
+        logger.info(f"[spa_sniff] render failed {career_url}: {str(e)[:60]}")
+    finally:
+        await ctx.close()
+
     if best:
         logger.info(f"[spa_sniff] {origin} → {len(best)} jobs via {best_src[:70]}")
     return best
