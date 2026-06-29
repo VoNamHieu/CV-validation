@@ -440,6 +440,39 @@ def _flatten_featured(companies: list[dict]) -> list[dict]:
     return flat
 
 
+# ── DB-backed candidate pool (opt-in) ────────────────────────────────────────
+# CATALOG_SOURCE controls where /search pulls its candidate pool from:
+#   "featured" (default) → in-memory crawl cache only — current behaviour, no change
+#   "db"                 → the Postgres jobs/companies store only
+#   "both"               → merge DB jobs into the featured pool (deduped by url)
+# Opt-in keeps the live product untouched while the store is populated.
+_CATALOG_SOURCE = os.getenv("CATALOG_SOURCE", "featured").lower()
+
+
+async def _db_pool() -> list[dict]:
+    """Active jobs from the store, reshaped for the facet engine. Best-effort:
+    any DB error degrades to an empty list so search never hard-fails on it."""
+    try:
+        from app.db import jobs as jobs_repo
+        return await jobs_repo.list_for_facet(limit=1000)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("DB candidate pool unavailable, falling back: %s", e)
+        return []
+
+
+async def _candidate_pool(companies: list[dict] | None) -> list[dict]:
+    """Assemble the pool facet ranks over, honouring CATALOG_SOURCE."""
+    featured = _flatten_featured(companies) if companies else []
+    if _CATALOG_SOURCE == "featured":
+        return featured
+    db_jobs = await _db_pool()
+    if _CATALOG_SOURCE == "db":
+        return db_jobs or featured  # fall back if store empty
+    # "both": merge, DB first, dedupe by url (featured may re-list the same posting)
+    seen = {j.get("url") for j in db_jobs if j.get("url")}
+    return db_jobs + [j for j in featured if j.get("url") not in seen]
+
+
 @router.post("/search")
 async def search(req: SearchRequest):
     """Rank the featured pool against a CV-derived (or explicit) profile using
@@ -464,16 +497,20 @@ async def search(req: SearchRequest):
         profile.cv_families = families_from_roles(req.cv_roles)
 
     # Reuse the featured cache (L1 → Redis); kick a refresh if cold.
-    now = time.time()
     companies = _featured_cache.get("data")
     if not companies:
         entry = await _read_featured_entry()
         companies = entry.get("companies") if entry else None
-    if not companies:
-        _ensure_refresh_task()
+
+    pool = await _candidate_pool(companies)
+    if not pool:
+        # Nothing to rank yet: warm the crawl cache (only the featured source
+        # depends on it) and tell the client to retry.
+        if not companies:
+            _ensure_refresh_task()
         return {"warming": True, "profile": profile.__dict__, "results": []}
 
-    ranked = rank_jobs(_flatten_featured(companies), profile)  # Phase 1: facet
+    ranked = rank_jobs(pool, profile)  # Phase 1: facet
 
     # Phase 2: embedding rerank within the top facet bucket (cached per job).
     if req.rerank and ranked:

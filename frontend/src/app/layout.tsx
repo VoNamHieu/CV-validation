@@ -23,7 +23,16 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="vi">
+    <html lang="vi" suppressHydrationWarning>
+      <head>
+        {/* Set theme before paint to avoid a flash. Default is light;
+            only flip to dark when the user previously chose it. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var t=localStorage.getItem('jobfit-theme');if(t==='dark'){document.documentElement.setAttribute('data-theme','dark');}}catch(e){}})();`,
+          }}
+        />
+      </head>
       <body
         className={`${inter.variable} ${geistMono.variable} antialiased`}
       >

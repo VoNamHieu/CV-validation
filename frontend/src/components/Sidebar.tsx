@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAppStore, AppView } from '@/store/useAppStore';
-import { Sparkle, MagicWand, Briefcase, FileText, List, X } from '@phosphor-icons/react';
+import { Sparkle, MagicWand, Briefcase, FileText, List, X, Sun, Moon } from '@phosphor-icons/react';
 import type { Icon } from '@phosphor-icons/react';
 
 interface NavItem {
@@ -25,6 +25,20 @@ export default function Sidebar() {
     const setView = useAppStore((s) => s.setView);
     const historyCount = useAppStore((s) => s.jobHistory.length);
     const [mobileOpen, setMobileOpen] = useState(false);
+
+    // Theme toggle — reads the attr set by the no-FOUC bootstrap script,
+    // flips data-theme on <html>, and persists the choice.
+    const [theme, setTheme] = useState<'light' | 'dark'>('light');
+    useEffect(() => {
+        setTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light');
+    }, []);
+    const toggleTheme = () => {
+        const next = theme === 'dark' ? 'light' : 'dark';
+        setTheme(next);
+        if (next === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+        else document.documentElement.removeAttribute('data-theme');
+        try { localStorage.setItem('jobfit-theme', next); } catch { /* ignore */ }
+    };
 
     return (
       <>
@@ -53,7 +67,7 @@ export default function Sidebar() {
                 left: 0,
                 bottom: 0,
                 width: SIDEBAR_WIDTH,
-                background: 'rgba(17, 17, 17, 0.92)',
+                background: 'var(--bg-secondary)',
                 backdropFilter: 'blur(16px)',
                 WebkitBackdropFilter: 'blur(16px)',
                 borderRight: '1px solid var(--border-subtle)',
@@ -174,6 +188,26 @@ export default function Sidebar() {
 
             {/* Footer */}
             <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {/* Theme toggle */}
+                <button
+                    onClick={toggleTheme}
+                    aria-label={theme === 'dark' ? 'Chuyển sang giao diện sáng' : 'Chuyển sang giao diện tối'}
+                    style={{
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        padding: '8px 12px', borderRadius: 10,
+                        background: 'var(--bg-card)',
+                        border: '1px solid var(--border-subtle)',
+                        color: 'var(--text-secondary)',
+                        fontSize: '0.74rem', fontWeight: 500, cursor: 'pointer',
+                        transition: 'all 0.18s ease', width: '100%', textAlign: 'left',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-card-hover)'; e.currentTarget.style.color = 'var(--text-primary)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--bg-card)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
+                >
+                    {theme === 'dark'
+                        ? <><Sun size={15} weight="duotone" /> Giao diện sáng</>
+                        : <><Moon size={15} weight="duotone" /> Giao diện tối</>}
+                </button>
                 <div
                     style={{
                         display: 'flex', alignItems: 'center', gap: 8,

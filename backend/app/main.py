@@ -11,8 +11,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
-from app.routers import extract, crawl, smart_crawl, render, career, debug_capture, link_monitor
+from app.routers import (
+    extract, crawl, smart_crawl, render, career, debug_capture, link_monitor,
+    compat_monitor, store, account,
+)
 from app.services.browser_pool import close_browser
+from app.db.pool import close_pool
 
 
 @asynccontextmanager
@@ -22,9 +26,11 @@ async def lifespan(_app: FastAPI):
     # awaits only a fast cache check; the crawl itself runs in the background.
     await career.warm_featured_cache()
     # Browser is launched lazily on first use (see browser_pool.get_browser);
-    # only need to clean it up on shutdown.
+    # only need to clean it up on shutdown. The DB pool is likewise lazy
+    # (first get_pool() call) — just close it on shutdown.
     yield
     await close_browser()
+    await close_pool()
 
 
 app = FastAPI(title="AI Job Fit Optimizer API", version="1.0.0", lifespan=lifespan)
@@ -79,6 +85,17 @@ def health_check():
     return {"status": "ok", "service": "ai-job-fit-optimizer"}
 
 
+@app.get("/health/db")
+async def health_db():
+    """Connectivity probe for the Supabase Postgres pool."""
+    from app.db.pool import ping
+    try:
+        ok = await ping()
+        return {"status": "ok" if ok else "degraded", "db": "supabase-postgres"}
+    except Exception as e:  # noqa: BLE001 — surface the reason to the caller
+        return JSONResponse({"status": "error", "detail": str(e)}, status_code=503)
+
+
 app.include_router(extract.router)
 app.include_router(crawl.router)
 app.include_router(smart_crawl.router)
@@ -86,3 +103,6 @@ app.include_router(render.router)
 app.include_router(career.router)
 app.include_router(debug_capture.router)
 app.include_router(link_monitor.router)
+app.include_router(compat_monitor.router)
+app.include_router(store.router)
+app.include_router(account.router)

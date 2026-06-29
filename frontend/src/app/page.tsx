@@ -71,8 +71,8 @@ export default function Home() {
           fontSize: '0.7rem',
           color: 'var(--text-muted)',
           borderTop: '1px solid var(--border-subtle)',
-          background: 'rgba(17, 17, 17, 0.6)',
-          opacity: 0.7,
+          background: 'var(--bg-secondary)',
+          opacity: 0.9,
         }}>
           JobFit AI · Vận hành bởi AI · Cam kết không bịa nội dung
         </footer>
