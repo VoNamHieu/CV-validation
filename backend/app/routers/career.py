@@ -219,7 +219,9 @@ async def _fetch_jobs_for(career_url: str) -> list[dict]:
             if elapsed > _FEATURED_SLOW_S:
                 logger.warning(f"[featured] SLOW {elapsed:.1f}s ({len(jobs)} jobs) — {career_url}")
             # Cloudflare/bot-detected sites yield nothing server-side — fall back
-            # to the latest browser-extension DOM capture for those hosts.
+            # to the latest browser-extension DOM capture for those hosts. (For
+            # One Mount the live OutSystems adapter normally succeeds; the DOM
+            # capture only kicks in if that render fails entirely.)
             if not jobs and capture_jobs.is_capture_host(career_url):
                 cap = await capture_jobs.jobs_from_capture(career_url)
                 if cap:

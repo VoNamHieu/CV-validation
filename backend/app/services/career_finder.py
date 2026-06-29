@@ -954,6 +954,20 @@ async def extract_jobs_from_career_page(career_url: str, _depth: int = 0) -> lis
         except Exception as e:
             logger.info(f"[stage4] Phenom extract skipped for {career_url}: {e}")
 
+    # Fast path 4: OutSystems career portal (e.g. One Mount) — jobs come from a
+    # /screenservices JSON the generic sniff misreads (it grabs category headers).
+    # Render + replay the job endpoint to get every opening with real /jobs/{id}
+    # URLs. Detect via the OutSystems bootstrap markers in the shell HTML.
+    if any(s in html.lower() for s in ("outsystemsapp", "/scripts/outsystems", "/moduleservices/moduleversioninfo")):
+        try:
+            from app.services.spa_sniff import outsystems_jobs
+            osj = await outsystems_jobs(career_url)
+            if osj:
+                return [JobListing(title=j["title"][:200], url=j["url"],
+                                   location=(j.get("location") or "")[:120]) for j in osj[:_MAX_JOBS]]
+        except Exception as e:
+            logger.info(f"[stage4] OutSystems extract skipped for {career_url}: {e}")
+
     soup = BeautifulSoup(html, "html.parser")
     base = _apex_url(career_url) or career_url
 

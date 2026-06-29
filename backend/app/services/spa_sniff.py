@@ -314,6 +314,221 @@ async def phenom_jobs(career_url: str) -> list[dict]:
     return rows[:50]
 
 
+# ── OutSystems career portals ────────────────────────────────────────────────
+# OutSystems SPAs (e.g. One Mount) load jobs via POST /screenservices/<module>/
+# <screen>/ScreenDataSet… returning {data:{List:{List:[…]}}}. Each record nests
+# the posting under sub-objects (JobRequest/Company/…). The list is server-side
+# paginated (StartIndex/MaxRecord), so after finding the job endpoint we replay
+# its POST in-page — the page's valid X-CSRFToken + module version come for free
+# — with the page size bumped, pulling every opening in one shot. JD is left
+# empty: it's resolved lazily from the detail page when scoring needs it.
+_OUTSYSTEMS_DETAIL_PREFIX = {
+    "careers.onemount.com": "/jobs/",   # detail page = /jobs/{JobRequest.Id}
+}
+_OS_SIZE_KEYS = ("maxrecord", "maxrecords", "pagesize", "recordsperpage",
+                 "top", "limit", "pagelength", "rowcount")
+_OS_OFFSET_KEYS = ("startindex", "startrow", "skip", "offset",
+                   "pageindex", "pagenumber", "currentpage")
+
+
+def is_outsystems(html: str) -> bool:
+    h = (html or "").lower()
+    return ("outsystemsapp" in h or "/scripts/outsystems" in h
+            or "/moduleservices/moduleversioninfo" in h)
+
+
+def _os_arrays(data):
+    """Every array of dict records anywhere in an OutSystems response."""
+    out = []
+
+    def walk(x):
+        if isinstance(x, list):
+            if x and sum(isinstance(i, dict) for i in x[:5]) >= 1:
+                out.append(x)
+            for i in x[:8]:
+                walk(i)
+        elif isinstance(x, dict):
+            for v in x.values():
+                walk(v)
+    walk(data)
+    return out
+
+
+def _os_core(rec: dict) -> dict:
+    """The sub-object carrying the posting, else rec. Requires a NON-EMPTY
+    title — sibling objects (Department/Company) often have an empty Name key
+    that would otherwise win and yield a blank title."""
+    for c in [rec, *(v for v in rec.values() if isinstance(v, dict))]:
+        if _first(c, _TITLE_KEYS):
+            return c
+    return rec
+
+
+def _os_clean_loc(loc: str) -> str:
+    # OutSystems wraps multi-locations in '#': "#Hà Nội#Hồ Chí Minh#".
+    return ", ".join(p.strip() for p in (loc or "").split("#") if p.strip())[:120]
+
+
+def _os_records_to_jobs(records, origin: str, host: str) -> list[dict]:
+    prefix = _OUTSYSTEMS_DETAIL_PREFIX.get(host, "/jobs/")
+    out, seen = [], set()
+    for rec in records:
+        if not isinstance(rec, dict):
+            continue
+        core = _os_core(rec)
+        low = {k.lower(): v for k, v in core.items()}
+        title = _first(core, _TITLE_KEYS)
+        if not title or len(title) < 3:
+            continue
+        jid = str(low.get("id") or low.get("jobid") or low.get("number") or "").strip()
+        if not jid or jid == "0":
+            continue
+        company = ""
+        for k, v in rec.items():
+            if "company" in k.lower() and isinstance(v, dict):
+                company = (v.get("OfficalName") or v.get("OfficialName")
+                           or v.get("Name") or "").strip()
+                break
+        key = (title.lower(), jid)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"title": title[:200], "url": f"{origin}{prefix}{jid}",
+                    "location": _os_clean_loc(_first(core, _LOC_KEYS)),
+                    "company": company, "description": ""})
+    return out
+
+
+def _os_bump(obj):
+    """Raise page-size keys + zero offset keys so a replay pulls all records."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            kl = k.lower()
+            if isinstance(v, bool):
+                continue
+            if kl in _OS_SIZE_KEYS and isinstance(v, (int, float)):
+                obj[k] = 200
+            elif kl in _OS_OFFSET_KEYS and isinstance(v, (int, float)):
+                obj[k] = 0
+            else:
+                _os_bump(v)
+    elif isinstance(obj, list):
+        for i in obj:
+            _os_bump(i)
+    return obj
+
+
+def _os_score(jobs: list[dict]) -> tuple[int, int]:
+    real = sum(1 for j in jobs
+               if _ROLE_RX.search(_norm_vi(j["title"])) or j["title"].count(" ") >= 3)
+    return (real, len(jobs))
+
+
+async def outsystems_jobs(career_url: str) -> list[dict]:
+    """Render an OutSystems career SPA, find its job-list screenservices endpoint,
+    replay it with the page size bumped, and normalize every opening."""
+    import asyncio
+    import json
+    try:
+        from app.services.browser_pool import get_browser
+    except ImportError:
+        return []
+    p = urlparse(career_url)
+    origin = f"{p.scheme}://{p.netloc}"
+    host = (p.netloc or "").lower().removeprefix("www.")
+
+    browser = await get_browser()
+    ctx = await browser.new_context(locale="vi-VN", user_agent="Mozilla/5.0 Chrome/120")
+    page = await ctx.new_page()
+
+    reqs: dict = {}        # screenservices url -> {body, csrf}
+    read_tasks: list = []
+    best_jobs: list[dict] = []
+
+    async def _read(resp):
+        try:
+            return resp.url, await resp.text()
+        except Exception:
+            return resp.url, ""
+
+    def on_req(req):
+        try:
+            if "/screenservices/" in req.url and req.method == "POST":
+                reqs[req.url] = {"body": req.post_data or "",
+                                 "csrf": req.headers.get("x-csrftoken", "")}
+        except Exception:
+            pass
+
+    def on_resp(r):
+        try:
+            if "/screenservices/" in r.url and "json" in r.headers.get("content-type", ""):
+                if len(read_tasks) < 30:
+                    read_tasks.append(asyncio.ensure_future(_read(r)))
+        except Exception:
+            pass
+
+    page.on("request", on_req)
+    page.on("response", on_resp)
+    try:
+        await page.goto(career_url, timeout=40000, wait_until="domcontentloaded")
+        try:
+            await page.wait_for_load_state("networkidle", timeout=10000)
+        except Exception:
+            pass
+        await page.wait_for_timeout(2500)
+        bodies = []
+        if read_tasks:
+            done = await asyncio.gather(*read_tasks, return_exceptions=True)
+            bodies = [d for d in done if isinstance(d, tuple) and d[1]]
+
+        # Pick the screenservices endpoint whose records read most like real jobs.
+        best_url, best_score = "", (-1, -1)
+        for url, body in bodies:
+            try:
+                data = json.loads(body)
+            except Exception:
+                continue
+            for arr in _os_arrays(data):
+                jobs = _os_records_to_jobs(arr, origin, host)
+                score = _os_score(jobs)
+                if jobs and score > best_score:
+                    best_url, best_jobs, best_score = url, jobs, score
+
+        # Replay the winning endpoint with page size bumped → all openings.
+        meta = reqs.get(best_url)
+        if best_jobs and meta and meta["body"]:
+            try:
+                bumped = _os_bump(json.loads(meta["body"]))
+                full = await page.evaluate(
+                    """async ({url, body, csrf}) => {
+                        const r = await fetch(url, {method:'POST',
+                          headers:{'Content-Type':'application/json; charset=UTF-8','X-CSRFToken':csrf},
+                          body: JSON.stringify(body)});
+                        return await r.text();
+                    }""",
+                    {"url": best_url, "body": bumped, "csrf": meta["csrf"]},
+                )
+                data = json.loads(full)
+                more = []
+                for arr in _os_arrays(data):
+                    js = _os_records_to_jobs(arr, origin, host)
+                    if len(js) > len(more):
+                        more = js
+                if len(more) > len(best_jobs):
+                    best_jobs = more
+            except Exception as e:
+                logger.info(f"[outsystems] replay failed {host}: {str(e)[:60]}")
+    except Exception as e:
+        logger.info(f"[outsystems] render failed {career_url}: {str(e)[:60]}")
+        best_jobs = []
+    finally:
+        await ctx.close()
+
+    if best_jobs:
+        logger.info(f"[outsystems] {origin} → {len(best_jobs)} jobs")
+    return best_jobs[:200]
+
+
 async def sniff_jobs(career_url: str) -> list[dict]:
     """Render the SPA, capture its job-list JSON endpoint(s), re-fetch + parse.
     First tries __NEXT_DATA__ (cheap, no render) for Next.js SSG sites."""
