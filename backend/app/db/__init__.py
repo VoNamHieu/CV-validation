@@ -11,6 +11,7 @@ into the FastAPI lifespan in ``app.main``.
 from app.db import (  # noqa: F401
     applications,
     companies,
+    credits,
     cv_profiles,
     jobs,
     profiles,
@@ -21,6 +22,7 @@ from app.db.pool import close_pool, get_pool, ping  # noqa: F401
 __all__ = [
     "applications",
     "companies",
+    "credits",
     "cv_profiles",
     "jobs",
     "profiles",

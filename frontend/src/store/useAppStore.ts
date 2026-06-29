@@ -80,6 +80,11 @@ type Step = 1 | 2 | 3 | 4;
 export type AppView = 'apply' | 'editor' | 'history';
 
 interface AppState {
+  // Has the visitor left the landing page and entered the app (persisted, so
+  // returning anonymous users skip the landing). Logged-in users skip it too.
+  entered: boolean;
+  enterApp: () => void;
+
   // Top-level navigation (sidebar)
   view: AppView;
   setView: (view: AppView) => void;
@@ -163,6 +168,7 @@ interface AppState {
 }
 
 const initialState = {
+  entered: false,
   view: 'apply' as AppView,
   currentStep: 1 as Step,
   cvRawText: '',
@@ -189,6 +195,8 @@ export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
       ...initialState,
+
+      enterApp: () => set({ entered: true }),
 
       setView: (view) => set({ view }),
       setStep: (step) => set({ currentStep: step }),

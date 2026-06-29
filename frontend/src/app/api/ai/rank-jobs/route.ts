@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { callAILight } from "@/lib/gemini";
+import { spendCredits, creditErrorResponse } from "@/lib/credits-guard";
+import { callAIJudge } from "@/lib/gemini";
 import { safeJsonParse } from "@/lib/safe-json";
 
 /**
@@ -119,7 +120,8 @@ ${candidates.map((c, i) => `${i + 1}. [${c.url}] ${c.title || "(no title)"}`).jo
 
 Rank these jobs from best to worst fit for this candidate.`;
 
-        const raw = await callAILight(systemPrompt, userPrompt, RANK_SCHEMA);
+        await spendCredits(request, "rank_jobs");
+        const raw = await callAIJudge(systemPrompt, userPrompt, RANK_SCHEMA);
         let parsed: { ranked?: Array<{ url: string; title?: string; fit_score?: number; reason?: string }> };
         try {
             parsed = safeJsonParse(raw);
@@ -153,6 +155,7 @@ Rank these jobs from best to worst fit for this candidate.`;
 
         return NextResponse.json({ ranked });
     } catch (e: unknown) {
+        const cr = creditErrorResponse(e); if (cr) return cr;
         const message = e instanceof Error ? e.message : "Failed to rank jobs";
         return NextResponse.json({ detail: message }, { status: 500 });
     }

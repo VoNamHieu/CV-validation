@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { spendCredits, creditErrorResponse } from "@/lib/credits-guard";
 import { callAILight } from "@/lib/gemini";
 import { safeJsonParse } from "@/lib/safe-json";
 
@@ -101,6 +102,7 @@ SITE: ${site_url || "unknown"}
 ${compactLinks ? "LINKS ON PAGE (one per line):" : "PAGE CONTENT:"}
 ${payload}`;
 
+        await spendCredits(request, "extract_job_links");
         const result = await callAILight(systemPrompt, userPrompt);
         console.log("[extract-job-links] AI raw response", {
             len: result?.length || 0,
@@ -144,6 +146,7 @@ ${payload}`;
             total_found: typeof parsed?.total_found === "number" ? parsed.total_found : jobs.length,
         });
     } catch (e: unknown) {
+        const cr = creditErrorResponse(e); if (cr) return cr;
         const message =
             e instanceof Error ? e.message : "Failed to extract job links";
         return NextResponse.json({ detail: message }, { status: 500 });

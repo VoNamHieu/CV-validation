@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { callAI } from "@/lib/gemini";
+import { spendCredits, creditErrorResponse } from "@/lib/credits-guard";
+import { callAIExtract } from "@/lib/gemini";
 import { safeJsonParse } from "@/lib/safe-json";
 import { MAX_INPUT_TEXT_LENGTH } from "@/lib/validation";
 import {
@@ -19,7 +20,8 @@ export async function POST(request: NextRequest) {
 
         const userPrompt = `Extract the following information from this CV text:\n\n${text}`;
 
-        const result = await callAI(CV_EXTRACTION_SYSTEM_PROMPT, userPrompt, CV_EXTRACTION_RESPONSE_SCHEMA);
+        await spendCredits(request, "extract_cv");
+        const result = await callAIExtract(CV_EXTRACTION_SYSTEM_PROMPT, userPrompt, CV_EXTRACTION_RESPONSE_SCHEMA);
 
         let parsed;
         try { parsed = safeJsonParse(result); }
@@ -27,6 +29,7 @@ export async function POST(request: NextRequest) {
 
         return NextResponse.json(normalizeCVResponse(parsed));
     } catch (e: unknown) {
+        const cr = creditErrorResponse(e); if (cr) return cr;
         const message = e instanceof Error ? e.message : "Failed to extract CV";
         return NextResponse.json({ detail: message }, { status: 500 });
     }
