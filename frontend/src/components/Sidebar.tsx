@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useAppStore, AppView } from '@/store/useAppStore';
 import { Sparkle, MagicWand, Briefcase, FileText, List, X, Sun, Moon } from '@phosphor-icons/react';
 import type { Icon } from '@phosphor-icons/react';
+import AuthButton from './AuthButton';
 
 interface NavItem {
     id: AppView;
@@ -188,6 +189,9 @@ export default function Sidebar() {
 
             {/* Footer */}
             <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {/* Account (hidden when Supabase Auth isn't configured) */}
+                <AuthButton />
+
                 {/* Theme toggle */}
                 <button
                     onClick={toggleTheme}

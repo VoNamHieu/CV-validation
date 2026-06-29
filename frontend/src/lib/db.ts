@@ -94,21 +94,30 @@ export interface Application {
 }
 
 // ── Auth seam ────────────────────────────────────────────────────────────────
-// Until Supabase Auth is wired on the FE, user-scoped calls identify the user
-// via an X-User-Id header. Swap getAuthHeaders() for the Supabase session token
-// (Authorization: Bearer …) later — call sites don't change.
+// When Supabase Auth is configured, user-scoped calls carry the session JWT
+// (Authorization: Bearer …) — the backend verifies it against the project JWKS.
+// Otherwise they fall back to the dev X-User-Id header (set via setUserId).
+import { getSupabase } from './supabase';
+
 let _devUserId: string | null = null;
 export function setUserId(id: string | null) {
     _devUserId = id;
 }
-function authHeaders(): Record<string, string> {
+
+async function authHeaders(): Promise<Record<string, string>> {
+    const sb = getSupabase();
+    if (sb) {
+        const { data } = await sb.auth.getSession();
+        const token = data.session?.access_token;
+        if (token) return { Authorization: `Bearer ${token}` };
+    }
     return _devUserId ? { 'X-User-Id': _devUserId } : {};
 }
 
 async function req<T>(path: string, init?: RequestInit & { auth?: boolean }): Promise<T> {
     const headers: Record<string, string> = { ...(init?.headers as Record<string, string>) };
     if (init?.body) headers['Content-Type'] = 'application/json';
-    if (init?.auth) Object.assign(headers, authHeaders());
+    if (init?.auth) Object.assign(headers, await authHeaders());
     const res = await fetch(path, { ...init, headers });
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
