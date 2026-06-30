@@ -21,6 +21,73 @@ interface Props {
     onBack: () => void;
 }
 
+// ── Lightweight JD formatter ─────────────────────────────────────────────────
+// fetchPage returns the whole page's text (nav, metadata, repeated title, then
+// the JD) as flat lines. Rather than dump it raw, we trim the leading nav/meta
+// noise and render headings / bullets / paragraphs with real typography. No AI.
+
+const HEADING_RX = /(responsibilit|requirement|qualificat|benefit|compensation|what you|we offer|about (the )?(role|us|company|team)|overview|job description|job purpose|key (responsibilit|skill|requirement)|mô tả công việc|mô tả|yêu cầu|quyền lợi|phúc lợi|kỹ năng|kinh nghiệm|học vấn|nhiệm vụ|trách nhiệm|đãi ngộ)/i;
+
+function looksHeading(line: string): boolean {
+    if (line.length > 64) return false;
+    const words = line.split(/\s+/).length;
+    if (/[:：]\s*$/.test(line) && words <= 9) return true;
+    return HEADING_RX.test(line) && words <= 9;
+}
+
+function bulletText(line: string): string | null {
+    const m = line.match(/^\s*(?:[-–—•*·▪◦‣]|\d+[.)]|[a-zA-Z][.)])\s+(.*\S)\s*$/);
+    return m ? m[1].trim() : null;
+}
+
+// Drop the leading run of nav / metadata lines (short labels like "Back",
+// "Full Time", a city, a date) up to the first real JD content — the first
+// heading keyword or the first long sentence. Only trims when every dropped
+// line is short, so we never eat real content.
+function trimLeadingNoise(lines: string[]): string[] {
+    let start = -1;
+    for (let i = 0; i < Math.min(lines.length, 16); i++) {
+        const l = lines[i].trim();
+        if (!l) continue;
+        if (looksHeading(l) || l.length > 60) { start = i; break; }
+    }
+    if (start <= 0) return lines;
+    const dropped = lines.slice(0, start).map((l) => l.trim()).filter(Boolean);
+    return dropped.every((l) => l.length <= 48) ? lines.slice(start) : lines;
+}
+
+function JdBody({ text }: { text: string }) {
+    const lines = trimLeadingNoise(text.replace(/\r/g, '').split('\n'));
+    const blocks: React.ReactNode[] = [];
+    let first = true;
+    lines.forEach((raw, i) => {
+        const line = raw.trim();
+        if (!line) return;
+        const bt = bulletText(line);
+        if (bt !== null) {
+            blocks.push(
+                <div key={i} style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                    <span style={{ color: 'var(--accent-purple, #8b5cf6)', flexShrink: 0 }}>•</span>
+                    <span>{bt}</span>
+                </div>,
+            );
+        } else if (looksHeading(line)) {
+            blocks.push(
+                <div key={i} style={{
+                    fontWeight: 700, color: 'var(--text-primary)', fontSize: '0.84rem',
+                    marginTop: first ? 0 : 14, marginBottom: 2,
+                }}>
+                    {line.replace(/[:：]\s*$/, '')}
+                </div>,
+            );
+        } else {
+            blocks.push(<p key={i} style={{ margin: first ? '0' : '6px 0 0' }}>{line}</p>);
+        }
+        first = false;
+    });
+    return <>{blocks}</>;
+}
+
 // One job card with a collapsible JD. The description is shown from the search
 // prefetch when present; otherwise it's lazily fetched from the posting page on
 // first expand (fetchPage renders SPA/IP-blocked pages server-side). This is a
@@ -160,11 +227,11 @@ function JobCard({ c, busy, onRemove }: { c: CandidateJob; busy: boolean; onRemo
                         </div>
                     ) : jd ? (
                         <div style={{
-                            maxHeight: 320, overflowY: 'auto',
+                            maxHeight: 340, overflowY: 'auto',
                             fontSize: '0.82rem', lineHeight: 1.6, color: 'var(--text-secondary)',
-                            whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                            wordBreak: 'break-word',
                         }}>
-                            {jd}
+                            <JdBody text={jd} />
                         </div>
                     ) : null}
                 </div>
