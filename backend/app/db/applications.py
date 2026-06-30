@@ -103,6 +103,19 @@ async def update_status(app_id: str, user_id: str, status: str) -> Optional[dict
     return row_to_dict(await pool.fetchrow(sql, app_id, user_id, status, terminal))
 
 
+async def update_cv(app_id: str, user_id: str, tailored_cv: Optional[dict]) -> Optional[dict]:
+    """Attach (or replace) the tailored CV on an existing application. Used when a
+    saved job's CV is optimized after the row was first created at scoring time,
+    so re-opening the job from history shows its tailored CV across sessions."""
+    pool = await get_pool()
+    sql = f"""
+        UPDATE applications SET tailored_cv = $3
+        WHERE id = $1 AND user_id = $2
+        RETURNING {_COLS}
+    """
+    return row_to_dict(await pool.fetchrow(sql, app_id, user_id, tailored_cv))
+
+
 async def update_notes(app_id: str, user_id: str, notes: Optional[str]) -> Optional[dict]:
     """Set the free-text note on an application (empty string clears it)."""
     pool = await get_pool()

@@ -221,6 +221,8 @@ interface AppState {
   removeJobRecord: (id: string) => void;
   clearJobHistory: () => void;
   loadJobRecordIntoWizard: (id: string) => void;
+  // Attach a tailored CV to a saved-job record (by jobUrl) after optimization.
+  attachCvToJobRecord: (jobUrl: string, cv: CVData) => void;
 
   // Multi-JD Ranking
   jdEntries: JDEntry[];
@@ -343,9 +345,21 @@ export const useAppStore = create<AppState>()(
         // Persist, then swap the optimistic client id for the server id so later
         // status/notes/delete calls address the real row.
         void account.createApplication(recordToCreate(optimistic))
-          .then((app) => set((s) => ({
-            jobHistory: s.jobHistory.map((j) => (j.id === optimistic.id ? appToRecord(app) : j)),
-          })))
+          .then((app) => {
+            const saved = appToRecord(app);
+            // Race: the CV may have been optimized (attachCvToJobRecord) while the
+            // POST was in flight — the optimistic row holds it but the server row
+            // doesn't. Re-persist so the tailored CV survives across sessions.
+            const live = get().jobHistory.find((j) => j.id === optimistic.id);
+            const pendingCv = live?.optimizedCv;
+            set((s) => ({
+              jobHistory: s.jobHistory.map((j) =>
+                j.id === optimistic.id ? { ...saved, optimizedCv: pendingCv ?? saved.optimizedCv } : j),
+            }));
+            if (pendingCv && !saved.optimizedCv) {
+              void account.updateApplicationCv(saved.id, pendingCv).catch(() => {});
+            }
+          })
           .catch(() => { /* keep optimistic; reconciles on next loadJobHistory */ });
       },
 
@@ -373,17 +387,56 @@ export const useAppStore = create<AppState>()(
         if (hasAuth()) ids.forEach((id) => void account.deleteApplication(id).catch(() => {}));
       },
 
-      // Re-open a saved job inside the wizard at the Report step
+      // Re-open a saved job inside the wizard's editor (step 3). The editor
+      // renders from jdEntries/selectedJdId — NOT the legacy single-JD fields —
+      // so we reconstruct a self-contained entry from the record and make it the
+      // only one shown, otherwise the editor keeps showing the last search's
+      // entries instead of the job the user clicked. (The legacy fields are kept
+      // in sync for any code path that still reads them.)
       loadJobRecordIntoWizard: (id) => {
         const record = get().jobHistory.find((r) => r.id === id);
         if (!record) return;
+        const entryId = `history-${record.id}`;
+        const entry: JDEntry = {
+          id: entryId,
+          source: record.jobUrl || entryId,
+          applyUrl: record.jobUrl || undefined,
+          label: record.jobTitle || record.company || 'Việc đã lưu',
+          status: 'done',
+          jdData: record.jdData,
+          matchResult: record.matchResult,
+          optimizedCv: record.optimizedCv,
+          jobTitle: record.jobTitle || undefined,
+          company: record.company || undefined,
+        };
         set({
+          jdEntries: [entry],
+          selectedJdId: entryId,
           jdData: record.jdData ?? null,
           matchResult: record.matchResult ?? null,
           optimizedCv: record.optimizedCv ?? null,
           currentStep: 3,
           view: 'apply',
         });
+      },
+
+      // Persist a tailored CV onto the saved-job record (cache + backend) once it
+      // exists. Called from the search/optimize flow with the SAME jobUrl used to
+      // create the record, so the match is exact (no fuzzy URL correlation). This
+      // is what lets a re-opened history job show its tailored CV across sessions
+      // — records are created at scoring time, before the CV is optimized.
+      attachCvToJobRecord: (jobUrl, cv) => {
+        if (!jobUrl) return;
+        const rec = get().jobHistory.find((r) => r.jobUrl === jobUrl);
+        if (!rec || rec.optimizedCv === cv) return;
+        set((s) => ({
+          jobHistory: s.jobHistory.map((r) => (r.id === rec.id ? { ...r, optimizedCv: cv } : r)),
+        }));
+        // Skip when the create POST hasn't resolved yet (id still client-side);
+        // addJobRecord re-persists the CV after the swap in that race.
+        if (hasAuth() && !rec.id.startsWith('client-') && !rec.id.startsWith('job-') && !rec.id.startsWith('mode1-')) {
+          void account.updateApplicationCv(rec.id, cv).catch(() => {});
+        }
       },
 
       // Multi-JD (auto-prune oldest when limit reached)

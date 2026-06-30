@@ -39,6 +39,11 @@ const { authState, backend, makeRow, account } = vi.hoisted(() => {
             if (r) r.notes = notes;
             return r;
         }),
+        updateApplicationCv: vi.fn(async (id: string, tailored_cv: unknown) => {
+            const r = backend.rows.find((x) => x.id === id && x.user_id === backend.currentUser);
+            if (r) r.tailored_cv = tailored_cv;
+            return r;
+        }),
         deleteApplication: vi.fn(async (id: string) => {
             const i = backend.rows.findIndex((x) => x.id === id && x.user_id === backend.currentUser);
             if (i >= 0) backend.rows.splice(i, 1);
@@ -186,5 +191,94 @@ describe('cross-account isolation (the leak fix)', () => {
         useAppStore.setState({ cvData: { name: 'A' } as never });
         useAppStore.getState().claimOwnership('user-A');
         expect(useAppStore.getState().cvData).toEqual({ name: 'A' });
+    });
+});
+
+describe('reopen a saved job into the editor (the wizard bug)', () => {
+    it('reconstructs a jdEntry from the record and selects it — not the search session', () => {
+        // a leftover search session is present…
+        useAppStore.setState({ jdEntries: [{ id: 'search-1', source: 's', label: 'search', status: 'done', optimizedCv: { name: 'search-cv' } } as never] });
+        useAppStore.setState({ jobHistory: [rec({ id: 'rec-1', jobUrl: 'https://co.com/x', jobTitle: 'Backend Eng', optimizedCv: { name: 'tailored' } as never })] });
+        useAppStore.getState().loadJobRecordIntoWizard('rec-1');
+        const st = useAppStore.getState();
+        expect(st.jdEntries).toHaveLength(1);                     // search entry replaced
+        expect(st.jdEntries[0].id).toBe('history-rec-1');
+        expect(st.jdEntries[0].optimizedCv).toEqual({ name: 'tailored' });
+        expect(st.selectedJdId).toBe('history-rec-1');
+        expect(st.currentStep).toBe(3);
+        expect(st.view).toBe('apply');
+    });
+
+    it('is a no-op for an unknown record id', () => {
+        useAppStore.getState().loadJobRecordIntoWizard('does-not-exist');
+        expect(useAppStore.getState().currentStep).not.toBe(3);
+    });
+});
+
+describe('attachCvToJobRecord persists the tailored CV', () => {
+    it('updates the matching record (by jobUrl) in cache + backend', async () => {
+        useAppStore.getState().addJobRecord(rec({ id: 'c1', jobUrl: 'https://co.com/job', jobTitle: 'X' }));
+        await flush();
+        const id = useAppStore.getState().jobHistory[0].id; // server id after swap
+        const cv = { name: 'tailored A' } as never;
+        useAppStore.getState().attachCvToJobRecord('https://co.com/job', cv);
+        await flush();
+        expect(useAppStore.getState().jobHistory[0].optimizedCv).toEqual(cv);
+        expect(account.updateApplicationCv).toHaveBeenCalledWith(id, cv);
+        expect(backend.rows[0].tailored_cv).toEqual(cv);
+    });
+
+    it('ignores a jobUrl with no matching record', () => {
+        useAppStore.setState({ jobHistory: [] });
+        useAppStore.getState().attachCvToJobRecord('https://nope.com', { name: 'x' } as never);
+        expect(account.updateApplicationCv).not.toHaveBeenCalled();
+    });
+});
+
+describe('END-TO-END: score → optimize → new session → reopen', () => {
+    it('a tailored CV saved on a job survives a reload and shows on reopen', async () => {
+        const url = 'https://acme.com/jobs/se';
+
+        // 1. Search flow scores the job → record created (no CV yet), like StepInputUrl.
+        useAppStore.getState().addJobRecord(rec({ id: 'job-xyz', jobUrl: url, jobTitle: 'SE', status: 'saved' }));
+        await flush();
+        expect(backend.rows).toHaveLength(1);
+        expect(backend.rows[0].tailored_cv ?? null).toBeNull();
+
+        // 2. Auto-optimize completes → attachCvToJobRecord (same jobUrl).
+        const cv = { name: 'Tailored SE' } as never;
+        useAppStore.getState().attachCvToJobRecord(url, cv);
+        await flush();
+        expect(backend.rows[0].tailored_cv).toEqual(cv);     // persisted to backend
+
+        // 3. NEW SESSION: cache is empty, hydrate from the backend.
+        useAppStore.setState({ jobHistory: [], jdEntries: [], selectedJdId: null, currentStep: 1 });
+        await useAppStore.getState().loadJobHistory();
+        const hist = useAppStore.getState().jobHistory;
+        expect(hist).toHaveLength(1);
+        expect(hist[0].optimizedCv).toEqual(cv);             // CV survived the round-trip
+
+        // 4. Reopen from history → editor gets a single entry WITH the CV.
+        useAppStore.getState().loadJobRecordIntoWizard(hist[0].id);
+        const st = useAppStore.getState();
+        expect(st.currentStep).toBe(3);
+        expect(st.jdEntries).toHaveLength(1);
+        expect(st.selectedJdId).toBe(`history-${hist[0].id}`);
+        // The editor renders sortedEntries = entries WITH optimizedCv — non-empty here.
+        expect(st.jdEntries.filter((e) => e.optimizedCv)).toHaveLength(1);
+    });
+
+    it('create-race: optimize fires before the create POST resolves, CV still persists', async () => {
+        const url = 'https://acme.com/jobs/race';
+        useAppStore.getState().addJobRecord(rec({ id: 'job-race', jobUrl: url }));
+        // intentionally NOT flushing — the create POST is still in flight
+        const cv = { name: 'Race CV' } as never;
+        useAppStore.getState().attachCvToJobRecord(url, cv);
+        // cache updated immediately; backend not yet (id still client-side)
+        expect(useAppStore.getState().jobHistory[0].optimizedCv).toEqual(cv);
+
+        await flush(); // create resolves → re-persists the pending CV
+        expect(backend.rows[0].tailored_cv).toEqual(cv);
+        expect(useAppStore.getState().jobHistory[0].optimizedCv).toEqual(cv);
     });
 });

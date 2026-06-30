@@ -239,6 +239,8 @@ export const account = {
         req<Application>(`/api/me/applications/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }), auth: true }),
     updateApplicationNotes: (id: string, notes: string) =>
         req<Application>(`/api/me/applications/${id}/notes`, { method: 'PATCH', body: JSON.stringify({ notes }), auth: true }),
+    updateApplicationCv: (id: string, tailored_cv: CVData) =>
+        req<Application>(`/api/me/applications/${id}/cv`, { method: 'PATCH', body: JSON.stringify({ tailored_cv }), auth: true }),
     deleteApplication: (id: string) =>
         req<{ deleted: boolean }>(`/api/me/applications/${id}`, { method: 'DELETE', auth: true }),
 };

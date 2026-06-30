@@ -87,6 +87,12 @@ class FakeApplicationsDB:
             r["notes"] = notes
         return r
 
+    async def update_cv(self, app_id, user_id, tailored_cv):
+        r = await self.get(app_id, user_id)
+        if r:
+            r["tailored_cv"] = tailored_cv
+        return r
+
     async def delete(self, app_id, user_id):
         r = await self.get(app_id, user_id)
         if not r:
@@ -98,7 +104,7 @@ class FakeApplicationsDB:
 @pytest.fixture
 def fake_db(monkeypatch):
     fake = FakeApplicationsDB()
-    for name in ("create", "list_for_user", "get", "update_status", "update_notes", "delete"):
+    for name in ("create", "list_for_user", "get", "update_status", "update_notes", "update_cv", "delete"):
         monkeypatch.setattr(repo, name, getattr(fake, name))
     app.dependency_overrides[get_current_user_id] = _header_user
     limiter = _rate_limiter()
@@ -144,6 +150,15 @@ class TestApplicationsCrud:
                          json={"notes": "phone screen Tue"}, headers=_as("user-A"))
         assert r.status_code == 200, r.text
         assert r.json()["notes"] == "phone screen Tue"
+
+    def test_update_cv_endpoint(self, client, fake_db):
+        created = client.post("/me/applications", json={"job_title": "X"},
+                              headers=_as("user-A")).json()
+        cv = {"name": "Nguyen Van A", "skills": ["React"]}
+        r = client.patch(f"/me/applications/{created['id']}/cv",
+                         json={"tailored_cv": cv}, headers=_as("user-A"))
+        assert r.status_code == 200, r.text
+        assert r.json()["tailored_cv"] == cv
 
     def test_update_status_endpoint(self, client, fake_db):
         created = client.post("/me/applications", json={"job_title": "X"},

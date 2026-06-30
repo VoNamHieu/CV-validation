@@ -152,6 +152,10 @@ class NotesUpdate(BaseModel):
     notes: Optional[str] = None
 
 
+class CvUpdate(BaseModel):
+    tailored_cv: Optional[dict] = None
+
+
 @router.get("/applications")
 async def list_applications(
     status: Optional[str] = Query(default=None),
@@ -196,6 +200,16 @@ async def update_application_notes(
     app_id: str, body: NotesUpdate, user_id: str = Depends(get_current_user_id)
 ):
     row = await applications.update_notes(app_id, user_id, body.notes)
+    if not row:
+        raise HTTPException(status_code=404, detail="Application not found")
+    return row
+
+
+@router.patch("/applications/{app_id}/cv")
+async def update_application_cv(
+    app_id: str, body: CvUpdate, user_id: str = Depends(get_current_user_id)
+):
+    row = await applications.update_cv(app_id, user_id, body.tailored_cv)
     if not row:
         raise HTTPException(status_code=404, detail="Application not found")
     return row

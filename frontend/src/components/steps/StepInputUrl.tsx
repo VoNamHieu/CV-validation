@@ -814,6 +814,10 @@ export default function StepInputUrl() {
                                 optimizedCvImprovements: variant.improvements,
                                 ...pdfCache,
                             });
+                            // Persist the tailored CV onto the saved-job record
+                            // (same jobUrl used to create it) so re-opening the
+                            // job from history shows this CV across sessions.
+                            useAppStore.getState().attachCvToJobRecord(jobUrl, variant.cv);
                             // First CV optimized → NOW open the editor on it.
                             if (navigateOnFirstDone && !navigated && runRef.current === runId) {
                                 navigated = true;
