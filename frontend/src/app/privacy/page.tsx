@@ -34,10 +34,6 @@ export default function PrivacyPage() {
             <p>Khi bạn chủ động kích hoạt agent tự động điền đơn trên một trang tuyển dụng, tiện ích sẽ đọc cấu
                 trúc trang (tên trường nhập liệu, nút bấm, nội dung lỗi hiển thị) để xác định cách điền — chỉ
                 phục vụ mục đích điền form, không thu thập nội dung trang ngoài phạm vi đó.</p>
-            <p>Tính năng gỡ lỗi nội bộ (chỉ chạy khi bạn chủ động bấm nút tương ứng) ghi lại danh sách URL và
-                phương thức (không bao gồm nội dung, cookie, hay thông tin đăng nhập) của các lệnh gọi mạng mà
-                chính trang bạn đang xem thực hiện, nhằm cải thiện khả năng nhận diện hệ thống tuyển dụng đứng
-                sau trang đó.</p>
             <p>Tiện ích không thu thập dữ liệu duyệt web của bạn trên các trang không liên quan đến tìm việc/ứng
                 tuyển, và không tự động gửi dữ liệu lên máy chủ trừ khi bạn chủ động thực hiện một hành động
                 (điền đơn, gỡ lỗi, đồng bộ hồ sơ).</p>
