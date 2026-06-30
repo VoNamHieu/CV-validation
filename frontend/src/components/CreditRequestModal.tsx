@@ -127,8 +127,8 @@ export default function CreditRequestModal({
                         <p style={{ ...descStyle, fontSize: '0.74rem', margin: '12px 0 14px' }}>
                             Sau khi chuyển, gửi biên lai tới{' '}
                             <a href={`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent('Mua token Latosa')}&body=${encodeURIComponent(`${TRANSFER_NOTE} ${email}`)}`}
-                                style={{ color: 'var(--accent-blue)', fontWeight: 600 }}>{SUPPORT_EMAIL}</a>
-                            {' '}để được cộng token sớm nhất.
+                                style={{ color: 'var(--accent-blue)', fontWeight: 600 }}>{SUPPORT_EMAIL}</a>.
+                            {' '}Token sẽ được cộng sau khi xác nhận — quá trình có thể mất vài phút để hoàn tất.
                         </p>
                         <button onClick={onClose} style={primaryBtn(false)}>Đã hiểu</button>
                     </>
