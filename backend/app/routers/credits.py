@@ -30,6 +30,10 @@ COSTS: dict[str, int] = {
     "optimize": 5,   # × units (number of variants)
     "tailor": 5,     # × units
     "gap_report": 5,  # one deep reasoning report (Pro tier)
+    # Flat per-job fee for extension auto-apply — covers ALL the agent-plan +
+    # map-form LLM calls that job makes (charged once when the job starts, not
+    # per step), so cost stays predictable for the user.
+    "auto_apply": 3,
 }
 
 

@@ -23,3 +23,12 @@ export async function getAuthHeaders(): Promise<Record<string, string>> {
 export function hasAuth(): boolean {
     return getSupabase() !== null || _devUserId !== null;
 }
+
+// Current Supabase access token (JWT), or null. Used to hand the extension a
+// token so its auto-apply / tailor calls can be credit-metered against the user.
+export async function getAccessToken(): Promise<string | null> {
+    const sb = getSupabase();
+    if (!sb) return null;
+    const { data } = await sb.auth.getSession();
+    return data.session?.access_token ?? null;
+}

@@ -98,6 +98,7 @@
             relay({
                 type: 'SAVE_PROFILE',
                 profile: event.data.profile,
+                token: event.data.token,
             }, 'JOBFIT_SYNC_PROFILE_RESPONSE');
         }
 

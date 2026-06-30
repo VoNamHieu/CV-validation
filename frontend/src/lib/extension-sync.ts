@@ -5,6 +5,7 @@
 
 import type { CVData } from "@/lib/types";
 import type { ExtensionProfile } from "@/lib/extension-profile";
+import { getAccessToken } from "@/lib/auth-headers";
 
 export interface SyncResult {
     ok: boolean;
@@ -52,7 +53,7 @@ function postAndAwait(
 }
 
 /** Sync the 23-field profile into extension storage. */
-export function syncProfileToExtension(
+export async function syncProfileToExtension(
     profile: ExtensionProfile,
     cvData?: CVData,
 ): Promise<SyncResult> {
@@ -61,6 +62,11 @@ export function syncProfileToExtension(
             type: "JOBFIT_EXPORT_PROFILE",
             profile,
             cvData,
+            // Hand the extension the current JWT so its credit-metered auto-apply
+            // / tailor calls can be attributed + charged to this user. Piggybacks
+            // on profile sync (runs on upload + edits) so the token stays fresh
+            // during active use. null when logged out / auth disabled.
+            token: await getAccessToken(),
             lastSyncedAt: Date.now(),
         },
         "JOBFIT_SYNC_PROFILE_RESPONSE",

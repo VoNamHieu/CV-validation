@@ -115,6 +115,34 @@ function injectAgentOnLoad(tabId) {
     chrome.tabs.onUpdated.addListener(listener);
 }
 
+// ─── Credit metering ────────────────────────────────────────────────────────
+// Charge the user for an LLM-backed action via the web app's /api/credits/spend
+// (server prices the action; we just name it). Auth = the JWT the web app synced
+// into storage (jobfitToken). Returns:
+//   { ok: true }                        — charged, proceed
+//   { ok: false, insufficient: true }   — out of credits (HTTP 402)
+//   { ok: false, auth: true }           — no/expired token (re-sync from web app)
+//   { ok: false }                       — transient/other (fail-open: don't block)
+async function extSpend(action, units = 1) {
+    const { jobfitAppUrl, jobfitToken } = await chrome.storage.local.get(['jobfitAppUrl', 'jobfitToken']);
+    if (!jobfitToken) return { ok: false, auth: true };
+    const appUrl = jobfitAppUrl || 'https://cv-validation.vercel.app';
+    try {
+        const res = await fetch(`${appUrl}/api/credits/spend`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jobfitToken}` },
+            body: JSON.stringify({ action, units }),
+        });
+        if (res.ok) return { ok: true };
+        if (res.status === 402) return { ok: false, insufficient: true };
+        if (res.status === 401) return { ok: false, auth: true };
+        return { ok: false }; // unexpected — fail open so a billing hiccup can't block applies
+    } catch (e) {
+        console.warn('[Latosa] credit spend failed (fail-open):', e?.message || e);
+        return { ok: false }; // network error — fail open
+    }
+}
+
 // ─── Single auto-apply (shared by relay + external paths) ───
 function handleAutoApplyStart(message, sendResponse) {
     const { jobUrl, profile } = message;
@@ -143,6 +171,16 @@ function handleAutoApplyStart(message, sendResponse) {
         const access = await ensureHostAccess(jobUrl);
         if (!access.ok) {
             sendResponse({ success: false, error: 'Cần cấp quyền truy cập trang này. Mở popup Latosa để cho phép.' });
+            return;
+        }
+        // Per-job flat fee (covers all the agent-plan + map-form LLM calls).
+        const charge = await extSpend('auto_apply');
+        if (charge.insufficient) {
+            sendResponse({ success: false, error: 'Không đủ credit để ứng tuyển. Nạp thêm tại Latosa.' });
+            return;
+        }
+        if (charge.auth) {
+            sendResponse({ success: false, error: 'Phiên đăng nhập đã hết hạn — mở Latosa và đồng bộ lại để tiếp tục.' });
             return;
         }
         chrome.storage.local.set(storage, () => {
@@ -203,8 +241,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     if (message.type === 'SAVE_PROFILE') {
         const syncedAt = Date.now();
+        // Persist the JWT alongside the profile so credit-metered auto-apply /
+        // tailor calls can be charged to this user. Only overwrite when present
+        // (a profile-only sync without a token shouldn't wipe a good token).
+        const toStore = { jobfitProfile: message.profile, jobfitProfileSyncedAt: syncedAt };
+        if (message.token) toStore.jobfitToken = message.token;
         chrome.storage.local.set(
-            { jobfitProfile: message.profile, jobfitProfileSyncedAt: syncedAt },
+            toStore,
             () => {
                 sendResponse({ success: true, syncedAt });
                 // Push to popup if open so the "Synced …" line refreshes immediately.
@@ -366,6 +409,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     appUrl.includes('localhost') ? null : 'http://localhost:3000',
                 ].filter(Boolean);
                 console.log(`${M1} endpoints to try (in order):`, urls);
+
+                // Charge the tailor fee up front (the pipeline is 3 LLM calls).
+                const charge = await extSpend('tailor');
+                if (charge.insufficient) {
+                    sendResponse({ success: false, error: 'Không đủ credit để tối ưu CV. Nạp thêm tại Latosa.' });
+                    return;
+                }
+                if (charge.auth) {
+                    sendResponse({ success: false, error: 'Phiên đăng nhập hết hạn — mở Latosa và đồng bộ lại.' });
+                    return;
+                }
 
                 let lastError = null;
                 for (const baseUrl of urls) {
@@ -654,6 +708,25 @@ function processNextJob() {
             persistState();
             broadcastProgress();
             setTimeout(() => processNextJob(), TAB_DELAY_MS);
+            return;
+        }
+        // Per-job flat fee (covers all this job's agent-plan + map-form calls).
+        const charge = await extSpend('auto_apply');
+        if (charge.insufficient || charge.auth) {
+            job.status = 'error';
+            job.result = {
+                success: false,
+                detail: charge.insufficient
+                    ? 'Không đủ credit để ứng tuyển job này.'
+                    : 'Phiên đăng nhập hết hạn — mở Latosa và đồng bộ lại.',
+            };
+            persistState();
+            broadcastProgress();
+            // Out of credits applies to every remaining job → stop the batch
+            // instead of churning failures; expired auth is the same.
+            isProcessing = false;
+            persistState();
+            broadcastProgress();
             return;
         }
         chrome.storage.local.set(storage, () => {
