@@ -24,21 +24,22 @@ PRICES = {
 
 USD_VND = 25_400          # tỉ giá USD→VND (cập nhật khi cần)
 
-# ── (2) ƯỚC LƯỢNG TOKEN mỗi action (thay bằng số đo thật từ log) ──
+# ── (2) TOKEN mỗi action. [M] = ĐO THẬT (measure-tokens.mts, CV/JD mẫu nhỏ —
+# input thực tế của user lớn hơn, scale lên ~1.5-3×). [E] = ước lượng.
 # credits = giá credit hiện tại trong backend COSTS (app/routers/credits.py).
 ACTIONS = {
-    "parse_pdf":         {"tier": "flash", "in": 3000, "out": 2000, "think": 0,    "credits": 1},
-    "extract_cv":        {"tier": "flash", "in": 2500, "out": 1800, "think": 0,    "credits": 1},
-    "extract_jd":        {"tier": "flash", "in": 1500, "out": 1000, "think": 0,    "credits": 1},
-    "search_profile":    {"tier": "flash", "in": 2500, "out": 400,  "think": 0,    "credits": 1},
-    "smart_search":      {"tier": "flash", "in": 2000, "out": 600,  "think": 0,    "credits": 1},
-    "rank_jobs":         {"tier": "flash", "in": 4000, "out": 800,  "think": 0,    "credits": 1},
-    "extract_job_links": {"tier": "flash", "in": 3000, "out": 800,  "think": 0,    "credits": 1},
-    "map_form":          {"tier": "flash", "in": 2000, "out": 1000, "think": 0,    "credits": 1},
-    "agent_plan":        {"tier": "flash", "in": 2500, "out": 1200, "think": 0,    "credits": 1},
-    "score":             {"tier": "pro",   "in": 5000, "out": 800,  "think": 3000, "credits": 4},
-    "optimize":          {"tier": "pro",   "in": 6000, "out": 4000, "think": 4000, "credits": 5},   # × số variant
-    "gap_report":        {"tier": "pro",   "in": 6000, "out": 1500, "think": 3000, "credits": 5},
+    "parse_pdf":         {"tier": "flash", "in": 3000, "out": 2000, "think": 0,    "credits": 1},  # [E]
+    "extract_cv":        {"tier": "flash", "in": 2500, "out": 1800, "think": 0,    "credits": 1},  # [E]
+    "extract_jd":        {"tier": "flash", "in": 474,  "out": 111,  "think": 0,    "credits": 1},  # [M]
+    "search_profile":    {"tier": "flash", "in": 2500, "out": 400,  "think": 0,    "credits": 1},  # [E]
+    "smart_search":      {"tier": "flash", "in": 2000, "out": 600,  "think": 0,    "credits": 1},  # [E]
+    "rank_jobs":         {"tier": "flash", "in": 4000, "out": 800,  "think": 0,    "credits": 1},  # [E]
+    "extract_job_links": {"tier": "flash", "in": 3000, "out": 800,  "think": 0,    "credits": 1},  # [E]
+    "map_form":          {"tier": "flash", "in": 2000, "out": 1000, "think": 0,    "credits": 1},  # [E]
+    "agent_plan":        {"tier": "flash", "in": 2500, "out": 1200, "think": 0,    "credits": 1},  # [E]
+    "score":             {"tier": "pro",   "in": 1041, "out": 659,  "think": 1839, "credits": 4},  # [M]
+    "optimize":          {"tier": "pro",   "in": 2160, "out": 769,  "think": 2306, "credits": 5},  # [M] × variant
+    "gap_report":        {"tier": "pro",   "in": 1756, "out": 920,  "think": 1265, "credits": 5},  # [M] (đo trên Flash)
 }
 
 # ── Giá bán credit hiện tại (frontend/src/lib/payment.ts TOPUP_PACK) ──
