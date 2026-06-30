@@ -192,6 +192,7 @@ export interface Feedback {
     message: string;
     rating: number | null;
     source: string | null;
+    page_url: string | null;
     created_at: string;
 }
 
