@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
     ArrowLeft, Globe, SpinnerGap, MagnifyingGlass, Sparkle,
     Brain, LinkSimple, Lightning, MagicWand, CheckCircle,
-    Briefcase, ArrowRight, Buildings,
+    Briefcase, ArrowRight,
 } from '@phosphor-icons/react';
 import type { Icon } from '@phosphor-icons/react';
 import { useAppStore, type JDEntry } from '@/store/useAppStore';
@@ -1081,16 +1081,15 @@ export default function StepInputUrl() {
                 </div>
             </div>
 
-            {/* Primary CTAs: two discovery modes to compare side by side.
-                - Featured Companies: curated list (fast, cached).
-                - Ground Search: grounded web search by role (dynamic). */}
-            <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
+            {/* Primary CTA: single entry point — AI discovers matching companies
+                from the curated pool and ranks their openings against the CV. */}
+            <div style={{ marginBottom: 16 }}>
                 <button
                     className="btn-primary"
                     onClick={() => handleFeaturedAnalyze('featured')}
                     disabled={isProcessing || !cvData}
                     style={{
-                        flex: 1,
+                        width: '100%',
                         height: 56,
                         fontSize: '0.98rem',
                         fontWeight: 600,
@@ -1105,35 +1104,18 @@ export default function StepInputUrl() {
                         </>
                     ) : (
                         <>
-                            <Buildings size={18} weight="fill" /> Công ty nổi bật
+                            <MagnifyingGlass size={18} weight="bold" /> Bắt đầu tìm kiếm
                         </>
                     )}
                 </button>
-                <button
-                    className="btn-secondary"
-                    onClick={() => handleFeaturedAnalyze('ground')}
-                    disabled={isProcessing || !cvData}
-                    title="Tìm các công ty đang tuyển vai trò của bạn qua tìm kiếm trên web trực tiếp"
-                    style={{
-                        flex: 1,
-                        height: 56,
-                        fontSize: '0.98rem',
-                        fontWeight: 600,
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                        borderRadius: 'var(--radius-lg)',
-                    }}
-                >
-                    <MagnifyingGlass size={18} weight="bold" /> Tìm trên web
-                </button>
             </div>
 
-            {/* Microcopy: explain when to use each mode */}
+            {/* Microcopy */}
             <div style={{
-                display: 'flex', gap: 10, marginBottom: 4,
+                marginBottom: 4, textAlign: 'center',
                 fontSize: '0.72rem', color: 'var(--text-muted)', lineHeight: 1.4,
             }}>
-                <span style={{ flex: 1, textAlign: 'center' }}>Nhanh · từ danh sách công ty tuyển chọn</span>
-                <span style={{ flex: 1, textAlign: 'center' }}>Tìm rộng hơn theo vai trò của bạn</span>
+                AI tìm công ty phù hợp với CV và chấm điểm tin tuyển dụng của họ
             </div>
 
             {/* Divider */}
