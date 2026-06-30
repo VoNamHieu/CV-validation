@@ -2,9 +2,10 @@
 
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X } from '@phosphor-icons/react';
+import { X, CheckCircle, FileText } from '@phosphor-icons/react';
 import { useAuth } from '@/lib/auth';
 import { stashPendingTermsAcceptance } from '@/lib/consent';
+import TermsAcceptModal from './TermsAcceptModal';
 
 type Mode = 'signin' | 'signup';
 
@@ -14,6 +15,7 @@ export default function AuthModal({ onClose, reason }: { onClose: () => void; re
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [agreed, setAgreed] = useState(false);   // Layer-1 consent (signup only)
+    const [termsModalOpen, setTermsModalOpen] = useState(false);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
     const [notice, setNotice] = useState('');
@@ -105,26 +107,34 @@ export default function AuthModal({ onClose, reason }: { onClose: () => void; re
                         value={password} onChange={(e) => setPassword(e.target.value)} style={inputStyle}
                     />
 
-                    {/* Layer-1 mandatory consent — signup only, unchecked by default */}
+                    {/* Layer-1 mandatory consent — signup only. Scroll-to-accept:
+                        the user must open the modal and scroll the full text. */}
                     {mode === 'signup' && (
-                        <label style={{
-                            display: 'flex', alignItems: 'flex-start', gap: 9, cursor: 'pointer',
-                            fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.5, marginTop: 2,
-                        }}>
-                            <input
-                                type="checkbox" checked={agreed} disabled={busy}
-                                onChange={(e) => setAgreed(e.target.checked)}
-                                style={{ marginTop: 2, width: 15, height: 15, flexShrink: 0, cursor: 'pointer' }}
-                            />
-                            <span>
-                                Tôi đồng ý với{' '}
-                                <a href="/terms" target="_blank" rel="noopener noreferrer"
-                                    style={{ color: 'var(--accent-blue)', fontWeight: 600 }}>Điều khoản Sử dụng</a>
-                                {' '}và{' '}
-                                <a href="/privacy" target="_blank" rel="noopener noreferrer"
-                                    style={{ color: 'var(--accent-blue)', fontWeight: 600 }}>Chính sách Quyền riêng tư</a>.
-                            </span>
-                        </label>
+                        agreed ? (
+                            <div style={{
+                                display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem',
+                                fontWeight: 600, color: 'var(--accent-green)', padding: '9px 12px',
+                                borderRadius: 10, background: 'color-mix(in srgb, var(--accent-green) 12%, transparent)',
+                                border: '1px solid color-mix(in srgb, var(--accent-green) 30%, transparent)',
+                            }}>
+                                <CheckCircle size={16} weight="fill" />
+                                Đã đồng ý Điều khoản Sử dụng &amp; Chính sách Quyền riêng tư
+                            </div>
+                        ) : (
+                            <button
+                                type="button" disabled={busy}
+                                onClick={() => setTermsModalOpen(true)}
+                                style={{
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                                    padding: '10px 12px', borderRadius: 10, cursor: 'pointer',
+                                    border: '1px dashed var(--border-default)', background: 'var(--bg-card)',
+                                    color: 'var(--text-primary)', fontSize: '0.8rem', fontWeight: 600,
+                                }}
+                            >
+                                <FileText size={15} weight="duotone" />
+                                Đọc &amp; đồng ý Điều khoản và Quyền riêng tư
+                            </button>
+                        )
                     )}
 
                     {error && (
@@ -165,6 +175,13 @@ export default function AuthModal({ onClose, reason }: { onClose: () => void; re
                         </>
                     )}
                 </div>
+
+                {termsModalOpen && (
+                    <TermsAcceptModal
+                        onAccept={() => { setAgreed(true); setTermsModalOpen(false); }}
+                        onClose={() => setTermsModalOpen(false)}
+                    />
+                )}
             </div>
         </div>,
         document.body,
