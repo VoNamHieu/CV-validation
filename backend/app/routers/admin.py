@@ -94,6 +94,10 @@ async def list_feedback(_admin: str = Depends(require_admin)):
 
 
 @router.get("/analytics/funnel")
-async def analytics_funnel(_admin: str = Depends(require_admin)):
-    """Distinct sessions per funnel event → {event: count} for FunnelPanel."""
-    return await events_repo.funnel_counts()
+async def analytics_funnel(
+    days: int = Query(30, ge=0, le=3650, description="Time window in days; 0 = all time"),
+    _admin: str = Depends(require_admin),
+):
+    """Distinct sessions per funnel event → {event: count} for FunnelPanel,
+    restricted to the last `days` days (0 = all time)."""
+    return await events_repo.funnel_counts(days=days)

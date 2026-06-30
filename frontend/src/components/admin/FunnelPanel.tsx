@@ -10,15 +10,23 @@ import { getAuthHeaders } from '@/lib/auth-headers';
 
 type Counts = Record<string, number>;
 
+const RANGES: { days: number; label: string }[] = [
+    { days: 7, label: '7 ngày' },
+    { days: 30, label: '30 ngày' },
+    { days: 90, label: '90 ngày' },
+    { days: 0, label: 'Tất cả' },
+];
+
 export default function FunnelPanel() {
     const [counts, setCounts] = useState<Counts | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
+    const [days, setDays] = useState(30);
 
     const load = useCallback(async () => {
         setLoading(true); setError('');
         try {
-            const res = await fetch('/api/admin/analytics/funnel', { headers: { ...(await getAuthHeaders()) } });
+            const res = await fetch(`/api/admin/analytics/funnel?days=${days}`, { headers: { ...(await getAuthHeaders()) } });
             if (!res.ok) {
                 const e = await res.json().catch(() => ({}));
                 throw new Error(e.detail || `HTTP ${res.status}`);
@@ -31,7 +39,7 @@ export default function FunnelPanel() {
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [days]);
 
     useEffect(() => { load(); }, [load]);
 
@@ -50,9 +58,29 @@ export default function FunnelPanel() {
                     Tải lại
                 </button>
             </div>
-            <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: '0 0 18px', lineHeight: 1.5 }}>
+            <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: '0 0 12px', lineHeight: 1.5 }}>
                 Số phiên (session) đạt từng bước. % theo bước đầu + tỉ lệ rớt so với bước trước.
             </p>
+
+            {/* Time-window selector */}
+            <div style={{ display: 'flex', gap: 6, marginBottom: 18, flexWrap: 'wrap' }}>
+                {RANGES.map((r) => {
+                    const active = days === r.days;
+                    return (
+                        <button
+                            key={r.days} type="button" onClick={() => setDays(r.days)} disabled={loading}
+                            style={{
+                                padding: '5px 12px', borderRadius: 20, cursor: loading ? 'default' : 'pointer',
+                                fontSize: '0.76rem', fontWeight: 600, border: '1px solid var(--border-subtle)',
+                                background: active ? 'var(--accent-purple, #8b5cf6)' : 'var(--bg-card)',
+                                color: active ? '#fff' : 'var(--text-secondary)',
+                            }}
+                        >
+                            {r.label}
+                        </button>
+                    );
+                })}
+            </div>
 
             {error && (
                 <div style={{ fontSize: '0.8rem', color: 'var(--accent-red, #ef4444)', marginBottom: 12 }}>
