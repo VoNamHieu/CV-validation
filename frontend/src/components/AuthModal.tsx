@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from '@phosphor-icons/react';
 import { useAuth } from '@/lib/auth';
+import { stashPendingTermsAcceptance } from '@/lib/consent';
 
 type Mode = 'signin' | 'signup';
 
@@ -12,6 +13,7 @@ export default function AuthModal({ onClose, reason }: { onClose: () => void; re
     const [mode, setMode] = useState<Mode>('signin');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
+    const [agreed, setAgreed] = useState(false);   // Layer-1 consent (signup only)
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
     const [notice, setNotice] = useState('');
@@ -24,6 +26,11 @@ export default function AuthModal({ onClose, reason }: { onClose: () => void; re
             : await signUp(email, password);
         setBusy(false);
         if (res.error) { setError(res.error); return; }
+        if (mode === 'signup') {
+            // Acceptance is recorded once a session exists (here if immediate,
+            // else after email confirm). See ConsentProvider.
+            stashPendingTermsAcceptance();
+        }
         if (res.needsConfirm) {
             setNotice('Đã gửi email xác nhận. Vui lòng kiểm tra hộp thư để kích hoạt tài khoản.');
             return;
@@ -98,6 +105,28 @@ export default function AuthModal({ onClose, reason }: { onClose: () => void; re
                         value={password} onChange={(e) => setPassword(e.target.value)} style={inputStyle}
                     />
 
+                    {/* Layer-1 mandatory consent — signup only, unchecked by default */}
+                    {mode === 'signup' && (
+                        <label style={{
+                            display: 'flex', alignItems: 'flex-start', gap: 9, cursor: 'pointer',
+                            fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.5, marginTop: 2,
+                        }}>
+                            <input
+                                type="checkbox" checked={agreed} disabled={busy}
+                                onChange={(e) => setAgreed(e.target.checked)}
+                                style={{ marginTop: 2, width: 15, height: 15, flexShrink: 0, cursor: 'pointer' }}
+                            />
+                            <span>
+                                Tôi đồng ý với{' '}
+                                <a href="/terms" target="_blank" rel="noopener noreferrer"
+                                    style={{ color: 'var(--accent-blue)', fontWeight: 600 }}>Điều khoản Sử dụng</a>
+                                {' '}và{' '}
+                                <a href="/privacy" target="_blank" rel="noopener noreferrer"
+                                    style={{ color: 'var(--accent-blue)', fontWeight: 600 }}>Chính sách Quyền riêng tư</a>.
+                            </span>
+                        </label>
+                    )}
+
                     {error && (
                         <div style={{ fontSize: '0.76rem', color: 'var(--accent-red, #ef4444)' }}>{error}</div>
                     )}
@@ -106,11 +135,13 @@ export default function AuthModal({ onClose, reason }: { onClose: () => void; re
                     )}
 
                     <button
-                        type="submit" disabled={busy}
+                        type="submit" disabled={busy || (mode === 'signup' && !agreed)}
                         style={{
                             marginTop: 4, padding: '11px 12px', borderRadius: 10, border: 'none',
                             background: 'var(--gradient-hero)', color: 'white', fontWeight: 600,
-                            fontSize: '0.85rem', cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.7 : 1,
+                            fontSize: '0.85rem',
+                            cursor: (busy || (mode === 'signup' && !agreed)) ? 'default' : 'pointer',
+                            opacity: (busy || (mode === 'signup' && !agreed)) ? 0.55 : 1,
                         }}
                     >
                         {busy ? 'Đang xử lý…' : mode === 'signin' ? 'Đăng nhập' : 'Đăng ký'}

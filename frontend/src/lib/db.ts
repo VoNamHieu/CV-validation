@@ -172,8 +172,24 @@ export const admin = {
 };
 
 // ── Account (user-scoped, requires auth) ──────────────────────────────────────
+export interface Profile {
+    id: string;
+    email: string | null;
+    created_at?: string;
+    terms_accepted_at: string | null;
+    terms_version: string | null;
+    agent_consent_at: string | null;
+}
+
 export const account = {
-    getProfile: () => req<{ id: string; email: string | null }>(`/api/me`, { auth: true }),
+    getProfile: () => req<Profile>(`/api/me`, { auth: true }),
+
+    // Layer 1: record the mandatory Terms + Privacy acceptance from signup.
+    acceptTerms: (version: string) =>
+        req<Profile>(`/api/me/accept-terms`, { method: 'POST', body: JSON.stringify({ version }), auth: true }),
+    // Layer 2: record the just-in-time consent for the auto-apply agent.
+    recordAgentConsent: () =>
+        req<Profile>(`/api/me/agent-consent`, { method: 'POST', auth: true }),
 
     listCvProfiles: () => req<CvProfile[]>(`/api/me/cv-profiles`, { auth: true }),
     getActiveCvProfile: () => req<CvProfile>(`/api/me/cv-profiles/active`, { auth: true }),

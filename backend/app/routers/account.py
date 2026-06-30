@@ -23,6 +23,26 @@ async def get_profile(user_id: str = Depends(get_current_user_id)):
     return await profiles.get(user_id) or {"id": user_id, "email": None}
 
 
+# ── consent ──────────────────────────────────────────────────────────────────
+class AcceptTerms(BaseModel):
+    version: str
+
+
+@router.post("/accept-terms")
+async def accept_terms(
+    body: AcceptTerms, user_id: str = Depends(get_current_user_id)
+):
+    """Layer 1 — record the mandatory Terms + Privacy acceptance from signup."""
+    return await profiles.accept_terms(user_id=user_id, version=body.version)
+
+
+@router.post("/agent-consent")
+async def agent_consent(user_id: str = Depends(get_current_user_id)):
+    """Layer 2 — record the separate just-in-time consent for the auto-apply
+    agent (shown the first time the user enables it)."""
+    return await profiles.set_agent_consent(user_id=user_id)
+
+
 # ── cv profiles ────────────────────────────────────────────────────────────
 class CvProfileCreate(BaseModel):
     structured: dict

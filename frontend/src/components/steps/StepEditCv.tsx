@@ -10,6 +10,7 @@ import {
 } from '@phosphor-icons/react';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthGate } from '@/lib/auth';
+import { useConsent } from '@/lib/consent-context';
 import CvDocumentPreview from '@/components/CvDocumentPreview';
 import EditableTemplateFrame from '@/components/EditableTemplateFrame';
 import { applyCvFieldEdit } from '@/lib/cv-inline-edit';
@@ -81,6 +82,7 @@ export default function StepEditCv() {
         userAvatarBase64, setUserAvatar, selectedJdId, searchPivotNote,
     } = useAppStore();
     const gate = useAuthGate();
+    const { ensureAgentConsent } = useConsent();
     const fullAutoFiredRef = useRef(false);
 
     // All entries that have optimized CVs, sorted by score
@@ -360,6 +362,8 @@ export default function StepEditCv() {
 
     /* ─── Single Auto Apply (legacy) ─── */
     const triggerAutoApply = async () => {
+        // Layer-2 consent: first time the auto-apply agent runs.
+        if (!(await ensureAgentConsent())) return;
         const cv = currentEntry?.optimizedCv;
         // Apply at the official link when set (the source may be an aggregator JD
         // we only crawled for scoring).
@@ -432,7 +436,8 @@ export default function StepEditCv() {
     /* ═══════════════════════════════════════════════════════════════
        BATCH AUTO APPLY ALL — Send all jobs to extension at once
        ═══════════════════════════════════════════════════════════════ */
-    const triggerAutoApplyAll = useCallback(() => {
+    const triggerAutoApplyAll = useCallback(async () => {
+        if (!(await ensureAgentConsent())) return;
         if (!isExtensionAvailable()) {
             setAutoApplyStatus('no-extension');
             setAutoApplyMessage('Extension chưa cài! Vui lòng cài JobFit AI Extension trước.');
@@ -475,7 +480,7 @@ export default function StepEditCv() {
             type: 'JOBFIT_AUTO_APPLY_ALL',
             jobs,
         }, '*');
-    }, [sortedEntries, buildProfile]);
+    }, [sortedEntries, buildProfile, ensureAgentConsent]);
 
     /* ═══════════════════════════════════════════════════════════════
        FULLY AUTONOMOUS APPLY ALL — Generate PDFs + sync + launch batch
@@ -485,6 +490,7 @@ export default function StepEditCv() {
           matching CV + profile into chrome.storage before agent runs.
        ═══════════════════════════════════════════════════════════════ */
     const triggerFullyAutoApply = useCallback(async () => {
+        if (!(await ensureAgentConsent())) return;
         if (!isExtensionAvailable()) {
             setAutoApplyStatus('no-extension');
             setAutoApplyMessage('Extension chưa cài! Vui lòng cài JobFit AI Extension trước.');
@@ -559,7 +565,7 @@ export default function StepEditCv() {
 
         // Reset status after handoff — batch progress UI takes over from here.
         setTimeout(() => setFullAutoStatus('idle'), 1500);
-    }, [sortedEntries, buildProfile, mergeProfile, userAvatarBase64]);
+    }, [sortedEntries, buildProfile, mergeProfile, userAvatarBase64, ensureAgentConsent]);
 
     const cancelBatchApply = useCallback(() => {
         window.postMessage({ type: 'JOBFIT_AUTO_APPLY_CANCEL' }, '*');

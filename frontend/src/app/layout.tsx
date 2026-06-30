@@ -3,6 +3,7 @@ import { Inter, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth";
 import { CreditsProvider } from "@/lib/credits-context";
+import { ConsentProvider } from "@/lib/consent-context";
 import GlobalAuthModal from "@/components/GlobalAuthModal";
 
 const inter = Inter({
@@ -41,8 +42,10 @@ export default function RootLayout({
       >
         <AuthProvider>
           <CreditsProvider>
-            {children}
-            <GlobalAuthModal />
+            <ConsentProvider>
+              {children}
+              <GlobalAuthModal />
+            </ConsentProvider>
           </CreditsProvider>
         </AuthProvider>
       </body>
