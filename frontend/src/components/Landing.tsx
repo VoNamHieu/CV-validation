@@ -15,9 +15,10 @@ import { useAuth } from '@/lib/auth';
 // animations / hovers / media queries that inline styles can't express.
 
 const STEPS = [
-    { icon: FileText, title: 'Tải CV của bạn', desc: 'Kéo thả file PDF. AI đọc kỹ năng, kinh nghiệm, học vấn và suy ra vai trò phù hợp.' },
-    { icon: Brain, title: 'AI phân tích & so khớp', desc: 'Quét các vị trí đang tuyển, chấm điểm độ khớp và chỉ ra điểm mạnh / thiếu sót.' },
-    { icon: Briefcase, title: 'Nhận việc & link chính thức', desc: 'Gợi ý công ty đang tuyển kèm link tuyển dụng thật của họ — không phải tin rác.' },
+    { icon: FileText, title: 'Tải CV của bạn', desc: 'Kéo thả file PDF. AI đọc kỹ năng, kinh nghiệm, học vấn và suy ra vai trò mục tiêu.' },
+    { icon: Brain, title: 'AI tìm công ty đang tuyển', desc: 'Quét các công ty trong mạng lưới và trang tuyển dụng chính thức của họ để tìm vị trí khớp.' },
+    { icon: Target, title: 'Chấm điểm độ khớp', desc: 'Mỗi tin được xếp hạng theo CV — biết ngay mình hợp bao nhiêu phần trăm và còn thiếu gì.' },
+    { icon: MagicWand, title: 'Tối ưu CV & ứng tuyển', desc: 'AI viết lại CV phù hợp từng vị trí (không bịa nội dung), xuất PDF, sẵn sàng nộp.' },
 ];
 
 const FEATURES = [
@@ -214,18 +215,20 @@ export default function Landing() {
             </section>
 
             {/* How it works */}
-            <section className="lp-section">
-                <h2 className="lp-h2">Ba bước, từ CV đến việc phù hợp</h2>
-                <p className="lp-section-sub">Không form dài, không tin rác — chỉ tải CV và để AI lo phần còn lại.</p>
-                <div className="lp-steps">
+            <section className="lp-section lp-how">
+                <h2 className="lp-h2">Cách hoạt động</h2>
+                <p className="lp-section-sub">Từ một file PDF đến danh sách việc phù hợp đã tối ưu CV — chỉ vài phút, không tin rác.</p>
+                <div className="lp-how-flow">
                     {STEPS.map((s, i) => {
                         const Icon = s.icon;
                         return (
-                            <div key={s.title} className="lp-step">
-                                <div className="lp-step-num">{i + 1}</div>
-                                <span className="lp-step-icon"><Icon size={22} weight="duotone" /></span>
-                                <div className="lp-step-title">{s.title}</div>
-                                <div className="lp-step-desc">{s.desc}</div>
+                            <div key={s.title} className="lp-how-step">
+                                <div className="lp-how-badge">
+                                    <Icon size={24} weight="duotone" />
+                                    <span className="lp-how-num">{i + 1}</span>
+                                </div>
+                                <div className="lp-how-title">{s.title}</div>
+                                <div className="lp-how-desc">{s.desc}</div>
                             </div>
                         );
                     })}
@@ -367,6 +370,21 @@ const LP_CSS = `
 .lp-step-icon, .lp-feature-icon { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 12px; margin-bottom: 14px; color: #fff; background: var(--gradient-hero); box-shadow: 0 6px 18px rgba(99,102,241,0.32); }
 .lp-step-title { font-weight: 700; font-size: 1rem; margin-bottom: 6px; }
 .lp-step-desc, .lp-feature-desc { font-size: 0.83rem; color: var(--text-muted); line-height: 1.55; }
+
+/* How it works — connected step flow */
+.lp-how-flow { display: flex; gap: 8px; margin-top: 12px; }
+.lp-how-step { position: relative; flex: 1; padding: 0 12px; text-align: center; }
+.lp-how-step:not(:last-child)::after { content: ''; position: absolute; top: 28px; left: calc(50% + 36px); right: calc(-50% + 36px); height: 2px; background: linear-gradient(90deg, var(--border-accent), var(--border-subtle)); }
+.lp-how-badge { position: relative; width: 56px; height: 56px; margin: 0 auto 18px; border-radius: 16px; display: flex; align-items: center; justify-content: center; color: #fff; background: var(--gradient-hero); box-shadow: 0 8px 22px rgba(99,102,241,0.35); }
+.lp-how-num { position: absolute; top: -8px; right: -8px; width: 22px; height: 22px; border-radius: 50%; background: var(--bg-card); border: 1px solid var(--border-default); color: var(--text-primary); font-size: 0.72rem; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+.lp-how-title { font-weight: 700; font-size: 0.98rem; margin-bottom: 6px; }
+.lp-how-desc { font-size: 0.83rem; color: var(--text-muted); line-height: 1.55; max-width: 220px; margin: 0 auto; }
+@media (max-width: 880px) {
+  .lp-how-flow { flex-direction: column; gap: 26px; max-width: 360px; margin: 12px auto 0; }
+  .lp-how-step { padding: 0; }
+  .lp-how-step:not(:last-child)::after { display: none; }
+  .lp-how-desc { max-width: none; }
+}
 
 .lp-features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; text-align: left; }
 .lp-feature { padding: 22px 20px; border-radius: 16px; border: 1px solid var(--border-subtle); background: var(--gradient-card), var(--bg-card); transition: transform .25s var(--ease-spring), border-color .25s, box-shadow .25s; }

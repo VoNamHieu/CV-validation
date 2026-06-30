@@ -3,7 +3,7 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import {
     Sparkle, Warning, FloppyDisk, CaretLeft, CaretRight,
-    UploadSimple, FileText, SpinnerGap, CircleNotch,
+    UploadSimple, FileText, SpinnerGap, CircleNotch, ClipboardText, MagicWand, UserCircle,
 } from '@phosphor-icons/react';
 import { useAppStore } from '@/store/useAppStore';
 import CvDocumentPreview from '@/components/CvDocumentPreview';
@@ -11,7 +11,7 @@ import EditableTemplateFrame from '@/components/EditableTemplateFrame';
 import CvTemplatePicker from '@/components/CvTemplatePicker';
 import { PersonalInfoSection } from '@/components/steps/StepEditCv';
 import { applyCvFieldEdit } from '@/lib/cv-inline-edit';
-import { parsePdfWithAI, renderCvPdf } from '@/lib/api';
+import { parsePdfWithAI, renderCvPdf, extractCvStructured } from '@/lib/api';
 import { renderCvHtml, getTemplate, DEFAULT_TEMPLATE_ID } from '@/lib/cv-templates';
 import type { CvTemplateId } from '@/lib/cv-templates';
 import type { CVData } from '@/lib/types';
@@ -52,13 +52,25 @@ export default function CvEditorView() {
     );
 }
 
-/* ─── Empty state: no CV loaded — upload one to start ───────────────────────── */
+/* ─── Empty state: no CV loaded — create one by uploading a PDF or pasting
+       content (AI structures it). Both land in the same editor + template. ─── */
 function UploadGate() {
     const setCvData = useAppStore((s) => s.setCvData);
     const setCvRawText = useAppStore((s) => s.setCvRawText);
+    const [mode, setMode] = useState<'upload' | 'paste'>('upload');
+    const [pasted, setPasted] = useState('');
     const [processing, setProcessing] = useState(false);
     const [error, setError] = useState('');
     const [dragOver, setDragOver] = useState(false);
+
+    // Shared: push the new CV into the store + extension once structured.
+    const adoptCv = useCallback((structured: CVData, rawText: string, label: string) => {
+        setCvRawText(rawText, label);
+        setCvData(structured);
+        const profile = cvToExtensionProfile(structured);
+        syncProfileToExtension(profile, structured).catch(() => { });
+        syncCvDataToExtension(structured).catch(() => { });
+    }, [setCvData, setCvRawText]);
 
     const handleFile = useCallback(async (file: File) => {
         if (!file.name.toLowerCase().endsWith('.pdf')) {
@@ -69,66 +81,141 @@ function UploadGate() {
         setProcessing(true);
         try {
             const structured = await parsePdfWithAI(file, 'cv');
-            setCvRawText('(parsed from PDF)', file.name);
-            setCvData(structured);
-            // Push the parsed profile + CV JSON to the extension, same as the
-            // Apply-flow upload step, so the popup is filled immediately.
-            const profile = cvToExtensionProfile(structured);
-            syncProfileToExtension(profile, structured).catch(() => { });
-            syncCvDataToExtension(structured).catch(() => { });
+            adoptCv(structured, '(parsed from PDF)', file.name);
         } catch (e: unknown) {
             setError(e instanceof Error ? e.message : 'Tải lên thất bại');
         } finally {
             setProcessing(false);
         }
-    }, [setCvData, setCvRawText]);
+    }, [adoptCv]);
+
+    // Paste flow: AI structures the raw text into a CV, then it renders in the
+    // current template just like an uploaded one.
+    const handleGenerate = useCallback(async () => {
+        const text = pasted.trim();
+        if (text.length < 40) {
+            setError('Hãy dán nhiều nội dung hơn (kinh nghiệm, kỹ năng, học vấn…) để AI tạo CV.');
+            return;
+        }
+        setError('');
+        setProcessing(true);
+        try {
+            const structured = await extractCvStructured(text);
+            adoptCv(structured, text, 'Nội dung đã dán');
+        } catch (e: unknown) {
+            setError(e instanceof Error ? e.message : 'Tạo CV thất bại');
+        } finally {
+            setProcessing(false);
+        }
+    }, [pasted, adoptCv]);
+
+    const tabStyle = (active: boolean): React.CSSProperties => ({
+        flex: 1, padding: '9px 12px', borderRadius: 10, cursor: 'pointer',
+        fontSize: '0.84rem', fontWeight: 600, border: '1px solid var(--border-subtle)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+        background: active ? 'var(--gradient-hero)' : 'var(--bg-card)',
+        color: active ? '#fff' : 'var(--text-secondary)',
+    });
 
     return (
-        <div style={{ maxWidth: 520, margin: '40px auto 0' }}>
-            <label
-                onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-                onDragLeave={() => setDragOver(false)}
-                onDrop={(e) => {
-                    e.preventDefault();
-                    setDragOver(false);
-                    const f = e.dataTransfer.files[0];
-                    if (f) void handleFile(f);
-                }}
-                style={{
-                    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12,
-                    padding: '48px 24px', borderRadius: 16, cursor: processing ? 'wait' : 'pointer',
-                    border: `2px dashed ${dragOver ? 'var(--accent-blue)' : 'var(--border-subtle)'}`,
-                    background: dragOver ? 'var(--gradient-hero-subtle)' : 'var(--bg-card)',
-                    transition: 'all 0.18s ease', textAlign: 'center',
-                }}
-            >
-                <div style={{
-                    width: 52, height: 52, borderRadius: 14,
-                    background: 'var(--gradient-hero)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                }}>
-                    {processing
-                        ? <SpinnerGap size={24} color="white" className="spin" />
-                        : <UploadSimple size={24} weight="bold" color="white" />}
-                </div>
-                <div style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                    {processing ? 'Đang đọc CV bằng AI…' : 'Tải lên CV (PDF) để bắt đầu'}
-                </div>
-                <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                    Kéo thả file hoặc bấm để chọn — AI sẽ trích xuất nội dung để chỉnh sửa.
-                </div>
-                <input
-                    type="file"
-                    accept="application/pdf"
-                    disabled={processing}
-                    style={{ display: 'none' }}
-                    onChange={(e) => {
-                        const f = e.target.files?.[0] ?? null;
+        <div style={{ maxWidth: 560, margin: '36px auto 0' }}>
+            {/* Mode tabs */}
+            <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+                <button type="button" disabled={processing} style={tabStyle(mode === 'upload')}
+                    onClick={() => { setMode('upload'); setError(''); }}>
+                    <UploadSimple size={16} weight="bold" /> Tải PDF
+                </button>
+                <button type="button" disabled={processing} style={tabStyle(mode === 'paste')}
+                    onClick={() => { setMode('paste'); setError(''); }}>
+                    <ClipboardText size={16} weight="bold" /> Dán nội dung
+                </button>
+            </div>
+
+            {mode === 'upload' ? (
+                <label
+                    onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                    onDragLeave={() => setDragOver(false)}
+                    onDrop={(e) => {
+                        e.preventDefault();
+                        setDragOver(false);
+                        const f = e.dataTransfer.files[0];
                         if (f) void handleFile(f);
-                        e.target.value = '';
                     }}
-                />
-            </label>
+                    style={{
+                        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12,
+                        padding: '48px 24px', borderRadius: 16, cursor: processing ? 'wait' : 'pointer',
+                        border: `2px dashed ${dragOver ? 'var(--accent-blue)' : 'var(--border-subtle)'}`,
+                        background: dragOver ? 'var(--gradient-hero-subtle)' : 'var(--bg-card)',
+                        transition: 'all 0.18s ease', textAlign: 'center',
+                    }}
+                >
+                    <div style={{
+                        width: 52, height: 52, borderRadius: 14,
+                        background: 'var(--gradient-hero)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}>
+                        {processing
+                            ? <SpinnerGap size={24} color="white" className="spin" />
+                            : <UploadSimple size={24} weight="bold" color="white" />}
+                    </div>
+                    <div style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                        {processing ? 'Đang đọc CV bằng AI…' : 'Tải lên CV (PDF) để bắt đầu'}
+                    </div>
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                        Kéo thả file hoặc bấm để chọn — AI sẽ trích xuất nội dung để chỉnh sửa.
+                    </div>
+                    <input
+                        type="file"
+                        accept="application/pdf"
+                        disabled={processing}
+                        style={{ display: 'none' }}
+                        onChange={(e) => {
+                            const f = e.target.files?.[0] ?? null;
+                            if (f) void handleFile(f);
+                            e.target.value = '';
+                        }}
+                    />
+                </label>
+            ) : (
+                <div>
+                    <textarea
+                        value={pasted}
+                        onChange={(e) => { setPasted(e.target.value); setError(''); }}
+                        disabled={processing}
+                        placeholder={'Dán nội dung CV của bạn vào đây — họ tên, liên hệ, kinh nghiệm, kỹ năng, học vấn… ở bất kỳ định dạng nào. AI sẽ tự sắp xếp thành CV hoàn chỉnh.'}
+                        rows={12}
+                        style={{
+                            width: '100%', padding: '14px 16px', borderRadius: 14,
+                            border: '1px solid var(--border-subtle)', background: 'var(--bg-card)',
+                            color: 'var(--text-primary)', fontSize: '0.86rem', lineHeight: 1.6,
+                            resize: 'vertical', outline: 'none', fontFamily: 'inherit',
+                        }}
+                    />
+                    <div style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        marginTop: 6, marginBottom: 14,
+                    }}>
+                        <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                            {pasted.trim().length} ký tự
+                        </span>
+                    </div>
+                    <button
+                        className="btn-primary"
+                        onClick={handleGenerate}
+                        disabled={processing || pasted.trim().length < 40}
+                        style={{
+                            width: '100%', height: 48, fontSize: '0.92rem', fontWeight: 600,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                            opacity: (processing || pasted.trim().length < 40) ? 0.6 : 1,
+                        }}
+                    >
+                        {processing
+                            ? <><SpinnerGap size={18} className="spin" /> Đang tạo CV bằng AI…</>
+                            : <><MagicWand size={18} weight="fill" /> Tạo CV từ nội dung</>}
+                    </button>
+                </div>
+            )}
+
             {error && (
                 <div style={{
                     marginTop: 12, padding: '8px 12px', borderRadius: 8,
@@ -160,6 +247,8 @@ function CvEditorWorkspace({ cv }: { cv: CVData }) {
     const [avatarError, setAvatarError] = useState<string | null>(null);
     const [downloadingPdf, setDownloadingPdf] = useState(false);
     const [pdfError, setPdfError] = useState('');
+    // Personal info now lives in its own tab, separate from the CV editor.
+    const [tab, setTab] = useState<'cv' | 'personal'>('cv');
 
     const workingCv = editedCv ?? cv;
     // Personal-info edits (contact/personal/employment/preferences) go to cvData
@@ -245,6 +334,35 @@ function CvEditorWorkspace({ cv }: { cv: CVData }) {
 
     return (
         <div style={{ minWidth: 0 }}>
+            {/* ══════ Tabs: tách Thông tin cá nhân khỏi trình sửa CV ══════ */}
+            <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+                {([
+                    { id: 'cv' as const, label: 'CV', icon: FileText },
+                    { id: 'personal' as const, label: 'Thông tin cá nhân', icon: UserCircle },
+                ]).map(({ id, label, icon: Icon }) => {
+                    const active = tab === id;
+                    return (
+                        <button
+                            key={id} type="button" onClick={() => setTab(id)}
+                            style={{
+                                flex: 1, padding: '9px 12px', borderRadius: 10, cursor: 'pointer',
+                                fontSize: '0.84rem', fontWeight: 600,
+                                border: '1px solid var(--border-subtle)',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+                                background: active ? 'var(--gradient-hero)' : 'var(--bg-card)',
+                                color: active ? '#fff' : 'var(--text-secondary)',
+                            }}
+                        >
+                            <Icon size={16} weight={active ? 'fill' : 'duotone'} /> {label}
+                        </button>
+                    );
+                })}
+            </div>
+
+            {/* ══════ Personal Info tab — editable, auto-synced to extension ══════ */}
+            {tab === 'personal' && <PersonalInfoSection cv={cv} onChange={setCvData} />}
+
+            {tab === 'cv' && (<>
             {/* ══════ AI Disclaimer ══════ */}
             <div style={{
                 background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)',
@@ -255,9 +373,6 @@ function CvEditorWorkspace({ cv }: { cv: CVData }) {
                 <Warning size={12} />
                 Bấm vào nội dung bất kỳ để sửa, di chuột vào mục để sắp xếp/xoá — nội dung do bạn kiểm soát.
             </div>
-
-            {/* ══════ Personal Info — editable, auto-synced to extension ══════ */}
-            <PersonalInfoSection cv={cv} onChange={setCvData} />
 
             {/* ══════ Template Picker + Avatar + Live Preview ══════ */}
             <div style={{ marginBottom: 12, padding: 12, background: 'var(--bg-card)', borderRadius: 10, border: '1px solid var(--border-subtle)' }}>
@@ -433,6 +548,7 @@ function CvEditorWorkspace({ cv }: { cv: CVData }) {
                     onEditedChange={setEditedCv}
                 />
             </div>
+            </>)}
 
             <div style={{
                 marginTop: 16, textAlign: 'center', fontSize: '0.72rem',
