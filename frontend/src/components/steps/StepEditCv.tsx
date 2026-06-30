@@ -6,7 +6,7 @@ import {
     CheckCircle, FilePdf, FloppyDisk, CaretLeft, CaretRight,
     RocketLaunch, Lightning, CircleNotch,
     XCircle, Stop, CaretDown, CaretUp, ShieldWarning, ChartBar,
-    ArrowsClockwise,
+    ArrowsClockwise, MagnifyingGlassPlus, PencilSimple,
 } from '@phosphor-icons/react';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthGate } from '@/lib/auth';
@@ -109,6 +109,8 @@ export default function StepEditCv() {
         const i = sortedEntries.findIndex(e => e.id === selectedJdId);
         return i >= 0 ? i : 0;
     });
+    // Main editor tab: edit the CV vs. the deep gap analysis (its own full-width tab).
+    const [mainTab, setMainTab] = useState<'editor' | 'analysis'>('editor');
     // The initializer above only runs on mount. When the editor is ALREADY
     // mounted (e.g. the extension's Mode-1 tailor pushes a new CV and navigates
     // here), selectedJdId changes but selectedIdx wouldn't follow — leaving the
@@ -244,6 +246,8 @@ export default function StepEditCv() {
                 optimizedCvPdfBase64: undefined,
                 optimizedCvFileName: undefined,
             });
+            // Keep the saved-job record's CV in sync so history re-open shows it.
+            useAppStore.getState().attachCvToJobRecord(currentEntry.applyUrl || currentEntry.source, variant.cv);
             setEditedCv(null); // drop stale inline edits so the new version shows
         } catch (err) {
             setReoptimizeError(err instanceof Error ? err.message : 'Tối ưu lại thất bại');
@@ -267,6 +271,7 @@ export default function StepEditCv() {
             optimizedCvPdfBase64: undefined,
             optimizedCvFileName: undefined,
         });
+        useAppStore.getState().attachCvToJobRecord(currentEntry.applyUrl || currentEntry.source, next);
     }, [currentEntry, editedCv, updateJdEntry]);
 
     // Overlay the latest base-profile fields (contact/personal/employment/
@@ -1251,7 +1256,32 @@ export default function StepEditCv() {
                 </div>
             </div>
 
+            {/* ══════ Main tabs: edit CV · deep analysis (its own tab) ══════ */}
+            <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+                {([
+                    { id: 'editor' as const, label: 'Chỉnh sửa CV', icon: PencilSimple },
+                    { id: 'analysis' as const, label: 'Phân tích chuyên sâu', icon: MagnifyingGlassPlus },
+                ]).map(({ id, label, icon: Icon }) => {
+                    const active = mainTab === id;
+                    return (
+                        <button
+                            key={id} type="button" onClick={() => setMainTab(id)}
+                            style={{
+                                display: 'flex', alignItems: 'center', gap: 7, padding: '9px 16px',
+                                borderRadius: 10, cursor: 'pointer', fontSize: '0.84rem', fontWeight: 600,
+                                border: '1px solid', borderColor: active ? 'transparent' : 'var(--border-subtle)',
+                                background: active ? 'var(--gradient-hero)' : 'var(--bg-card)',
+                                color: active ? '#fff' : 'var(--text-secondary)',
+                            }}
+                        >
+                            <Icon size={15} weight={active ? 'fill' : 'duotone'} /> {label}
+                        </button>
+                    );
+                })}
+            </div>
+
             {/* ══════ Two-column workspace: CV editor (left) · job match analysis (right) ══════ */}
+            {mainTab === 'editor' && (
             <div className="editor-layout">
             {/* ───────────────────────── LEFT: CV editor ───────────────────────── */}
             <div style={{ minWidth: 0 }}>
@@ -1531,7 +1561,20 @@ export default function StepEditCv() {
                 />
             </aside>
 
-            </div>{/* ───────── /editor-layout ───────── */}
+            </div>
+            )}{/* ───────── /editor-layout ───────── */}
+
+            {/* ══════ Deep analysis — opens in its own full-width tab ══════ */}
+            {mainTab === 'analysis' && (
+                <div className="glass-card" style={{ maxWidth: 760, margin: '0 auto', padding: '20px 22px' }}>
+                    <GapReportSection
+                        key={currentEntry.id}
+                        cv={cvData}
+                        jd={currentEntry.jdData}
+                        match={currentEntry.matchResult}
+                    />
+                </div>
+            )}
 
             {/* Hide scrollbar for tabs + two-column responsive layout */}
             <style>{`
@@ -1715,8 +1758,7 @@ function MatchAnalysisPanel({
                 )}
             </div>
 
-            {/* ── Deep gap analysis (AI) — sits in the gap area ── */}
-            <GapReportSection cv={cvData} jd={jd} match={m} />
+            {/* Deep gap analysis lives in its own "Phân tích chuyên sâu" tab now. */}
 
             {/* ── Scoring breakdown ── */}
             <p style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)', margin: '0 0 4px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>

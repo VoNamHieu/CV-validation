@@ -72,7 +72,7 @@ export default function GapReportSection({ cv, jd, match }: { cv: CVData; jd?: J
     const capability = report?.gaps.filter((g) => g.type === 'capability') ?? [];
 
     return (
-        <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px dashed var(--border-subtle)' }}>
+        <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                 <MagnifyingGlassPlus size={15} weight="duotone" style={{ color: 'var(--accent-purple, #8b5cf6)' }} />
                 <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-primary)' }}>Phân tích gap chuyên sâu</span>
