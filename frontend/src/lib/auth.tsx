@@ -80,6 +80,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             email, password, options: { emailRedirectTo },
         });
         if (error) return { error: error.message };
+        // Supabase anti-enumeration: signing up with an ALREADY-registered email
+        // doesn't error — it returns an obfuscated user with an empty identities
+        // array and no session. Detect that so we tell the user to log in instead
+        // of falsely claiming a confirmation email was sent.
+        if (data.user && (data.user.identities?.length ?? 0) === 0) {
+            return { error: 'Email này đã có tài khoản. Vui lòng đăng nhập.' };
+        }
         // No session back → email confirmation required.
         return { needsConfirm: !data.session };
     }, [sb]);
