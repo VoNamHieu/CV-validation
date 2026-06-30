@@ -91,7 +91,7 @@ export default function Home() {
           background: 'var(--bg-secondary)',
           opacity: 0.9,
         }}>
-          <div>JobFit AI · Vận hành bởi AI · Cam kết không bịa nội dung</div>
+          <div>Latosa · Vận hành bởi AI · Cam kết không bịa nội dung</div>
           <div style={{ marginTop: 6, display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
             <a href="/privacy" style={{ color: 'var(--text-secondary)', textDecoration: 'none' }}>Quyền riêng tư</a>
             <span>·</span>

@@ -804,7 +804,7 @@ export default function CvDocumentPreview({
                     fontSize: '0.7rem', color: '#bbb',
                     textAlign: 'center',
                 }}>
-                    Tối ưu với sự hỗ trợ của AI · Tạo bởi JobFit AI
+                    Tối ưu với sự hỗ trợ của AI · Tạo bởi Latosa
                 </div>
             </div>
 

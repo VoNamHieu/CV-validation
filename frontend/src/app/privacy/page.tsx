@@ -3,8 +3,8 @@ import LegalShell from '@/components/LegalShell';
 import { PrivacyContent } from '@/components/legal/LegalContent';
 
 export const metadata: Metadata = {
-    title: 'Chính sách Quyền riêng tư — JobFit AI',
-    description: 'Cách JobFit AI thu thập, sử dụng, chia sẻ và bảo vệ dữ liệu cá nhân của bạn.',
+    title: 'Chính sách Quyền riêng tư — Latosa',
+    description: 'Cách Latosa thu thập, sử dụng, chia sẻ và bảo vệ dữ liệu cá nhân của bạn.',
 };
 
 export default function PrivacyPage() {

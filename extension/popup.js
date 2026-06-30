@@ -1,5 +1,5 @@
 /**
- * JobFit AI — Auto Apply Extension — Popup Script
+ * Latosa — Auto Apply Extension — Popup Script
  */
 
 // ─── All field IDs ───
@@ -195,7 +195,7 @@ function updateStatus(profile) {
     statusEl.appendChild(missingLine);
 }
 
-// ─── Import from JobFit AI App ───
+// ─── Import from Latosa App ───
 async function importFromApp() {
     const appUrl = document.getElementById('appUrl')?.value || 'https://cv-validation.vercel.app';
     const btn = document.getElementById('importFromApp');
@@ -216,7 +216,7 @@ async function importFromApp() {
         }
     } catch (err) {
         btn.textContent = '❌ Error';
-        console.error('[JobFit AI] Import error:', err);
+        console.error('[Latosa] Import error:', err);
         setTimeout(() => { btn.textContent = 'Import'; btn.disabled = false; }, 2000);
     }
 }
@@ -261,7 +261,7 @@ async function tailorCurrentJob() {
         if (!tab || !/^https?:/.test(tab.url || '')) throw new Error('Mở một trang job (https) trước.');
         const resp = await chrome.tabs.sendMessage(tab.id, { type: 'RUN_MODE1' });
         statusEl.textContent = resp?.success
-            ? '✅ Đã tailor — mở JobFit AI để xem & ứng tuyển.'
+            ? '✅ Đã tailor — mở Latosa để xem & ứng tuyển.'
             : `❌ ${resp?.error || 'Không tailor được'}`;
     } catch (e) {
         statusEl.textContent = `❌ ${e.message || e}`;

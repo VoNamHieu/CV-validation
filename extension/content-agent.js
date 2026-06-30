@@ -1,5 +1,5 @@
 /**
- * JobFit AI — Universal Apply Agent (v2 — Autonomous Agent)
+ * Latosa — Universal Apply Agent (v2 — Autonomous Agent)
  *
  * Replaces the linear single-shot form filler with an agentic loop:
  *   Observe → Plan → Act → Verify → Repeat
@@ -497,7 +497,7 @@ function extractFormFields() {
                     }
                 } catch (e) {
                     // Cross-origin iframe — cannot access
-                    console.warn('[JobFit Agent] Cannot access cross-origin iframe:', e.message);
+                    console.warn('[Latosa Agent] Cannot access cross-origin iframe:', e.message);
                 }
             }
         } catch (e) { /* ignore */ }
@@ -775,7 +775,7 @@ function setFileOnInput(el, base64Data, fileName, mimeType = 'application/pdf') 
         el.dispatchEvent(new Event('change', { bubbles: true }));
         return true;
     } catch (e) {
-        console.warn('[JobFit Agent] File upload failed:', e);
+        console.warn('[Latosa Agent] File upload failed:', e);
         return false;
     }
 }
@@ -790,7 +790,7 @@ function setFileOnInput(el, base64Data, fileName, mimeType = 'application/pdf') 
 async function executeSingleInstruction(inst, cvData) {
     const el = document.querySelector(inst.selector);
     if (!el) {
-        console.warn(`[JobFit Agent] Selector not found: ${inst.selector}`);
+        console.warn(`[Latosa Agent] Selector not found: ${inst.selector}`);
         return false;
     }
 
@@ -802,7 +802,7 @@ async function executeSingleInstruction(inst, cvData) {
     // password box, and page text can't talk the planner into it (the server
     // also filters these, this is the last line of defense).
     if (el.type === 'password') {
-        console.warn(`[JobFit Agent] Refusing to fill password field: ${inst.selector}`);
+        console.warn(`[Latosa Agent] Refusing to fill password field: ${inst.selector}`);
         return false;
     }
 
@@ -812,7 +812,7 @@ async function executeSingleInstruction(inst, cvData) {
             if (cvData?.base64 && cvData?.fileName) {
                 return setFileOnInput(el, cvData.base64, cvData.fileName);
             }
-            console.warn('[JobFit Agent] Upload requested but no CV data available');
+            console.warn('[Latosa Agent] Upload requested but no CV data available');
             return false;
         }
 
@@ -884,7 +884,7 @@ async function executeSingleInstruction(inst, cvData) {
             if (el.value === value) return true;
 
             // Fallback: simulate typing
-            console.log('[JobFit Agent] Value did not stick, trying keyboard simulation');
+            console.log('[Latosa Agent] Value did not stick, trying keyboard simulation');
             await simulateTyping(el, value);
             // Verify again — claiming success here without checking inflates the
             // `filled` count the planner sees and hides persistently-broken fields.
@@ -894,10 +894,10 @@ async function executeSingleInstruction(inst, cvData) {
             return String(el.value || '').trim() !== '';
         }
 
-        console.warn(`[JobFit Agent] Unknown action: ${action}`);
+        console.warn(`[Latosa Agent] Unknown action: ${action}`);
         return false;
     } catch (err) {
-        console.warn(`[JobFit Agent] Failed to execute:`, inst, err);
+        console.warn(`[Latosa Agent] Failed to execute:`, inst, err);
         return false;
     }
 }
@@ -1255,7 +1255,7 @@ async function runAgentLoop(profile) {
         });
     });
     const hasCV = !!cvData;
-    console.log('[JobFit Apply] ▶ runAgentLoop start', {
+    console.log('[Latosa Apply] ▶ runAgentLoop start', {
         url: location.href, host: location.hostname, hasCV,
         profileFields: Object.keys(profile || {}).length,
     });
@@ -1267,12 +1267,12 @@ async function runAgentLoop(profile) {
 
         const applyBtn = findApplyButton();
         if (applyBtn) {
-            console.log('[JobFit Apply] step0: clicked Apply button:', (applyBtn.innerText || applyBtn.value || '').trim().slice(0, 40));
+            console.log('[Latosa Apply] step0: clicked Apply button:', (applyBtn.innerText || applyBtn.value || '').trim().slice(0, 40));
             applyBtn.click();
             showProgress(0, AGENT_MAX_ITERATIONS, 'Đã click nút Ứng tuyển, chờ form...');
             await sleep(2000);
         } else {
-            console.log('[JobFit Apply] step0: no Apply button found — scanning current form');
+            console.log('[Latosa Apply] step0: no Apply button found — scanning current form');
             showProgress(0, AGENT_MAX_ITERATIONS, 'Không tìm thấy nút Apply, scan form hiện tại...');
             await sleep(500);
         }
@@ -1368,7 +1368,7 @@ async function runAgentLoop(profile) {
             } catch (err) {
                 // Fallback: use simple map-form for the first iteration
                 if (i === 0 && state.formFields.length > 0) {
-                    console.warn('[JobFit Agent] Agent plan failed, falling back to map-form:', err.message);
+                    console.warn('[Latosa Agent] Agent plan failed, falling back to map-form:', err.message);
                     try {
                         const result = await callLLMMapping(state.formFields, profile);
                         plan = {
@@ -1391,7 +1391,7 @@ async function runAgentLoop(profile) {
                 }
             }
 
-            console.log(`[JobFit Apply] iter ${i + 1}/${AGENT_MAX_ITERATIONS}: fields=${state.formFields.length} → action=${plan.action}` +
+            console.log(`[Latosa Apply] iter ${i + 1}/${AGENT_MAX_ITERATIONS}: fields=${state.formFields.length} → action=${plan.action}` +
                 (plan.reason ? ` (${String(plan.reason).slice(0, 50)})` : '') +
                 (Array.isArray(plan.instructions) ? ` [${plan.instructions.length} instr]` : ''));
 
@@ -1501,7 +1501,7 @@ function showConfirmation(filledCount, totalFields, isSuccess) {
         });
 
         const title = document.createElement('div');
-        title.textContent = '⚡ JobFit AI — Auto Apply Agent';
+        title.textContent = '⚡ Latosa — Auto Apply Agent';
         title.style.cssText = 'font-size: 18px; font-weight: 700; margin-bottom: 12px;';
         card.appendChild(title);
 
@@ -1540,7 +1540,7 @@ function showConfirmation(filledCount, totalFields, isSuccess) {
 //        | 'failed'
 function reportResult(success, detail, outcome) {
     const o = outcome || (success ? 'filled' : 'failed');
-    console.log(`[JobFit Apply] ■ result: ${success ? '✅' : '✖'} outcome=${o} | ${detail} | ${window.location.hostname}`);
+    console.log(`[Latosa Apply] ■ result: ${success ? '✅' : '✖'} outcome=${o} | ${detail} | ${window.location.hostname}`);
     chrome.runtime.sendMessage({
         type: 'AUTO_APPLY_RESULT',
         result: {
@@ -1684,7 +1684,7 @@ function injectFloatingButton(profile) {
     const btn = document.createElement('button');
     btn.id = 'jobfit-auto-apply-btn';
     btn.textContent = '⚡ Auto Apply';
-    btn.title = 'JobFit AI — Auto Apply Agent';
+    btn.title = 'Latosa — Auto Apply Agent';
     Object.assign(btn.style, {
         position: 'fixed', bottom: '80px', right: '20px', zIndex: '99999',
         background: 'linear-gradient(135deg, #7c3aed, #6366f1)',
@@ -1722,11 +1722,11 @@ async function init() {
                 chrome.storage.local.remove(['pendingAutoApply', 'autoApplyJobUrl', 'batchMode'], r);
             });
 
-            console.log(`[JobFit Agent] Auto-apply triggered (batch: ${isBatch})`);
+            console.log(`[Latosa Agent] Auto-apply triggered (batch: ${isBatch})`);
 
             showToast(isBatch
                 ? '🚀 Batch Apply — Đang xử lý job này...'
-                : '🚀 JobFit AI Agent đang xử lý...', 0);
+                : '🚀 Latosa Agent đang xử lý...', 0);
             await sleep(500);
             document.getElementById('jobfit-toast')?.remove();
 
@@ -1734,7 +1734,7 @@ async function init() {
             return;
         }
     } catch (e) {
-        console.warn('[JobFit Agent] Auto-apply check failed:', e);
+        console.warn('[Latosa Agent] Auto-apply check failed:', e);
         reportResult(false, `Init error: ${e.message}`);
     }
 
@@ -1750,7 +1750,7 @@ async function init() {
         if (isJobPage) {
             injectFloatingButton(profile);
         } else {
-            console.log('[JobFit Agent] Page does not look like a job/apply page, skipping button.');
+            console.log('[Latosa Agent] Page does not look like a job/apply page, skipping button.');
         }
     };
 
@@ -1791,9 +1791,9 @@ function _newSourceRef() {
 
 // Debug logging for the tailor-on-job-board flow. Page-side logs show in the
 // JOB BOARD tab's DevTools console (filter: "Mode1"). Background-side logs show
-// in the extension's service-worker console (chrome://extensions → JobFit AI →
-// "service worker"). Both share the [JobFit Mode1] prefix.
-const M1 = '[JobFit Mode1]';
+// in the extension's service-worker console (chrome://extensions → Latosa →
+// "service worker"). Both share the [Latosa Mode1] prefix.
+const M1 = '[Latosa Mode1]';
 
 async function runMode1() {
     const t0 = Date.now();
@@ -1804,8 +1804,8 @@ async function runMode1() {
             r({ cv: d.jobfitCv || null, syncedAt: d.jobfitCvSyncedAt }));
     });
     if (!cv.cv) {
-        console.warn(`${M1} ✖ no CV synced — open JobFit AI and sync first`);
-        showToast('⚠️ Chưa có CV. Hãy mở JobFit AI và đồng bộ CV trước.', 5000);
+        console.warn(`${M1} ✖ no CV synced — open Latosa and sync first`);
+        showToast('⚠️ Chưa có CV. Hãy mở Latosa và đồng bộ CV trước.', 5000);
         return { success: false, error: 'no CV synced' };
     }
     console.log(`${M1} ✓ CV synced`, {
@@ -1847,7 +1847,7 @@ async function runMode1() {
                 improvements: v0?.improvements?.length ?? 0,
                 score: resp.data?.match?.overall_score,
             });
-            showToast('✅ CV đã tailor — mở JobFit AI để xem & ứng tuyển.', 6000);
+            showToast('✅ CV đã tailor — mở Latosa để xem & ứng tuyển.', 6000);
         } else {
             console.warn(`${M1} ✖ tailor failed in ${ms}ms:`, resp?.error, resp);
             showToast(`❌ Tailor lỗi: ${resp?.error || 'unknown'}`, 6000);

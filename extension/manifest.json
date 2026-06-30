@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "JobFit AI — Auto Apply",
+  "name": "Latosa — Auto Apply",
   "version": "2.4.0",
-  "description": "AI Agent tự động ứng tuyển trên BẤT KỲ job site nào với CV đã optimize từ JobFit AI",
+  "description": "AI Agent tự động ứng tuyển trên BẤT KỲ job site nào với CV đã optimize từ Latosa",
   "permissions": [
     "activeTab",
     "storage",

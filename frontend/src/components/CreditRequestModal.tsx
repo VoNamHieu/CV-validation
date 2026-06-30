@@ -109,10 +109,10 @@ export default function CreditRequestModal({
                             ({TOPUP_PACK.credits} credit · {TOPUP_PACK.priceVnd.toLocaleString('vi-VN')}đ), ghi đúng nội dung,
                             rồi credit sẽ được cộng sau khi xác nhận.
                         </p>
-                        <BankTransfer note={`JobFit ${email}`} amount={`${TOPUP_PACK.priceVnd.toLocaleString('vi-VN')}đ`} />
+                        <BankTransfer note={`Latosa ${email}`} amount={`${TOPUP_PACK.priceVnd.toLocaleString('vi-VN')}đ`} />
                         <p style={{ ...descStyle, fontSize: '0.74rem', margin: '12px 0 14px' }}>
                             Sau khi chuyển, gửi biên lai tới{' '}
-                            <a href={`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent('Mua credit JobFit')}&body=${encodeURIComponent(`JobFit ${email}`)}`}
+                            <a href={`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent('Mua credit Latosa')}&body=${encodeURIComponent(`Latosa ${email}`)}`}
                                 style={{ color: 'var(--accent-blue)', fontWeight: 600 }}>{SUPPORT_EMAIL}</a>
                             {' '}để được cộng credit sớm nhất.
                         </p>
@@ -151,7 +151,7 @@ function SupportView({ granted, email, onClose }: { granted: number; email: stri
         <>
             <h2 style={titleStyle}>Đã cộng {granted} credit! 🎉</h2>
             <p style={descStyle}>
-                Cảm ơn bạn đã dùng JobFit. Nếu thấy hữu ích, bạn có thể ủng hộ mình một chút —
+                Cảm ơn bạn đã dùng Latosa. Nếu thấy hữu ích, bạn có thể ủng hộ mình một chút —
                 hoàn toàn tuỳ tâm.
             </p>
 
@@ -170,7 +170,7 @@ function SupportView({ granted, email, onClose }: { granted: number; email: stri
                     padding: 14, marginBottom: 12, background: 'var(--bg-card)',
                 }}>
                     <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>
-                        Góp ý để JobFit tốt hơn
+                        Góp ý để Latosa tốt hơn
                     </div>
                     <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
                         {[1, 2, 3, 4, 5].map((n) => (
@@ -210,7 +210,7 @@ function SupportView({ granted, email, onClose }: { granted: number; email: stri
                     <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
                         <Coffee size={16} weight="duotone" style={{ color: 'var(--accent-amber, #f59e0b)' }} /> Mời mình ly cà phê (tuỳ tâm)
                     </div>
-                    <BankTransfer note={`JobFit cafe ${email}`} />
+                    <BankTransfer note={`Latosa cafe ${email}`} />
                 </div>
             ) : (
                 <button

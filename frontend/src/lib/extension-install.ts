@@ -1,4 +1,4 @@
-// Where users get the JobFit auto-apply Chrome extension. Centralised so every
+// Where users get the Latosa auto-apply Chrome extension. Centralised so every
 // "cần cài extension" prompt points at the same place.
 export const EXTENSION_INSTALL_URL =
     'https://drive.google.com/file/d/1Ja5_jyISkHF0NAuHMv8sbPRYdYIPD7YQ/view?usp=sharing';

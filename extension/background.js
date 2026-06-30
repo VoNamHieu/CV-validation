@@ -1,5 +1,5 @@
 /**
- * JobFit AI — Auto Apply Extension — Background Service Worker
+ * Latosa — Auto Apply Extension — Background Service Worker
  * Handles: single apply, batch apply queue, extension communication
  */
 
@@ -29,7 +29,7 @@ chrome.storage.local.get(['applyQueue', 'isProcessing', 'currentJobIndex', 'curr
         currentJobIndex = typeof data.currentJobIndex === 'number' ? data.currentJobIndex : -1;
         currentTabId = data.currentTabId ?? null;
         jobStartedAt = typeof data.jobStartedAt === 'number' ? data.jobStartedAt : Date.now();
-        console.log('[JobFit AI] SW woke — restored batch state:', {
+        console.log('[Latosa] SW woke — restored batch state:', {
             queue: applyQueue.length, currentJobIndex, currentTabId,
         });
         // The timer died with the old SW. Re-arm it so a tab that crashed
@@ -50,7 +50,7 @@ function armJobSafetyTimer(timedJobIndex) {
     jobSafetyTimer = setTimeout(() => {
         if (isProcessing && timedJobIndex === currentJobIndex &&
             applyQueue[timedJobIndex]?.status === 'processing') {
-            console.warn(`[JobFit AI] Batch Apply: timeout for job ${timedJobIndex + 1}, skipping`);
+            console.warn(`[Latosa] Batch Apply: timeout for job ${timedJobIndex + 1}, skipping`);
             applyQueue[timedJobIndex].status = 'error';
             applyQueue[timedJobIndex].result = { success: false, detail: 'Timeout — page did not respond' };
             persistState();
@@ -93,7 +93,7 @@ async function ensureHostAccess(url) {
     const has = await chrome.permissions.contains({ origins: [pattern] }).catch(() => false);
     if (has) return { ok: true, known: false };
     try {
-        // "Trang này dùng hệ thống tuyển dụng chưa nhận diện — JobFit cần quyền
+        // "Trang này dùng hệ thống tuyển dụng chưa nhận diện — Latosa cần quyền
         //  truy cập để điền form tự động." (the Chrome dialog shows the origin)
         const granted = await chrome.permissions.request({ origins: [pattern] });
         return { ok: granted, known: false };
@@ -110,7 +110,7 @@ function injectAgentOnLoad(tabId) {
         chrome.tabs.onUpdated.removeListener(listener);
         chrome.scripting.insertCSS({ target: { tabId }, files: ['content.css'] }).catch(() => { });
         chrome.scripting.executeScript({ target: { tabId }, files: ['utils.js', 'content-agent.js'] })
-            .catch((e) => console.warn('[JobFit AI] inject agent failed:', e?.message || e));
+            .catch((e) => console.warn('[Latosa] inject agent failed:', e?.message || e));
     };
     chrome.tabs.onUpdated.addListener(listener);
 }
@@ -142,13 +142,13 @@ function handleAutoApplyStart(message, sendResponse) {
     (async () => {
         const access = await ensureHostAccess(jobUrl);
         if (!access.ok) {
-            sendResponse({ success: false, error: 'Cần cấp quyền truy cập trang này. Mở popup JobFit để cho phép.' });
+            sendResponse({ success: false, error: 'Cần cấp quyền truy cập trang này. Mở popup Latosa để cho phép.' });
             return;
         }
         chrome.storage.local.set(storage, () => {
             chrome.tabs.create({ url: jobUrl, active: true }, (tab) => {
                 if (!access.known) injectAgentOnLoad(tab.id);  // unknown host: no declarative script
-                console.log('[JobFit AI] Auto Apply: opened tab', tab.id, 'for', jobUrl);
+                console.log('[Latosa] Auto Apply: opened tab', tab.id, 'for', jobUrl);
                 sendResponse({ success: true, tabId: tab.id });
             });
         });
@@ -156,7 +156,7 @@ function handleAutoApplyStart(message, sendResponse) {
     return true;
 }
 
-// ─── Listen for external messages from JobFit AI web app ───
+// ─── Listen for external messages from Latosa web app ───
 // NOTE: only reachable if the manifest declares externally_connectable.
 // The supported path is the content-webapp.js relay → onMessage below.
 chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
@@ -269,7 +269,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                         return;
                     } catch (e) {
                         lastError = e;
-                        console.warn(`[JobFit AI] LLM proxy failed for ${baseUrl}:`, e.message);
+                        console.warn(`[Latosa] LLM proxy failed for ${baseUrl}:`, e.message);
                     }
                 }
                 sendResponse({ success: false, error: lastError?.message || 'All endpoints failed' });
@@ -313,7 +313,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                         return;
                     } catch (e) {
                         lastError = e;
-                        console.warn(`[JobFit AI] Agent plan proxy failed for ${baseUrl}:`, e.message);
+                        console.warn(`[Latosa] Agent plan proxy failed for ${baseUrl}:`, e.message);
                     }
                 }
                 sendResponse({ success: false, error: lastError?.message || 'All endpoints failed' });
@@ -346,7 +346,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     //    tailored CV to the web app for rendering.
     // ══════════════════════════════════════════════════════════════
     if (message.type === 'MODE1_TAILOR') {
-        const M1 = '[JobFit Mode1/bg]';
+        const M1 = '[Latosa Mode1/bg]';
         const { cv, jdText, sourceRef, jobUrl, jobTitle, options } = message;
         console.log(`${M1} received`, {
             hasCv: !!cv, jdChars: jdText?.length || 0, sourceRef,
@@ -397,7 +397,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                         await chrome.storage.local.set({ mode1RefMap: map });
                         console.log(`${M1} stored sourceRef→jobUrl map (local only)`);
                         // Push the tailored CV to the web-app tab(s) to render
-                        // (pushToWebApp logs the JobFit-app tab count + warns if none open).
+                        // (pushToWebApp logs the Latosa-app tab count + warns if none open).
                         // jobUrl + jobTitle ride along so the web app can save the
                         // job to history (client-side only — still never sent to
                         // the server; source_ref stays the apply handle).
@@ -425,7 +425,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     //    holds the opaque source_ref.
     // ══════════════════════════════════════════════════════════════
     if (message.type === 'MODE1_APPLY') {
-        const MA = '[JobFit Mode1/apply]';
+        const MA = '[Latosa Mode1/apply]';
         // Wrap sendResponse so the final outcome is always logged.
         const reply = (r) => {
             if (r?.success) console.log(`${MA} ✅ apply handed off / started`, r);
@@ -516,7 +516,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return true;
         }
 
-        console.log(`[JobFit AI] Batch Apply: starting ${jobs.length} jobs`);
+        console.log(`[Latosa] Batch Apply: starting ${jobs.length} jobs`);
 
         // Initialize queue
         applyQueue = jobs.map((job, idx) => ({
@@ -543,7 +543,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     // ── Cancel batch ──
     if (message.type === 'AUTO_APPLY_ALL_CANCEL') {
-        console.log('[JobFit AI] Batch Apply: cancelled by user');
+        console.log('[Latosa] Batch Apply: cancelled by user');
         isProcessing = false;
         applyQueue = [];
         currentJobIndex = -1;
@@ -578,7 +578,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     // ── Content script reports single auto-apply result ──
     if (message.type === 'AUTO_APPLY_RESULT') {
-        console.log('[JobFit AI] Auto Apply result:', message.result);
+        console.log('[Latosa] Auto Apply result:', message.result);
 
         // Ignore stray/late results from tabs that aren't the one we're driving —
         // otherwise a result from a previous job's tab can corrupt the current entry.
@@ -619,7 +619,7 @@ function processNextJob() {
 
     if (currentJobIndex >= applyQueue.length) {
         // All done!
-        console.log('[JobFit AI] Batch Apply: all jobs completed!');
+        console.log('[Latosa] Batch Apply: all jobs completed!');
         isProcessing = false;
         currentTabId = null;
         persistState();
@@ -631,7 +631,7 @@ function processNextJob() {
     job.status = 'processing';
     persistState();
 
-    console.log(`[JobFit AI] Batch Apply: processing job ${currentJobIndex + 1}/${applyQueue.length} — ${job.jobUrl}`);
+    console.log(`[Latosa] Batch Apply: processing job ${currentJobIndex + 1}/${applyQueue.length} — ${job.jobUrl}`);
 
     // Save profile + (optional) per-job CV file for this specific job + set pending flag
     const storage = {
@@ -650,7 +650,7 @@ function processNextJob() {
         const access = await ensureHostAccess(job.jobUrl);
         if (!access.ok) {
             job.status = 'error';
-            job.result = { success: false, detail: 'Cần cấp quyền truy cập trang này (mở popup JobFit để cho phép).' };
+            job.result = { success: false, detail: 'Cần cấp quyền truy cập trang này (mở popup Latosa để cho phép).' };
             persistState();
             broadcastProgress();
             setTimeout(() => processNextJob(), TAB_DELAY_MS);
@@ -707,14 +707,14 @@ function broadcastProgress() {
     });
 }
 
-// When we open a JobFit-app tab for a cold Mode-1 result, remember when — so a
+// When we open a Latosa-app tab for a cold Mode-1 result, remember when — so a
 // burst of tailors (multiple jobs, no tab open) opens ONE tab, not one each.
 // Resets if the worker is recycled, by which point the tab exists and is taken
 // by the firstAppTab branch instead.
 let mode1ColdTabOpenAt = 0;
 
 // Push an arbitrary message to every tab; content-webapp.js forwards the
-// JobFit-app ones to the page. Used to deliver the Mode-1 tailored CV.
+// Latosa-app ones to the page. Used to deliver the Mode-1 tailored CV.
 function pushToWebApp(message) {
     chrome.tabs.query({}, (tabs) => {
         let appTabs = 0;
@@ -728,9 +728,9 @@ function pushToWebApp(message) {
             chrome.tabs.sendMessage(tab.id, message).catch(() => { });
         }
         if (message?.type === 'JOBFIT_MODE1_RESULT') {
-            console.log(`[JobFit Mode1/bg] pushed ${message.type} → ${appTabs} JobFit-app tab(s) open`);
+            console.log(`[Latosa Mode1/bg] pushed ${message.type} → ${appTabs} Latosa-app tab(s) open`);
             if (firstAppTab) {
-                // The user tailored on a job board, so the JobFit-app tab is in
+                // The user tailored on a job board, so the Latosa-app tab is in
                 // the background. Bring it to the front so the auto-opened CV
                 // editor is actually visible. tabs.update selects the tab in its
                 // window; windows.update is needed when it's in another window.
@@ -738,9 +738,9 @@ function pushToWebApp(message) {
                 if (firstAppTab.windowId != null) {
                     chrome.windows.update(firstAppTab.windowId, { focused: true }).catch(() => { });
                 }
-                console.log(`[JobFit Mode1/bg] focused JobFit-app tab ${firstAppTab.id} (win ${firstAppTab.windowId})`);
+                console.log(`[Latosa Mode1/bg] focused Latosa-app tab ${firstAppTab.id} (win ${firstAppTab.windowId})`);
             } else {
-                // No JobFit-app tab open. Stash the result and open ONE tab; the
+                // No Latosa-app tab open. Stash the result and open ONE tab; the
                 // new tab claims it from storage via the JOBFIT_WEBAPP_READY
                 // handshake (MV3 workers are ephemeral and a fresh tab hasn't
                 // subscribed yet, so we can't just sendMessage). Tailoring several
@@ -757,10 +757,10 @@ function pushToWebApp(message) {
                     chrome.storage.local.get('jobfitAppUrl', (d) => {
                         const appUrl = d.jobfitAppUrl || 'https://cv-validation.vercel.app';
                         chrome.tabs.create({ url: appUrl, active: true });
-                        console.log(`[JobFit Mode1/bg] no app tab — stashed tailored CV + opened ${appUrl}`);
+                        console.log(`[Latosa Mode1/bg] no app tab — stashed tailored CV + opened ${appUrl}`);
                     });
                 } else {
-                    console.log('[JobFit Mode1/bg] no app tab, but one is already opening — stashed for that tab');
+                    console.log('[Latosa Mode1/bg] no app tab, but one is already opening — stashed for that tab');
                 }
             }
         }
@@ -771,7 +771,7 @@ function pushToWebApp(message) {
 chrome.tabs.onRemoved.addListener((tabId) => {
     if (tabId === currentTabId && isProcessing && currentJobIndex < applyQueue.length) {
         if (applyQueue[currentJobIndex]?.status === 'processing') {
-            console.log('[JobFit AI] Batch Apply: tab closed, marking as error and continuing');
+            console.log('[Latosa] Batch Apply: tab closed, marking as error and continuing');
             applyQueue[currentJobIndex].status = 'error';
             applyQueue[currentJobIndex].result = { success: false, detail: 'Tab was closed' };
             persistState();
@@ -909,13 +909,13 @@ async function extCrawl(url) {
     try {
         const tab = await chrome.tabs.create({ url, active: false });
         tabId = tab.id;
-        console.log(`[JobFit AI] EXT_CRAWL: opened background tab ${tabId} for ${url}`);
+        console.log(`[Latosa] EXT_CRAWL: opened background tab ${tabId} for ${url}`);
 
         // Wait for initial load (Cloudflare challenge page may load first)
         try {
             await _waitForTabComplete(tabId, EXT_CRAWL_TAB_LOAD_TIMEOUT);
         } catch (e) {
-            console.warn(`[JobFit AI] EXT_CRAWL: initial load timeout — continuing to poll`);
+            console.warn(`[Latosa] EXT_CRAWL: initial load timeout — continuing to poll`);
         }
 
         // Poll until the page no longer looks like a challenge, OR timeout.
@@ -958,7 +958,7 @@ async function extCrawl(url) {
                 const linkSamples = (result?.textWithLinks || '')
                     .match(/\[LINK:[^\]]+\][^[]{0,80}/g)
                     ?.slice(0, 3) || [];
-                console.log(`[JobFit AI] EXT_CRAWL DEBUG poll #${pollIdx}`, {
+                console.log(`[Latosa] EXT_CRAWL DEBUG poll #${pollIdx}`, {
                     url,
                     title: result?.title,
                     textLen: result?.text?.length || 0,
@@ -980,7 +980,7 @@ async function extCrawl(url) {
                 // otherwise the AI extractor downstream gets a card-less page.
                 const searchReady = !isSearchPage || hasJobLinks;
                 if (contentReady && searchReady) {
-                    console.log(`[JobFit AI] EXT_CRAWL: extracted ${result.text.length} chars from ${url}`);
+                    console.log(`[Latosa] EXT_CRAWL: extracted ${result.text.length} chars from ${url}`);
                     return {
                         success: true,
                         text: result.text,
@@ -991,14 +991,14 @@ async function extCrawl(url) {
                     };
                 }
             } catch (e) {
-                console.warn(`[JobFit AI] EXT_CRAWL: executeScript error:`, e.message);
+                console.warn(`[Latosa] EXT_CRAWL: executeScript error:`, e.message);
             }
             await new Promise(r => setTimeout(r, EXT_CRAWL_POLL_INTERVAL));
         }
 
         // Timed out. If we ever got content but it was a challenge, return blocked.
         const blocked = !!(last && last.looksLikeChallenge);
-        console.log(`[JobFit AI] EXT_CRAWL DEBUG timeout`, {
+        console.log(`[Latosa] EXT_CRAWL DEBUG timeout`, {
             url,
             blocked,
             finalTitle: last?.title,
@@ -1023,7 +1023,7 @@ async function extCrawl(url) {
 
 // ─── Install event ───
 chrome.runtime.onInstalled.addListener(() => {
-    console.log('[JobFit AI] Extension installed!');
+    console.log('[Latosa] Extension installed!');
     // Clear any stale queue
     chrome.storage.local.remove([
         'applyQueue', 'isProcessing', 'currentJobIndex', 'currentTabId', 'jobStartedAt',

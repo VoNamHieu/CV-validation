@@ -101,7 +101,7 @@ export default function Sidebar() {
                         WebkitTextFillColor: 'transparent',
                     }}
                 >
-                    JobFit AI
+                    Latosa
                 </span>
             </div>
 

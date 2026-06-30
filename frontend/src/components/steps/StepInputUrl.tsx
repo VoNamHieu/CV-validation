@@ -1025,7 +1025,7 @@ export default function StepInputUrl() {
             if (!searchPage.text && !searchPage.textWithLinks) {
                 const tail = isExtensionAvailable()
                     ? 'Ngay cả cách vượt qua bằng extension cũng thất bại — hãy thử lại sau hoặc cài extension.'
-                    : 'Hãy cài extension JobFit AI cho Chrome để vượt qua bảo vệ chống bot.';
+                    : 'Hãy cài extension Latosa cho Chrome để vượt qua bảo vệ chống bot.';
                 throw new Error(
                     isAuto
                         ? `Không tải được các việc phù hợp. ${tail}`

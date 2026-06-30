@@ -116,8 +116,8 @@ export default function FloatingFeedback() {
     const subtitle = ctx === 'apply'
         ? 'Bạn vừa hoàn tất ứng tuyển — trải nghiệm thế nào?'
         : ctx === 'session'
-            ? 'Bạn dùng JobFit có thấy ổn không? Góp ý giúp chúng tôi nhé!'
-            : 'Bạn thấy JobFit thế nào? Điều gì nên cải thiện?';
+            ? 'Bạn dùng Latosa có thấy ổn không? Góp ý giúp chúng tôi nhé!'
+            : 'Bạn thấy Latosa thế nào? Điều gì nên cải thiện?';
 
     return (
         <>
@@ -162,7 +162,7 @@ export default function FloatingFeedback() {
                                 Cảm ơn góp ý của bạn!
                             </div>
                             <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 16 }}>
-                                Phản hồi của bạn giúp JobFit tốt hơn mỗi ngày.
+                                Phản hồi của bạn giúp Latosa tốt hơn mỗi ngày.
                             </div>
                             <button onClick={close} className="btn-secondary" style={{ padding: '8px 20px', fontSize: '0.85rem' }}>
                                 Đóng
