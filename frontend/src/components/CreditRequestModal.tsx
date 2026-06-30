@@ -126,7 +126,7 @@ export default function CreditRequestModal({
                         <BankTransfer note={`${TRANSFER_NOTE} ${email}`} />
                         <p style={{ ...descStyle, fontSize: '0.74rem', margin: '12px 0 14px' }}>
                             Sau khi chuyển, gửi biên lai tới{' '}
-                            <a href={`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent('Mua token Career AI')}&body=${encodeURIComponent(`${TRANSFER_NOTE} ${email}`)}`}
+                            <a href={`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent('Mua token Latosa')}&body=${encodeURIComponent(`${TRANSFER_NOTE} ${email}`)}`}
                                 style={{ color: 'var(--accent-blue)', fontWeight: 600 }}>{SUPPORT_EMAIL}</a>
                             {' '}để được cộng token sớm nhất.
                         </p>
@@ -163,7 +163,7 @@ function SupportView({ granted, email, onClose }: { granted: number; email: stri
 
     return (
         <>
-            <h2 style={titleStyle}>Đã cộng {granted} credit! 🎉</h2>
+            <h2 style={titleStyle}>Đã cộng {granted} token! 🎉</h2>
             <p style={descStyle}>
                 Cảm ơn bạn đã dùng Latosa. Nếu thấy hữu ích, bạn có thể ủng hộ mình một chút —
                 hoàn toàn tuỳ tâm.
@@ -224,7 +224,7 @@ function SupportView({ granted, email, onClose }: { granted: number; email: stri
                     <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
                         <Coffee size={16} weight="duotone" style={{ color: 'var(--accent-amber, #f59e0b)' }} /> Mời mình ly cà phê (tuỳ tâm)
                     </div>
-                    <BankTransfer note={`Career AI cafe ${email}`} />
+                    <BankTransfer note={`Latosa cafe ${email}`} />
                 </div>
             ) : (
                 <button
