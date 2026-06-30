@@ -17,6 +17,7 @@ import {
 } from '@/lib/api';
 import { buildSearchUrl, matchesCity, titleMatchScore, cityLabel, experienceGapExceeds } from '@/lib/job-targeting';
 import { buildCvPdfCache } from '@/lib/cv-pdf-cache';
+import { filterUnseenCandidates } from '@/lib/job-dedup';
 
 type Phase = 'idle' | 'analyzing_cv' | 'searching' | 'extracting_links'
     | 'ranking' | 'crawling_job';
@@ -376,7 +377,15 @@ export default function StepInputUrl() {
                         locationNote: off ? `Khác ${cityName}` : undefined,
                     };
                 };
-                const cands = orderedJobs.map(toCandidate);
+                const allCands = orderedJobs.map(toCandidate);
+                // Hide jobs the user already has — saved/applied (jobHistory) or
+                // currently queued (jdEntries) — so a repeat search surfaces new
+                // postings instead of the same ones.
+                const { jobHistory, jdEntries } = useAppStore.getState();
+                const { kept: cands, removed } = filterUnseenCandidates(allCands, jobHistory, jdEntries);
+                if (removed > 0) {
+                    console.info(`[discovery] ẩn ${removed} job đã có khỏi kết quả tìm`);
+                }
                 const INITIAL_SHOWN = 6;
                 if (runRef.current === runId) {
                     setPhase('idle');
