@@ -65,6 +65,17 @@ async function callModel(
     const client = getClient();
     const models = opts.models ?? REASON_MODELS;
 
+    // Inject the real current date into every call. Without it the model resolves
+    // relative time ("present", "hiện tại", "nay") against its training cutoff
+    // (~2025) and under-counts years of experience / recency by a year+.
+    const now = new Date();
+    const dateContext =
+        `Today's date is ${now.toISOString().slice(0, 10)} (the current year is ${now.getUTCFullYear()}). `
+        + `Interpret every relative time reference — "present", "now", "current", `
+        + `"hiện tại", "nay", "đến nay" — as this date when computing durations, `
+        + `years of experience, or recency. Do not assume any earlier year.\n\n`;
+    const systemInstruction = dateContext + systemPrompt;
+
     let lastErr: unknown;
     for (const model of models) {
         // Disable thinking on the light tier. Flash accepts thinkingBudget:0;
@@ -80,13 +91,24 @@ async function callModel(
                     model,
                     contents,
                     config: {
-                        systemInstruction: systemPrompt,
+                        systemInstruction,
                         responseMimeType: "application/json",
                         ...(schema ? { responseSchema: schema } : {}),
                         ...(thinkingConfig ? { thinkingConfig } : {}),
                         httpOptions: { timeout: REQUEST_TIMEOUT_MS },
                     },
                 });
+                // Log token usage so real per-action cost can be measured from
+                // logs (input / output / thinking). thinkingTokenCount is the
+                // dominant cost on the Pro reasoning tier.
+                const u = response.usageMetadata;
+                if (u) {
+                    console.log(`[${tag}] tokens model=${model} `
+                        + `in=${u.promptTokenCount ?? 0} `
+                        + `out=${u.candidatesTokenCount ?? 0} `
+                        + `think=${u.thoughtsTokenCount ?? 0} `
+                        + `total=${u.totalTokenCount ?? 0}`);
+                }
                 return response.text ?? "";
             } catch (e) {
                 lastErr = e;
