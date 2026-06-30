@@ -8,6 +8,7 @@ import {
 } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import { getSupabase } from './supabase';
+import { useAppStore } from '@/store/useAppStore';
 
 interface AuthResult {
     error?: string;
@@ -61,6 +62,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             sub.subscription.unsubscribe();
         };
     }, [sb]);
+
+    // Once the session is resolved, claim the persisted store for this user.
+    // A different (or absent) owner means a logout or account switch on this
+    // browser → wipe the previous user's CV / JD entries / history so nothing
+    // leaks. Then (re)hydrate the history cache from the backend. Gated on
+    // !loading so the transient null during session-restore doesn't wipe a
+    // returning user's own data.
+    const userId = session?.user?.id ?? null;
+    useEffect(() => {
+        if (loading) return;
+        useAppStore.getState().claimOwnership(userId);
+        void useAppStore.getState().loadJobHistory();
+    }, [loading, userId]);
 
     const signIn = useCallback(async (email: string, password: string): Promise<AuthResult> => {
         if (!sb) return { error: 'Đăng nhập chưa được cấu hình' };

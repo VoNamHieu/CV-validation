@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
     Briefcase, MagnifyingGlass, ArrowSquareOut, Trash, CaretDown, CaretUp,
     Trophy, Crosshair, TrendUp, Warning, Clock, Globe, Sparkle,
@@ -215,6 +215,11 @@ export default function HistoryView() {
     const removeJobRecord = useAppStore((s) => s.removeJobRecord);
     const clearJobHistory = useAppStore((s) => s.clearJobHistory);
     const loadJobRecordIntoWizard = useAppStore((s) => s.loadJobRecordIntoWizard);
+    const loadJobHistory = useAppStore((s) => s.loadJobHistory);
+
+    // Refresh from the server whenever the board is opened (the cache may be
+    // stale after a save on another tab / device).
+    useEffect(() => { void loadJobHistory(); }, [loadJobHistory]);
 
     const [expandedId, setExpandedId] = useState<string | null>(null);
     const [query, setQuery] = useState('');

@@ -17,7 +17,7 @@ STATUSES = (
 _COLS = (
     "id, user_id, cv_profile_id, job_id, saved_job_id, company_name, job_title, "
     "role_family, seniority, jd_facts, source_url, tailored_cv, fit_score, "
-    "fit_breakdown, status, outcome_at, anonymized_at, created_at, updated_at"
+    "fit_breakdown, status, notes, outcome_at, anonymized_at, created_at, updated_at"
 )
 
 
@@ -37,6 +37,7 @@ async def create(
     fit_score: Optional[int] = None,
     fit_breakdown: Optional[dict] = None,
     status: str = "tailored",
+    notes: Optional[str] = None,
 ) -> dict:
     if status not in STATUSES:
         raise ValueError(f"invalid status {status!r}; expected one of {STATUSES}")
@@ -45,15 +46,15 @@ async def create(
         INSERT INTO applications
             (user_id, cv_profile_id, job_id, saved_job_id, company_name, job_title,
              role_family, seniority, jd_facts, source_url, tailored_cv, fit_score,
-             fit_breakdown, status)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+             fit_breakdown, status, notes)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
         RETURNING {_COLS}
     """
     return row_to_dict(
         await pool.fetchrow(
             sql, user_id, cv_profile_id, job_id, saved_job_id, company_name, job_title,
             role_family, seniority, jd_facts, source_url, tailored_cv, fit_score,
-            fit_breakdown, status,
+            fit_breakdown, status, notes,
         )
     )
 
@@ -100,6 +101,17 @@ async def update_status(app_id: str, user_id: str, status: str) -> Optional[dict
         RETURNING {_COLS}
     """
     return row_to_dict(await pool.fetchrow(sql, app_id, user_id, status, terminal))
+
+
+async def update_notes(app_id: str, user_id: str, notes: Optional[str]) -> Optional[dict]:
+    """Set the free-text note on an application (empty string clears it)."""
+    pool = await get_pool()
+    sql = f"""
+        UPDATE applications SET notes = $3
+        WHERE id = $1 AND user_id = $2
+        RETURNING {_COLS}
+    """
+    return row_to_dict(await pool.fetchrow(sql, app_id, user_id, notes))
 
 
 async def delete(app_id: str, user_id: str) -> bool:

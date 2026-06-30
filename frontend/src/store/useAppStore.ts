@@ -12,6 +12,8 @@ import type {
 } from '@/lib/types';
 import type { CvTemplateId } from '@/lib/cv-templates';
 import type { CvImprovement } from '@/lib/cv-improvements';
+import { account, type Application, type ApplicationStatus } from '@/lib/db';
+import { hasAuth } from '@/lib/auth-headers';
 
 // Re-export for backward compatibility
 export type { ExperienceDetail, EducationDetail, ProjectDetail, CVData, JDData, CategoryScore, MatchResult };
@@ -35,6 +37,65 @@ export interface JobRecord {
   optimizedCv?: CVData;
   status: JobStatus;
   notes?: string;
+}
+
+// ── JobRecord ⇄ server Application mapping ──
+// The history board is now backed by public.applications (user-scoped), not
+// localStorage. The board's 5-stage vocabulary maps onto the DB funnel's 7
+// stages both ways so the backend stays the source of truth without changing
+// the UI. Stages with no board equivalent (filled/callback) fold into the
+// nearest board stage on read.
+const STATUS_TO_DB: Record<JobStatus, ApplicationStatus> = {
+  saved: 'tailored', applied: 'submitted', interviewing: 'interview',
+  offer: 'offer', rejected: 'rejected',
+};
+const STATUS_FROM_DB: Record<ApplicationStatus, JobStatus> = {
+  tailored: 'saved', filled: 'applied', submitted: 'applied',
+  callback: 'interviewing', interview: 'interviewing',
+  offer: 'offer', rejected: 'rejected',
+};
+
+function hostnameOf(url: string): string {
+  if (!url) return '';
+  try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; }
+}
+
+// Dedup key: prefer the job URL; fall back to title|company when there's no URL
+// (e.g. text/PDF-pasted JDs) so the same posting isn't recorded twice.
+function seenKey(url?: string, title?: string, company?: string): string {
+  const u = (url ?? '').trim();
+  return u || `${title ?? ''}|${company ?? ''}`;
+}
+
+function appToRecord(a: Application): JobRecord {
+  return {
+    id: a.id,
+    jobTitle: a.job_title ?? '',
+    company: a.company_name ?? '',
+    jobUrl: a.source_url ?? '',
+    siteName: hostnameOf(a.source_url ?? ''),
+    overallScore: a.fit_score ?? 0,
+    timestamp: a.created_at ? Date.parse(a.created_at) : Date.now(),
+    jdData: (a.jd_facts as unknown as JDData) ?? undefined,
+    matchResult: (a.fit_breakdown as unknown as MatchResult) ?? undefined,
+    optimizedCv: a.tailored_cv ?? undefined,
+    status: STATUS_FROM_DB[a.status] ?? 'saved',
+    notes: a.notes ?? undefined,
+  };
+}
+
+function recordToCreate(r: JobRecord) {
+  return {
+    job_title: r.jobTitle || null,
+    company_name: r.company || null,
+    source_url: r.jobUrl || null,
+    fit_score: Number.isFinite(r.overallScore) ? Math.round(r.overallScore) : null,
+    jd_facts: (r.jdData as unknown as Record<string, unknown>) ?? null,
+    fit_breakdown: (r.matchResult as unknown as Record<string, unknown>) ?? null,
+    tailored_cv: r.optimizedCv ?? null,
+    status: STATUS_TO_DB[r.status] ?? 'tailored',
+    notes: r.notes ?? null,
+  };
 }
 
 // ── Multi-JD Ranking ──
@@ -148,8 +209,13 @@ interface AppState {
   optimizedCv: CVData | null;
   setOptimizedCv: (data: CVData | null) => void;
 
-  // Job History Board
+  // Job History Board — backed by the server (public.applications), scoped to
+  // the signed-in user. `jobHistory` is an in-memory cache hydrated by
+  // loadJobHistory(); it is NOT persisted to localStorage (that leaked one
+  // user's saved jobs to the next person on the same browser). Mutations write
+  // through to the backend and update the cache optimistically.
   jobHistory: JobRecord[];
+  loadJobHistory: () => Promise<void>;
   addJobRecord: (record: JobRecord) => void;
   updateJobRecord: (id: string, updates: Partial<JobRecord>) => void;
   removeJobRecord: (id: string) => void;
@@ -192,8 +258,18 @@ interface AppState {
   userAvatarBase64: string | null;
   setUserAvatar: (dataUrl: string | null) => void;
 
+  // Whose data currently lives in this browser's persisted store. Set on login;
+  // when the signed-in user differs from this, resetUserData() wipes the
+  // previous owner's CV / JD entries / optimized CVs so nothing leaks across
+  // accounts on a shared browser. null = anonymous / unclaimed.
+  ownerUserId: string | null;
+  claimOwnership: (userId: string | null) => void;
+
   // Reset
   resetAll: () => void;
+  // Clears per-user content (CV, JD entries, history cache, avatar, targets)
+  // but keeps app-shell flags (entered/view). Used on logout / account switch.
+  resetUserData: () => void;
 }
 
 const initialState = {
@@ -221,6 +297,7 @@ const initialState = {
   loadingMessage: '',
   fullyAutoMode: false,
   userAvatarBase64: null as string | null,
+  ownerUserId: null as string | null,
 };
 
 export const useAppStore = create<AppState>()(
@@ -247,18 +324,54 @@ export const useAppStore = create<AppState>()(
       setMatchResult: (result) => set({ matchResult: result }),
       setOptimizedCv: (data) => set({ optimizedCv: data }),
 
-      // Job History (auto-prune oldest)
-      addJobRecord: (record) => set((s) => {
-        const updated = [{ ...record, status: record.status ?? 'saved' }, ...s.jobHistory];
-        return { jobHistory: updated.slice(0, MAX_JOB_HISTORY) };
-      }),
-      updateJobRecord: (id, updates) => set((s) => ({
-        jobHistory: s.jobHistory.map((r) => (r.id === id ? { ...r, ...updates } : r)),
-      })),
-      removeJobRecord: (id) => set((s) => ({
-        jobHistory: s.jobHistory.filter((r) => r.id !== id),
-      })),
-      clearJobHistory: () => set({ jobHistory: [] }),
+      // Job History — server-backed (public.applications), user-scoped. The
+      // cache is hydrated from the backend; mutations write through.
+      loadJobHistory: async () => {
+        if (!hasAuth()) { set({ jobHistory: [] }); return; }
+        try {
+          const apps = await account.listApplications();
+          set({ jobHistory: apps.map(appToRecord) });
+        } catch { /* offline / 401 — keep whatever's cached */ }
+      },
+
+      addJobRecord: (record) => {
+        const key = seenKey(record.jobUrl, record.jobTitle, record.company);
+        if (get().jobHistory.some((j) => seenKey(j.jobUrl, j.jobTitle, j.company) === key)) return;
+        const optimistic: JobRecord = { ...record, status: record.status ?? 'saved' };
+        set((s) => ({ jobHistory: [optimistic, ...s.jobHistory].slice(0, MAX_JOB_HISTORY) }));
+        if (!hasAuth()) return;
+        // Persist, then swap the optimistic client id for the server id so later
+        // status/notes/delete calls address the real row.
+        void account.createApplication(recordToCreate(optimistic))
+          .then((app) => set((s) => ({
+            jobHistory: s.jobHistory.map((j) => (j.id === optimistic.id ? appToRecord(app) : j)),
+          })))
+          .catch(() => { /* keep optimistic; reconciles on next loadJobHistory */ });
+      },
+
+      updateJobRecord: (id, updates) => {
+        set((s) => ({
+          jobHistory: s.jobHistory.map((r) => (r.id === id ? { ...r, ...updates } : r)),
+        }));
+        if (!hasAuth()) return;
+        if (updates.status) {
+          void account.updateApplicationStatus(id, STATUS_TO_DB[updates.status]).catch(() => {});
+        }
+        if (updates.notes !== undefined) {
+          void account.updateApplicationNotes(id, updates.notes ?? '').catch(() => {});
+        }
+      },
+
+      removeJobRecord: (id) => {
+        set((s) => ({ jobHistory: s.jobHistory.filter((r) => r.id !== id) }));
+        if (hasAuth()) void account.deleteApplication(id).catch(() => {});
+      },
+
+      clearJobHistory: () => {
+        const ids = get().jobHistory.map((r) => r.id);
+        set({ jobHistory: [] });
+        if (hasAuth()) ids.forEach((id) => void account.deleteApplication(id).catch(() => {}));
+      },
 
       // Re-open a saved job inside the wizard at the Report step
       loadJobRecordIntoWizard: (id) => {
@@ -309,16 +422,41 @@ export const useAppStore = create<AppState>()(
 
       setUserAvatar: (dataUrl) => set({ userAvatarBase64: dataUrl }),
 
+      // Claim the persisted store for `userId`. If it was owned by a DIFFERENT
+      // user (account switch or stale data from a previous session on this
+      // browser), wipe that user's content first so nothing leaks. An anonymous
+      // visitor (current owner null) signing in just adopts their own local work.
+      claimOwnership: (userId) => {
+        const prev = get().ownerUserId;
+        if (prev === userId) return;
+        if (prev !== null && prev !== userId) get().resetUserData();
+        set({ ownerUserId: userId });
+      },
+
+      resetUserData: () => set({
+        cvRawText: '', cvFileName: '', cvData: null,
+        targetJobTitle: '', targetLocation: '', targetLevel: '', searchPivotNote: '',
+        jdRawText: '', jdData: null, matchResult: null, optimizedCv: null,
+        jobHistory: [], jdEntries: [], selectedJdId: null,
+        candidates: [], candidatePool: [], wizardStage: 'search',
+        userAvatarBase64: null, currentStep: 1,
+      }),
+
       resetAll: () => set(initialState),
     }),
     {
       name: 'ai-job-fit-optimizer',
-      version: 2,
+      version: 3,
       // fullyAutoMode is intentionally excluded so a reload mid-pipeline
       // doesn't resurrect auto-apply on a stale state.
       partialize: (state) => {
         const rest: Partial<AppState> = { ...state };
         delete (rest as { fullyAutoMode?: boolean }).fullyAutoMode;
+        // jobHistory is server-backed now (public.applications) — never persist
+        // it to localStorage. Persisting it is exactly what leaked one user's
+        // saved jobs to the next person on the same browser. Rehydrated empty,
+        // then loadJobHistory() fills it from the backend for the signed-in user.
+        delete (rest as Record<string, unknown>).jobHistory;
         // Transient discovery state — re-derived from a fresh search, never
         // restored (a persisted 'results' stage with no candidates would be a
         // dead-end on reload).
@@ -349,12 +487,9 @@ export const useAppStore = create<AppState>()(
       // records would crash filters/dropdowns expecting `status` to be set.
       migrate: (persistedState, version) => {
         const state = persistedState as Partial<AppState> & Record<string, unknown>;
-        if (version < 2 && state?.jobHistory && Array.isArray(state.jobHistory)) {
-          state.jobHistory = (state.jobHistory as JobRecord[]).map((r) => ({
-            ...r,
-            status: r.status ?? 'saved',
-          }));
-        }
+        // v3: history moved to the server. Drop any locally-persisted jobHistory
+        // (previous-user leak) — loadJobHistory() repopulates it from the backend.
+        if (version < 3) delete (state as Record<string, unknown>).jobHistory;
         if (!state.view) state.view = 'apply';
         return state as AppState;
       },

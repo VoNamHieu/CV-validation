@@ -48,10 +48,11 @@ export default function Mode1ResultBanner() {
                 jobTitle: title || undefined,
             });
         }
-        // Save to history (client-side localStorage only — the real URL never
-        // reaches the server) so a tailored job shows up under saved jobs.
+        // Save to history so a tailored job shows up under saved jobs.
+        // addJobRecord persists to the server (public.applications, user-scoped)
+        // and dedups by URL/title, so re-firing never appends a duplicate.
         const recId = `mode1-job-${r.source_ref || id}`;
-        if ((r.jobUrl || title) && !store.jobHistory.some(j => j.id === recId)) {
+        if (r.jobUrl || title) {
             addJobRecord({
                 id: recId,
                 jobTitle: title || 'Việc đã tinh chỉnh',

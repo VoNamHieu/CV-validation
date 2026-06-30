@@ -141,10 +141,15 @@ class ApplicationCreate(BaseModel):
     fit_score: Optional[int] = None
     fit_breakdown: Optional[dict] = None
     status: str = "tailored"
+    notes: Optional[str] = None
 
 
 class StatusUpdate(BaseModel):
     status: str
+
+
+class NotesUpdate(BaseModel):
+    notes: Optional[str] = None
 
 
 @router.get("/applications")
@@ -181,6 +186,16 @@ async def update_application_status(
         row = await applications.update_status(app_id, user_id, body.status)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    if not row:
+        raise HTTPException(status_code=404, detail="Application not found")
+    return row
+
+
+@router.patch("/applications/{app_id}/notes")
+async def update_application_notes(
+    app_id: str, body: NotesUpdate, user_id: str = Depends(get_current_user_id)
+):
+    row = await applications.update_notes(app_id, user_id, body.notes)
     if not row:
         raise HTTPException(status_code=404, detail="Application not found")
     return row

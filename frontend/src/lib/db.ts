@@ -87,6 +87,7 @@ export interface Application {
     fit_score: number | null;
     fit_breakdown: Record<string, unknown> | null;
     status: ApplicationStatus;
+    notes: string | null;
     outcome_at: string | null;
     anonymized_at: string | null;
     created_at: string;
@@ -236,6 +237,8 @@ export const account = {
         req<Application>(`/api/me/applications`, { method: 'POST', body: JSON.stringify(body), auth: true }),
     updateApplicationStatus: (id: string, status: ApplicationStatus) =>
         req<Application>(`/api/me/applications/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }), auth: true }),
+    updateApplicationNotes: (id: string, notes: string) =>
+        req<Application>(`/api/me/applications/${id}/notes`, { method: 'PATCH', body: JSON.stringify({ notes }), auth: true }),
     deleteApplication: (id: string) =>
         req<{ deleted: boolean }>(`/api/me/applications/${id}`, { method: 'DELETE', auth: true }),
 };
