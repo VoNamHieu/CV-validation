@@ -1,9 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
     Sparkle, MagicWand, FileText, Briefcase, ArrowRight, SignIn,
     Target, Lightning, CheckCircle, Brain, RocketLaunch,
+    FilePdf, MagnifyingGlass, GlobeHemisphereWest, DownloadSimple,
+    Buildings, Play, Pause,
 } from '@phosphor-icons/react';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuth } from '@/lib/auth';
@@ -74,6 +76,201 @@ function LogoItem({ name, domain }: { name: string; domain: string }) {
     );
 }
 
+// Auto-playing, video-style walkthrough of the flow: CV → tìm việc khắp nơi →
+// chấm điểm → tối ưu CV. Pure CSS/JS — no real video asset. Scenes advance on a
+// timer (paused on hover or via the play/pause button) and the timeline tabs let
+// the visitor jump. Respects prefers-reduced-motion (no auto-advance there).
+const DEMO_SCENES = [
+    { label: 'Tải CV', icon: FilePdf, ms: 3400 },
+    { label: 'Tìm việc khắp nơi', icon: GlobeHemisphereWest, ms: 4200 },
+    { label: 'Chấm điểm độ khớp', icon: Target, ms: 4000 },
+    { label: 'Tối ưu CV', icon: MagicWand, ms: 3800 },
+];
+
+const DEMO_JOBS = [
+    { t: 'Senior Frontend Engineer', co: 'One Mount', s: 92, c: 'var(--accent-purple)' },
+    { t: 'Product Designer (UI/UX)', co: 'MoMo', s: 88, c: 'var(--accent-blue)' },
+    { t: 'Solution Architect', co: 'FPT Software', s: 81, c: 'var(--accent-purple)' },
+    { t: 'QC Engineer (Fresher)', co: 'Tiki', s: 67, c: 'var(--accent-amber)' },
+];
+
+const DEMO_SOURCES = [
+    'Trang tuyển dụng chính thức của công ty',
+    'Cổng nghề nghiệp doanh nghiệp',
+    'Mạng lưới công ty đang tuyển',
+    'Trang career của tập đoàn',
+];
+
+function DemoPlayer() {
+    const [scene, setScene] = useState(0);
+    const [paused, setPaused] = useState(false);
+    const [reduced, setReduced] = useState(false);
+
+    useEffect(() => {
+        const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+        const update = () => setReduced(mq.matches);
+        update();
+        mq.addEventListener('change', update);
+        return () => mq.removeEventListener('change', update);
+    }, []);
+
+    useEffect(() => {
+        if (paused || reduced) return;
+        const id = setTimeout(
+            () => setScene((s) => (s + 1) % DEMO_SCENES.length),
+            DEMO_SCENES[scene].ms,
+        );
+        return () => clearTimeout(id);
+    }, [scene, paused, reduced]);
+
+    return (
+        <div
+            className="lp-demo-frame"
+            onMouseEnter={() => setPaused(true)}
+            onMouseLeave={() => setPaused(false)}
+        >
+            <div className="lp-mock-bar">
+                <span className="lp-mock-dot" style={{ background: '#ff5f57' }} />
+                <span className="lp-mock-dot" style={{ background: '#febc2e' }} />
+                <span className="lp-mock-dot" style={{ background: '#28c840' }} />
+                <span className="lp-mock-url">jobfit.ai · Demo</span>
+                <button
+                    className="lp-demo-play"
+                    onClick={() => setPaused((p) => !p)}
+                    aria-label={paused ? 'Phát demo' : 'Tạm dừng demo'}
+                >
+                    {paused ? <Play size={12} weight="fill" /> : <Pause size={12} weight="fill" />}
+                </button>
+            </div>
+
+            <div className="lp-demo-stage">
+                {/* Scene 1 — Tải CV */}
+                <div className={`lp-scene ${scene === 0 ? 'is-on' : ''}`} aria-hidden={scene !== 0}>
+                    <div className="lp-drop">
+                        <div className="lp-drop-card">
+                            <FilePdf size={26} weight="duotone" />
+                            <div>
+                                <div className="lp-drop-name">Nguyen_Van_A_CV.pdf</div>
+                                <div className="lp-drop-meta">AI đang đọc kỹ năng & kinh nghiệm…</div>
+                            </div>
+                            <span className="lp-scan-line" />
+                        </div>
+                        <div className="lp-chips">
+                            {['React', 'TypeScript', '5 năm KN', 'Frontend', 'Team lead'].map((c, i) => (
+                                <span key={c} className="lp-chip2" style={{ animationDelay: `${0.5 + i * 0.28}s` }}>
+                                    <CheckCircle size={11} weight="fill" /> {c}
+                                </span>
+                            ))}
+                        </div>
+                        <div className="lp-role-out">
+                            <Brain size={14} weight="duotone" /> Vai trò mục tiêu: <b>Senior Frontend Engineer</b>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Scene 2 — Tìm việc khắp nơi */}
+                <div className={`lp-scene ${scene === 1 ? 'is-on' : ''}`} aria-hidden={scene !== 1}>
+                    <div className="lp-search">
+                        <div className="lp-radar">
+                            <GlobeHemisphereWest size={34} weight="duotone" />
+                            <span className="lp-ping" /><span className="lp-ping lp-ping-2" />
+                            {scene === 1 && <span className="lp-radar-sweep" />}
+                        </div>
+                        <div className="lp-search-side">
+                            <div className="lp-search-head">
+                                <MagnifyingGlass size={14} weight="bold" /> Đang tìm việc phù hợp ở khắp nơi…
+                            </div>
+                            {DEMO_SOURCES.map((src, i) => (
+                                <div key={src} className="lp-src" style={{ animationDelay: `${0.3 + i * 0.5}s` }}>
+                                    <Buildings size={13} weight="duotone" />
+                                    <span className="lp-src-name">{src}</span>
+                                    <CheckCircle size={14} weight="fill" className="lp-src-ok" />
+                                </div>
+                            ))}
+                            <div className="lp-search-count">
+                                <b>132</b> vị trí · <b>24</b> công ty đang tuyển
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Scene 3 — Chấm điểm độ khớp */}
+                <div className={`lp-scene ${scene === 2 ? 'is-on' : ''}`} aria-hidden={scene !== 2}>
+                    <div className="lp-score-scene">
+                        <div className="lp-mock-score">
+                            <div className="lp-ring"><span className="lp-ring-num">92<small>%</small></span></div>
+                            <div>
+                                <div className="lp-mock-role">Senior Frontend Engineer</div>
+                                <div className="lp-mock-co"><Briefcase size={12} weight="duotone" /> One Mount · Hà Nội</div>
+                                <span className="lp-chip lp-chip-green"><CheckCircle size={11} weight="fill" /> Độ khớp rất cao</span>
+                            </div>
+                        </div>
+                        {DEMO_JOBS.slice(1).map((j, i) => (
+                            <div key={j.t} className="lp-job lp-job-anim" style={{ animationDelay: `${0.2 + i * 0.2}s` }}>
+                                <div className="lp-job-info">
+                                    <span className="lp-job-title">{j.t}</span>
+                                    <span className="lp-job-meta">{j.co}</span>
+                                </div>
+                                <div className="lp-bar">
+                                    <span style={{ width: scene === 2 ? `${j.s}%` : '0%', background: j.c }} />
+                                </div>
+                                <span className="lp-job-score">{j.s}%</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                {/* Scene 4 — Tối ưu CV */}
+                <div className={`lp-scene ${scene === 3 ? 'is-on' : ''}`} aria-hidden={scene !== 3}>
+                    <div className="lp-cv-scene">
+                        <div className="lp-cv-doc">
+                            <div className="lp-cv-h" />
+                            <div className="lp-cv-line lp-cv-hl" style={{ animationDelay: '.3s' }} />
+                            <div className="lp-cv-line" style={{ width: '92%' }} />
+                            <div className="lp-cv-line lp-cv-hl" style={{ animationDelay: '.7s', width: '78%' }} />
+                            <div className="lp-cv-line" style={{ width: '88%' }} />
+                            <div className="lp-cv-line" style={{ width: '64%' }} />
+                            <div className="lp-cv-line lp-cv-hl" style={{ animationDelay: '1.1s', width: '70%' }} />
+                        </div>
+                        <div className="lp-cv-side">
+                            <span className="lp-chip lp-chip-green"><MagicWand size={11} weight="fill" /> Tối ưu cho Senior Frontend Engineer</span>
+                            <div className="lp-cv-note"><CheckCircle size={13} weight="fill" /> Viết lại theo JD — không bịa nội dung</div>
+                            <div className="lp-cv-note"><CheckCircle size={13} weight="fill" /> Làm nổi bật kỹ năng khớp nhất</div>
+                            <button className="lp-cv-export"><DownloadSimple size={14} weight="bold" /> Xuất PDF</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* Timeline */}
+            <div className="lp-timeline">
+                {DEMO_SCENES.map((sc, i) => {
+                    const Icon = sc.icon;
+                    return (
+                        <button
+                            key={sc.label}
+                            className={`lp-tl-tab ${scene === i ? 'is-active' : ''}`}
+                            onClick={() => setScene(i)}
+                        >
+                            <span className="lp-tl-label"><Icon size={13} weight="duotone" /> {sc.label}</span>
+                            <span className="lp-tl-track">
+                                <span
+                                    className="lp-tl-fill"
+                                    style={
+                                        scene === i && !paused && !reduced
+                                            ? { animation: `lp-tl-grow ${sc.ms}ms linear forwards` }
+                                            : { width: scene > i ? '100%' : scene === i ? '100%' : '0%' }
+                                    }
+                                />
+                            </span>
+                        </button>
+                    );
+                })}
+            </div>
+        </div>
+    );
+}
+
 export default function Landing() {
     const enterApp = useAppStore((s) => s.enterApp);
     const { enabled, user, promptLogin } = useAuth();
@@ -120,15 +317,15 @@ export default function Landing() {
             <section className="lp-hero">
                 <div className="lp-hero-copy">
                     <span className="lp-badge">
-                        <Sparkle size={13} weight="fill" /> Trợ lý tìm việc bằng AI · không bịa nội dung
+                        <Sparkle size={13} weight="fill" /> Tự động tìm việc khắp nơi bằng AI · không bịa nội dung
                     </span>
                     <h1 className="lp-h1">
-                        Tải CV lên — AI tìm việc phù hợp và{' '}
-                        <span className="lp-grad-text">tối ưu hồ sơ</span> cho bạn
+                        Tải CV lên — AI tự động tìm kiếm job{' '}
+                        <span className="lp-grad-text">ở bất cứ đâu</span> cho bạn
                     </h1>
                     <p className="lp-sub">
-                        Phân tích CV, gợi ý công ty đang tuyển, chấm điểm độ khớp và chỉnh CV theo
-                        từng vị trí. Từ một file PDF đến danh sách việc phù hợp — chỉ vài phút.
+                        Phân tích CV, tự động tìm job khớp ở mọi nơi, chấm điểm độ phù hợp và chỉnh CV
+                        theo từng vị trí. Từ một file PDF đến danh sách việc phù hợp — chỉ vài phút.
                     </p>
                     <div className="lp-cta-row">
                         <button className="lp-btn-primary lp-btn-lg lp-pulse" onClick={onStart}>
@@ -233,6 +430,9 @@ export default function Landing() {
                         );
                     })}
                 </div>
+                <div className="lp-demo-wrap">
+                    <DemoPlayer />
+                </div>
             </section>
 
             {/* Features */}
@@ -255,7 +455,7 @@ export default function Landing() {
             {/* CTA band */}
             <section className="lp-cta-band">
                 <div className="lp-cta-inner">
-                    <h2 className="lp-cta-title">Sẵn sàng tìm việc phù hợp?</h2>
+                    <h2 className="lp-cta-title">Sẵn sàng để AI tự động tìm job khắp nơi?</h2>
                     <p className="lp-cta-desc">Tải CV lên và xem AI làm việc — miễn phí để bắt đầu.</p>
                     <button className="lp-btn-primary lp-btn-lg" onClick={onStart}>
                         <RocketLaunch size={18} weight="fill" /> Bắt đầu ngay
@@ -417,6 +617,85 @@ const LP_CSS = `
 
 @keyframes lp-rise { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: none; } }
 
+/* ── Demo player ───────────────────────────────────────────── */
+.lp-demo-wrap { max-width: 720px; margin: 48px auto 0; }
+.lp-demo-frame { border-radius: 18px; border: 1px solid var(--border-default); background: var(--bg-card); box-shadow: var(--shadow-card-hover), 0 30px 80px rgba(0,0,0,0.16); overflow: hidden; text-align: left; }
+.lp-demo-frame .lp-mock-bar { position: relative; }
+.lp-demo-play { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); width: 24px; height: 24px; border-radius: 7px; border: 1px solid var(--border-default); background: var(--bg-glass); color: var(--text-secondary); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: color .2s, border-color .2s; }
+.lp-demo-play:hover { color: var(--text-primary); border-color: var(--border-accent); }
+.lp-demo-stage { position: relative; height: 300px; padding: 22px; }
+.lp-scene { position: absolute; inset: 22px; opacity: 0; transform: translateY(10px) scale(.99); pointer-events: none; transition: opacity .45s ease, transform .45s var(--ease-out-expo); display: flex; flex-direction: column; justify-content: center; }
+.lp-scene.is-on { opacity: 1; transform: none; pointer-events: auto; }
+
+/* Scene 1 — upload */
+.lp-drop { display: flex; flex-direction: column; gap: 14px; align-items: center; }
+.lp-drop-card { position: relative; display: flex; align-items: center; gap: 12px; width: 100%; max-width: 380px; padding: 14px 16px; border-radius: 13px; border: 1px dashed var(--border-accent); background: var(--gradient-hero-subtle); color: var(--accent-purple); overflow: hidden; }
+.lp-drop-name { font-weight: 700; font-size: 0.86rem; color: var(--text-primary); }
+.lp-drop-meta { font-size: 0.74rem; color: var(--text-muted); margin-top: 2px; }
+.lp-scan-line { position: absolute; left: 0; top: 0; width: 100%; height: 2px; background: linear-gradient(90deg, transparent, var(--accent-purple), transparent); animation: lp-scanline 1.8s ease-in-out infinite; }
+@keyframes lp-scanline { 0% { transform: translateY(0); } 50% { transform: translateY(54px); } 100% { transform: translateY(0); } }
+.lp-chips { display: flex; flex-wrap: wrap; gap: 7px; justify-content: center; max-width: 420px; }
+.lp-chip2 { display: inline-flex; align-items: center; gap: 4px; font-size: 0.72rem; font-weight: 600; color: var(--text-secondary); background: var(--bg-elevated); border: 1px solid var(--border-subtle); padding: 4px 10px; border-radius: 999px; opacity: 0; animation: lp-pop .4s var(--ease-spring) forwards; }
+.lp-chip2 svg { color: var(--accent-green); }
+@keyframes lp-pop { from { opacity: 0; transform: scale(.8) translateY(6px); } to { opacity: 1; transform: none; } }
+.lp-role-out { display: flex; align-items: center; gap: 6px; font-size: 0.8rem; color: var(--text-secondary); }
+.lp-role-out b { color: var(--text-primary); }
+.lp-role-out svg { color: var(--accent-purple); }
+
+/* Scene 2 — search everywhere */
+.lp-search { display: flex; align-items: center; gap: 26px; }
+.lp-radar { position: relative; width: 110px; height: 110px; flex-shrink: 0; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--accent-purple); background: var(--gradient-hero-subtle); border: 1px solid var(--border-subtle); }
+.lp-ping { position: absolute; inset: 0; border-radius: 50%; border: 2px solid var(--accent-purple); opacity: 0; animation: lp-ping 2.4s ease-out infinite; }
+.lp-ping-2 { animation-delay: 1.2s; }
+@keyframes lp-ping { 0% { transform: scale(.55); opacity: .6; } 100% { transform: scale(1.25); opacity: 0; } }
+.lp-radar-sweep { position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(from 0deg, transparent 0deg, color-mix(in srgb, var(--accent-purple) 35%, transparent) 50deg, transparent 80deg); animation: lp-sweep 2.2s linear infinite; }
+@keyframes lp-sweep { to { transform: rotate(360deg); } }
+.lp-search-side { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 7px; }
+.lp-search-head { display: flex; align-items: center; gap: 6px; font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 3px; }
+.lp-search-head svg { color: var(--accent-purple); }
+.lp-src { display: flex; align-items: center; gap: 8px; font-size: 0.78rem; color: var(--text-secondary); padding: 6px 10px; border-radius: 9px; background: var(--bg-elevated); border: 1px solid var(--border-subtle); opacity: 0; animation: lp-slidein .45s var(--ease-out-expo) forwards; }
+.lp-src svg:first-child { color: var(--text-muted); flex-shrink: 0; }
+.lp-src-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lp-src-ok { color: var(--accent-green); flex-shrink: 0; }
+@keyframes lp-slidein { from { opacity: 0; transform: translateX(-10px); } to { opacity: 1; transform: none; } }
+.lp-search-count { font-size: 0.78rem; color: var(--text-muted); margin-top: 4px; }
+.lp-search-count b { color: var(--accent-purple); font-weight: 800; }
+
+/* Scene 3 — scoring (reuses hero mock classes) */
+.lp-score-scene { display: flex; flex-direction: column; gap: 12px; }
+.lp-job-anim { opacity: 0; animation: lp-slidein .5s var(--ease-out-expo) forwards; }
+.lp-score-scene .lp-bar span { transition: width 1s var(--ease-out-expo) .3s; }
+
+/* Scene 4 — optimize CV */
+.lp-cv-scene { display: flex; gap: 22px; align-items: center; }
+.lp-cv-doc { width: 200px; flex-shrink: 0; padding: 16px; border-radius: 10px; background: var(--bg-elevated); border: 1px solid var(--border-subtle); display: flex; flex-direction: column; gap: 9px; box-shadow: var(--shadow-card-hover); }
+.lp-cv-h { height: 12px; width: 60%; border-radius: 4px; background: var(--gradient-hero); }
+.lp-cv-line { height: 8px; width: 100%; border-radius: 4px; background: var(--border-default); }
+.lp-cv-hl { background: color-mix(in srgb, var(--accent-purple) 30%, var(--border-default)); animation: lp-hl 2.6s ease-in-out infinite; }
+@keyframes lp-hl { 0%,100% { background: var(--border-default); } 50% { background: color-mix(in srgb, var(--accent-purple) 45%, transparent); } }
+.lp-cv-side { flex: 1; display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.lp-cv-note { display: flex; align-items: center; gap: 7px; font-size: 0.78rem; color: var(--text-secondary); }
+.lp-cv-note svg { color: var(--accent-green); flex-shrink: 0; }
+.lp-cv-export { display: inline-flex; align-items: center; gap: 7px; margin-top: 4px; padding: 9px 16px; border: none; cursor: pointer; font-weight: 700; font-size: 0.82rem; color: #fff; background: var(--gradient-hero); border-radius: 11px; box-shadow: 0 6px 18px rgba(99,102,241,0.3); }
+
+/* Timeline */
+.lp-timeline { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 10px; border-top: 1px solid var(--border-subtle); background: var(--bg-elevated); }
+.lp-tl-tab { display: flex; flex-direction: column; gap: 7px; padding: 7px 8px; border: none; background: transparent; cursor: pointer; border-radius: 9px; transition: background .2s; }
+.lp-tl-tab:hover { background: var(--bg-glass); }
+.lp-tl-label { display: flex; align-items: center; gap: 5px; font-size: 0.72rem; font-weight: 600; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color .2s; }
+.lp-tl-tab.is-active .lp-tl-label { color: var(--text-primary); }
+.lp-tl-track { height: 3px; border-radius: 999px; background: var(--border-subtle); overflow: hidden; }
+.lp-tl-fill { display: block; height: 100%; width: 0; border-radius: 999px; background: var(--gradient-hero); }
+@keyframes lp-tl-grow { from { width: 0; } to { width: 100%; } }
+@media (max-width: 880px) {
+  .lp-demo-stage { height: auto; min-height: 340px; }
+  .lp-search { flex-direction: column; gap: 18px; text-align: center; }
+  .lp-cv-scene { flex-direction: column; }
+  .lp-cv-doc { width: 100%; }
+  .lp-tl-label { font-size: 0; gap: 0; }
+  .lp-tl-label svg { font-size: initial; }
+}
+
 @media (max-width: 880px) {
   .lp-hero { grid-template-columns: 1fr; gap: 32px; padding-top: 24px; text-align: center; }
   .lp-hero-copy { display: flex; flex-direction: column; align-items: center; }
@@ -431,5 +710,8 @@ const LP_CSS = `
   .lp-hero-copy, .lp-mock-wrap { animation: none; }
   .lp-mock { transform: none; }
   .lp-marquee-track { animation: none; }
+  .lp-scan-line, .lp-ping, .lp-radar-sweep, .lp-cv-hl { animation: none; }
+  .lp-scene { transition: opacity .2s ease; transform: none; }
+  .lp-chip2, .lp-src, .lp-job-anim { opacity: 1; animation: none; }
 }
 `;
