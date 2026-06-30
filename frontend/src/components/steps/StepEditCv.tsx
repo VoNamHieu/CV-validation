@@ -1655,6 +1655,7 @@ function MatchAnalysisPanel({
         () => (cvData.skills || []).map(s => s.toLowerCase()),
         [cvData.skills],
     );
+    const [open, setOpen] = useState(true);
 
     if (!jd || !m) return null;
 
@@ -1666,11 +1667,23 @@ function MatchAnalysisPanel({
 
     return (
         <div className="glass-card" style={{ padding: '16px 18px' }}>
-            <h3 style={{ fontSize: '0.95rem', fontWeight: 700, margin: '0 0 14px', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button
+                onClick={() => setOpen(o => !o)}
+                aria-expanded={open}
+                style={{
+                    display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+                    margin: open ? '0 0 14px' : 0, padding: 0, background: 'none', border: 'none',
+                    cursor: 'pointer', color: 'var(--text-primary)', fontSize: '0.95rem',
+                    fontWeight: 700, textAlign: 'left',
+                }}
+            >
                 <ChartBar size={16} weight="duotone" style={{ color: 'var(--accent-blue)' }} />
-                Độ phù hợp
-            </h3>
+                <span style={{ flex: 1 }}>Độ phù hợp</span>
+                {open ? <CaretUp size={14} /> : <CaretDown size={14} />}
+            </button>
 
+            {open && (
+            <>
             {/* ── Must-Have coverage ── */}
             <p style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)', margin: '0 0 8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                 Kỹ năng bắt buộc ({aligned.length}/{mustHave.length} khớp)
@@ -1722,6 +1735,8 @@ function MatchAnalysisPanel({
                 <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: '16px 0 0' }}>
                     {m.strength_summary}
                 </p>
+            )}
+            </>
             )}
         </div>
     );
