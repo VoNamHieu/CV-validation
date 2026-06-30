@@ -76,7 +76,7 @@ function isExtensionAvailable(): boolean {
 
 export default function StepEditCv() {
     const {
-        cvData, jdEntries, setStep, setCvData, updateJdEntry,
+        cvData, jdEntries, setStep, updateJdEntry,
         fullyAutoMode, setFullyAutoMode,
         userAvatarBase64, setUserAvatar, selectedJdId, searchPivotNote,
     } = useAppStore();
@@ -265,12 +265,26 @@ export default function StepEditCv() {
         });
     }, [currentEntry, editedCv, updateJdEntry]);
 
+    // Overlay the latest base-profile fields (contact/personal/employment/
+    // preferences) — edited in the standalone CV editor's "Thông tin cá nhân"
+    // tab — onto a per-job CV, so every render / export / push reflects the
+    // current main info even though the wizard no longer edits it inline.
+    const mergeProfile = useCallback((cv: CVData): CVData => (
+        cvData ? {
+            ...cv,
+            contact: cvData.contact ?? cv.contact,
+            personal: cvData.personal ?? cv.personal,
+            employment: cvData.employment ?? cv.employment,
+            preferences: cvData.preferences ?? cv.preferences,
+        } : cv
+    ), [cvData]);
+
     const [downloadingPdf, setDownloadingPdf] = useState(false);
     const handleDownload = async (editedCv: CVData) => {
         if (downloadingPdf) return;
         setDownloadingPdf(true);
         try {
-            const html = renderCvHtml(editedCv, currentEntry?.selectedTemplateId, {
+            const html = renderCvHtml(mergeProfile(editedCv), currentEntry?.selectedTemplateId, {
                 avatarBase64: userAvatarBase64 ?? undefined,
             });
             const filename = `${editedCv.name.replace(/\s+/g, '_')}_${(currentEntry.jobTitle || 'optimized').replace(/\s+/g, '_')}.pdf`;
@@ -325,16 +339,10 @@ export default function StepEditCv() {
        section, but per-job optimized variants don't necessarily carry them.
        Merge the base cvData's profile sub-objects in so every per-job push
        carries the same contact info, address, etc. */
-    const buildProfile = useCallback((cv: CVData) => {
-        const enrichedCv: CVData = cvData ? {
-            ...cv,
-            contact: cvData.contact ?? cv.contact,
-            personal: cvData.personal ?? cv.personal,
-            employment: cvData.employment ?? cv.employment,
-            preferences: cvData.preferences ?? cv.preferences,
-        } : cv;
-        return cvToExtensionProfile(enrichedCv);
-    }, [cvData]);
+    const buildProfile = useCallback(
+        (cv: CVData) => cvToExtensionProfile(mergeProfile(cv)),
+        [mergeProfile],
+    );
 
     /* ─── Auto-push profile to extension whenever cvData changes ───
        Debounced so a burst of edits in the Personal info section only emits
@@ -513,7 +521,7 @@ export default function StepEditCv() {
                 let base64 = entry.optimizedCvPdfBase64;
                 let outFilename = entry.optimizedCvFileName;
                 if (!base64 || !outFilename) {
-                    const html = renderCvHtml(cv, entry.selectedTemplateId, {
+                    const html = renderCvHtml(mergeProfile(cv), entry.selectedTemplateId, {
                         avatarBase64: userAvatarBase64 ?? undefined,
                     });
                     const safeTitle = (entry.jobTitle || 'job').replace(/\s+/g, '_').slice(0, 40);
@@ -551,7 +559,7 @@ export default function StepEditCv() {
 
         // Reset status after handoff — batch progress UI takes over from here.
         setTimeout(() => setFullAutoStatus('idle'), 1500);
-    }, [sortedEntries, buildProfile, userAvatarBase64]);
+    }, [sortedEntries, buildProfile, mergeProfile, userAvatarBase64]);
 
     const cancelBatchApply = useCallback(() => {
         window.postMessage({ type: 'JOBFIT_AUTO_APPLY_CANCEL' }, '*');
@@ -1248,8 +1256,9 @@ export default function StepEditCv() {
                 Được AI tối ưu cho &quot;{currentEntry.jobTitle || 'vị trí này'}&quot; — Bấm vào nội dung bất kỳ để sửa, di chuột lên từng mục để sắp xếp lại / xoá
             </div>
 
-            {/* ══════ Personal Info — pre-filled from CV, editable, auto-synced ══════ */}
-            <PersonalInfoSection cv={cvData} onChange={setCvData} />
+            {/* Personal info is edited in the standalone CV editor's "Thông tin
+                cá nhân" tab; here it's pulled straight from the base cvData and
+                merged into every per-job CV (see enrichedCv) + extension push. */}
 
             {/* ══════ Re-optimize with the candidate's own points ══════ */}
             <div className="glass-card" style={{ marginBottom: 12, padding: '14px 18px' }}>
@@ -1467,7 +1476,7 @@ export default function StepEditCv() {
                             <EditableTemplateFrame
                                 key={`${currentEntry.id}-${currentEntry.selectedTemplateId ?? DEFAULT_TEMPLATE_ID}-${userAvatarBase64?.length ?? 0}`}
                                 html={renderCvHtml(
-                                    editedCv ?? currentEntry.optimizedCv!,
+                                    mergeProfile(editedCv ?? currentEntry.optimizedCv!),
                                     currentEntry.selectedTemplateId,
                                     { avatarBase64: userAvatarBase64 ?? undefined },
                                 )}
