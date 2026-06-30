@@ -1,15 +1,16 @@
 'use client';
 
-// "Xin thêm credit" flow. The first request grants a one-time free top-up; any
-// request after that switches to a manual bank-transfer view (the owner tops
-// the user up after the transfer — no payment gateway yet).
+// "Xin thêm credit" flow:
+//   1st request  → grant the one-time free credits, then a "support us" screen:
+//                  leave feedback, or buy-me-a-coffee (bank transfer, any amount).
+//   afterwards   → a manual bank-transfer paywall (fixed pack price).
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Coins, CheckCircle, Copy } from '@phosphor-icons/react';
-import { credits as creditsApi } from '@/lib/db';
+import { X, Coins, CheckCircle, Copy, Coffee, Star, PaperPlaneTilt } from '@phosphor-icons/react';
+import { credits as creditsApi, account } from '@/lib/db';
 import { BANK_INFO, TOPUP_PACK, SUPPORT_EMAIL } from '@/lib/payment';
 
-type View = 'intro' | 'granted' | 'pay';
+type View = 'intro' | 'support' | 'pay';
 
 export default function CreditRequestModal({
     email, onClose, onGranted,
@@ -22,7 +23,6 @@ export default function CreditRequestModal({
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
     const [granted, setGranted] = useState(0);
-    const [imgOk, setImgOk] = useState(true);
 
     const request = async () => {
         setBusy(true);
@@ -33,7 +33,7 @@ export default function CreditRequestModal({
                 setView('pay');
             } else {
                 setGranted(r.granted);
-                setView('granted');
+                setView('support');
                 onGranted();
             }
         } catch {
@@ -42,9 +42,6 @@ export default function CreditRequestModal({
             setBusy(false);
         }
     };
-
-    const note = `JobFit ${email}`;
-    const copy = (t: string) => { navigator.clipboard?.writeText(t).catch(() => {}); };
 
     if (typeof document === 'undefined') return null;
 
@@ -60,7 +57,7 @@ export default function CreditRequestModal({
             <div
                 onClick={(e) => e.stopPropagation()}
                 style={{
-                    width: '100%', maxWidth: 420, maxHeight: '88vh', overflowY: 'auto',
+                    width: '100%', maxWidth: 440, maxHeight: '90vh', overflowY: 'auto',
                     background: 'var(--bg-secondary)', border: '1px solid var(--border-subtle)',
                     borderRadius: 16, padding: 24, position: 'relative',
                     boxShadow: '0 20px 60px rgba(0,0,0,0.35)',
@@ -81,84 +78,41 @@ export default function CreditRequestModal({
                     background: 'var(--gradient-hero)', display: 'flex',
                     alignItems: 'center', justifyContent: 'center',
                 }}>
-                    {view === 'granted'
+                    {view === 'support'
                         ? <CheckCircle size={22} weight="fill" color="#fff" />
                         : <Coins size={22} weight="duotone" color="#fff" />}
                 </div>
 
-                {/* ── Intro: offer the request ── */}
                 {view === 'intro' && (
                     <>
-                        <h2 style={{ fontSize: '1.05rem', fontWeight: 700, margin: '0 0 8px', color: 'var(--text-primary)' }}>
-                            Xin thêm credit
-                        </h2>
-                        <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: '0 0 18px' }}>
+                        <h2 style={titleStyle}>Xin thêm credit</h2>
+                        <p style={descStyle}>
                             Lần đầu bạn được tặng thêm <strong style={{ color: 'var(--text-primary)' }}>{TOPUP_PACK.credits} credit</strong> miễn phí.
                             Sau đó, để dùng tiếp bạn cần mua thêm qua chuyển khoản.
                         </p>
-                        {error && <div style={{ fontSize: '0.78rem', color: 'var(--accent-red, #ef4444)', marginBottom: 10 }}>{error}</div>}
-                        <button
-                            onClick={request} disabled={busy}
-                            style={primaryBtn(busy)}
-                        >
+                        {error && <div style={errStyle}>{error}</div>}
+                        <button onClick={request} disabled={busy} style={primaryBtn(busy)}>
                             {busy ? 'Đang xử lý…' : `Nhận thêm ${TOPUP_PACK.credits} credit`}
                         </button>
                     </>
                 )}
 
-                {/* ── Granted: free top-up succeeded ── */}
-                {view === 'granted' && (
-                    <>
-                        <h2 style={{ fontSize: '1.05rem', fontWeight: 700, margin: '0 0 8px', color: 'var(--text-primary)' }}>
-                            Đã cộng {granted} credit!
-                        </h2>
-                        <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: '0 0 18px' }}>
-                            Credit miễn phí đã được cộng vào tài khoản. Lần tới bạn sẽ cần mua thêm.
-                        </p>
-                        <button onClick={onClose} style={primaryBtn(false)}>Tiếp tục</button>
-                    </>
+                {view === 'support' && (
+                    <SupportView granted={granted} email={email} onClose={onClose} />
                 )}
 
-                {/* ── Pay: manual bank transfer ── */}
                 {view === 'pay' && (
                     <>
-                        <h2 style={{ fontSize: '1.05rem', fontWeight: 700, margin: '0 0 6px', color: 'var(--text-primary)' }}>
-                            Mua thêm credit
-                        </h2>
-                        <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: '0 0 14px' }}>
+                        <h2 style={titleStyle}>Mua thêm credit</h2>
+                        <p style={descStyle}>
                             Bạn đã dùng hết lượt miễn phí. Chuyển khoản theo thông tin dưới đây
                             ({TOPUP_PACK.credits} credit · {TOPUP_PACK.priceVnd.toLocaleString('vi-VN')}đ), ghi đúng nội dung,
                             rồi credit sẽ được cộng sau khi xác nhận.
                         </p>
-
-                        {imgOk && (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                                src={BANK_INFO.qrImage} alt="Mã QR chuyển khoản"
-                                onError={() => setImgOk(false)}
-                                style={{
-                                    display: 'block', width: 200, height: 200, objectFit: 'contain',
-                                    margin: '0 auto 14px', borderRadius: 12, background: '#fff',
-                                    border: '1px solid var(--border-subtle)',
-                                }}
-                            />
-                        )}
-
-                        <div style={{
-                            display: 'flex', flexDirection: 'column', gap: 6, fontSize: '0.82rem',
-                            background: 'var(--bg-card)', border: '1px solid var(--border-subtle)',
-                            borderRadius: 10, padding: '12px 14px', marginBottom: 14,
-                        }}>
-                            <Row label="Ngân hàng" value={BANK_INFO.bank} />
-                            <Row label="Số tài khoản" value={BANK_INFO.accountNumber} onCopy={() => copy(BANK_INFO.accountNumber)} />
-                            <Row label="Chủ tài khoản" value={BANK_INFO.accountHolder} />
-                            <Row label="Số tiền" value={`${TOPUP_PACK.priceVnd.toLocaleString('vi-VN')}đ`} />
-                            <Row label="Nội dung CK" value={note} onCopy={() => copy(note)} highlight />
-                        </div>
-
-                        <p style={{ fontSize: '0.74rem', color: 'var(--text-muted)', lineHeight: 1.55, margin: '0 0 14px' }}>
+                        <BankTransfer note={`JobFit ${email}`} amount={`${TOPUP_PACK.priceVnd.toLocaleString('vi-VN')}đ`} />
+                        <p style={{ ...descStyle, fontSize: '0.74rem', margin: '12px 0 14px' }}>
                             Sau khi chuyển, gửi biên lai tới{' '}
-                            <a href={`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent('Mua credit JobFit')}&body=${encodeURIComponent(note)}`}
+                            <a href={`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent('Mua credit JobFit')}&body=${encodeURIComponent(`JobFit ${email}`)}`}
                                 style={{ color: 'var(--accent-blue)', fontWeight: 600 }}>{SUPPORT_EMAIL}</a>
                             {' '}để được cộng credit sớm nhất.
                         </p>
@@ -168,6 +122,143 @@ export default function CreditRequestModal({
             </div>
         </div>,
         document.body,
+    );
+}
+
+// First-request success + optional support (feedback / coffee).
+function SupportView({ granted, email, onClose }: { granted: number; email: string; onClose: () => void }) {
+    const [msg, setMsg] = useState('');
+    const [rating, setRating] = useState(0);
+    const [sending, setSending] = useState(false);
+    const [sent, setSent] = useState(false);
+    const [showCoffee, setShowCoffee] = useState(false);
+
+    const send = async () => {
+        if (!msg.trim() || sending) return;
+        setSending(true);
+        try {
+            await account.submitFeedback({ message: msg.trim(), rating: rating || undefined, source: 'topup' });
+            setSent(true);
+        } catch {
+            // best-effort — don't block the user on feedback
+            setSent(true);
+        } finally {
+            setSending(false);
+        }
+    };
+
+    return (
+        <>
+            <h2 style={titleStyle}>Đã cộng {granted} credit! 🎉</h2>
+            <p style={descStyle}>
+                Cảm ơn bạn đã dùng JobFit. Nếu thấy hữu ích, bạn có thể ủng hộ mình một chút —
+                hoàn toàn tuỳ tâm.
+            </p>
+
+            {/* Feedback */}
+            {sent ? (
+                <div style={{
+                    display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.82rem', fontWeight: 600,
+                    color: 'var(--accent-green)', padding: '12px 14px', borderRadius: 10,
+                    background: 'color-mix(in srgb, var(--accent-green) 12%, transparent)', marginBottom: 12,
+                }}>
+                    <CheckCircle size={16} weight="fill" /> Cảm ơn góp ý của bạn!
+                </div>
+            ) : (
+                <div style={{
+                    border: '1px solid var(--border-subtle)', borderRadius: 12,
+                    padding: 14, marginBottom: 12, background: 'var(--bg-card)',
+                }}>
+                    <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>
+                        Góp ý để JobFit tốt hơn
+                    </div>
+                    <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+                        {[1, 2, 3, 4, 5].map((n) => (
+                            <button key={n} type="button" onClick={() => setRating(n)} aria-label={`${n} sao`}
+                                style={{ border: 'none', background: 'none', cursor: 'pointer', padding: 0, lineHeight: 0 }}>
+                                <Star size={20} weight={n <= rating ? 'fill' : 'regular'}
+                                    style={{ color: n <= rating ? 'var(--accent-amber, #f59e0b)' : 'var(--text-muted)' }} />
+                            </button>
+                        ))}
+                    </div>
+                    <textarea
+                        value={msg} onChange={(e) => setMsg(e.target.value)} rows={3} maxLength={4000}
+                        placeholder="Bạn thích/chưa thích gì? Muốn có thêm tính năng nào?"
+                        style={{
+                            width: '100%', resize: 'vertical', padding: '8px 10px', borderRadius: 8,
+                            background: 'var(--bg-secondary)', border: '1px solid var(--border-subtle)',
+                            color: 'var(--text-primary)', fontSize: '0.82rem', fontFamily: 'inherit', lineHeight: 1.5,
+                        }}
+                    />
+                    <button
+                        onClick={send} disabled={!msg.trim() || sending}
+                        style={{
+                            marginTop: 8, display: 'flex', alignItems: 'center', gap: 6,
+                            padding: '8px 14px', borderRadius: 8, border: 'none', background: 'var(--gradient-hero)',
+                            color: '#fff', fontSize: '0.8rem', fontWeight: 600,
+                            cursor: (!msg.trim() || sending) ? 'default' : 'pointer', opacity: (!msg.trim() || sending) ? 0.55 : 1,
+                        }}
+                    >
+                        <PaperPlaneTilt size={14} weight="fill" /> {sending ? 'Đang gửi…' : 'Gửi góp ý'}
+                    </button>
+                </div>
+            )}
+
+            {/* Buy me a coffee */}
+            {showCoffee ? (
+                <div style={{ marginBottom: 12 }}>
+                    <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <Coffee size={16} weight="duotone" style={{ color: 'var(--accent-amber, #f59e0b)' }} /> Mời mình ly cà phê (tuỳ tâm)
+                    </div>
+                    <BankTransfer note={`JobFit cafe ${email}`} />
+                </div>
+            ) : (
+                <button
+                    onClick={() => setShowCoffee(true)}
+                    style={{
+                        width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                        padding: '10px 12px', borderRadius: 10, marginBottom: 12, cursor: 'pointer',
+                        border: '1px solid var(--border-default)', background: 'var(--bg-card)',
+                        color: 'var(--text-primary)', fontSize: '0.82rem', fontWeight: 600,
+                    }}
+                >
+                    <Coffee size={16} weight="duotone" style={{ color: 'var(--accent-amber, #f59e0b)' }} /> Buy me a coffee ☕
+                </button>
+            )}
+
+            <button onClick={onClose} style={primaryBtn(false)}>Tiếp tục</button>
+        </>
+    );
+}
+
+function BankTransfer({ note, amount }: { note: string; amount?: string }) {
+    const [imgOk, setImgOk] = useState(true);
+    const copy = (t: string) => { navigator.clipboard?.writeText(t).catch(() => {}); };
+    return (
+        <>
+            {imgOk && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                    src={BANK_INFO.qrImage} alt="Mã QR chuyển khoản" onError={() => setImgOk(false)}
+                    style={{
+                        display: 'block', width: 180, height: 180, objectFit: 'contain',
+                        margin: '0 auto 12px', borderRadius: 12, background: '#fff',
+                        border: '1px solid var(--border-subtle)',
+                    }}
+                />
+            )}
+            <div style={{
+                display: 'flex', flexDirection: 'column', gap: 6, fontSize: '0.82rem',
+                background: 'var(--bg-card)', border: '1px solid var(--border-subtle)',
+                borderRadius: 10, padding: '12px 14px',
+            }}>
+                <Row label="Ngân hàng" value={BANK_INFO.bank} />
+                <Row label="Số tài khoản" value={BANK_INFO.accountNumber} onCopy={() => copy(BANK_INFO.accountNumber)} />
+                <Row label="Chủ tài khoản" value={BANK_INFO.accountHolder} />
+                {amount && <Row label="Số tiền" value={amount} />}
+                <Row label="Nội dung CK" value={note} onCopy={() => copy(note)} highlight />
+            </div>
+        </>
     );
 }
 
@@ -181,9 +272,7 @@ function Row({ label, value, onCopy, highlight }: {
                 <span style={{
                     fontWeight: 700, color: highlight ? 'var(--accent-purple, #8b5cf6)' : 'var(--text-primary)',
                     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                }}>
-                    {value}
-                </span>
+                }}>{value}</span>
                 {onCopy && (
                     <button onClick={onCopy} aria-label="Sao chép" title="Sao chép"
                         style={{ border: 'none', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', flexShrink: 0 }}>
@@ -194,6 +283,10 @@ function Row({ label, value, onCopy, highlight }: {
         </div>
     );
 }
+
+const titleStyle: React.CSSProperties = { fontSize: '1.05rem', fontWeight: 700, margin: '0 0 8px', color: 'var(--text-primary)' };
+const descStyle: React.CSSProperties = { fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: '0 0 16px' };
+const errStyle: React.CSSProperties = { fontSize: '0.78rem', color: 'var(--accent-red, #ef4444)', marginBottom: 10 };
 
 function primaryBtn(busy: boolean): React.CSSProperties {
     return {

@@ -5,6 +5,7 @@ import { AuthProvider } from "@/lib/auth";
 import { CreditsProvider } from "@/lib/credits-context";
 import { ConsentProvider } from "@/lib/consent-context";
 import GlobalAuthModal from "@/components/GlobalAuthModal";
+import FloatingFeedback from "@/components/FloatingFeedback";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -45,6 +46,7 @@ export default function RootLayout({
             <ConsentProvider>
               {children}
               <GlobalAuthModal />
+              <FloatingFeedback />
             </ConsentProvider>
           </CreditsProvider>
         </AuthProvider>

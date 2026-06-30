@@ -172,6 +172,7 @@ export const admin = {
         req<{ user_id: string; email: string; granted: number; balance: number; reason: string }>(
             `/api/admin/credits/grant`, { method: 'POST', body: JSON.stringify(body), auth: true },
         ),
+    listFeedback: () => req<Feedback[]>(`/api/admin/feedback`, { auth: true }),
 };
 
 // ── Account (user-scoped, requires auth) ──────────────────────────────────────
@@ -182,6 +183,16 @@ export interface Profile {
     terms_accepted_at: string | null;
     terms_version: string | null;
     agent_consent_at: string | null;
+}
+
+export interface Feedback {
+    id: string;
+    user_id: string | null;
+    email: string | null;
+    message: string;
+    rating: number | null;
+    source: string | null;
+    created_at: string;
 }
 
 export const account = {
@@ -197,6 +208,10 @@ export const account = {
     // Permanently delete the account + all data (Privacy §5).
     deleteAccount: () =>
         req<{ deleted: boolean }>(`/api/me/account`, { method: 'DELETE', auth: true }),
+
+    // Submit a feedback / support message (shared /feedback endpoint).
+    submitFeedback: (body: { message: string; rating?: number; source?: string; page_url?: string }) =>
+        req<Feedback>(`/api/feedback`, { method: 'POST', body: JSON.stringify(body), auth: true }),
 
     listCvProfiles: () => req<CvProfile[]>(`/api/me/cv-profiles`, { auth: true }),
     getActiveCvProfile: () => req<CvProfile>(`/api/me/cv-profiles/active`, { auth: true }),
