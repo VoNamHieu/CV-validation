@@ -29,6 +29,7 @@ COSTS: dict[str, int] = {
     "score": 4,
     "optimize": 5,   # × units (number of variants)
     "tailor": 5,     # × units
+    "gap_report": 5,  # one deep reasoning report (Pro tier)
 }
 
 

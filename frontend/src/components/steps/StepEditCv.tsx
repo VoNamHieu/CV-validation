@@ -11,6 +11,7 @@ import {
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthGate } from '@/lib/auth';
 import { useConsent } from '@/lib/consent-context';
+import GapReportSection from '@/components/GapReportSection';
 import CvDocumentPreview from '@/components/CvDocumentPreview';
 import EditableTemplateFrame from '@/components/EditableTemplateFrame';
 import { applyCvFieldEdit } from '@/lib/cv-inline-edit';
@@ -1709,6 +1710,9 @@ function MatchAnalysisPanel({
                     <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Không có yêu cầu bắt buộc rõ ràng.</span>
                 )}
             </div>
+
+            {/* ── Deep gap analysis (AI) — sits in the gap area ── */}
+            <GapReportSection cv={cvData} jd={jd} match={m} />
 
             {/* ── Scoring breakdown ── */}
             <p style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)', margin: '0 0 4px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>

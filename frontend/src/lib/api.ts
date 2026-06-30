@@ -90,6 +90,21 @@ export async function scoreFit(cv: unknown, jd: unknown) {
     return res.json();
 }
 
+// Deep gap analysis: JD vs how the current CV demonstrates the candidate's
+// ability. Returns a GapReport (see lib/gap-report). Credit-metered ('gap_report').
+export async function generateGapReport(cv: unknown, jd: unknown, match?: unknown) {
+    const res = await fetch('/api/ai/gap-report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
+        body: JSON.stringify({ cv, jd, match }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || 'Tạo báo cáo gap thất bại');
+    }
+    return res.json() as Promise<import('@/lib/gap-report').GapReport>;
+}
+
 export async function optimizeCvVariants(
     cv: unknown,
     jd: unknown,
