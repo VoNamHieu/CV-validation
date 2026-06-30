@@ -28,3 +28,12 @@ async def get(user_id: str) -> Optional[dict]:
     return row_to_dict(
         await pool.fetchrow(f"SELECT {_COLS} FROM profiles WHERE id = $1", user_id)
     )
+
+
+async def find_id_by_email(email: str) -> Optional[str]:
+    """Resolve a user id from their email (case-insensitive). Used by admin
+    tooling to target a user without knowing their UUID."""
+    pool = await get_pool()
+    return await pool.fetchval(
+        "SELECT id FROM profiles WHERE lower(email) = lower($1)", email
+    )

@@ -157,6 +157,20 @@ export const credits = {
     costs: () => req<Record<string, number>>(`/api/credits/costs`),
 };
 
+// ── Admin (allowlisted operators only; backend enforces via ADMIN_EMAILS) ─────
+export const admin = {
+    // 200 when the caller is an admin; throws (403) otherwise. Used to gate the page.
+    check: () => req<{ ok: boolean }>(`/api/admin/check`, { auth: true }),
+    lookupUser: (email: string) =>
+        req<{ user_id: string; email: string; balance: number }>(
+            `/api/admin/users/lookup?email=${encodeURIComponent(email)}`, { auth: true },
+        ),
+    grantCredits: (body: { email: string; amount: number; reason?: string }) =>
+        req<{ user_id: string; email: string; granted: number; balance: number; reason: string }>(
+            `/api/admin/credits/grant`, { method: 'POST', body: JSON.stringify(body), auth: true },
+        ),
+};
+
 // ── Account (user-scoped, requires auth) ──────────────────────────────────────
 export const account = {
     getProfile: () => req<{ id: string; email: string | null }>(`/api/me`, { auth: true }),
