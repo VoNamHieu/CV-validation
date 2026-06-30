@@ -7,7 +7,8 @@ import {
     Briefcase, ArrowRight,
 } from '@phosphor-icons/react';
 import type { Icon } from '@phosphor-icons/react';
-import { useAppStore, type JDEntry } from '@/store/useAppStore';
+import { useAppStore, type JDEntry, type CandidateJob } from '@/store/useAppStore';
+import JobResultsView from '@/components/JobResultsView';
 import {
     smartSearch, crawlUrl, extractJdStructured, scoreFit, fetchPage,
     extractJobLinks, rankJobsTournament, extensionCrawl, isExtensionAvailable,
@@ -114,6 +115,8 @@ export default function StepInputUrl() {
         clearJdEntries, addJdEntry, updateJdEntry, setOptimizedCv, addJobRecord,
         setView, jobHistory, fullyAutoMode, setFullyAutoMode, setSelectedJdId,
         targetJobTitle, targetLocation, targetLevel, setSearchPivotNote,
+        setDiscovery, candidates, candidatePool, removeCandidate,
+        revealMoreCandidates, clearCandidates, wizardStage, setWizardStage,
     } = useAppStore();
 
     const [url, setUrl] = useState('');
@@ -151,6 +154,7 @@ export default function StepInputUrl() {
         setInferredTitle('');
         setSearchPivotNote('');   // cleared; the featured path re-sets it post-search
         clearJdEntries();
+        clearCandidates();
         const runId = ++runRef.current;
 
         try {
@@ -351,6 +355,35 @@ export default function StepInputUrl() {
                 const paired = pairCity(ranked);
                 offCity = paired.offCity;
                 orderedJobs = paired.pool;
+            }
+
+            // ── Non-auto: hand the ranked jobs to the results page for curation
+            //    (remove / find more) BEFORE we spend credits scoring + tailoring.
+            //    Full-auto skips this and runs the pipeline straight through. ──
+            if (!isFullAuto) {
+                const toCandidate = (job: FeaturedJob): CandidateJob => {
+                    const off = !!cityKey && !!job.location && !matchesCity(job.location, cityKey);
+                    return {
+                        id: `cand-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                        url: job.url,
+                        applyUrl: job.applyUrl,
+                        title: job.title,
+                        company: job.company,
+                        careerUrl: job.careerUrl,
+                        location: job.location || '',
+                        description: job.description || '',
+                        roleFamily: job.roleFamily,
+                        locationNote: off ? `Khác ${cityName}` : undefined,
+                    };
+                };
+                const cands = orderedJobs.map(toCandidate);
+                const INITIAL_SHOWN = 6;
+                if (runRef.current === runId) {
+                    setPhase('idle');
+                    setPhaseDetail('');
+                    setDiscovery(cands.slice(0, INITIAL_SHOWN), cands.slice(INITIAL_SHOWN));
+                }
+                return;
             }
 
             // ── Select the jobs to process; keep the rest as a role-adjacent
@@ -828,6 +861,54 @@ export default function StepInputUrl() {
         return { navigated };
     };
 
+    // Build a JD entry from a curated candidate so the pipeline can process it.
+    const candidateToEntry = (c: CandidateJob): JDEntry => ({
+        id: `jd-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        source: c.url,
+        applyUrl: c.applyUrl,
+        label: c.title,
+        status: 'crawling',
+        jobTitle: c.title,
+        company: c.company,
+        location: c.location || undefined,
+        locationNote: c.locationNote,
+        prefetchedJd: c.description || undefined,
+        roleFamily: c.roleFamily,
+    });
+
+    // Results-page "Optimize" action: crawl + score + tailor exactly the jobs the
+    // user kept (no backfill — they curated this list), then open the editor.
+    const handleOptimizeSelected = async () => {
+        if (!cvData) { setError('Vui lòng tải CV lên trước.'); return; }
+        const picked = useAppStore.getState().candidates;
+        if (!picked.length) { setError('Hãy giữ lại ít nhất một việc để tối ưu.'); return; }
+
+        setError('');
+        setOptimizedCv(null);
+        clearJdEntries();
+        const runId = ++runRef.current;
+        try {
+            for (const c of picked) addJdEntry(candidateToEntry(c));
+            const { navigated } = await runJobPipeline({
+                queueLen: picked.length,
+                runId,
+                fallbackTitle: (targetJobTitle || cvData.desired_job_title || '').trim(),
+                navigateOnFirstDone: true,
+                targetScored: picked.length,
+                // No nextBackfill: process only the user's curated selection.
+            });
+            if (runRef.current === runId) {
+                setPhase('idle');
+                if (!navigated) setStep(3);
+            }
+        } catch (e: unknown) {
+            const msg = e instanceof Error ? e.message : 'Tối ưu thất bại';
+            setError(msg);
+            setPhase('idle');
+            setPhaseDetail('');
+        }
+    };
+
     const handleSmartAnalyze = async (overrideUrl?: string) => {
         const trimmed = (overrideUrl ?? url).trim();
         // Auto mode = the URL is internal (user clicked "Find jobs from my CV").
@@ -1052,13 +1133,27 @@ export default function StepInputUrl() {
         <div className="animate-fade-in" style={{ maxWidth: 660, margin: '0 auto', padding: '40px 20px' }}>
             <h2 style={{ fontSize: '1.6rem', fontWeight: 700, marginBottom: 8 }}>
                 <MagicWand size={22} weight="duotone" style={{ display: 'inline', marginRight: 8, color: 'var(--accent-purple)' }} />
-                Tìm việc thông minh
+                {wizardStage === 'results' ? 'Việc phù hợp với bạn' : 'Tìm việc thông minh'}
             </h2>
             <p style={{ color: 'var(--text-secondary)', marginBottom: 32, fontSize: '0.95rem', lineHeight: 1.6 }}>
-                AI đọc CV của bạn, tìm các công ty đang tuyển vai trò của bạn, và chấm điểm từng
-                tin tuyển dụng trực tiếp từ trang tuyển dụng chính thức của công ty.
+                {wizardStage === 'results'
+                    ? 'Đây là các việc AI tìm được cho bạn. Bỏ những việc không phù hợp, tìm thêm nếu muốn, rồi tối ưu CV cho các việc còn lại.'
+                    : 'AI đọc CV của bạn, tìm các công ty đang tuyển vai trò của bạn, và chấm điểm từng tin tuyển dụng trực tiếp từ trang tuyển dụng chính thức của công ty.'}
             </p>
 
+            {wizardStage === 'results' && (
+                <JobResultsView
+                    candidates={candidates}
+                    poolRemaining={candidatePool.length}
+                    busy={isProcessing}
+                    onRemove={removeCandidate}
+                    onFindMore={() => revealMoreCandidates(3)}
+                    onOptimize={handleOptimizeSelected}
+                    onBack={() => { clearCandidates(); setWizardStage('search'); }}
+                />
+            )}
+
+            {wizardStage === 'search' && <>
             {/* How it works */}
             <div className="glass-card" style={{
                 padding: '16px 20px', marginBottom: 24,
@@ -1168,6 +1263,7 @@ export default function StepInputUrl() {
                     Tìm trên URL này
                 </button>
             </div>
+            </>}
 
             {/* Inferred title badge */}
             {inferredTitle && isProcessing && (
@@ -1263,13 +1359,15 @@ export default function StepInputUrl() {
                 </div>
             )}
 
-            {/* Actions */}
-            <div style={{ marginTop: 24, display: 'flex', justifyContent: 'space-between' }}>
-                <button className="btn-secondary" onClick={() => setStep(1)} disabled={isProcessing}
-                    style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <ArrowLeft size={16} weight="bold" /> Quay lại
-                </button>
-            </div>
+            {/* Actions — results stage has its own "Tìm kiếm lại" back button */}
+            {wizardStage === 'search' && (
+                <div style={{ marginTop: 24, display: 'flex', justifyContent: 'space-between' }}>
+                    <button className="btn-secondary" onClick={() => setStep(1)} disabled={isProcessing}
+                        style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <ArrowLeft size={16} weight="bold" /> Quay lại
+                    </button>
+                </div>
+            )}
 
             {/* Link to History view */}
             {jobHistory.length > 0 && (

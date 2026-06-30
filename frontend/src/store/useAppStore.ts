@@ -76,6 +76,23 @@ export interface JDEntry {
   roleFamily?: string;
 }
 
+// A discovered-but-not-yet-processed job, shown on the results page so the user
+// can curate (remove / find more) BEFORE we spend credits crawling + scoring +
+// tailoring. Carries everything needed to later build a JDEntry without a
+// re-search. Transient: never persisted (see partialize).
+export interface CandidateJob {
+  id: string;
+  url: string;
+  applyUrl: string;
+  title: string;
+  company: string;
+  careerUrl: string;
+  location: string;
+  description: string;    // JD text the search layer already fetched (prefetch)
+  roleFamily?: string;
+  locationNote?: string;  // "Khác <city>" when off the chosen city
+}
+
 type Step = 1 | 2 | 3 | 4;
 export type AppView = 'apply' | 'editor' | 'history';
 
@@ -148,6 +165,18 @@ interface AppState {
   selectedJdId: string | null;
   setSelectedJdId: (id: string | null) => void;
 
+  // Results page (between search and edit). `candidates` = the jobs currently
+  // shown for curation; `candidatePool` = ranked spares revealed by "find more".
+  // `wizardStage` switches step 2 between the search form and the results list.
+  candidates: CandidateJob[];
+  candidatePool: CandidateJob[];
+  wizardStage: 'search' | 'results';
+  setDiscovery: (shown: CandidateJob[], pool: CandidateJob[]) => void;
+  removeCandidate: (id: string) => void;
+  revealMoreCandidates: (n?: number) => void;
+  clearCandidates: () => void;
+  setWizardStage: (stage: 'search' | 'results') => void;
+
   // Loading states
   isLoading: boolean;
   loadingMessage: string;
@@ -185,6 +214,9 @@ const initialState = {
   jobHistory: [] as JobRecord[],
   jdEntries: [] as JDEntry[],
   selectedJdId: null as string | null,
+  candidates: [] as CandidateJob[],
+  candidatePool: [] as CandidateJob[],
+  wizardStage: 'search' as 'search' | 'results',
   isLoading: false,
   loadingMessage: '',
   fullyAutoMode: false,
@@ -255,6 +287,22 @@ export const useAppStore = create<AppState>()(
       clearJdEntries: () => set({ jdEntries: [] }),
       setSelectedJdId: (id) => set({ selectedJdId: id }),
 
+      // Results-page curation
+      setDiscovery: (shown, pool) =>
+        set({ candidates: shown, candidatePool: pool, wizardStage: 'results' }),
+      removeCandidate: (id) =>
+        set((s) => ({ candidates: s.candidates.filter((c) => c.id !== id) })),
+      revealMoreCandidates: (n = 3) =>
+        set((s) => {
+          if (!s.candidatePool.length) return {} as Partial<AppState>;
+          return {
+            candidates: [...s.candidates, ...s.candidatePool.slice(0, n)],
+            candidatePool: s.candidatePool.slice(n),
+          };
+        }),
+      clearCandidates: () => set({ candidates: [], candidatePool: [] }),
+      setWizardStage: (stage) => set({ wizardStage: stage }),
+
       setLoading: (loading, message = '') => set({ isLoading: loading, loadingMessage: message }),
 
       setFullyAutoMode: (v) => set({ fullyAutoMode: v }),
@@ -271,6 +319,12 @@ export const useAppStore = create<AppState>()(
       partialize: (state) => {
         const rest: Partial<AppState> = { ...state };
         delete (rest as { fullyAutoMode?: boolean }).fullyAutoMode;
+        // Transient discovery state — re-derived from a fresh search, never
+        // restored (a persisted 'results' stage with no candidates would be a
+        // dead-end on reload).
+        delete (rest as Record<string, unknown>).candidates;
+        delete (rest as Record<string, unknown>).candidatePool;
+        delete (rest as Record<string, unknown>).wizardStage;
         // Drop the heaviest field from persistence: each optimized CV caches its
         // rendered PDF as base64 (~100–500KB each). Persisting these across many
         // entries overflows the ~5MB localStorage quota — the write throws, the

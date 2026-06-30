@@ -1,11 +1,16 @@
 'use client';
 
-import { Check, Upload, Globe, PencilSimple } from '@phosphor-icons/react';
+import { Check, Upload, Globe, ListChecks, PencilSimple } from '@phosphor-icons/react';
+import { useAppStore } from '@/store/useAppStore';
 
+// Visual wizard phases. "Kết quả" lives inside step 2 (the search component
+// switches to its results view), so the active phase is derived from both
+// currentStep and wizardStage rather than the step number alone.
 const steps = [
-    { num: 1, label: 'Tải CV', icon: Upload },
-    { num: 2, label: 'Tìm việc', icon: Globe },
-    { num: 3, label: 'Sửa CV', icon: PencilSimple },
+    { phase: 1, label: 'Tải CV', icon: Upload },
+    { phase: 2, label: 'Tìm việc', icon: Globe },
+    { phase: 3, label: 'Kết quả', icon: ListChecks },
+    { phase: 4, label: 'Sửa CV', icon: PencilSimple },
 ];
 
 interface StepperProps {
@@ -13,19 +18,26 @@ interface StepperProps {
 }
 
 export default function Stepper({ currentStep }: StepperProps) {
+    const wizardStage = useAppStore((s) => s.wizardStage);
+
+    const activePhase =
+        currentStep === 1 ? 1
+            : currentStep === 2 ? (wizardStage === 'results' ? 3 : 2)
+                : 4;
+
     return (
         <div style={{
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            padding: '24px 20px', maxWidth: 480, margin: '0 auto',
+            padding: '24px 20px', maxWidth: 560, margin: '0 auto',
             position: 'relative', zIndex: 1,
         }}>
             {steps.map((step, i) => {
-                const isCompleted = currentStep > step.num;
-                const isActive = currentStep === step.num;
+                const isCompleted = activePhase > step.phase;
+                const isActive = activePhase === step.phase;
                 const Icon = step.icon;
 
                 return (
-                    <div key={step.num} style={{ display: 'contents' }}>
+                    <div key={step.phase} style={{ display: 'contents' }}>
                         <div style={{
                             display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
                         }}>
