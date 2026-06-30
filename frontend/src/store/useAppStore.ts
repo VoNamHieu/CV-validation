@@ -185,6 +185,11 @@ interface AppState {
   cvData: CVData | null;
   setCvRawText: (text: string, fileName: string) => void;
   setCvData: (data: CVData) => void;
+  // Persist/restore the base CV per account via cv_profiles, so it survives
+  // logout→login (resetUserData wipes it for isolation; this brings it back for
+  // the same user). Restores when local is empty; persists local when the
+  // backend has none yet.
+  syncActiveCvProfile: () => Promise<void>;
 
   // Job targeting — confirmed on the upload step, consumed by the job finder.
   // targetJobTitle defaults to the AI-inferred desired_job_title but the user
@@ -321,7 +326,24 @@ export const useAppStore = create<AppState>()(
       setStep: (step) => set({ currentStep: step }),
 
       setCvRawText: (text, fileName) => set({ cvRawText: text, cvFileName: fileName }),
-      setCvData: (data) => set({ cvData: data }),
+      setCvData: (data) => {
+        set({ cvData: data });
+        // Persist the base CV to the account so it survives logout→login.
+        if (hasAuth()) void account.createCvProfile({ structured: data, make_active: true }).catch(() => {});
+      },
+
+      syncActiveCvProfile: async () => {
+        if (!hasAuth()) return;
+        try {
+          const p = await account.getActiveCvProfile();
+          if (p?.structured && !get().cvData) set({ cvData: p.structured });
+        } catch {
+          // No active profile on the backend yet — persist the local CV if any
+          // (covers the anon-upload-then-login path).
+          const local = get().cvData;
+          if (local) { try { await account.createCvProfile({ structured: local, make_active: true }); } catch { /* best-effort */ } }
+        }
+      },
 
       setTargetJobTitle: (title) => set({ targetJobTitle: title }),
       setTargetLocation: (cityKey) => set({ targetLocation: cityKey }),

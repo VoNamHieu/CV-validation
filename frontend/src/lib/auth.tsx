@@ -74,6 +74,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (loading) return;
         useAppStore.getState().claimOwnership(userId);
         void useAppStore.getState().loadJobHistory();
+        void useAppStore.getState().syncActiveCvProfile();
     }, [loading, userId]);
 
     const signIn = useCallback(async (email: string, password: string): Promise<AuthResult> => {

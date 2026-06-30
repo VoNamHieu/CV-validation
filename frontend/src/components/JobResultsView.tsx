@@ -277,6 +277,23 @@ export default function JobResultsView({
 
     return (
         <div>
+            {/* How the list is ordered — no per-job score shown; ranking is by
+                semantic (embedding) similarity of each posting to the user's CV. */}
+            {count > 0 && (
+                <div style={{
+                    display: 'flex', gap: 8, alignItems: 'flex-start',
+                    padding: '10px 12px', marginBottom: 14, borderRadius: 10,
+                    background: 'var(--gradient-hero-subtle)', border: '1px solid var(--border-subtle)',
+                    fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.5,
+                }}>
+                    <Sparkle size={14} weight="fill" style={{ color: 'var(--accent-purple)', flexShrink: 0, marginTop: 2 }} />
+                    <span>
+                        Đã sắp xếp theo <strong style={{ color: 'var(--text-primary)' }}>độ phù hợp với CV của bạn</strong> (semantic
+                        search) — việc khớp nhất ở trên. Điểm khớp % chi tiết hiện sau khi chấm điểm.
+                    </span>
+                </div>
+            )}
+
             {/* Job cards */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
                 {candidates.map((c) => (

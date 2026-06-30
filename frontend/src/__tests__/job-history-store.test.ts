@@ -9,7 +9,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const { authState, backend, makeRow, account } = vi.hoisted(() => {
     interface Row { id: string; user_id: string; status: string; notes: string | null; [k: string]: unknown }
     const authState = { logged_in: true };
-    const backend = { currentUser: 'user-A', rows: [] as Row[], seq: 0 };
+    const backend = { currentUser: 'user-A', rows: [] as Row[], seq: 0, profiles: {} as Record<string, unknown> };
     const makeRow = (user: string, body: Record<string, unknown>): Row => {
         backend.seq += 1;
         return {
@@ -49,6 +49,16 @@ const { authState, backend, makeRow, account } = vi.hoisted(() => {
             if (i >= 0) backend.rows.splice(i, 1);
             return { deleted: true };
         }),
+        // cv_profiles: active profile per user (for base-CV persist/restore)
+        getActiveCvProfile: vi.fn(async () => {
+            const p = backend.profiles[backend.currentUser];
+            if (!p) throw new Error('404 No active CV profile');
+            return { id: 'cvp', user_id: backend.currentUser, structured: p, is_active: true };
+        }),
+        createCvProfile: vi.fn(async (body: { structured: unknown }) => {
+            backend.profiles[backend.currentUser] = body.structured;
+            return { id: 'cvp', user_id: backend.currentUser, structured: body.structured, is_active: true };
+        }),
     };
     return { authState, backend, makeRow, account };
 });
@@ -70,7 +80,7 @@ const rec = (over: Partial<JobRecord> = {}): JobRecord => ({
 });
 
 beforeEach(() => {
-    backend.rows = []; backend.seq = 0; backend.currentUser = 'user-A';
+    backend.rows = []; backend.seq = 0; backend.currentUser = 'user-A'; backend.profiles = {};
     authState.logged_in = true;
     useAppStore.getState().resetAll();
     vi.clearAllMocks();
@@ -266,6 +276,34 @@ describe('END-TO-END: score → optimize → new session → reopen', () => {
         expect(st.selectedJdId).toBe(`history-${hist[0].id}`);
         // The editor renders sortedEntries = entries WITH optimizedCv — non-empty here.
         expect(st.jdEntries.filter((e) => e.optimizedCv)).toHaveLength(1);
+    });
+
+    it('base CV survives logout→login: persisted on set, restored on sync', async () => {
+        // logged-in user (ownership claimed) sets a CV → persisted to the account
+        useAppStore.getState().claimOwnership('user-A');
+        useAppStore.getState().setCvData({ name: 'My CV' } as never);
+        await flush();
+        expect(account.createCvProfile).toHaveBeenCalled();
+        expect(backend.profiles['user-A']).toEqual({ name: 'My CV' });
+
+        // logout wipes local data (resetUserData)
+        useAppStore.getState().claimOwnership(null);
+        expect(useAppStore.getState().cvData).toBeNull();
+
+        // login again → sync restores the CV from the account
+        useAppStore.getState().claimOwnership('user-A');
+        await useAppStore.getState().syncActiveCvProfile();
+        expect(useAppStore.getState().cvData).toEqual({ name: 'My CV' });
+    });
+
+    it('sync persists a local CV when the account has none yet (anon-upload→login)', async () => {
+        // anon upload while logged out → not persisted
+        authState.logged_in = false;
+        useAppStore.getState().setCvData({ name: 'Anon CV' } as never);
+        // now logged in, account has no profile → sync should persist the local CV
+        authState.logged_in = true;
+        await useAppStore.getState().syncActiveCvProfile();
+        expect(backend.profiles['user-A']).toEqual({ name: 'Anon CV' });
     });
 
     it('create-race: optimize fires before the create POST resolves, CV still persists', async () => {

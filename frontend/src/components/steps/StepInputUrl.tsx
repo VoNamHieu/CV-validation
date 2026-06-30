@@ -16,6 +16,7 @@ import {
     optimizeCvVariants, reportBrokenLink, type JobListing,
 } from '@/lib/api';
 import { buildSearchUrl, matchesCity, titleMatchScore, cityLabel, experienceGapExceeds } from '@/lib/job-targeting';
+import type { CVData } from '@/lib/types';
 import { buildCvPdfCache } from '@/lib/cv-pdf-cache';
 import { filterUnseenCandidates } from '@/lib/job-dedup';
 
@@ -35,6 +36,19 @@ const PHASE_CONFIG: Record<Exclude<Phase, 'idle'>, { label: string; icon: Icon }
     ranking: { label: 'Đang xếp hạng việc theo độ phù hợp CV...', icon: Sparkle },
     crawling_job: { label: 'Đang phân tích các việc song song...', icon: Lightning },
 };
+
+// Compact CV text for the Phase-2 semantic (embedding) rerank query. Built from
+// structured fields so it survives a logout/login restore (the raw extracted
+// text isn't persisted). Bounded to keep the embed call cheap.
+function buildCvText(cv: CVData): string {
+    return [
+        cv.employment?.current_title || cv.desired_job_title,
+        cv.summary,
+        (cv.skills || []).join(', '),
+        ...(cv.experience || []).slice(0, 6).map((e) =>
+            [e.title, e.company, e.description].filter(Boolean).join(' — ')),
+    ].filter(Boolean).join('\n').slice(0, 6000);
+}
 
 const PHASE_ORDER: Exclude<Phase, 'idle'>[] = [
     'analyzing_cv', 'searching', 'extracting_links', 'ranking', 'crawling_job',
@@ -295,6 +309,12 @@ export default function StepInputUrl() {
                 const search = await searchFeaturedJobsWarm(
                     {
                         target_roles: targetTitle ? [targetTitle] : [],
+                        // CV text → drives the Phase-2 semantic (embedding) rerank:
+                        // jobs are ordered by cosine similarity to the candidate's
+                        // actual CV, so the most compatible postings rank first.
+                        // Built from structured fields (survives a logout/login
+                        // restore where the raw text isn't kept).
+                        cv_text: buildCvText(cvData),
                         // Proven role (CV) as the fit CONSTRAINT — distinct from
                         // target_roles (direction). Lets the engine shade jobs by
                         // transferability when the target differs from the CV.

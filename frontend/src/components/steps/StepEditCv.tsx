@@ -8,7 +8,7 @@ import {
     XCircle, Stop, CaretDown, CaretUp, ShieldWarning, ChartBar,
     ArrowsClockwise, MagnifyingGlassPlus, PencilSimple, ArrowsLeftRight,
 } from '@phosphor-icons/react';
-import { useAppStore } from '@/store/useAppStore';
+import { useAppStore, type JDEntry } from '@/store/useAppStore';
 import { useAuthGate } from '@/lib/auth';
 import { useConsent } from '@/lib/consent-context';
 import GapReportSection from '@/components/GapReportSection';
@@ -102,6 +102,15 @@ export default function StepEditCv() {
     const jobsInFlight = useMemo(() => jdEntries.some(
         e => e.optimizing || (e.status !== 'done' && e.status !== 'error'),
     ), [jdEntries]);
+
+    // A job re-opened from history that has a saved match report but NO tailored
+    // CV yet (created at scoring time, before optimization). Show its report + an
+    // optimize CTA instead of the dead-end "no optimized CV" empty state.
+    const reportOnlyEntry = useMemo(() => {
+        if (sortedEntries.length > 0) return null;
+        const sel = jdEntries.find(e => e.id === selectedJdId);
+        return sel?.matchResult && sel?.jdData && !sel.optimizedCv && !sel.optimizing ? sel : null;
+    }, [sortedEntries, jdEntries, selectedJdId]);
 
     // Open on the job the user clicked through from the report (selectedJdId);
     // fall back to the top-scored CV when there's no selection or it has no
@@ -257,6 +266,30 @@ export default function StepEditCv() {
             setReoptimizing(false);
         }
     }, [currentEntry, cvData, reoptPoints, updateJdEntry, gate]);
+
+    /* ─── Optimize a re-opened (report-only) job: first tailored CV for a saved
+       job that was only scored. Reuses the standard optimizer; on success the
+       entry gains an optimizedCv → it enters sortedEntries → the normal editor
+       takes over. Needs a base CV (restored from the account on login). ─── */
+    const optimizeReopened = useCallback(async (entry: JDEntry) => {
+        if (!entry.jdData || !entry.matchResult) return;
+        if (!cvData) { setStep(1); return; }   // no base CV → send to upload step
+        if (!gate('Đăng nhập để tối ưu CV bằng AI (tặng 50 credit).')) return;
+        updateJdEntry(entry.id, { optimizing: true });
+        try {
+            const data = await optimizeCvVariants(cvData, entry.jdData, entry.matchResult, { useGaps: true });
+            const variant = data.variants[0];
+            if (!variant?.cv) throw new Error('Trình tối ưu không trả về CV nào');
+            updateJdEntry(entry.id, {
+                optimizing: false,
+                optimizedCv: variant.cv,
+                optimizedCvImprovements: variant.improvements,
+            });
+            useAppStore.getState().attachCvToJobRecord(entry.applyUrl || entry.source, variant.cv);
+        } catch {
+            updateJdEntry(entry.id, { optimizing: false });
+        }
+    }, [cvData, gate, updateJdEntry, setStep]);
 
     /* ─── Inline edits made directly on the rendered template preview ───
        Committed into both editedCv (what the preview/download shows) and the
@@ -626,7 +659,10 @@ export default function StepEditCv() {
     // While jobs are still in flight, show a loading state instead of the
     // "no jobs" message — the editor opens on the first scored job before its
     // CV is optimized, so `sortedEntries` is transiently empty.
-    if (!cvData || sortedEntries.length === 0 || !currentEntry) {
+    // Note: a re-opened job can have a tailored CV (from the account) even when
+    // the base CV isn't loaded — so we DON'T gate on cvData here; the editor
+    // renders the tailored CV and the base-CV-dependent bits degrade below.
+    if (sortedEntries.length === 0 || !currentEntry) {
         if (jobsInFlight) {
             return (
                 <div className="animate-fade-in" style={{ maxWidth: 600, margin: '0 auto', padding: '60px 20px', textAlign: 'center' }}>
@@ -645,6 +681,35 @@ export default function StepEditCv() {
                     <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: 24, lineHeight: 1.6 }}>
                         Đã ghép việc xong — chúng tôi đang điều chỉnh CV cho từng công việc. Chúng sẽ hiện ra ở đây ngay khi hoàn tất.
                     </p>
+                </div>
+            );
+        }
+        // Re-opened saved job with a report but no tailored CV yet → show its
+        // match report + an "optimize" CTA (instead of the dead-end below).
+        if (reportOnlyEntry) {
+            return (
+                <div className="animate-fade-in" style={{ maxWidth: 760, margin: '0 auto', padding: '40px 20px' }}>
+                    <button className="btn-secondary" onClick={() => setStep(2)}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 18 }}>
+                        <ArrowLeft size={16} /> Quay lại Tìm việc
+                    </button>
+                    <h3 style={{ fontSize: '1.25rem', fontWeight: 800, marginBottom: 4 }}>
+                        {reportOnlyEntry.jobTitle || reportOnlyEntry.company || reportOnlyEntry.label}
+                    </h3>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem', margin: '0 0 18px', lineHeight: 1.6 }}>
+                        Job đã lưu — đây là báo cáo độ phù hợp đã chấm. Tối ưu CV cho job này để chỉnh sửa và xuất PDF.
+                    </p>
+                    <button className="btn-primary" onClick={() => optimizeReopened(reportOnlyEntry)}
+                        style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center', width: '100%', padding: '11px 16px', marginBottom: 18 }}>
+                        <Sparkle size={16} weight="fill" /> {cvData ? 'Tối ưu CV cho job này' : 'Tải CV để tối ưu'}
+                    </button>
+                    <MatchAnalysisPanel
+                        entryId={reportOnlyEntry.id}
+                        jd={reportOnlyEntry.jdData}
+                        m={reportOnlyEntry.matchResult}
+                        cvData={cvData ?? ({} as CVData)}
+                        onOpenAnalysis={() => setMainTab('analysis')}
+                    />
                 </div>
             );
         }
@@ -1517,7 +1582,7 @@ export default function StepEditCv() {
                         </div>
                         {compareOpen && (
                             <BeforeAfterModal
-                                original={cvData}
+                                original={cvData ?? currentEntry.optimizedCv!}
                                 optimized={mergeProfile(editedCv ?? currentEntry.optimizedCv!)}
                                 templateId={currentEntry.selectedTemplateId}
                                 avatarBase64={userAvatarBase64 ?? undefined}
@@ -1553,7 +1618,7 @@ export default function StepEditCv() {
             <div style={{ display: livePreviewOpen ? 'none' : undefined }}>
                 <CvDocumentPreview
                     key={currentEntry.id}
-                    originalCv={cvData}
+                    originalCv={cvData ?? currentEntry.optimizedCv!}
                     optimizedCv={currentEntry.optimizedCv!}
                     onSave={handleDownload}
                     onEditedChange={handleEditedChange}
@@ -1569,17 +1634,20 @@ export default function StepEditCv() {
                     entryId={currentEntry.id}
                     jd={currentEntry.jdData}
                     m={currentEntry.matchResult}
-                    cvData={cvData}
+                    cvData={cvData ?? ({} as CVData)}
                     onOpenAnalysis={() => setMainTab('analysis')}
                 />
                 {/* What the optimizer changed for THIS job — and an honest
-                    warning when the content is still identical to the base CV */}
-                <ImprovementsPanel
-                    originalCv={cvData}
-                    optimizedCv={editedCv ?? currentEntry.optimizedCv!}
-                    improvements={currentEntry.optimizedCvImprovements}
-                    jobTitle={currentEntry.jobTitle || currentEntry.company || currentEntry.label}
-                />
+                    warning when the content is still identical to the base CV.
+                    Needs the base CV to diff; skipped when it isn't loaded. */}
+                {cvData && (
+                    <ImprovementsPanel
+                        originalCv={cvData}
+                        optimizedCv={editedCv ?? currentEntry.optimizedCv!}
+                        improvements={currentEntry.optimizedCvImprovements}
+                        jobTitle={currentEntry.jobTitle || currentEntry.company || currentEntry.label}
+                    />
+                )}
             </aside>
 
             </div>
@@ -1591,7 +1659,7 @@ export default function StepEditCv() {
                     <GapReportSection
                         key={currentEntry.id}
                         entryId={currentEntry.id}
-                        cv={cvData}
+                        cv={cvData ?? currentEntry.optimizedCv!}
                         jd={currentEntry.jdData}
                         match={currentEntry.matchResult}
                     />
