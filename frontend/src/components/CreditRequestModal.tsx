@@ -8,7 +8,7 @@ import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Coins, CheckCircle, Copy, Coffee, Star, PaperPlaneTilt } from '@phosphor-icons/react';
 import { credits as creditsApi, account } from '@/lib/db';
-import { BANK_INFO, TOPUP_PACKS, FREE_TOPUP, TRANSFER_NOTE, SUPPORT_EMAIL } from '@/lib/payment';
+import { BANK_INFO, TOPUP_PACKS, FREE_TOPUP, TRANSFER_NOTE } from '@/lib/payment';
 
 type View = 'intro' | 'support' | 'pay';
 
@@ -125,10 +125,8 @@ export default function CreditRequestModal({
                         </div>
                         <BankTransfer note={`${TRANSFER_NOTE} ${email}`} />
                         <p style={{ ...descStyle, fontSize: '0.74rem', margin: '12px 0 14px' }}>
-                            Sau khi chuyển, gửi biên lai tới{' '}
-                            <a href={`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent('Mua token Latosa')}&body=${encodeURIComponent(`${TRANSFER_NOTE} ${email}`)}`}
-                                style={{ color: 'var(--accent-blue)', fontWeight: 600 }}>{SUPPORT_EMAIL}</a>.
-                            {' '}Token sẽ được cộng sau khi xác nhận — quá trình có thể mất vài phút để hoàn tất.
+                            Token sẽ được cộng tự động sau khi hệ thống nhận được chuyển khoản —
+                            quá trình có thể mất vài phút để hoàn tất.
                         </p>
                         <button onClick={onClose} style={primaryBtn(false)}>Đã hiểu</button>
                     </>
