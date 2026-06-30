@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import {
     Sparkle, MagicWand, FileText, Briefcase, ArrowRight, SignIn,
     Target, Lightning, CheckCircle, Brain, RocketLaunch,
@@ -29,15 +30,60 @@ const FEATURES = [
 ];
 
 const STATS = [
-    { value: '150+', label: 'công ty được theo dõi' },
     { value: '3', label: 'bước từ CV đến việc' },
     { value: '50', label: 'credit miễn phí khi đăng ký' },
     { value: '0', label: 'tin tuyển dụng rác' },
 ];
 
+// Recognizable employers from the featured pool, shown as a logo marquee for
+// social proof. Domains feed a logo CDN; a failed load falls back to the name
+// (see LogoItem) so the strip never shows a broken image.
+const COMPANIES: { name: string; domain: string }[] = [
+    { name: 'Shopee', domain: 'shopee.vn' },
+    { name: 'VNG', domain: 'vng.com.vn' },
+    { name: 'Tiki', domain: 'tiki.vn' },
+    { name: 'MoMo', domain: 'momo.vn' },
+    { name: 'Grab', domain: 'grab.com' },
+    { name: 'Lazada', domain: 'lazada.vn' },
+    { name: 'TikTok', domain: 'tiktok.com' },
+    { name: 'Agoda', domain: 'agoda.com' },
+    { name: 'Traveloka', domain: 'traveloka.com' },
+    { name: 'Visa', domain: 'visa.com' },
+    { name: 'Mastercard', domain: 'mastercard.com' },
+    { name: 'FPT Software', domain: 'fpt-software.com' },
+    { name: 'Techcombank', domain: 'techcombank.com.vn' },
+    { name: 'Vietcombank', domain: 'vietcombank.com.vn' },
+    { name: 'VPBank', domain: 'vpbank.com.vn' },
+    { name: 'Vinamilk', domain: 'vinamilk.com.vn' },
+    { name: 'Bosch', domain: 'bosch.com' },
+    { name: 'Heineken', domain: 'heineken.com' },
+];
+
+// One logo: image from the CDN, falling back to a wordmark on load error.
+function LogoItem({ name, domain }: { name: string; domain: string }) {
+    const [failed, setFailed] = useState(false);
+    if (failed) return <span className="lp-logo-text">{name}</span>;
+    return (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+            className="lp-logo-img" alt={name} loading="lazy"
+            src={`https://logo.clearbit.com/${domain}`}
+            onError={() => setFailed(true)}
+        />
+    );
+}
+
 export default function Landing() {
     const enterApp = useAppStore((s) => s.enterApp);
     const { enabled, user, promptLogin } = useAuth();
+
+    // Hard gate: when auth is on and nobody's signed in, every "start" CTA opens
+    // the login modal instead of entering the app. Signing in flips the page to
+    // the app automatically (see app/page.tsx). Auth off (dev) → enter directly.
+    const onStart = () => {
+        if (enabled && !user) promptLogin('Đăng nhập để bắt đầu dùng JobFit AI');
+        else enterApp();
+    };
 
     return (
         <div className="lp-root">
@@ -63,7 +109,7 @@ export default function Landing() {
                             <SignIn size={15} weight="duotone" /> Đăng nhập
                         </button>
                     )}
-                    <button className="lp-btn-primary lp-nav-cta" onClick={enterApp}>
+                    <button className="lp-btn-primary lp-nav-cta" onClick={onStart}>
                         Vào app <ArrowRight size={15} weight="bold" />
                     </button>
                 </div>
@@ -84,7 +130,7 @@ export default function Landing() {
                         từng vị trí. Từ một file PDF đến danh sách việc phù hợp — chỉ vài phút.
                     </p>
                     <div className="lp-cta-row">
-                        <button className="lp-btn-primary lp-btn-lg lp-pulse" onClick={enterApp}>
+                        <button className="lp-btn-primary lp-btn-lg lp-pulse" onClick={onStart}>
                             <RocketLaunch size={18} weight="fill" /> Bắt đầu miễn phí
                         </button>
                         {enabled && !user && (
@@ -94,7 +140,7 @@ export default function Landing() {
                         )}
                     </div>
                     <div className="lp-trust">
-                        <CheckCircle size={15} weight="fill" /> Dùng thử không cần đăng nhập
+                        <CheckCircle size={15} weight="fill" /> Đăng ký nhanh bằng email
                         <span className="lp-dot" />
                         <CheckCircle size={15} weight="fill" /> Tặng 50 credit khi tạo tài khoản
                     </div>
@@ -150,6 +196,23 @@ export default function Landing() {
                 ))}
             </section>
 
+            {/* Featured company logos */}
+            <section className="lp-logos">
+                <p className="lp-logos-title">Việc làm nổi bật từ các công ty như:</p>
+                <div className="lp-marquee">
+                    <div className="lp-marquee-track">
+                        {[...COMPANIES, ...COMPANIES].map((c, i) => (
+                            <div className="lp-logo-cell" key={`${c.name}-${i}`}>
+                                <LogoItem name={c.name} domain={c.domain} />
+                            </div>
+                        ))}
+                    </div>
+                </div>
+                <p className="lp-logos-disclaim">
+                    Logos are trademarks of their respective owners. Their appearance does not imply endorsement or partnership.
+                </p>
+            </section>
+
             {/* How it works */}
             <section className="lp-section">
                 <h2 className="lp-h2">Ba bước, từ CV đến việc phù hợp</h2>
@@ -191,7 +254,7 @@ export default function Landing() {
                 <div className="lp-cta-inner">
                     <h2 className="lp-cta-title">Sẵn sàng tìm việc phù hợp?</h2>
                     <p className="lp-cta-desc">Tải CV lên và xem AI làm việc — miễn phí để bắt đầu.</p>
-                    <button className="lp-btn-primary lp-btn-lg" onClick={enterApp}>
+                    <button className="lp-btn-primary lp-btn-lg" onClick={onStart}>
                         <RocketLaunch size={18} weight="fill" /> Bắt đầu ngay
                     </button>
                 </div>
@@ -218,7 +281,7 @@ const LP_CSS = `
 .lp-orb-3 { width: 420px; height: 420px; top: 520px; left: 40%; background: radial-gradient(circle, #22d3ee, transparent 70%); opacity: 0.28; animation: lp-float 24s ease-in-out infinite; }
 @keyframes lp-float { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(40px,30px) scale(1.08); } }
 
-.lp-nav, .lp-hero, .lp-stats, .lp-section, .lp-cta-band, .lp-footer { position: relative; z-index: 1; }
+.lp-nav, .lp-hero, .lp-stats, .lp-logos, .lp-section, .lp-cta-band, .lp-footer { position: relative; z-index: 1; }
 .lp-nav { max-width: 1120px; margin: 0 auto; padding: 20px 24px; display: flex; align-items: center; justify-content: space-between; }
 .lp-brand { display: flex; align-items: center; gap: 10px; }
 .lp-logo { width: 34px; height: 34px; border-radius: 10px; background: var(--gradient-hero); display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 16px rgba(99,102,241,0.4); }
@@ -272,10 +335,26 @@ const LP_CSS = `
 .lp-job-score { font-size: 0.76rem; font-weight: 700; color: var(--text-secondary); width: 34px; text-align: right; }
 
 /* Stats */
-.lp-stats { max-width: 1000px; margin: 26px auto; padding: 22px 24px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; border: 1px solid var(--border-subtle); border-radius: 18px; background: var(--bg-glass); backdrop-filter: blur(10px); }
+.lp-stats { max-width: 800px; margin: 26px auto; padding: 22px 24px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; border: 1px solid var(--border-subtle); border-radius: 18px; background: var(--bg-glass); backdrop-filter: blur(10px); }
 .lp-stat { text-align: center; }
 .lp-stat-val { font-size: clamp(1.5rem, 3vw, 2rem); font-weight: 800; letter-spacing: -0.02em; background: var(--gradient-hero); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
 .lp-stat-label { font-size: 0.74rem; color: var(--text-muted); margin-top: 2px; }
+
+/* Featured logos marquee */
+.lp-logos { max-width: 1120px; margin: 18px auto 0; padding: 26px 24px; text-align: center; }
+.lp-logos-title { font-size: 0.82rem; font-weight: 600; color: var(--text-muted); margin: 0 0 20px; }
+.lp-marquee { position: relative; overflow: hidden;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent); }
+.lp-marquee-track { display: flex; align-items: center; width: max-content; animation: lp-scroll 45s linear infinite; }
+.lp-marquee:hover .lp-marquee-track { animation-play-state: paused; }
+.lp-logo-cell { flex-shrink: 0; height: 40px; margin: 0 26px; display: flex; align-items: center; justify-content: center; }
+.lp-logo-img { height: 30px; width: auto; max-width: 132px; object-fit: contain; filter: grayscale(1); opacity: 0.6; transition: filter .25s, opacity .25s; }
+.lp-logo-cell:hover .lp-logo-img { filter: none; opacity: 1; }
+.lp-logo-text { font-weight: 800; font-size: 1.05rem; letter-spacing: -0.01em; color: var(--text-secondary); white-space: nowrap; opacity: 0.75; }
+.lp-logo-cell:hover .lp-logo-text { color: var(--text-primary); opacity: 1; }
+.lp-logos-disclaim { font-size: 0.66rem; color: var(--text-muted); opacity: 0.65; margin: 22px auto 0; max-width: 540px; line-height: 1.5; }
+@keyframes lp-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
 
 /* Sections */
 .lp-section { max-width: 1000px; margin: 0 auto; padding: 56px 24px; text-align: center; }
@@ -321,5 +400,6 @@ const LP_CSS = `
   .lp-orb, .lp-pulse::after { animation: none; }
   .lp-hero-copy, .lp-mock-wrap { animation: none; }
   .lp-mock { transform: none; }
+  .lp-marquee-track { animation: none; }
 }
 `;

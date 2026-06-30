@@ -1,6 +1,6 @@
 'use client';
 
-import { X, MapPin, Buildings, Plus, ArrowRight, ArrowLeft, Sparkle } from '@phosphor-icons/react';
+import { X, MapPin, Buildings, Plus, ArrowRight, ArrowLeft, Sparkle, ArrowSquareOut } from '@phosphor-icons/react';
 import type { CandidateJob } from '@/store/useAppStore';
 
 // Results page shown between the search step and the editor. Lets the user
@@ -25,7 +25,9 @@ export default function JobResultsView({
         <div>
             {/* Job cards */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
-                {candidates.map((c) => (
+                {candidates.map((c) => {
+                    const jdLink = c.applyUrl || c.url;
+                    return (
                     <div
                         key={c.id}
                         className="glass-card"
@@ -36,12 +38,29 @@ export default function JobResultsView({
                         }}
                     >
                         <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{
-                                fontSize: '0.92rem', fontWeight: 600, color: 'var(--text-primary)',
-                                marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                            }}>
-                                {c.title}
-                            </div>
+                            {jdLink ? (
+                                <a
+                                    href={jdLink} target="_blank" rel="noopener noreferrer"
+                                    title="Xem mô tả công việc (mở tab mới)"
+                                    style={{
+                                        display: 'inline-flex', alignItems: 'center', gap: 5, maxWidth: '100%',
+                                        fontSize: '0.92rem', fontWeight: 600, color: 'var(--text-primary)',
+                                        marginBottom: 4, textDecoration: 'none',
+                                    }}
+                                    onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--accent-purple, #8b5cf6)'; }}
+                                    onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-primary)'; }}
+                                >
+                                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.title}</span>
+                                    <ArrowSquareOut size={14} weight="bold" style={{ flexShrink: 0, opacity: 0.7 }} />
+                                </a>
+                            ) : (
+                                <div style={{
+                                    fontSize: '0.92rem', fontWeight: 600, color: 'var(--text-primary)',
+                                    marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                                }}>
+                                    {c.title}
+                                </div>
+                            )}
                             <div style={{
                                 display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
                                 fontSize: '0.78rem', color: 'var(--text-secondary)',
@@ -82,7 +101,8 @@ export default function JobResultsView({
                             <X size={15} weight="bold" />
                         </button>
                     </div>
-                ))}
+                    );
+                })}
 
                 {count === 0 && (
                     <div style={{

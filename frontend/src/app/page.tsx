@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import { useAppStore } from '@/store/useAppStore';
+import { useAuth } from '@/lib/auth';
 import Sidebar, { SIDEBAR_WIDTH } from '@/components/Sidebar';
 import Stepper from '@/components/Stepper';
 import StepUploadCV from '@/components/steps/StepUploadCV';
@@ -16,6 +17,7 @@ export default function Home() {
   const view = useAppStore((s) => s.view);
   const currentStep = useAppStore((s) => s.currentStep);
   const entered = useAppStore((s) => s.entered);
+  const { user, enabled, loading: authLoading } = useAuth();
 
   // Global listener so __jobfitExtensionId is set as soon as the
   // extension's content-webapp.js posts JOBFIT_EXTENSION_READY,
@@ -32,9 +34,18 @@ export default function Home() {
     return () => window.removeEventListener('message', handler);
   }, []);
 
-  // Front door: show the landing page until the visitor enters the app.
-  // `entered` is persisted, so returning users skip straight to the app.
-  if (!entered) return <Landing />;
+  // Front door. Hard gate: when Supabase Auth is configured, the app is only
+  // reachable by a logged-in user — anonymous visitors always see the landing
+  // page (its CTAs open the login modal). When auth isn't configured (dev /
+  // no Supabase env), fall back to the persisted `entered` flag.
+  if (enabled) {
+    // Don't flash the landing while the session is still being restored, or a
+    // returning logged-in user would see a blink of the front door.
+    if (authLoading) return null;
+    if (!user) return <Landing />;
+  } else if (!entered) {
+    return <Landing />;
+  }
 
   return (
     <div style={{ minHeight: '100vh', position: 'relative' }}>
