@@ -101,7 +101,7 @@ export default function Sidebar() {
                         WebkitTextFillColor: 'transparent',
                     }}
                 >
-                    Latosa
+                    Copo
                 </span>
             </div>
 

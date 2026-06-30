@@ -59,7 +59,7 @@ interface BatchProgress {
 }
 
 /**
- * Check if the Latosa extension is installed.
+ * Check if the Copo extension is installed.
  * The extension's content-webapp.js posts JOBFIT_EXTENSION_READY on load.
  * We also listen for JOBFIT_AUTO_APPLY_RESPONSE.
  */
@@ -396,7 +396,7 @@ export default function StepEditCv() {
         const handle = setTimeout(() => {
             const profile = cvToExtensionProfile(cvData);
             syncProfileToExtension(profile, cvData).then((res) => {
-                if (!res.ok) console.warn('[Latosa] Auto-sync profile → extension failed:', res.error);
+                if (!res.ok) console.warn('[Copo] Auto-sync profile → extension failed:', res.error);
             });
         }, 500);
         return () => clearTimeout(handle);
@@ -483,7 +483,7 @@ export default function StepEditCv() {
         if (!(await ensureAgentConsent())) return;
         if (!isExtensionAvailable()) {
             setAutoApplyStatus('no-extension');
-            setAutoApplyMessage('Extension chưa cài! Vui lòng cài Latosa Extension trước.');
+            setAutoApplyMessage('Extension chưa cài! Vui lòng cài Copo Extension trước.');
             promptInstallExtension();
             setTimeout(() => setAutoApplyStatus('idle'), 5000);
             return;
@@ -537,7 +537,7 @@ export default function StepEditCv() {
         if (!(await ensureAgentConsent())) return;
         if (!isExtensionAvailable()) {
             setAutoApplyStatus('no-extension');
-            setAutoApplyMessage('Extension chưa cài! Vui lòng cài Latosa Extension trước.');
+            setAutoApplyMessage('Extension chưa cài! Vui lòng cài Copo Extension trước.');
             promptInstallExtension();
             setTimeout(() => setAutoApplyStatus('idle'), 5000);
             return;

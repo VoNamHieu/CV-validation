@@ -22,7 +22,7 @@ export default function LegalShell({
                     maxWidth: 760, margin: '0 auto', padding: '16px 24px',
                     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                 }}>
-                    <Link href="/" className="legal-brand">Latosa</Link>
+                    <Link href="/" className="legal-brand">Copo</Link>
                     <Link href="/" className="legal-back">← Về trang chủ</Link>
                 </div>
             </header>
@@ -41,7 +41,7 @@ export default function LegalShell({
                     <a href="mailto:vonamhieu.work@gmail.com" className="legal-footer-link">Liên hệ</a>
                 </div>
                 <div style={{ marginTop: 10, opacity: 0.7 }}>
-                    © 2026 Latosa · Vận hành bởi AI · Cam kết không bịa nội dung
+                    © 2026 Copo · Vận hành bởi AI · Cam kết không bịa nội dung
                 </div>
             </footer>
         </div>

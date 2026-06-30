@@ -1,6 +1,6 @@
 /**
- * Latosa — Content Script for Web App
- * Runs on the Latosa web app pages (localhost + vercel.app)
+ * Copo — Content Script for Web App
+ * Runs on the Copo web app pages (localhost + vercel.app)
  *
  * Responsibilities:
  * 1. Announce extension presence to web app
@@ -25,7 +25,7 @@
     announce();
     [1000, 3000, 8000].forEach(ms => setTimeout(announce, ms));
 
-    console.log('[Latosa] Extension content script loaded on web app');
+    console.log('[Copo] Extension content script loaded on web app');
 
     /**
      * Relay a message to the background worker and always answer the page,
@@ -71,7 +71,7 @@
 
         // ─── Batch Auto Apply All ───
         if (event.data?.type === 'JOBFIT_AUTO_APPLY_ALL') {
-            console.log('[Latosa] Received AUTO_APPLY_ALL with', event.data.jobs?.length, 'jobs');
+            console.log('[Copo] Received AUTO_APPLY_ALL with', event.data.jobs?.length, 'jobs');
             relay({
                 type: 'AUTO_APPLY_ALL_START',
                 jobs: event.data.jobs,

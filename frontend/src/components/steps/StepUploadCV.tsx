@@ -66,7 +66,7 @@ export default function StepUploadCV() {
             syncProfileToExtension(profile, structured).then((res) => {
                 setExtSynced(res.ok);
                 setExtSyncError(res.error ?? '');
-                if (!res.ok) console.warn('[Latosa] Profile sync → extension failed:', res.error);
+                if (!res.ok) console.warn('[Copo] Profile sync → extension failed:', res.error);
             });
             // Also sync the rich CV JSON so the extension can tailor it on a job
             // page (Mode 1) — the relay drops cvData from the profile message.

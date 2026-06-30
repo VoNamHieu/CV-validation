@@ -20,7 +20,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Latosa | Trợ lý tìm việc & tối ưu CV",
+  title: "Copo | Trợ lý tìm việc & tối ưu CV",
   description: "Tải CV lên, để AI tìm việc phù hợp, chấm điểm độ khớp và gợi ý tối ưu CV — cam kết không bịa nội dung.",
 };
 

@@ -1,5 +1,5 @@
 /**
- * Latosa — Auto Apply Extension
+ * Copo — Auto Apply Extension
  * Shared utility functions for form filling
  */
 
@@ -138,7 +138,7 @@ function createFloatingButton(siteName) {
     const btn = document.createElement('button');
     btn.id = 'jobfit-auto-apply-btn';
     btn.innerHTML = `⚡ Auto Apply`;
-    btn.title = `Latosa — Auto Apply (${siteName})`;
+    btn.title = `Copo — Auto Apply (${siteName})`;
     document.body.appendChild(btn);
     return btn;
 }
@@ -150,7 +150,7 @@ function showConfirmation(siteName, onConfirm, onCancel) {
     overlay.innerHTML = `
     <div class="jobfit-confirm-card">
       <div class="jobfit-confirm-header">
-        <span>⚡</span> Latosa — Auto Apply
+        <span>⚡</span> Copo — Auto Apply
       </div>
       <div class="jobfit-confirm-body">
         <p>Form đã được điền tự động trên <strong>${siteName}</strong>.</p>

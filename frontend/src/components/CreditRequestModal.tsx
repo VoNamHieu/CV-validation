@@ -163,7 +163,7 @@ function SupportView({ granted, email, onClose }: { granted: number; email: stri
         <>
             <h2 style={titleStyle}>Đã cộng {granted} token! 🎉</h2>
             <p style={descStyle}>
-                Cảm ơn bạn đã dùng Latosa. Nếu thấy hữu ích, bạn có thể ủng hộ mình một chút —
+                Cảm ơn bạn đã dùng Copo. Nếu thấy hữu ích, bạn có thể ủng hộ mình một chút —
                 hoàn toàn tuỳ tâm.
             </p>
 
@@ -182,7 +182,7 @@ function SupportView({ granted, email, onClose }: { granted: number; email: stri
                     padding: 14, marginBottom: 12, background: 'var(--bg-card)',
                 }}>
                     <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>
-                        Góp ý để Latosa tốt hơn
+                        Góp ý để Copo tốt hơn
                     </div>
                     <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
                         {[1, 2, 3, 4, 5].map((n) => (
@@ -222,7 +222,7 @@ function SupportView({ granted, email, onClose }: { granted: number; email: stri
                     <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
                         <Coffee size={16} weight="duotone" style={{ color: 'var(--accent-amber, #f59e0b)' }} /> Mời mình ly cà phê (tuỳ tâm)
                     </div>
-                    <BankTransfer note={`Latosa cafe ${email}`} />
+                    <BankTransfer note={`Copo cafe ${email}`} />
                 </div>
             ) : (
                 <button

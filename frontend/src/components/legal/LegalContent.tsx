@@ -23,15 +23,15 @@ export function TermsContent() {
     return (
         <>
             <p className="lead">
-                Các điều khoản này điều chỉnh việc bạn sử dụng Latosa (&quot;chúng tôi&quot;, &quot;Latosa&quot;) —
+                Các điều khoản này điều chỉnh việc bạn sử dụng Copo (&quot;chúng tôi&quot;, &quot;Copo&quot;) —
                 bao gồm ứng dụng web và tiện ích mở rộng trình duyệt Chrome. Bằng việc tạo tài khoản hoặc sử dụng
                 dịch vụ, bạn đồng ý với các điều khoản này. Nếu không đồng ý, vui lòng không sử dụng dịch vụ.
             </p>
 
             <h2>1. Mô tả dịch vụ</h2>
-            <p>Latosa là công cụ hỗ trợ tìm việc bằng AI: phân tích CV, gợi ý vị trí và công ty đang tuyển,
+            <p>Copo là công cụ hỗ trợ tìm việc bằng AI: phân tích CV, gợi ý vị trí và công ty đang tuyển,
                 chấm điểm độ phù hợp, gợi ý tối ưu CV theo từng vị trí, và hỗ trợ điền đơn ứng tuyển qua tiện ích
-                trình duyệt. Latosa là công cụ hỗ trợ — không phải đơn vị tuyển dụng, không phải đại diện của bất
+                trình duyệt. Copo là công cụ hỗ trợ — không phải đơn vị tuyển dụng, không phải đại diện của bất
                 kỳ nhà tuyển dụng nào, và không đảm bảo bạn sẽ được phỏng vấn hay nhận việc.</p>
 
             <h2>2. Tài khoản</h2>
@@ -40,17 +40,17 @@ export function TermsContent() {
                 tin chính xác và thông báo cho chúng tôi nếu nghi ngờ tài khoản bị truy cập trái phép.</p>
 
             <h2>3. Điều kiện độ tuổi</h2>
-            <p>Dịch vụ dành cho người dùng từ đủ 18 tuổi trở lên. Bằng việc sử dụng Latosa, bạn xác nhận mình đáp
+            <p>Dịch vụ dành cho người dùng từ đủ 18 tuổi trở lên. Bằng việc sử dụng Copo, bạn xác nhận mình đáp
                 ứng điều kiện này.</p>
 
             <h2>4. Credit và thanh toán</h2>
             <p>Một số thao tác AI tiêu tốn &quot;credit&quot;. Tài khoản mới được tặng một lượng credit miễn phí.
-                Hiện tại Latosa chưa tích hợp cổng thanh toán và không thu phí. Chúng tôi có thể thay đổi cơ chế
+                Hiện tại Copo chưa tích hợp cổng thanh toán và không thu phí. Chúng tôi có thể thay đổi cơ chế
                 credit, hạn mức hoặc giới thiệu gói trả phí trong tương lai; mọi thay đổi sẽ được thông báo trên
                 dịch vụ trước khi áp dụng.</p>
 
             <h2>5. Sử dụng được phép</h2>
-            <p>Bạn đồng ý chỉ sử dụng Latosa cho mục đích tìm việc hợp pháp của cá nhân bạn. Bạn không được:</p>
+            <p>Bạn đồng ý chỉ sử dụng Copo cho mục đích tìm việc hợp pháp của cá nhân bạn. Bạn không được:</p>
             <ul>
                 <li>tải lên nội dung sai sự thật, vi phạm pháp luật, hoặc xâm phạm quyền của người khác;</li>
                 <li>sử dụng dịch vụ để gửi thư rác (spam) hoặc nộp đơn hàng loạt gây phiền nhiễu cho nhà tuyển dụng;</li>
@@ -61,7 +61,7 @@ export function TermsContent() {
 
             <h2>6. Nội dung của bạn</h2>
             <p>Bạn giữ toàn bộ quyền sở hữu đối với CV, mô tả công việc và nội dung khác bạn cung cấp. Bạn cấp cho
-                Latosa quyền xử lý các nội dung đó (bao gồm gửi tới nhà cung cấp AI) chỉ nhằm cung cấp dịch vụ cho
+                Copo quyền xử lý các nội dung đó (bao gồm gửi tới nhà cung cấp AI) chỉ nhằm cung cấp dịch vụ cho
                 bạn. Bạn cam kết có quyền hợp pháp đối với nội dung mình tải lên.</p>
 
             <h2>7. Tính năng AI và giới hạn</h2>
@@ -74,11 +74,11 @@ export function TermsContent() {
             <h2>8. Tiện ích Chrome và tự động điền đơn</h2>
             <p>Tính năng tự động điền chỉ hoạt động khi bạn chủ động kích hoạt trên một trang tuyển dụng. Bạn có
                 trách nhiệm rà soát kỹ toàn bộ thông tin được điền và chịu trách nhiệm cho đơn ứng tuyển trước khi
-                nhấn nộp. Latosa không chịu trách nhiệm cho nội dung bạn đã nộp, và việc bạn sử dụng tính năng này
+                nhấn nộp. Copo không chịu trách nhiệm cho nội dung bạn đã nộp, và việc bạn sử dụng tính năng này
                 phải tuân thủ điều khoản của trang tuyển dụng liên quan.</p>
 
             <h2>9. Sở hữu trí tuệ</h2>
-            <p>Dịch vụ, thương hiệu, giao diện, mã nguồn và các thành phần của Latosa thuộc quyền sở hữu của chúng
+            <p>Dịch vụ, thương hiệu, giao diện, mã nguồn và các thành phần của Copo thuộc quyền sở hữu của chúng
                 tôi và được pháp luật bảo hộ. Điều khoản này không trao cho bạn bất kỳ quyền nào đối với chúng,
                 ngoài quyền sử dụng dịch vụ theo đúng các điều khoản này.</p>
 
@@ -88,7 +88,7 @@ export function TermsContent() {
                 lỗi, hay rằng kết quả AI là chính xác hoặc phù hợp cho mục đích cụ thể của bạn.</p>
 
             <h2>11. Giới hạn trách nhiệm</h2>
-            <p>Trong phạm vi pháp luật cho phép, Latosa không chịu trách nhiệm cho các thiệt hại gián tiếp, ngẫu
+            <p>Trong phạm vi pháp luật cho phép, Copo không chịu trách nhiệm cho các thiệt hại gián tiếp, ngẫu
                 nhiên hoặc hệ quả phát sinh từ việc sử dụng (hoặc không thể sử dụng) dịch vụ, bao gồm nhưng không
                 giới hạn ở việc mất cơ hội việc làm, mất dữ liệu, hay sai sót trong nội dung do AI tạo ra.</p>
 
@@ -118,10 +118,10 @@ export function PrivacyContent() {
     return (
         <>
             <p className="lead">
-                Latosa (&quot;chúng tôi&quot;, &quot;Latosa&quot;) là dịch vụ hỗ trợ tìm việc bằng AI, bao gồm
+                Copo (&quot;chúng tôi&quot;, &quot;Copo&quot;) là dịch vụ hỗ trợ tìm việc bằng AI, bao gồm
                 ứng dụng web và tiện ích mở rộng trình duyệt Chrome. Chính sách này giải thích chúng tôi
                 thu thập, sử dụng, chia sẻ và bảo vệ dữ liệu cá nhân của bạn như thế nào khi bạn sử dụng
-                Latosa.
+                Copo.
             </p>
 
             <h2>1. Dữ liệu chúng tôi thu thập</h2>
@@ -132,7 +132,7 @@ export function PrivacyContent() {
             <p><strong>1.3 Dữ liệu tin tuyển dụng</strong> — Link hoặc nội dung mô tả công việc (JD) bạn nhập vào
                 hệ thống để phân tích và so khớp.</p>
             <p><strong>1.4 Dữ liệu sử dụng dịch vụ</strong> — Lịch sử các hành động bạn thực hiện (trích xuất CV,
-                chấm điểm phù hợp, tối ưu CV, tự động điền đơn) và số credit đã sử dụng. Hiện tại Latosa chưa
+                chấm điểm phù hợp, tối ưu CV, tự động điền đơn) và số credit đã sử dụng. Hiện tại Copo chưa
                 tích hợp cổng thanh toán, nên chúng tôi không thu thập hoặc lưu trữ thông tin thẻ/tài khoản
                 ngân hàng của bạn.</p>
             <p><strong>1.5 Dữ liệu theo dõi ứng tuyển</strong> — Trạng thái các đơn ứng tuyển bạn lưu lại trong
@@ -164,7 +164,7 @@ export function PrivacyContent() {
                 <li><strong>Railway</strong> — Hạ tầng máy chủ backend xử lý các yêu cầu của ứng dụng.</li>
             </ul>
             <p>Chúng tôi có thể tiết lộ dữ liệu nếu pháp luật yêu cầu, hoặc để bảo vệ quyền, tài sản, an toàn của
-                Latosa, người dùng, hoặc bên thứ ba.</p>
+                Copo, người dùng, hoặc bên thứ ba.</p>
 
             <h2>4. Lưu trữ và bảo mật</h2>
             <p>Dữ liệu được truyền tải qua kết nối mã hoá (HTTPS) và xác thực bằng JWT. Quyền truy cập dữ liệu
@@ -187,7 +187,7 @@ export function PrivacyContent() {
                 <a href="mailto:vonamhieu.work@gmail.com">vonamhieu.work@gmail.com</a>.</p>
 
             <h2>7. Tiện ích mở rộng Chrome</h2>
-            <p>Tiện ích Latosa yêu cầu một số quyền truy cập trình duyệt (đọc/tương tác với nội dung trang,
+            <p>Tiện ích Copo yêu cầu một số quyền truy cập trình duyệt (đọc/tương tác với nội dung trang,
                 quản lý tab) để thực hiện chức năng tự động điền đơn ứng tuyển trên các trang tuyển dụng. Phạm vi
                 quyền truy cập được giới hạn ở mức cần thiết cho chức năng này; tiện ích không theo dõi hoạt động
                 duyệt web của bạn ngoài mục đích đã nêu, và không thu thập hay truyền dữ liệu mà không có hành
@@ -198,7 +198,7 @@ export function PrivacyContent() {
                 hiện không sử dụng cookie theo dõi quảng cáo của bên thứ ba.</p>
 
             <h2>9. Trẻ em</h2>
-            <p>Latosa không hướng đến và không cố ý thu thập dữ liệu từ người dùng dưới 18 tuổi. Nếu bạn cho
+            <p>Copo không hướng đến và không cố ý thu thập dữ liệu từ người dùng dưới 18 tuổi. Nếu bạn cho
                 rằng chúng tôi đã vô tình thu thập dữ liệu của người dưới 18 tuổi, vui lòng liên hệ để chúng tôi
                 xử lý.</p>
 

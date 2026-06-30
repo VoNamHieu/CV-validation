@@ -133,7 +133,7 @@ function DemoPlayer() {
                 <span className="lp-mock-dot" style={{ background: '#ff5f57' }} />
                 <span className="lp-mock-dot" style={{ background: '#febc2e' }} />
                 <span className="lp-mock-dot" style={{ background: '#28c840' }} />
-                <span className="lp-mock-url">latosa.ai · Demo</span>
+                <span className="lp-mock-url">copo.ai · Demo</span>
                 <button
                     className="lp-demo-play"
                     onClick={() => setPaused((p) => !p)}
@@ -279,7 +279,7 @@ export default function Landing() {
     // the login modal instead of entering the app. Signing in flips the page to
     // the app automatically (see app/page.tsx). Auth off (dev) → enter directly.
     const onStart = () => {
-        if (enabled && !user) promptLogin('Đăng nhập để bắt đầu dùng Latosa');
+        if (enabled && !user) promptLogin('Đăng nhập để bắt đầu dùng Copo');
         else enterApp();
     };
 
@@ -299,7 +299,7 @@ export default function Landing() {
             <header className="lp-nav">
                 <div className="lp-brand">
                     <span className="lp-logo"><Sparkle size={18} weight="fill" color="#fff" /></span>
-                    <span className="lp-brand-name">Latosa</span>
+                    <span className="lp-brand-name">Copo</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     {enabled && !user && (
@@ -351,7 +351,7 @@ export default function Landing() {
                             <span className="lp-mock-dot" style={{ background: '#ff5f57' }} />
                             <span className="lp-mock-dot" style={{ background: '#febc2e' }} />
                             <span className="lp-mock-dot" style={{ background: '#28c840' }} />
-                            <span className="lp-mock-url">latosa.ai · So khớp</span>
+                            <span className="lp-mock-url">copo.ai · So khớp</span>
                         </div>
                         <div className="lp-mock-body">
                             <div className="lp-mock-score">
@@ -466,7 +466,7 @@ export default function Landing() {
             <footer className="lp-footer">
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
                     <span className="lp-logo lp-logo-sm"><Sparkle size={13} weight="fill" color="#fff" /></span>
-                    Latosa · Vận hành bởi AI · Cam kết không bịa nội dung
+                    Copo · Vận hành bởi AI · Cam kết không bịa nội dung
                 </div>
                 <div className="lp-footer-links">
                     <a href="/privacy">Quyền riêng tư</a>

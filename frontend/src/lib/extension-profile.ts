@@ -1,5 +1,5 @@
 // Single source of truth for the 23-field profile shape consumed by the
-// Latosa extension popup and content-agent autofill. Maps a CVData
+// Copo extension popup and content-agent autofill. Maps a CVData
 // object into the flat shape the extension expects.
 
 import type { CVData } from "@/lib/types";

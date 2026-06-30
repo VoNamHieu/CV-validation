@@ -1,6 +1,6 @@
 'use client';
 
-// Shown when the user triggers an auto-apply action without the Latosa Chrome
+// Shown when the user triggers an auto-apply action without the Copo Chrome
 // extension installed. Globally mounted (layout) and opened via the
 // NEED_EXTENSION_EVENT, so any caller just dispatches promptInstallExtension().
 import { useEffect, useState } from 'react';
@@ -9,7 +9,7 @@ import { X, PuzzlePiece, ArrowSquareOut, CheckCircle } from '@phosphor-icons/rea
 import { EXTENSION_INSTALL_URL, NEED_EXTENSION_EVENT } from '@/lib/extension-install';
 
 const STEPS = [
-    'Tải & cài extension Latosa cho Chrome từ link bên dưới.',
+    'Tải & cài extension Copo cho Chrome từ link bên dưới.',
     'Ghim extension, rồi quay lại đây và tải lại trang (F5).',
     'Bấm "Ứng tuyển tự động" lại — agent sẽ tự điền form.',
 ];
@@ -61,10 +61,10 @@ export default function InstallExtensionModal() {
                 </div>
 
                 <h2 style={{ fontSize: '1.05rem', fontWeight: 700, marginBottom: 6, color: 'var(--text-primary)' }}>
-                    Cần cài extension Latosa
+                    Cần cài extension Copo
                 </h2>
                 <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: 16, lineHeight: 1.55 }}>
-                    Tính năng tự động ứng tuyển cần extension Latosa cho Chrome để điền form trên trang
+                    Tính năng tự động ứng tuyển cần extension Copo cho Chrome để điền form trên trang
                     tuyển dụng. Cài một lần là dùng được.
                 </p>
 
@@ -91,7 +91,7 @@ export default function InstallExtensionModal() {
                         display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
                     }}
                 >
-                    <ArrowSquareOut size={17} weight="bold" /> Cài extension Latosa
+                    <ArrowSquareOut size={17} weight="bold" /> Cài extension Copo
                 </a>
 
                 <div style={{

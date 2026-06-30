@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Latosa — Auto Apply",
+  "name": "Copo — Auto Apply",
   "version": "2.4.0",
-  "description": "AI Agent tự động ứng tuyển trên BẤT KỲ job site nào với CV đã optimize từ Latosa",
+  "description": "AI Agent tự động ứng tuyển trên BẤT KỲ job site nào với CV đã optimize từ Copo",
   "permissions": [
     "activeTab",
     "storage",
