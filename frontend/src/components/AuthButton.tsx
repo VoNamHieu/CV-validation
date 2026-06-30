@@ -1,19 +1,21 @@
 'use client';
 
 import { useState } from 'react';
-import { SignIn, SignOut, UserCircle, Coins, Trash } from '@phosphor-icons/react';
+import { SignIn, SignOut, UserCircle, Coins, Trash, Plus } from '@phosphor-icons/react';
 import { useAuth } from '@/lib/auth';
 import { useCredits } from '@/lib/credits-context';
 import { useAppStore } from '@/store/useAppStore';
 import DeleteAccountModal from './DeleteAccountModal';
+import CreditRequestModal from './CreditRequestModal';
 
 // Sidebar auth widget: a login button when signed out, or the user's email +
 // sign-out when signed in. Renders nothing if Supabase Auth isn't configured.
 export default function AuthButton() {
     const { enabled, user, loading, signOut, promptLogin } = useAuth();
-    const { balance } = useCredits();
+    const { balance, refresh } = useCredits();
     const resetAll = useAppStore((s) => s.resetAll);
     const [deleteOpen, setDeleteOpen] = useState(false);
+    const [topupOpen, setTopupOpen] = useState(false);
 
     if (!enabled) return null;
 
@@ -48,6 +50,14 @@ export default function AuthButton() {
                     </span>
                 </div>
                 <button
+                    onClick={() => setTopupOpen(true)}
+                    style={rowStyle}
+                    onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-primary)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-secondary)'; }}
+                >
+                    <Plus size={15} weight="bold" /> Xin thêm credit
+                </button>
+                <button
                     onClick={() => signOut()}
                     style={rowStyle}
                     onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-primary)'; }}
@@ -63,6 +73,14 @@ export default function AuthButton() {
                 >
                     <Trash size={15} weight="duotone" /> Xoá tài khoản
                 </button>
+
+                {topupOpen && (
+                    <CreditRequestModal
+                        email={user.email ?? ''}
+                        onClose={() => setTopupOpen(false)}
+                        onGranted={refresh}
+                    />
+                )}
 
                 {deleteOpen && (
                     <DeleteAccountModal

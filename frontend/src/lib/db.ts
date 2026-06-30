@@ -155,6 +155,9 @@ export const catalog = {
 export const credits = {
     balance: () => req<{ balance: number; signup_grant: number }>(`/api/credits/balance`, { auth: true }),
     costs: () => req<Record<string, number>>(`/api/credits/costs`),
+    // One-time free top-up; after that returns requires_payment=true.
+    requestTopup: () => req<{ granted: number; balance: number; requires_payment: boolean }>(
+        `/api/credits/request-topup`, { method: 'POST', auth: true }),
 };
 
 // ── Admin (allowlisted operators only; backend enforces via ADMIN_EMAILS) ─────

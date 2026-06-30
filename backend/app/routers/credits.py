@@ -47,6 +47,13 @@ async def costs():
     return COSTS
 
 
+@router.post("/request-topup")
+async def request_topup(user_id: str = Depends(get_current_user_id)):
+    """First request grants a one-time free top-up; subsequent requests return
+    requires_payment=True so the client shows bank-transfer details."""
+    return await credits_repo.request_topup(user_id)
+
+
 @router.post("/spend")
 async def spend(body: SpendBody, user_id: str = Depends(get_current_user_id)):
     base = COSTS.get(body.action)

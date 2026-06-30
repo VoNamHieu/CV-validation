@@ -61,6 +61,40 @@ async def spend(user_id: str, action: str, cost: int) -> tuple[bool, int]:
             return True, bal
 
 
+FREE_TOPUP_AMOUNT = int(os.getenv("CREDIT_FREE_TOPUP", "50"))
+
+
+async def request_topup(user_id: str, amount: int = FREE_TOPUP_AMOUNT) -> dict:
+    """One-time free top-up. The first request grants `amount` credits; any
+    request after that requires payment (returns requires_payment=True so the
+    UI shows bank-transfer details). Locks the user's credits row so concurrent
+    requests can't double-grant."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await _ensure(conn, user_id)
+            # Serialize per-user so the EXISTS check + grant are atomic.
+            await conn.fetchval("SELECT balance FROM credits WHERE user_id = $1 FOR UPDATE", user_id)
+            used = await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM credit_ledger WHERE user_id = $1 AND reason = 'free_topup')",
+                user_id,
+            )
+            if used:
+                bal = await conn.fetchval("SELECT balance FROM credits WHERE user_id = $1", user_id)
+                return {"granted": 0, "balance": bal, "requires_payment": True}
+            bal = await conn.fetchval(
+                "UPDATE credits SET balance = balance + $2, granted_total = granted_total + $2, "
+                "updated_at = now() WHERE user_id = $1 RETURNING balance",
+                user_id, amount,
+            )
+            await conn.execute(
+                "INSERT INTO credit_ledger (user_id, delta, reason, balance_after) "
+                "VALUES ($1, $2, 'free_topup', $3)",
+                user_id, amount, bal,
+            )
+            return {"granted": amount, "balance": bal, "requires_payment": False}
+
+
 async def grant(user_id: str, amount: int, reason: str = "topup") -> int:
     """Add credits (top-up / promo). Returns new balance."""
     pool = await get_pool()
