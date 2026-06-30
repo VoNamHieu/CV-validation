@@ -8,7 +8,7 @@ import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Coins, CheckCircle, Copy, Coffee, Star, PaperPlaneTilt } from '@phosphor-icons/react';
 import { credits as creditsApi, account } from '@/lib/db';
-import { BANK_INFO, TOPUP_PACK, SUPPORT_EMAIL } from '@/lib/payment';
+import { BANK_INFO, TOPUP_PACKS, FREE_TOPUP, TRANSFER_NOTE, SUPPORT_EMAIL } from '@/lib/payment';
 
 type View = 'intro' | 'support' | 'pay';
 
@@ -85,14 +85,14 @@ export default function CreditRequestModal({
 
                 {view === 'intro' && (
                     <>
-                        <h2 style={titleStyle}>Xin thêm credit</h2>
+                        <h2 style={titleStyle}>Xin thêm token</h2>
                         <p style={descStyle}>
-                            Lần đầu bạn được tặng thêm <strong style={{ color: 'var(--text-primary)' }}>{TOPUP_PACK.credits} credit</strong> miễn phí.
+                            Lần đầu bạn được tặng thêm <strong style={{ color: 'var(--text-primary)' }}>{FREE_TOPUP} token</strong> miễn phí.
                             Sau đó, để dùng tiếp bạn cần mua thêm qua chuyển khoản.
                         </p>
                         {error && <div style={errStyle}>{error}</div>}
                         <button onClick={request} disabled={busy} style={primaryBtn(busy)}>
-                            {busy ? 'Đang xử lý…' : `Nhận thêm ${TOPUP_PACK.credits} credit`}
+                            {busy ? 'Đang xử lý…' : `Nhận thêm ${FREE_TOPUP} token`}
                         </button>
                     </>
                 )}
@@ -103,18 +103,32 @@ export default function CreditRequestModal({
 
                 {view === 'pay' && (
                     <>
-                        <h2 style={titleStyle}>Mua thêm credit</h2>
+                        <h2 style={titleStyle}>Mua thêm token</h2>
                         <p style={descStyle}>
-                            Bạn đã dùng hết lượt miễn phí. Chuyển khoản theo thông tin dưới đây
-                            ({TOPUP_PACK.credits} credit · {TOPUP_PACK.priceVnd.toLocaleString('vi-VN')}đ), ghi đúng nội dung,
-                            rồi credit sẽ được cộng sau khi xác nhận.
+                            Bạn đã dùng hết lượt miễn phí. Chọn gói, chuyển khoản đúng số tiền + nội dung
+                            bên dưới — token sẽ được cộng sau khi xác nhận.
                         </p>
-                        <BankTransfer note={`Latosa ${email}`} amount={`${TOPUP_PACK.priceVnd.toLocaleString('vi-VN')}đ`} />
+                        <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+                            {TOPUP_PACKS.map((p) => (
+                                <div key={p.credits} style={{
+                                    flex: 1, border: '1px solid var(--border-subtle)', borderRadius: 10,
+                                    padding: '12px 10px', textAlign: 'center', background: 'var(--bg-card)',
+                                }}>
+                                    <div style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                                        {p.credits} <span style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-muted)' }}>token</span>
+                                    </div>
+                                    <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--accent-purple, #8b5cf6)', marginTop: 2 }}>
+                                        {p.priceVnd.toLocaleString('vi-VN')}đ
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                        <BankTransfer note={`${TRANSFER_NOTE} ${email}`} />
                         <p style={{ ...descStyle, fontSize: '0.74rem', margin: '12px 0 14px' }}>
                             Sau khi chuyển, gửi biên lai tới{' '}
-                            <a href={`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent('Mua credit Latosa')}&body=${encodeURIComponent(`Latosa ${email}`)}`}
+                            <a href={`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent('Mua token Career AI')}&body=${encodeURIComponent(`${TRANSFER_NOTE} ${email}`)}`}
                                 style={{ color: 'var(--accent-blue)', fontWeight: 600 }}>{SUPPORT_EMAIL}</a>
-                            {' '}để được cộng credit sớm nhất.
+                            {' '}để được cộng token sớm nhất.
                         </p>
                         <button onClick={onClose} style={primaryBtn(false)}>Đã hiểu</button>
                     </>
@@ -210,7 +224,7 @@ function SupportView({ granted, email, onClose }: { granted: number; email: stri
                     <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
                         <Coffee size={16} weight="duotone" style={{ color: 'var(--accent-amber, #f59e0b)' }} /> Mời mình ly cà phê (tuỳ tâm)
                     </div>
-                    <BankTransfer note={`Latosa cafe ${email}`} />
+                    <BankTransfer note={`Career AI cafe ${email}`} />
                 </div>
             ) : (
                 <button

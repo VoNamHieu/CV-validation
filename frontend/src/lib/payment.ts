@@ -1,16 +1,24 @@
 // Bank-transfer payment details shown when a user needs to buy more credits
 // (no payment gateway yet — manual transfer + the owner tops them up).
-//
-// TODO(owner): edit these and drop your bank QR image at public/bank-qr.png.
-// Transfer note should be the user's email so top-ups can be matched.
+// Drop your bank QR image at public/bank-qr.png.
 export const BANK_INFO = {
-    bank: 'Vietcombank',
-    accountNumber: '0000000000',
+    bank: 'VPBank',
+    accountNumber: '880010603',
     accountHolder: 'VO NAM HIEU',
-    qrImage: '/bank-qr.png',   // place your QR/bank image here (public/bank-qr.png)
+    qrImage: '/bank-qr.png',
 };
 
-// Credits per paid top-up pack + its price (VND). Adjust to your pricing.
-export const TOPUP_PACK = { credits: 50, priceVnd: 50000 };
+// One-time free grant on the first top-up request (matches backend
+// CREDIT_FREE_TOPUP). Separate from the paid packs below.
+export const FREE_TOPUP = 50;
+
+// Paid top-up packs (VND → credits). Manual bank transfer; owner credits after.
+export const TOPUP_PACKS = [
+    { credits: 50, priceVnd: 50_000 },
+    { credits: 120, priceVnd: 100_000 },
+];
+
+// Bank-transfer memo. The user's email is appended so transfers can be matched.
+export const TRANSFER_NOTE = 'top-up tokens Career AI';
 
 export const SUPPORT_EMAIL = 'vonamhieu.work@gmail.com';
