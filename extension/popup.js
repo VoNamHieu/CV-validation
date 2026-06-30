@@ -251,108 +251,6 @@ function initTabs() {
     });
 }
 
-// ─── Init ───
-// ── Debug capture ──────────────────────────────────────────────────────────
-// Runs IN the page (injected) and returns a snapshot of the rendered DOM so we
-// can build/repair extractors against what a real browser actually sees.
-// Injected (world: MAIN). Async: scrolls + waits for the SPA to actually render
-// its JD before snapshotting, so we don't capture an empty pre-XHR shell. Reads
-// window.__jfApis (set by content-netcap.js) to surface the backend job API.
-async function __captureSnapshot() {
-    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-    const textLen = () => ((document.body && document.body.innerText) || '').length;
-
-    // ── Wait for content: scroll to trigger lazy/virtualized lists, then wait
-    //    until the visible text stabilizes above a threshold (SPAs fetch the JD
-    //    after first paint). Bounded so it never hangs the capture. ──
-    const JOB_SEL = "[class*='job' i],[class*='description' i],[class*='recruit' i]," +
-        "[class*='tuyen-dung' i],[itemtype*='JobPosting' i],article,main,h1";
-    const start = Date.now();
-    let last = -1, stable = 0;
-    while (Date.now() - start < 12000) {
-        try { window.scrollTo(0, (document.body && document.body.scrollHeight) || 0); } catch (e) { /* noop */ }
-        const n = textLen();
-        const hasJob = !!document.querySelector(JOB_SEL);
-        if (n > 1200 && hasJob && n === last) {
-            if (++stable >= 2) break;            // two stable polls → content settled
-        } else {
-            stable = 0;
-        }
-        last = n;
-        await sleep(700);
-    }
-    try { window.scrollTo(0, 0); } catch (e) { /* noop */ }
-
-    const firstLine = (s) => (s || '').split('\n').map((x) => x.trim()).filter(Boolean)[0] || '';
-    const anchors = [...document.querySelectorAll('a[href]')].slice(0, 1500).map((a) => ({
-        href: a.href,
-        text: firstLine(a.innerText).slice(0, 160),
-    }));
-    const tables = [...document.querySelectorAll('table')].slice(0, 20).map((t) =>
-        [...t.querySelectorAll('tr')].slice(0, 80).map((r) =>
-            [...r.querySelectorAll('th,td')].map((c) => firstLine(c.innerText).slice(0, 120))
-        )
-    );
-    const nd = document.getElementById('__NEXT_DATA__');
-    const jsonld = [...document.querySelectorAll('script[type="application/ld+json"]')]
-        .slice(0, 10).map((s) => (s.textContent || '').slice(0, 100000));
-
-    // Embedded JS state islands (Nuxt/Redux/Apollo/Remix) — the JD often lives
-    // here even when the rendered DOM is thin.
-    let state = '';
-    for (const k of ['__NUXT__', '__INITIAL_STATE__', '__APOLLO_STATE__', '__remixContext', '__INITIAL_DATA__']) {
-        try {
-            if (window[k]) { state = JSON.stringify(window[k]).slice(0, 500000); break; }
-        } catch (e) { /* unserializable — skip */ }
-    }
-
-    return {
-        url: location.href,
-        title: document.title || '',
-        html: document.documentElement.outerHTML,
-        anchors,
-        tables,
-        nextData: nd ? (nd.textContent || '').slice(0, 500000) : '',
-        jsonld,
-        apis: (window.__jfApis || []).slice(0, 200),   // backend API calls the page made
-        state,
-    };
-}
-
-async function captureForDebug() {
-    const statusEl = document.getElementById('debugStatus');
-    const btn = document.getElementById('debugCaptureBtn');
-    const backendUrl = (document.getElementById('debugBackendUrl').value || '').trim().replace(/\/+$/, '');
-    const token = (document.getElementById('debugToken').value || '').trim();
-    if (!backendUrl || !token) {
-        statusEl.textContent = '⚠️ Nhập Backend URL + Token trước.';
-        return;
-    }
-    chrome.storage.local.set({ debugBackendUrl: backendUrl, debugToken: token });
-    btn.disabled = true; btn.textContent = '⏳ Đang chụp…'; statusEl.textContent = '';
-    try {
-        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (!tab || !/^https?:/.test(tab.url || '')) throw new Error('Tab không hợp lệ');
-        const [{ result: snap }] = await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            world: 'MAIN',               // read window.__jfApis + page state
-            func: __captureSnapshot,
-        });
-        const res = await fetch(`${backendUrl}/debug/capture`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Debug-Token': token },
-            body: JSON.stringify(snap),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
-        statusEl.textContent = `✅ ${data.host} · ${Math.round((data.bytes || 0) / 1024)}KB · ${data.anchors} links · ${data.apis || 0} API calls`;
-    } catch (e) {
-        statusEl.textContent = `❌ ${e.message || e}`;
-    } finally {
-        btn.disabled = false; btn.textContent = '🐞 Gửi DOM để debug';
-    }
-}
-
 // ── Mode 1: tell the content script on the active job tab to tailor the CV ──
 async function tailorCurrentJob() {
     const statusEl = document.getElementById('tailorStatus');
@@ -372,75 +270,134 @@ async function tailorCurrentJob() {
     }
 }
 
-const __sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// ── Site access (optional host permissions) ─────────────────────────────────
+// Known hosts (mirror of manifest content_scripts.matches) auto-inject; any
+// other job site needs a just-in-time grant. The popup is the reliable,
+// gesture-valid place to request/revoke these. We track popup-granted origins
+// in storage so the card can list + revoke them.
+const KNOWN_HOST_RE = /(^|\.)(topcv\.vn|vietnamworks\.com|itviec\.com|careerbuilder\.vn|careerlink\.vn|careerviet\.vn|vieclam24h\.vn|linkedin\.com|lever\.co|greenhouse\.io|ashbyhq\.com|myworkdayjobs\.com|smartrecruiters\.com|icims\.com|taleo\.net|jobvite\.com|breezy\.hr|bamboohr\.com|workable\.com|recruitee\.com|teamtailor\.com)$/i;
 
-async function __waitTabComplete(tabId, timeoutMs = 25000) {
-    const start = Date.now();
-    while (Date.now() - start < timeoutMs) {
-        try {
-            const tab = await chrome.tabs.get(tabId);
-            if (tab.status === 'complete') return true;
-        } catch (e) {
-            return false; // tab gone
-        }
-        await __sleep(400);
+let __activeTab = null;
+
+const prettyOrigin = (o) => o === 'https://*/*'
+    ? 'Mọi trang tuyển dụng'
+    : (o || '').replace(/^(?:\*|https?):\/\//, '').replace(/\/\*$/, '');
+
+async function trackGrant(origin) {
+    const { optionalGrants = [] } = await chrome.storage.local.get('optionalGrants');
+    if (!optionalGrants.includes(origin)) {
+        await chrome.storage.local.set({ optionalGrants: [...optionalGrants, origin] });
     }
-    return false;
 }
 
-// Walk the backend's target list: open each in a background tab, let the SPA
-// render, capture the DOM, POST it, close the tab. One at a time so we don't
-// spawn 17 tabs at once.
-async function batchCapture() {
-    const statusEl = document.getElementById('debugStatus');
-    const btn = document.getElementById('debugBatchBtn');
-    const backendUrl = (document.getElementById('debugBackendUrl').value || '').trim().replace(/\/+$/, '');
-    const token = (document.getElementById('debugToken').value || '').trim();
-    if (!backendUrl || !token) { statusEl.textContent = '⚠️ Nhập Backend URL + Token trước.'; return; }
-    chrome.storage.local.set({ debugBackendUrl: backendUrl, debugToken: token });
-    btn.disabled = true;
-    const hdr = { 'X-Debug-Token': token };
-    let targets;
+async function renderGrantedList() {
+    const wrap = document.getElementById('grantedList');
+    const { optionalGrants = [] } = await chrome.storage.local.get('optionalGrants');
+    wrap.innerHTML = '';
+    for (const origin of optionalGrants) {
+        const has = await chrome.permissions.contains({ origins: [origin] }).catch(() => false);
+        if (!has) continue;
+        const row = document.createElement('div');
+        row.className = 'perm-granted-row';
+        const label = document.createElement('span');
+        label.textContent = prettyOrigin(origin);
+        const btn = document.createElement('button');
+        btn.className = 'perm-revoke';
+        btn.textContent = 'Thu hồi';
+        btn.addEventListener('click', async () => {
+            await chrome.permissions.remove({ origins: [origin] }).catch(() => { });
+            const { optionalGrants: cur = [] } = await chrome.storage.local.get('optionalGrants');
+            await chrome.storage.local.set({ optionalGrants: cur.filter(o => o !== origin) });
+            refreshPermUI();
+        });
+        row.append(label, btn);
+        wrap.appendChild(row);
+    }
+}
+
+// Reflect the active tab's access state in the card.
+async function refreshPermUI() {
+    const pill = document.getElementById('permPill');
+    const siteEl = document.getElementById('permSite');
+    const grantBtn = document.getElementById('grantSiteBtn');
+    const setPill = (cls, text) => { pill.className = `perm-pill ${cls}`; pill.textContent = text; };
+
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    __activeTab = tab || null;
+    let host = '', origin = '', isHttp = false, known = false;
     try {
-        const res = await fetch(`${backendUrl}/debug/capture/targets`, { headers: hdr });
-        if (!res.ok) throw new Error(`HTTP ${res.status}${res.status === 404 ? ' (backend chưa deploy?)' : ''}`);
-        targets = (await res.json()).targets || [];
-    } catch (e) {
-        statusEl.textContent = `❌ Không lấy được target: ${e.message || e}`;
-        btn.disabled = false; return;
+        const u = new URL(tab?.url || '');
+        isHttp = /^https?:$/.test(u.protocol);
+        host = u.hostname; origin = `${u.origin}/*`;
+        known = KNOWN_HOST_RE.test(host);
+    } catch (e) { /* non-web tab */ }
+
+    if (!isHttp) {
+        siteEl.textContent = 'Mở một trang tuyển dụng (https) để cấp quyền.';
+        setPill('muted', '—');
+        grantBtn.disabled = true;
+        renderGrantedList();
+        return;
     }
-    if (!targets.length) {
-        statusEl.textContent = '⚠️ Danh sách target rỗng (backend chưa deploy hoặc đã quét hết).';
-        btn.disabled = false; return;
+    siteEl.textContent = host;
+    // "All job sites" opt-in covers everything — the recommended path for the
+    // featured pool, whose company career pages live on hundreds of bespoke
+    // domains we can't statically allowlist.
+    const allGranted = await chrome.permissions.contains({ origins: ['https://*/*'] }).catch(() => false);
+    const grantAllBtn = document.getElementById('grantAllBtn');
+    if (grantAllBtn) grantAllBtn.disabled = allGranted;
+
+    if (known) {
+        setPill('ok', '✓ Đã hỗ trợ sẵn');
+        grantBtn.disabled = true;
+    } else if (allGranted) {
+        setPill('ok', '✓ Đã bật mọi trang');
+        grantBtn.disabled = true;
+    } else {
+        const has = await chrome.permissions.contains({ origins: [origin] }).catch(() => false);
+        if (has) { setPill('ok', '✓ Đã cấp'); grantBtn.disabled = true; }
+        else { setPill('warn', 'Cần cấp quyền'); grantBtn.disabled = false; }
     }
-    let ok = 0, fail = 0;
-    for (let i = 0; i < targets.length; i++) {
-        const t = targets[i];
-        statusEl.textContent = `⏳ ${i + 1}/${targets.length} ${t.name}…  (✅${ok} ❌${fail})`;
-        let tab;
-        try {
-            tab = await chrome.tabs.create({ url: t.url, active: false });
-            await __waitTabComplete(tab.id);
-            await __sleep(1500); // brief settle; __captureSnapshot then waits for real content
-            const [{ result: snap }] = await chrome.scripting.executeScript({
-                target: { tabId: tab.id }, world: 'MAIN', func: __captureSnapshot,
-            });
-            const r = await fetch(`${backendUrl}/debug/capture`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', ...hdr },
-                body: JSON.stringify(snap),
-            });
-            if (!r.ok) throw new Error(`HTTP ${r.status}`);
-            ok++;
-        } catch (e) {
-            fail++;
-        } finally {
-            if (tab) { try { await chrome.tabs.remove(tab.id); } catch (e) { /* noop */ } }
-        }
-    }
-    statusEl.textContent = `✅ Xong: ${ok} gửi, ${fail} lỗi / ${targets.length} site.`;
-    btn.disabled = false;
+    renderGrantedList();
 }
+
+async function grantCurrentSite() {
+    const statusEl = document.getElementById('grantStatus');
+    if (!__activeTab || !/^https?:/.test(__activeTab.url || '')) {
+        statusEl.textContent = '⚠️ Mở một trang tuyển dụng (https) trước.';
+        return;
+    }
+    try {
+        const origin = `${new URL(__activeTab.url).origin}/*`;
+        const granted = await chrome.permissions.request({ origins: [origin] });
+        if (!granted) { statusEl.textContent = '❌ Bạn đã từ chối cấp quyền.'; return; }
+        await trackGrant(origin);
+        statusEl.textContent = '✅ Đã cấp — agent có thể chạy trên trang này.';
+        // Inject now so a job already open on this tab can start (no-op on known
+        // hosts where the declarative content script already loaded).
+        try {
+            await chrome.scripting.insertCSS({ target: { tabId: __activeTab.id }, files: ['content.css'] });
+            await chrome.scripting.executeScript({ target: { tabId: __activeTab.id }, files: ['utils.js', 'content-agent.js'] });
+        } catch (e) { /* already present (declarative) — ignore */ }
+        refreshPermUI();
+    } catch (e) {
+        statusEl.textContent = `❌ ${e.message || e}`;
+    }
+}
+
+async function grantAllSites() {
+    const statusEl = document.getElementById('grantStatus');
+    try {
+        const granted = await chrome.permissions.request({ origins: ['https://*/*'] });
+        if (!granted) { statusEl.textContent = '❌ Bạn đã từ chối cấp quyền.'; return; }
+        await trackGrant('https://*/*');
+        statusEl.textContent = '✅ Đã cấp quyền cho mọi trang tuyển dụng.';
+        refreshPermUI();
+    } catch (e) {
+        statusEl.textContent = `❌ ${e.message || e}`;
+    }
+}
+
 
 document.addEventListener('DOMContentLoaded', () => {
     initTabs();
@@ -470,14 +427,9 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('importFromApp').addEventListener('click', importFromApp);
     document.getElementById('resetAll').addEventListener('click', resetAll);
     document.getElementById('tailorJobBtn').addEventListener('click', tailorCurrentJob);
-
-    // Debug capture: restore saved backend URL + token, wire the button.
-    chrome.storage.local.get(['debugBackendUrl', 'debugToken'], (d) => {
-        if (d.debugBackendUrl) document.getElementById('debugBackendUrl').value = d.debugBackendUrl;
-        if (d.debugToken) document.getElementById('debugToken').value = d.debugToken;
-    });
-    document.getElementById('debugCaptureBtn').addEventListener('click', captureForDebug);
-    document.getElementById('debugBatchBtn').addEventListener('click', batchCapture);
+    document.getElementById('grantSiteBtn').addEventListener('click', grantCurrentSite);
+    document.getElementById('grantAllBtn').addEventListener('click', grantAllSites);
+    refreshPermUI();
 
     // CV upload
     const cvFileInput = document.getElementById('cvFileInput');

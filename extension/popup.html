@@ -105,6 +105,21 @@
       <div id="tailorStatus" style="font-size:12px;margin-top:6px;color:#a5b4fc;"></div>
     </div>
 
+    <div class="perm-card">
+      <div class="perm-head">
+        <span class="perm-title">🔓 Quyền truy cập trang</span>
+        <span id="permPill" class="perm-pill muted">…</span>
+      </div>
+      <div id="permSite" class="perm-site">Đang kiểm tra trang đang mở…</div>
+      <div class="perm-actions">
+        <button id="grantSiteBtn" class="btn-action">Cho phép trang này</button>
+        <button id="grantAllBtn" class="btn-ghost">Mọi trang tuyển dụng</button>
+      </div>
+      <div id="grantStatus" class="perm-status-line"></div>
+      <p class="hint">Công ty trong danh sách gợi ý thường dùng trang tuyển dụng trên domain riêng. Bật <b>"Mọi trang tuyển dụng"</b> để agent tự ứng tuyển khắp nơi — có thể thu hồi bất cứ lúc nào.</p>
+      <div id="grantedList" class="perm-granted"></div>
+    </div>
+
     <div class="field">
       <label>Chức danh hiện tại <span class="req">*</span></label>
       <input type="text" id="currentTitle" placeholder="Product Manager">
@@ -220,18 +235,6 @@
       <div id="syncStatus" style="margin-top: 6px; font-size: 11px; opacity: 0.75;">⚪ Chưa đồng bộ</div>
     </div>
 
-    <!-- ═══ Debug capture (dev tool) ═══ -->
-    <div class="setting-card" style="flex-direction: column; align-items: stretch; gap: 8px;">
-      <div class="setting-label">
-        <span>🐞 Debug: gửi DOM trang này</span>
-        <p class="hint">Chụp DOM trang đang mở → backend để dựng extractor chính xác</p>
-      </div>
-      <input type="text" id="debugBackendUrl" placeholder="https://your-app.up.railway.app" style="width:100%;">
-      <input type="password" id="debugToken" placeholder="X-Debug-Token" style="width:100%;">
-      <button id="debugCaptureBtn" class="btn-action" style="width:100%;">🐞 Gửi DOM trang này</button>
-      <button id="debugBatchBtn" class="btn-action" style="width:100%;">🔍 Quét hàng loạt (auto)</button>
-      <div id="debugStatus" style="font-size: 11px; opacity: 0.8;"></div>
-    </div>
   </div>
 
   <!-- ═══ Footer ═══ -->

@@ -60,6 +60,61 @@ function armJobSafetyTimer(timedJobIndex) {
     }, JOB_SAFETY_WINDOW_MS);
 }
 
+// ─── Optional host-permission gating ───────────────────────────────────────
+// The manifest ships a NARROW host_permissions allowlist (known job boards +
+// ATS platforms) so the install-time warning reads "đọc dữ liệu trên các trang
+// tuyển dụng đã biết" instead of "…mọi trang web". Any other site is covered
+// by optional_host_permissions ("https://*/*") and must be granted just-in-time.
+//
+// Known hosts get the content-agent via the declarative content_scripts entry.
+// On a freshly granted UNKNOWN host there's no declarative match, so we inject
+// the agent programmatically (chrome.scripting) after the tab loads.
+
+// Mirror of manifest content_scripts.matches — these auto-inject, no grant needed.
+const KNOWN_HOST_RE = /(^|\.)(topcv\.vn|vietnamworks\.com|itviec\.com|careerbuilder\.vn|careerlink\.vn|careerviet\.vn|vieclam24h\.vn|linkedin\.com|lever\.co|greenhouse\.io|ashbyhq\.com|myworkdayjobs\.com|smartrecruiters\.com|icims\.com|taleo\.net|jobvite\.com|breezy\.hr|bamboohr\.com|workable\.com|recruitee\.com|teamtailor\.com)$/i;
+
+function originPattern(url) {
+    try { return `${new URL(url).origin}/*`; } catch (e) { return null; }
+}
+function isKnownHost(url) {
+    try { return KNOWN_HOST_RE.test(new URL(url).hostname); } catch (e) { return false; }
+}
+
+// Ensure the agent is allowed to run on `url`. Known hosts: always. Unknown
+// hosts: check the optional grant and, if missing, request it just-in-time with
+// a clear reason. NOTE: chrome.permissions.request() needs a user gesture; mid-
+// batch in the service worker that gesture is usually absent, so the request is
+// best-effort — if it rejects, the job is skipped with a "needs permission"
+// result and the user can grant it from the popup ("Cho phép trên trang này").
+async function ensureHostAccess(url) {
+    if (isKnownHost(url)) return { ok: true, known: true };
+    const pattern = originPattern(url);
+    if (!pattern) return { ok: false, known: false };
+    const has = await chrome.permissions.contains({ origins: [pattern] }).catch(() => false);
+    if (has) return { ok: true, known: false };
+    try {
+        // "Trang này dùng hệ thống tuyển dụng chưa nhận diện — JobFit cần quyền
+        //  truy cập để điền form tự động." (the Chrome dialog shows the origin)
+        const granted = await chrome.permissions.request({ origins: [pattern] });
+        return { ok: granted, known: false };
+    } catch (e) {
+        return { ok: false, known: false, gestureRequired: true };
+    }
+}
+
+// Inject the agent into a granted UNKNOWN host once the tab finishes loading
+// (known hosts already have it via the declarative content script).
+function injectAgentOnLoad(tabId) {
+    const listener = (id, info) => {
+        if (id !== tabId || info.status !== 'complete') return;
+        chrome.tabs.onUpdated.removeListener(listener);
+        chrome.scripting.insertCSS({ target: { tabId }, files: ['content.css'] }).catch(() => { });
+        chrome.scripting.executeScript({ target: { tabId }, files: ['utils.js', 'content-agent.js'] })
+            .catch((e) => console.warn('[JobFit AI] inject agent failed:', e?.message || e));
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+}
+
 // ─── Single auto-apply (shared by relay + external paths) ───
 function handleAutoApplyStart(message, sendResponse) {
     const { jobUrl, profile } = message;
@@ -84,12 +139,20 @@ function handleAutoApplyStart(message, sendResponse) {
         storage.cvFileBase64 = message.cvFileBase64;
         storage.cvFileName = message.cvFileName;
     }
-    chrome.storage.local.set(storage, () => {
-        chrome.tabs.create({ url: jobUrl, active: true }, (tab) => {
-            console.log('[JobFit AI] Auto Apply: opened tab', tab.id, 'for', jobUrl);
-            sendResponse({ success: true, tabId: tab.id });
+    (async () => {
+        const access = await ensureHostAccess(jobUrl);
+        if (!access.ok) {
+            sendResponse({ success: false, error: 'Cần cấp quyền truy cập trang này. Mở popup JobFit để cho phép.' });
+            return;
+        }
+        chrome.storage.local.set(storage, () => {
+            chrome.tabs.create({ url: jobUrl, active: true }, (tab) => {
+                if (!access.known) injectAgentOnLoad(tab.id);  // unknown host: no declarative script
+                console.log('[JobFit AI] Auto Apply: opened tab', tab.id, 'for', jobUrl);
+                sendResponse({ success: true, tabId: tab.id });
+            });
         });
-    });
+    })();
     return true;
 }
 
@@ -581,20 +644,34 @@ function processNextJob() {
         storage.cvFileBase64 = job.cvFileBase64;
         storage.cvFileName = job.cvFileName;
     }
-    chrome.storage.local.set(storage, () => {
-        // Open the job URL in a new tab
-        chrome.tabs.create({ url: job.jobUrl, active: true }, (tab) => {
-            currentTabId = tab.id;
-            jobStartedAt = Date.now();
+    (async () => {
+        // Gate on host access first — an unknown host needs an optional-permission
+        // grant before we can drive it; skip the job cleanly if it's not granted.
+        const access = await ensureHostAccess(job.jobUrl);
+        if (!access.ok) {
+            job.status = 'error';
+            job.result = { success: false, detail: 'Cần cấp quyền truy cập trang này (mở popup JobFit để cho phép).' };
             persistState();
             broadcastProgress();
+            setTimeout(() => processNextJob(), TAB_DELAY_MS);
+            return;
+        }
+        chrome.storage.local.set(storage, () => {
+            // Open the job URL in a new tab
+            chrome.tabs.create({ url: job.jobUrl, active: true }, (tab) => {
+                currentTabId = tab.id;
+                jobStartedAt = Date.now();
+                if (!access.known) injectAgentOnLoad(tab.id);  // unknown host: inject agent manually
+                persistState();
+                broadcastProgress();
 
-            // Watchdog: skip the job if the page goes silent. The agent's
-            // heartbeats keep re-arming this while it's actively working
-            // (capture the index so a stale timer can't skip a later job).
-            armJobSafetyTimer(currentJobIndex);
+                // Watchdog: skip the job if the page goes silent. The agent's
+                // heartbeats keep re-arming this while it's actively working
+                // (capture the index so a stale timer can't skip a later job).
+                armJobSafetyTimer(currentJobIndex);
+            });
         });
-    });
+    })();
 }
 
 // ─── Broadcast progress to all content scripts (web app) ───

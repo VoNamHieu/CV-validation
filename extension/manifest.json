@@ -10,8 +10,32 @@
     "scripting"
   ],
   "host_permissions": [
-    "https://*/*",
-    "http://localhost:3000/*"
+    "https://*.topcv.vn/*",
+    "https://*.vietnamworks.com/*",
+    "https://*.itviec.com/*",
+    "https://*.careerbuilder.vn/*",
+    "https://*.careerlink.vn/*",
+    "https://*.careerviet.vn/*",
+    "https://*.vieclam24h.vn/*",
+    "https://*.linkedin.com/*",
+    "https://*.lever.co/*",
+    "https://*.greenhouse.io/*",
+    "https://*.ashbyhq.com/*",
+    "https://*.myworkdayjobs.com/*",
+    "https://*.smartrecruiters.com/*",
+    "https://*.icims.com/*",
+    "https://*.taleo.net/*",
+    "https://*.jobvite.com/*",
+    "https://*.breezy.hr/*",
+    "https://*.bamboohr.com/*",
+    "https://*.workable.com/*",
+    "https://*.recruitee.com/*",
+    "https://*.teamtailor.com/*",
+    "http://localhost:3000/*",
+    "https://*.vercel.app/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*"
   ],
   "content_scripts": [
     {
@@ -26,48 +50,27 @@
     },
     {
       "matches": [
-        "https://*/*"
-      ],
-      "exclude_matches": [
-        "https://*.google.com/*",
-        "https://*.youtube.com/*",
-        "https://*.facebook.com/*",
-        "https://*.instagram.com/*",
-        "https://*.twitter.com/*",
-        "https://*.x.com/*",
-        "https://*.tiktok.com/*",
-        "https://*.netflix.com/*",
-        "https://*.spotify.com/*",
-        "https://*.vercel.app/*"
-      ],
-      "js": [
-        "content-netcap.js"
-      ],
-      "run_at": "document_start",
-      "world": "MAIN"
-    },
-    {
-      "matches": [
-        "https://*/*"
-      ],
-      "exclude_matches": [
-        "https://*.google.com/*",
-        "https://*.youtube.com/*",
-        "https://*.facebook.com/*",
-        "https://*.instagram.com/*",
-        "https://*.twitter.com/*",
-        "https://*.x.com/*",
-        "https://*.threads.net/*",
-        "https://*.tiktok.com/*",
-        "https://*.reddit.com/*",
-        "https://*.pinterest.com/*",
-        "https://*.netflix.com/*",
-        "https://*.twitch.tv/*",
-        "https://*.spotify.com/*",
-        "https://*.whatsapp.com/*",
-        "https://*.messenger.com/*",
-        "https://*.discord.com/*",
-        "https://*.vercel.app/*"
+        "https://*.topcv.vn/*",
+        "https://*.vietnamworks.com/*",
+        "https://*.itviec.com/*",
+        "https://*.careerbuilder.vn/*",
+        "https://*.careerlink.vn/*",
+        "https://*.careerviet.vn/*",
+        "https://*.vieclam24h.vn/*",
+        "https://*.linkedin.com/*",
+        "https://*.lever.co/*",
+        "https://*.greenhouse.io/*",
+        "https://*.ashbyhq.com/*",
+        "https://*.myworkdayjobs.com/*",
+        "https://*.smartrecruiters.com/*",
+        "https://*.icims.com/*",
+        "https://*.taleo.net/*",
+        "https://*.jobvite.com/*",
+        "https://*.breezy.hr/*",
+        "https://*.bamboohr.com/*",
+        "https://*.workable.com/*",
+        "https://*.recruitee.com/*",
+        "https://*.teamtailor.com/*"
       ],
       "js": [
         "utils.js",
