@@ -16,10 +16,11 @@ Chạy:  python3 backend/scripts/pricing_calc.py
 # ── (1) GIÁ TOKEN GEMINI — USD / 1,000,000 token. ⚠️ ĐIỀN SỐ THẬT ──
 # Thinking token thường tính giá như OUTPUT token (đặt think = out nếu vậy).
 PRICES = {
-    # gemini-3.1-pro-preview  (reasoning: score / optimize / gap_report)
-    "pro":   {"in": 1.25, "out": 10.00, "think": 10.00},   # GIẢ ĐỊNH — thay số thật
-    # gemini-3-flash-preview  (light: parse/extract/rank/map…)
-    "flash": {"in": 0.10, "out": 0.40,  "think": 0.40},    # GIẢ ĐỊNH — thay số thật
+    # Gemini 3.1 Pro (Preview) — reasoning: score / optimize / gap_report.
+    # ($/1M; doubles for prompts >200K tokens — không áp dụng, prompt ta ~1-6K.)
+    "pro":   {"in": 2.00, "out": 12.00, "think": 12.00},   # thinking tính như output
+    # Gemini 3.5 Flash — light: parse/extract/rank/map…
+    "flash": {"in": 1.50, "out": 9.00,  "think": 9.00},
 }
 
 USD_VND = 25_400          # tỉ giá USD→VND (cập nhật khi cần)
@@ -59,7 +60,8 @@ def main() -> None:
     revenue_per_credit_vnd = PACK_PRICE_VND / PACK_CREDITS
     revenue_per_credit_usd = revenue_per_credit_vnd / USD_VND
 
-    print("⚠️  Giá token bên dưới là GIẢ ĐỊNH — thay PRICES bằng số thật của bạn.\n")
+    print("Giá: Gemini 3.1 Pro $2/$12 · Gemini 3.5 Flash $1.5/$9 (in/out, $/1M). "
+          "Token: đo thật (CV/JD mẫu); parse_pdf/extract_cv là ước lượng.\n")
     print(f"{'action':18} {'tier':6} {'tokens(i/o/t)':18} {'$ / lần':>10} {'₫ / lần':>10} "
           f"{'credits':>8} {'$/credit':>9}")
     print("-" * 92)
