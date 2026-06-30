@@ -54,11 +54,18 @@ def generate_json(system_prompt: str, user_prompt: str) -> str:
     Returns the raw text content (expected to be JSON).
     """
     client = get_raw_client()
+    # Give the model the real current date so it resolves "present"/"current"/
+    # "hiện tại" against today, not its training cutoff (~2025).
+    from datetime import datetime, timezone
+    _date_ctx = (
+        f"Today's date is {datetime.now(timezone.utc).date().isoformat()}. "
+        "Interpret relative time references (\"present\", \"now\", \"current\", "
+        "\"hiện tại\", \"nay\") as this date, not an earlier year.\n\n"
+    )
     config = {
         "response_mime_type": "application/json",
     }
-    if system_prompt:
-        config["system_instruction"] = system_prompt
+    config["system_instruction"] = (_date_ctx + system_prompt) if system_prompt else _date_ctx
 
     last_err: Exception | None = None
     for model in (MAIN_MODEL, FALLBACK_MODEL):
