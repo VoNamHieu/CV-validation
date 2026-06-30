@@ -10,20 +10,22 @@ import { Suspense, useCallback, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
     ShieldCheck, MagnifyingGlass, Coins, ArrowLeft, SpinnerGap, CheckCircle, WarningCircle,
-    Heartbeat, PlugsConnected, ChatCircleDots,
+    Heartbeat, PlugsConnected, ChatCircleDots, FunnelSimple,
 } from '@phosphor-icons/react';
 import { useAuth } from '@/lib/auth';
 import { admin } from '@/lib/db';
 import MonitorPanel from '@/components/admin/MonitorPanel';
 import CompatPanel from '@/components/admin/CompatPanel';
 import FeedbackPanel from '@/components/admin/FeedbackPanel';
+import FunnelPanel from '@/components/admin/FunnelPanel';
 
 type Access = 'checking' | 'granted' | 'denied';
-type Tab = 'credits' | 'monitor' | 'compat' | 'feedback';
+type Tab = 'credits' | 'analytics' | 'monitor' | 'compat' | 'feedback';
 
 const QUICK_AMOUNTS = [50, 100, 250, 500];
 const TABS: { id: Tab; label: string; icon: typeof Coins }[] = [
     { id: 'credits', label: 'Cấp credit', icon: Coins },
+    { id: 'analytics', label: 'Funnel', icon: FunnelSimple },
     { id: 'monitor', label: 'Link monitor', icon: Heartbeat },
     { id: 'compat', label: 'Compatibility', icon: PlugsConnected },
     { id: 'feedback', label: 'Feedback', icon: ChatCircleDots },
@@ -220,6 +222,7 @@ function AdminConsole() {
                 </div>
 
                 {tab === 'credits' && creditsTab}
+                {tab === 'analytics' && <FunnelPanel />}
                 {tab === 'monitor' && <MonitorPanel />}
                 {tab === 'compat' && <CompatPanel />}
                 {tab === 'feedback' && <FeedbackPanel />}

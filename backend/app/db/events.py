@@ -1,0 +1,30 @@
+"""Repository for ``public.events`` — self-hosted funnel analytics."""
+from __future__ import annotations
+
+import json
+from typing import Optional
+
+from app.db.pool import get_pool
+
+
+async def record(
+    *, user_id: Optional[str], session_id: str, event: str,
+    page_url: Optional[str] = None, meta: Optional[dict] = None,
+) -> None:
+    """Append one funnel event. Fire-and-forget from the client's view."""
+    pool = await get_pool()
+    await pool.execute(
+        "INSERT INTO events (user_id, session_id, event, page_url, meta) "
+        "VALUES ($1, $2, $3, $4, $5::jsonb)",
+        user_id, session_id, event[:80], page_url,
+        json.dumps(meta) if meta else None,
+    )
+
+
+async def funnel_counts() -> dict[str, int]:
+    """Distinct sessions that reached each event → {event: count}."""
+    pool = await get_pool()
+    rows = await pool.fetch(
+        "SELECT event, count(DISTINCT session_id) AS n FROM events GROUP BY event"
+    )
+    return {r["event"]: r["n"] for r in rows}

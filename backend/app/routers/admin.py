@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.db import credits as credits_repo
+from app.db import events as events_repo
 from app.db import feedback as feedback_repo
 from app.db import profiles as profiles_repo
 from app.services.auth import get_current_user_id
@@ -90,3 +91,9 @@ async def grant_credits(body: GrantBody, _admin: str = Depends(require_admin)):
 async def list_feedback(_admin: str = Depends(require_admin)):
     """Recent user feedback / support messages (newest first)."""
     return await feedback_repo.list_recent(limit=200)
+
+
+@router.get("/analytics/funnel")
+async def analytics_funnel(_admin: str = Depends(require_admin)):
+    """Distinct sessions per funnel event → {event: count} for FunnelPanel."""
+    return await events_repo.funnel_counts()

@@ -101,3 +101,18 @@ async def get_current_user_id(
         return x_user_id
 
     raise HTTPException(status_code=401, detail="Authentication required")
+
+
+async def get_optional_user_id(
+    authorization: str | None = Header(default=None),
+    x_user_id: str | None = Header(default=None),
+) -> str | None:
+    """Like get_current_user_id but returns None instead of 401 — for endpoints
+    that work anonymously (e.g. funnel events) yet attach the user when present."""
+    if authorization and authorization.lower().startswith("bearer "):
+        uid = _verify_jwt(authorization[7:].strip())
+        if uid:
+            return uid
+    if not _auth_configured() and x_user_id:
+        return x_user_id
+    return None

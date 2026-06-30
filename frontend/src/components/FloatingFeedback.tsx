@@ -3,9 +3,14 @@
 // Small floating "góp ý sản phẩm" widget pinned to the bottom-right. Opens a
 // compact form (optional quick rating + message) and POSTs to /api/feedback.
 // Hidden on the gated landing page (when auth is on and nobody's signed in).
-import { useState } from 'react';
+//
+// Auto-prompts once per session when the user is likely to have an opinion:
+//   • ~2 minutes after entering the app (the wizard), or
+//   • right after a batch auto-apply finishes (extension JOBFIT_APPLY_PROGRESS).
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { ChatCircleDots, X, PaperPlaneTilt, CheckCircle } from '@phosphor-icons/react';
 import { useAuth } from '@/lib/auth';
+import { useAppStore } from '@/store/useAppStore';
 import { getAuthHeaders } from '@/lib/auth-headers';
 
 const FACES = [
@@ -14,22 +19,71 @@ const FACES = [
     { value: 5, emoji: '😍', label: 'Rất thích' },
 ];
 
+// One auto-prompt per browser session (survives client-side navigation; resets
+// on a hard reload). A successful manual submit sets it too, so we never nag.
+const SESSION_KEY = 'jobfit-feedback-prompted';
+const SESSION_DELAY_MS = 120_000; // ~2 minutes in the app
+
+type PromptCtx = null | 'session' | 'apply';
+
 export default function FloatingFeedback() {
     const { enabled, user } = useAuth();
+    const entered = useAppStore((s) => s.entered);
+
     const [open, setOpen] = useState(false);
     const [rating, setRating] = useState(0);
     const [message, setMessage] = useState('');
     const [busy, setBusy] = useState(false);
     const [done, setDone] = useState(false);
     const [error, setError] = useState('');
+    const [ctx, setCtx] = useState<PromptCtx>(null);
+
+    const autoPromptedRef = useRef(false);
+    const prevProcessingRef = useRef(false);
+
+    const reset = useCallback(() => {
+        setRating(0); setMessage(''); setError(''); setDone(false);
+    }, []);
+
+    // Open the widget on a trigger — but only once per session, and never if the
+    // user already opened/submitted it.
+    const maybeAutoPrompt = useCallback((context: Exclude<PromptCtx, null>) => {
+        if (autoPromptedRef.current) return;
+        try { if (sessionStorage.getItem(SESSION_KEY)) { autoPromptedRef.current = true; return; } } catch { /* ignore */ }
+        autoPromptedRef.current = true;
+        try { sessionStorage.setItem(SESSION_KEY, '1'); } catch { /* ignore */ }
+        reset();
+        setCtx(context);
+        setOpen(true);
+    }, [reset]);
+
+    // Trigger A: ~2 minutes after entering the app.
+    useEffect(() => {
+        if ((enabled && !user) || !entered) return;
+        const t = setTimeout(() => maybeAutoPrompt('session'), SESSION_DELAY_MS);
+        return () => clearTimeout(t);
+    }, [enabled, user, entered, maybeAutoPrompt]);
+
+    // Trigger B: a batch auto-apply just finished (processing → idle with jobs).
+    useEffect(() => {
+        const onMsg = (e: MessageEvent) => {
+            if (e.source !== window || e.data?.type !== 'JOBFIT_APPLY_PROGRESS') return;
+            const processing = !!e.data.isProcessing;
+            const total = e.data.total ?? 0;
+            if (prevProcessingRef.current && !processing && total > 0) {
+                maybeAutoPrompt('apply');
+            }
+            prevProcessingRef.current = processing;
+        };
+        window.addEventListener('message', onMsg);
+        return () => window.removeEventListener('message', onMsg);
+    }, [maybeAutoPrompt]);
 
     // Hard-gate: don't show on the landing page (anonymous + auth enabled).
     if (enabled && !user) return null;
 
-    const reset = () => {
-        setRating(0); setMessage(''); setError(''); setDone(false);
-    };
-    const close = () => { setOpen(false); };
+    const close = () => setOpen(false);
+    const openManually = () => { reset(); setCtx(null); setOpen(true); };
 
     const submit = async () => {
         const text = message.trim();
@@ -49,6 +103,8 @@ export default function FloatingFeedback() {
                 const e = await res.json().catch(() => ({}));
                 throw new Error(e.detail || `Gửi thất bại (${res.status})`);
             }
+            try { sessionStorage.setItem(SESSION_KEY, '1'); } catch { /* ignore */ }
+            autoPromptedRef.current = true;
             setDone(true);
         } catch (e) {
             setError(e instanceof Error ? e.message : 'Gửi góp ý thất bại');
@@ -57,12 +113,18 @@ export default function FloatingFeedback() {
         }
     };
 
+    const subtitle = ctx === 'apply'
+        ? 'Bạn vừa hoàn tất ứng tuyển — trải nghiệm thế nào?'
+        : ctx === 'session'
+            ? 'Bạn dùng JobFit có thấy ổn không? Góp ý giúp chúng tôi nhé!'
+            : 'Bạn thấy JobFit thế nào? Điều gì nên cải thiện?';
+
     return (
         <>
             {/* Launcher button */}
             <button
                 aria-label="Góp ý về sản phẩm"
-                onClick={() => { if (open) { close(); } else { reset(); setOpen(true); } }}
+                onClick={() => { if (open) close(); else openManually(); }}
                 style={{
                     position: 'fixed', bottom: 20, right: 20, zIndex: 95,
                     width: 52, height: 52, borderRadius: '50%', border: 'none',
@@ -102,11 +164,7 @@ export default function FloatingFeedback() {
                             <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 16 }}>
                                 Phản hồi của bạn giúp JobFit tốt hơn mỗi ngày.
                             </div>
-                            <button
-                                onClick={close}
-                                className="btn-secondary"
-                                style={{ padding: '8px 20px', fontSize: '0.85rem' }}
-                            >
+                            <button onClick={close} className="btn-secondary" style={{ padding: '8px 20px', fontSize: '0.85rem' }}>
                                 Đóng
                             </button>
                         </div>
@@ -116,7 +174,7 @@ export default function FloatingFeedback() {
                                 Góp ý về sản phẩm
                             </div>
                             <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 14 }}>
-                                Bạn thấy JobFit thế nào? Điều gì nên cải thiện?
+                                {subtitle}
                             </div>
 
                             {/* Quick rating (optional) */}
