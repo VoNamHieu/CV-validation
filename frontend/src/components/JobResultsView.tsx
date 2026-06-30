@@ -40,24 +40,53 @@ function bulletText(line: string): string | null {
     return m ? m[1].trim() : null;
 }
 
-// Drop the leading run of nav / metadata lines (short labels like "Back",
-// "Full Time", a city, a date) up to the first real JD content — the first
-// heading keyword or the first long sentence. Only trims when every dropped
-// line is short, so we never eat real content.
-function trimLeadingNoise(lines: string[]): string[] {
-    let start = -1;
+// A line that strongly signals the START of the actual JD body.
+const JD_START_RX = /^(about\b|company overview|the role\b|role summary|position summary|job (description|summary|purpose|overview)|(key |main )?responsibilit|duties\b|what you|we['’]?re looking|we are looking|who you are|requirements?\b|qualifications?\b|mô tả công việc|về (công việc|vị trí|công ty|chúng tôi)|giới thiệu|nhiệm vụ|trách nhiệm|yêu cầu)/i;
+
+// A line that signals the JD has ENDED and page chrome / other jobs begin.
+const JD_END_RX = /^(related jobs?|similar (jobs|positions)|other (jobs|openings|positions)|recommended|you may also|việc( làm)? (tương tự|liên quan)|refer a friend|apply( now)?$|share (this )?(job|position)|follow us|©|copyright|all rights|privacy policy|terms of|cookie|don['’]?t see (any )?suitable|leave your (updated )?profile|send (us )?your cv|back to)/i;
+
+// First line of real content when there's no strong JD heading — the first
+// heading or long sentence, provided everything before it is short (nav/meta).
+function firstContentIndex(lines: string[]): number {
     for (let i = 0; i < Math.min(lines.length, 16); i++) {
         const l = lines[i].trim();
         if (!l) continue;
-        if (looksHeading(l) || l.length > 60) { start = i; break; }
+        if (looksHeading(l) || l.length > 60) {
+            const before = lines.slice(0, i).map((x) => x.trim()).filter(Boolean);
+            return before.every((x) => x.length <= 48) ? i : 0;
+        }
     }
-    if (start <= 0) return lines;
-    const dropped = lines.slice(0, start).map((l) => l.trim()).filter(Boolean);
-    return dropped.every((l) => l.length <= 48) ? lines.slice(start) : lines;
+    return 0;
+}
+
+// Carve out just the JD body from a full-page text dump: start at the first
+// strong JD heading (pulling in an intro paragraph right before it), and stop
+// at the first chrome/other-jobs marker after that. Falls back to a simple
+// leading-noise trim when no clear JD section is found, and to the full text
+// when the carved region looks too small.
+function extractJdRegion(lines: string[]): string[] {
+    let start = lines.findIndex((l) => JD_START_RX.test(l.trim()));
+    if (start >= 0) {
+        for (let i = start - 1; i >= 0 && i >= start - 4; i--) {
+            const l = lines[i].trim();
+            if (!l) continue;
+            if (l.length > 50 && !JD_END_RX.test(l)) start = i; else break;
+        }
+    } else {
+        start = firstContentIndex(lines);
+    }
+    let end = lines.length;
+    for (let i = start + 1; i < lines.length; i++) {
+        if (JD_END_RX.test(lines[i].trim())) { end = i; break; }
+    }
+    const region = lines.slice(start, end);
+    if (region.join(' ').trim().length < 120) return lines.slice(firstContentIndex(lines));
+    return region;
 }
 
 function JdBody({ text }: { text: string }) {
-    const lines = trimLeadingNoise(text.replace(/\r/g, '').split('\n'));
+    const lines = extractJdRegion(text.replace(/\r/g, '').split('\n'));
     const blocks: React.ReactNode[] = [];
     let first = true;
     lines.forEach((raw, i) => {
@@ -93,7 +122,8 @@ function JdBody({ text }: { text: string }) {
 // first expand (fetchPage renders SPA/IP-blocked pages server-side). This is a
 // plain crawl — no AI credits — so it isn't gated.
 function JobCard({ c, busy, onRemove }: { c: CandidateJob; busy: boolean; onRemove: (id: string) => void }) {
-    const jdLink = c.applyUrl || c.url;
+    const jdLink = c.applyUrl || c.url;        // where the title links (apply)
+    const jdFetchUrl = c.url || c.applyUrl;    // the SPECIFIC posting page to read the JD from
     const prefetched = c.description?.trim() || '';
     const [open, setOpen] = useState(false);
     const [jd, setJd] = useState<string | null>(prefetched || null);
@@ -104,11 +134,11 @@ function JobCard({ c, busy, onRemove }: { c: CandidateJob; busy: boolean; onRemo
         const next = !open;
         setOpen(next);
         if (!next || jd !== null || loading) return;
-        if (!jdLink) { setError('Không có liên kết mô tả cho việc này.'); return; }
+        if (!jdFetchUrl) { setError('Không có liên kết mô tả cho việc này.'); return; }
         setLoading(true);
         setError('');
         try {
-            const r = await fetchPage(jdLink);
+            const r = await fetchPage(jdFetchUrl);
             if (r.success && r.text?.trim()) setJd(r.text.trim());
             else setError(r.blocked
                 ? 'Trang mô tả chặn truy cập tự động — mở ở tab mới để xem đầy đủ.'
