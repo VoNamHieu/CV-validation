@@ -24,6 +24,17 @@ function norm(s: string | undefined): string {
     return (s ?? "").replace(/\s+/g, " ").trim().toLowerCase();
 }
 
+function snippet(s: string | undefined, n = 120): string {
+    const t = (s ?? "").replace(/\s+/g, " ").trim();
+    return t.length > n ? `${t.slice(0, n).trimEnd()}…` : t;
+}
+
+function listVi(items: string[], max = 4): string {
+    const shown = items.slice(0, max);
+    const extra = items.length - shown.length;
+    return shown.join(", ") + (extra > 0 ? ` +${extra} nữa` : "");
+}
+
 /**
  * Compare original vs optimized CV and describe every real content change in
  * user-facing Vietnamese. Empty result = the optimized CV is textually
@@ -32,53 +43,63 @@ function norm(s: string | undefined): string {
 export function diffCvChanges(original: CVData, optimized: CVData): string[] {
     const changes: string[] = [];
 
-    if (norm(original.summary) !== norm(optimized.summary)) {
-        changes.push("Mục tiêu nghề nghiệp được viết lại theo yêu cầu của job.");
+    if (norm(original.summary) !== norm(optimized.summary) && optimized.summary?.trim()) {
+        changes.push(`Viết lại mục tiêu nghề nghiệp: “${snippet(optimized.summary, 130)}”`);
     }
 
     const origExp = original.experience ?? [];
     const optExp = optimized.experience ?? [];
-    let rewordedEntries = 0;
+    const rewordedCompanies: string[] = [];
     let rewordedBullets = 0;
-    let reorderedEntries = 0;
+    let exampleBullet = "";
+    const reorderedCompanies: string[] = [];
     for (let i = 0; i < Math.min(origExp.length, optExp.length); i++) {
+        const label = (optExp[i].company || optExp[i].title || `mục ${i + 1}`).trim();
         const a = bullets(origExp[i].description);
         const b = bullets(optExp[i].description);
         const aSet = new Set(a.map(norm));
-        const changed = b.filter(l => !aSet.has(norm(l))).length;
-        if (changed > 0) {
-            rewordedEntries++;
-            rewordedBullets += changed;
+        const newBullets = b.filter(l => !aSet.has(norm(l)));
+        if (newBullets.length > 0) {
+            rewordedCompanies.push(label);
+            rewordedBullets += newBullets.length;
+            if (!exampleBullet) exampleBullet = newBullets[0];
         } else if (a.length === b.length && a.map(norm).join("|") !== b.map(norm).join("|")) {
-            reorderedEntries++;
+            reorderedCompanies.push(label);
         }
     }
-    if (rewordedEntries > 0) {
-        changes.push(`${rewordedBullets} bullet trong ${rewordedEntries} mục kinh nghiệm được viết lại nhấn vào keyword của JD.`);
+    if (rewordedCompanies.length > 0) {
+        changes.push(`Viết lại ${rewordedBullets} gạch đầu dòng ở ${listVi(rewordedCompanies)} — bổ sung từ khoá & định lượng theo JD.`);
+        if (exampleBullet) changes.push(`Ví dụ: “${snippet(exampleBullet, 140)}”`);
     }
-    if (reorderedEntries > 0) {
-        changes.push(`Bullet trong ${reorderedEntries} mục kinh nghiệm được sắp xếp lại — thành tích liên quan nhất lên đầu.`);
+    if (reorderedCompanies.length > 0) {
+        changes.push(`Sắp xếp lại bullet ở ${listVi(reorderedCompanies)}: thành tích liên quan nhất lên đầu.`);
     }
 
     const origProj = original.projects ?? [];
     const optProj = optimized.projects ?? [];
-    let projChanged = 0;
+    const projChanged: string[] = [];
     for (let i = 0; i < Math.min(origProj.length, optProj.length); i++) {
-        if (norm(origProj[i].description) !== norm(optProj[i].description)) projChanged++;
+        if (norm(origProj[i].description) !== norm(optProj[i].description)) {
+            projChanged.push((optProj[i].name || `dự án ${i + 1}`).trim());
+        }
     }
-    if (projChanged > 0) {
-        changes.push(`Mô tả của ${projChanged} dự án được viết lại.`);
+    if (projChanged.length > 0) {
+        changes.push(`Viết lại mô tả dự án: ${listVi(projChanged)}.`);
     }
 
-    const origSkills = (original.skills ?? []).map(norm).join("|");
-    const optSkills = (optimized.skills ?? []).map(norm).join("|");
-    if (origSkills !== optSkills) {
-        const origSet = new Set((original.skills ?? []).map(norm));
-        const sameSet = (optimized.skills ?? []).every(s => origSet.has(norm(s)))
-            && (optimized.skills ?? []).length === (original.skills ?? []).length;
-        changes.push(sameSet
-            ? "Kỹ năng được sắp xếp lại — kỹ năng JD yêu cầu lên đầu."
-            : "Danh sách kỹ năng được điều chỉnh.");
+    const origList = original.skills ?? [];
+    const optList = optimized.skills ?? [];
+    if (origList.map(norm).join("|") !== optList.map(norm).join("|")) {
+        const origSet = new Set(origList.map(norm));
+        const added = optList.filter(s => !origSet.has(norm(s)));
+        if (added.length > 0) {
+            changes.push(`Bổ sung kỹ năng khớp JD: ${listVi(added)}.`);
+        } else if (optList.length > 0) {
+            // Same set, reordered → name the ones pulled to the front.
+            changes.push(`Đưa lên đầu danh sách kỹ năng: ${listVi(optList, 5)} (theo yêu cầu JD).`);
+        } else {
+            changes.push("Điều chỉnh danh sách kỹ năng theo JD.");
+        }
     }
 
     return changes;

@@ -37,7 +37,7 @@ describe('diffCvChanges', () => {
 
     it('detects a rewritten summary', () => {
         const changes = diffCvChanges(makeCv(), makeCv({ summary: 'Tailored for fintech' }));
-        expect(changes.some(c => c.includes('Mục tiêu nghề nghiệp'))).toBe(true);
+        expect(changes.some(c => c.includes('mục tiêu nghề nghiệp'))).toBe(true);
     });
 
     it('counts reworded experience bullets', () => {
@@ -48,7 +48,7 @@ describe('diffCvChanges', () => {
             }],
         });
         const changes = diffCvChanges(makeCv(), optimized);
-        expect(changes.some(c => c.includes('1 bullet trong 1 mục kinh nghiệm'))).toBe(true);
+        expect(changes.some(c => c.includes('gạch đầu dòng') && c.includes('ACME'))).toBe(true);
     });
 
     it('detects reordered bullets without rewording', () => {
@@ -59,13 +59,13 @@ describe('diffCvChanges', () => {
             }],
         });
         const changes = diffCvChanges(makeCv(), optimized);
-        expect(changes.some(c => c.includes('sắp xếp lại'))).toBe(true);
+        expect(changes.some(c => c.toLowerCase().includes('sắp xếp lại'))).toBe(true);
     });
 
     it('detects reordered skills as reordering, not edits', () => {
         const optimized = makeCv({ skills: ['Postgres', 'Go'] });
         const changes = diffCvChanges(makeCv(), optimized);
-        expect(changes.some(c => c.includes('Kỹ năng được sắp xếp lại'))).toBe(true);
+        expect(changes.some(c => c.includes('Đưa lên đầu danh sách kỹ năng'))).toBe(true);
     });
 
     it('detects project description changes', () => {

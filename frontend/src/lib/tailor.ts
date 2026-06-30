@@ -297,11 +297,11 @@ Return ONLY valid JSON matching this exact schema:
   "improvements": [{"section": "string", "change": "string", "reason": "string"}]
 }
 
-improvements = a list of EVERY concrete change you made, written in VIETNAMESE for the candidate to read:
+improvements = a list of EVERY concrete change you made, written in VIETNAMESE for the candidate to read. Make each one SPECIFIC and IMPACTFUL — the candidate must immediately see the value:
 - "section": where the change is ("Mục tiêu nghề nghiệp", "Kinh nghiệm: <company>", "Kỹ năng", "Dự án: <name>").
-- "change": what you rewrote/reordered, specific (quote the keyword or bullet topic, not generic phrases).
-- "reason": why it helps for THIS job description (name the JD requirement/keyword it targets).
-Only list changes you actually made. If you made no change to the CV, return an empty improvements array.
+- "change": QUOTE the concrete edit — the exact phrase/metric/keyword you added or the before→after, not a generic summary. Good: 'Thêm "giảm 40% thời gian tải trang" vào gạch đầu dòng đầu'. Bad: 'viết lại bullet cho rõ hơn'.
+- "reason": the SPECIFIC JD requirement/keyword it targets and why it strengthens the match (e.g. 'JD yêu cầu tối ưu hiệu năng — định lượng tác động làm nổi bật điều đó').
+Prefer fewer, high-signal entries over many trivial ones; merge tiny edits. Only list changes you actually made; if you made none, return an empty improvements array (the app shows a deterministic diff in that case).
 
 STRICT GUARDRAILS:
 1. Only use information explicitly found in the original CV.
