@@ -4,7 +4,6 @@
 // generates an AI report: where the CV falls short of the JD, split into
 // "chưa thể hiện" (you likely have it — surface it) vs "cần bổ sung" (a real
 // gap — close it), each with a concrete recommendation. Credit-metered.
-import { useState } from 'react';
 import {
     MagnifyingGlassPlus, CircleNotch, Warning, CheckCircle, Sparkle,
     Eye, GraduationCap, ArrowsClockwise,
@@ -12,7 +11,8 @@ import {
 import { generateGapReport } from '@/lib/api';
 import { useAuthGate } from '@/lib/auth';
 import { useCredits } from '@/lib/credits-context';
-import type { GapReport, GapItem, GapSeverity } from '@/lib/gap-report';
+import { useAppStore } from '@/store/useAppStore';
+import type { GapItem, GapSeverity } from '@/lib/gap-report';
 import type { CVData, JDData, MatchResult } from '@/lib/types';
 
 const SEV: Record<GapSeverity, { label: string; color: string }> = {
@@ -44,25 +44,39 @@ function GapCard({ g }: { g: GapItem }) {
     );
 }
 
-export default function GapReportSection({ cv, jd, match }: { cv: CVData; jd?: JDData; match?: MatchResult }) {
+export default function GapReportSection(
+    { entryId, cv, jd, match, embedded = false }: {
+        entryId: string; cv: CVData; jd?: JDData; match?: MatchResult;
+        // true when shown as the full-width "Phân tích" tab (vs inline in the
+        // match panel) — lets the layout drop the inline top border/spacing.
+        embedded?: boolean;
+    },
+) {
+    void embedded;
     const gate = useAuthGate();
     const { refresh } = useCredits();
-    const [report, setReport] = useState<GapReport | null>(null);
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState('');
+    // State lives on the jdEntry (store), not here — so switching tabs/jobs
+    // mid-analysis doesn't throw away a credit-charged report, and the result is
+    // written even if this component has unmounted by the time the call resolves.
+    const updateJdEntry = useAppStore((s) => s.updateJdEntry);
+    const entry = useAppStore((s) => s.jdEntries.find((e) => e.id === entryId));
+    const report = entry?.gapReport ?? null;
+    const loading = entry?.gapLoading ?? false;
+    const error = entry?.gapError ?? '';
 
     const run = async () => {
-        if (!jd) return;
+        if (!jd || loading) return;
         if (!gate('Đăng nhập để tạo báo cáo gap bằng AI (tặng 50 credit).')) return;
-        setLoading(true); setError('');
+        updateJdEntry(entryId, { gapLoading: true, gapError: undefined });
         try {
             const r = await generateGapReport(cv, jd, match);
-            setReport(r);
+            updateJdEntry(entryId, { gapReport: r, gapLoading: false });
             refresh();
         } catch (e) {
-            setError(e instanceof Error ? e.message : 'Tạo báo cáo thất bại');
-        } finally {
-            setLoading(false);
+            updateJdEntry(entryId, {
+                gapError: e instanceof Error ? e.message : 'Tạo báo cáo thất bại',
+                gapLoading: false,
+            });
         }
     };
 

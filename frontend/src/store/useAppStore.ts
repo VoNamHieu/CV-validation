@@ -14,6 +14,7 @@ import type { CvTemplateId } from '@/lib/cv-templates';
 import type { CvImprovement } from '@/lib/cv-improvements';
 import { account, type Application, type ApplicationStatus } from '@/lib/db';
 import { hasAuth } from '@/lib/auth-headers';
+import type { GapReport } from '@/lib/gap-report';
 
 // Re-export for backward compatibility
 export type { ExperienceDetail, EducationDetail, ProjectDetail, CVData, JDData, CategoryScore, MatchResult };
@@ -135,6 +136,13 @@ export interface JDEntry {
   // Role family (taxonomy) this job was ranked under — drives the role-adjacent
   // backfill: a dead posting is replaced by another job in the SAME family.
   roleFamily?: string;
+  // Deep gap-analysis result + in-flight flag, kept on the entry (not in the
+  // GapReportSection's local state) so switching tabs/jobs doesn't discard a
+  // credit-charged report mid-flight. gapLoading is reset on rehydrate (no
+  // in-flight request survives a reload).
+  gapReport?: GapReport;
+  gapLoading?: boolean;
+  gapError?: string;
 }
 
 // A discovered-but-not-yet-processed job, shown on the results page so the user
@@ -559,14 +567,18 @@ export const useAppStore = create<AppState>()(
         //  - `optimizing: true` left over (its status is already 'done') → clear
         //    it, else the editor's jobsInFlight check stays true and shows the
         //    "Optimizing your CVs…" spinner permanently.
-        const needsFix = state.jdEntries.some((e) => inFlight.has(e.status) || e.optimizing);
+        const needsFix = state.jdEntries.some((e) => inFlight.has(e.status) || e.optimizing || e.gapLoading);
         if (!needsFix) return;
         const fixed = state.jdEntries.map((e) => {
-          if (inFlight.has(e.status)) {
-            return { ...e, optimizing: false, status: 'error' as const, error: 'Interrupted by page reload' };
+          // A gap report that was mid-flight at reload can't resume — clear the
+          // flag so the button is clickable again (the report itself, if it
+          // landed before reload, is kept).
+          const base = e.gapLoading ? { ...e, gapLoading: false } : e;
+          if (inFlight.has(base.status)) {
+            return { ...base, optimizing: false, status: 'error' as const, error: 'Interrupted by page reload' };
           }
-          if (e.optimizing) return { ...e, optimizing: false };
-          return e;
+          if (base.optimizing) return { ...base, optimizing: false };
+          return base;
         });
         // Defer: this callback can run synchronously inside create(), before
         // the exported store binding exists.

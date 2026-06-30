@@ -6,12 +6,13 @@ import {
     CheckCircle, FilePdf, FloppyDisk, CaretLeft, CaretRight,
     RocketLaunch, Lightning, CircleNotch,
     XCircle, Stop, CaretDown, CaretUp, ShieldWarning, ChartBar,
-    ArrowsClockwise, MagnifyingGlassPlus, PencilSimple,
+    ArrowsClockwise, MagnifyingGlassPlus, PencilSimple, ArrowsLeftRight,
 } from '@phosphor-icons/react';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthGate } from '@/lib/auth';
 import { useConsent } from '@/lib/consent-context';
 import GapReportSection from '@/components/GapReportSection';
+import BeforeAfterModal from '@/components/BeforeAfterModal';
 import CvDocumentPreview from '@/components/CvDocumentPreview';
 import EditableTemplateFrame from '@/components/EditableTemplateFrame';
 import { applyCvFieldEdit } from '@/lib/cv-inline-edit';
@@ -145,6 +146,7 @@ export default function StepEditCv() {
     // Defaults to preview: the optimized CV rendered in the chosen template
     // is what the user lands on; editing is the opt-in mode.
     const [livePreviewOpen, setLivePreviewOpen] = useState(true);
+    const [compareOpen, setCompareOpen] = useState(false);
     const [editedCv, setEditedCv] = useState<CVData | null>(null);
     const handleEditedChange = useCallback((cv: CVData) => {
         setEditedCv(cv);
@@ -1492,6 +1494,14 @@ export default function StepEditCv() {
                             justifyContent: 'flex-end', gap: 8, marginTop: 8,
                         }}>
                             <button
+                                onClick={() => setCompareOpen(true)}
+                                className="btn-secondary"
+                                title="Xem CV gốc và bản đã tối ưu cạnh nhau"
+                                style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '8px 16px', fontSize: '0.82rem' }}
+                            >
+                                <ArrowsLeftRight size={14} weight="bold" /> So sánh trước/sau
+                            </button>
+                            <button
                                 onClick={() => void handleDownload(editedCv ?? currentEntry.optimizedCv!)}
                                 disabled={downloadingPdf}
                                 className="btn-primary"
@@ -1505,6 +1515,15 @@ export default function StepEditCv() {
                                 {downloadingPdf ? 'Đang xuất PDF…' : 'Lưu & Tải xuống'}
                             </button>
                         </div>
+                        {compareOpen && (
+                            <BeforeAfterModal
+                                original={cvData}
+                                optimized={mergeProfile(editedCv ?? currentEntry.optimizedCv!)}
+                                templateId={currentEntry.selectedTemplateId}
+                                avatarBase64={userAvatarBase64 ?? undefined}
+                                onClose={() => setCompareOpen(false)}
+                            />
+                        )}
                         <div style={{
                             marginTop: 8, fontSize: '0.74rem', color: 'var(--text-muted)',
                         }}>
@@ -1547,9 +1566,11 @@ export default function StepEditCv() {
             {/* ──────────────────── RIGHT: job match analysis ──────────────────── */}
             <aside className="analysis-sidebar">
                 <MatchAnalysisPanel
+                    entryId={currentEntry.id}
                     jd={currentEntry.jdData}
                     m={currentEntry.matchResult}
                     cvData={cvData}
+                    onOpenAnalysis={() => setMainTab('analysis')}
                 />
                 {/* What the optimizer changed for THIS job — and an honest
                     warning when the content is still identical to the base CV */}
@@ -1569,6 +1590,7 @@ export default function StepEditCv() {
                 <div className="glass-card" style={{ maxWidth: 760, margin: '0 auto', padding: '20px 22px' }}>
                     <GapReportSection
                         key={currentEntry.id}
+                        entryId={currentEntry.id}
                         cv={cvData}
                         jd={currentEntry.jdData}
                         match={currentEntry.matchResult}
@@ -1699,17 +1721,24 @@ function ImprovementsPanel({
    and strength summary. Mirrors what used to live on the standalone report
    page; now docked to the right of the editor. */
 function MatchAnalysisPanel({
-    jd, m, cvData,
+    entryId, jd, m, cvData, onOpenAnalysis,
 }: {
+    entryId: string;
     jd?: JDData;
     m?: MatchResult;
     cvData: CVData;
+    onOpenAnalysis: () => void;
 }) {
     const cvSkillsLower = useMemo(
         () => (cvData.skills || []).map(s => s.toLowerCase()),
         [cvData.skills],
     );
     const [open, setOpen] = useState(true);
+    // The button below opens the "Phân tích chuyên sâu" tab; it reflects the
+    // deep-analysis state (which lives on the jdEntry, so it keeps running across
+    // tab switches — see GapReportSection).
+    const gapLoading = useAppStore(s => s.jdEntries.find(e => e.id === entryId)?.gapLoading ?? false);
+    const gapHasReport = useAppStore(s => !!s.jdEntries.find(e => e.id === entryId)?.gapReport);
 
     if (!jd || !m) return null;
 
@@ -1792,6 +1821,22 @@ function MatchAnalysisPanel({
                     {m.strength_summary}
                 </p>
             )}
+
+            {/* ── Open the deep gap analysis (in its own "Phân tích chuyên sâu" tab) ── */}
+            <button
+                onClick={onOpenAnalysis}
+                style={{
+                    display: 'flex', alignItems: 'center', gap: 8, width: '100%', justifyContent: 'center',
+                    marginTop: 16, padding: '9px 14px', borderRadius: 9, cursor: 'pointer',
+                    fontSize: '0.82rem', fontWeight: 700, color: 'var(--accent-purple)',
+                    background: 'var(--gradient-hero-subtle)', border: '1px solid var(--border-subtle)',
+                }}
+            >
+                {gapLoading
+                    ? <><CircleNotch size={14} className="spin" /> Đang phân tích gap…</>
+                    : <><MagnifyingGlassPlus size={15} weight="bold" /> {gapHasReport ? 'Xem phân tích gap chuyên sâu' : 'Phân tích gap chuyên sâu'}</>}
+                <CaretRight size={13} weight="bold" />
+            </button>
             </>
             )}
         </div>
