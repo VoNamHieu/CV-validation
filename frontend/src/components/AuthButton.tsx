@@ -1,14 +1,19 @@
 'use client';
 
-import { SignIn, SignOut, UserCircle, Coins } from '@phosphor-icons/react';
+import { useState } from 'react';
+import { SignIn, SignOut, UserCircle, Coins, Trash } from '@phosphor-icons/react';
 import { useAuth } from '@/lib/auth';
 import { useCredits } from '@/lib/credits-context';
+import { useAppStore } from '@/store/useAppStore';
+import DeleteAccountModal from './DeleteAccountModal';
 
 // Sidebar auth widget: a login button when signed out, or the user's email +
 // sign-out when signed in. Renders nothing if Supabase Auth isn't configured.
 export default function AuthButton() {
     const { enabled, user, loading, signOut, promptLogin } = useAuth();
     const { balance } = useCredits();
+    const resetAll = useAppStore((s) => s.resetAll);
+    const [deleteOpen, setDeleteOpen] = useState(false);
 
     if (!enabled) return null;
 
@@ -50,6 +55,26 @@ export default function AuthButton() {
                 >
                     <SignOut size={15} weight="duotone" /> Đăng xuất
                 </button>
+                <button
+                    onClick={() => setDeleteOpen(true)}
+                    style={{ ...rowStyle, color: 'var(--accent-red, #ef4444)' }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = 'color-mix(in srgb, var(--accent-red, #ef4444) 10%, transparent)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--bg-card)'; }}
+                >
+                    <Trash size={15} weight="duotone" /> Xoá tài khoản
+                </button>
+
+                {deleteOpen && (
+                    <DeleteAccountModal
+                        email={user.email ?? ''}
+                        onClose={() => setDeleteOpen(false)}
+                        onDeleted={async () => {
+                            setDeleteOpen(false);
+                            await signOut();   // drop the (now-invalid) session
+                            resetAll();         // wipe local store → back to landing
+                        }}
+                    />
+                )}
             </div>
         );
     }

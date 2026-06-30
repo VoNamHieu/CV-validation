@@ -61,6 +61,21 @@ async def set_agent_consent(*, user_id: str) -> dict:
     return row_to_dict(await pool.fetchrow(sql, user_id))
 
 
+async def delete_account(user_id: str) -> None:
+    """Hard-delete the user and ALL their data (Privacy §5 — right to erasure).
+    One transaction: app rows first, then the profile, then the auth.users row
+    (which also cascades auth identities/sessions). Explicit per-table deletes
+    so cleanup doesn't depend on every FK being ON DELETE CASCADE."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            for table in ("applications", "saved_jobs", "cv_profiles",
+                          "credit_ledger", "credits"):
+                await conn.execute(f"DELETE FROM {table} WHERE user_id = $1", user_id)
+            await conn.execute("DELETE FROM profiles WHERE id = $1", user_id)
+            await conn.execute("DELETE FROM auth.users WHERE id = $1", user_id)
+
+
 async def find_id_by_email(email: str) -> Optional[str]:
     """Resolve a user id from their email (case-insensitive). Used by admin
     tooling to target a user without knowing their UUID."""

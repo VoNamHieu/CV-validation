@@ -43,6 +43,13 @@ async def agent_consent(user_id: str = Depends(get_current_user_id)):
     return await profiles.set_agent_consent(user_id=user_id)
 
 
+@router.delete("/account")
+async def delete_account(user_id: str = Depends(get_current_user_id)):
+    """Permanently delete the account and all associated data (Privacy §5)."""
+    await profiles.delete_account(user_id)
+    return {"deleted": True}
+
+
 # ── cv profiles ────────────────────────────────────────────────────────────
 class CvProfileCreate(BaseModel):
     structured: dict

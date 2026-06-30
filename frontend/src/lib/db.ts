@@ -191,6 +191,10 @@ export const account = {
     recordAgentConsent: () =>
         req<Profile>(`/api/me/agent-consent`, { method: 'POST', auth: true }),
 
+    // Permanently delete the account + all data (Privacy §5).
+    deleteAccount: () =>
+        req<{ deleted: boolean }>(`/api/me/account`, { method: 'DELETE', auth: true }),
+
     listCvProfiles: () => req<CvProfile[]>(`/api/me/cv-profiles`, { auth: true }),
     getActiveCvProfile: () => req<CvProfile>(`/api/me/cv-profiles/active`, { auth: true }),
     createCvProfile: (body: { structured: CVData; raw_cv_url?: string; embedding?: number[]; make_active?: boolean }) =>
