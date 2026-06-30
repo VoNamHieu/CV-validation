@@ -264,8 +264,17 @@ export default function Landing() {
             </section>
 
             <footer className="lp-footer">
-                <span className="lp-logo lp-logo-sm"><Sparkle size={13} weight="fill" color="#fff" /></span>
-                JobFit AI · Vận hành bởi AI · Cam kết không bịa nội dung
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
+                    <span className="lp-logo lp-logo-sm"><Sparkle size={13} weight="fill" color="#fff" /></span>
+                    JobFit AI · Vận hành bởi AI · Cam kết không bịa nội dung
+                </div>
+                <div className="lp-footer-links">
+                    <a href="/privacy">Quyền riêng tư</a>
+                    <span>·</span>
+                    <a href="/terms">Điều khoản sử dụng</a>
+                    <span>·</span>
+                    <a href="mailto:vonamhieu.work@gmail.com">Liên hệ</a>
+                </div>
             </footer>
         </div>
     );
@@ -401,7 +410,10 @@ const LP_CSS = `
 .lp-cta-band .lp-btn-primary { position: relative; background: #fff; color: #4f46e5; box-shadow: 0 10px 30px rgba(0,0,0,0.18); }
 .lp-cta-band .lp-btn-primary:hover { box-shadow: 0 14px 40px rgba(0,0,0,0.28); }
 
-.lp-footer { max-width: 1000px; margin: 0 auto; padding: 40px 24px 48px; display: flex; align-items: center; justify-content: center; gap: 9px; font-size: 0.78rem; color: var(--text-muted); }
+.lp-footer { max-width: 1000px; margin: 0 auto; padding: 40px 24px 48px; display: flex; flex-direction: column; align-items: center; gap: 12px; font-size: 0.78rem; color: var(--text-muted); }
+.lp-footer-links { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.lp-footer-links a { color: var(--text-secondary); text-decoration: none; font-weight: 500; }
+.lp-footer-links a:hover { color: var(--text-primary); }
 
 @keyframes lp-rise { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: none; } }
 
