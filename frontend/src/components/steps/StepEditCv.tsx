@@ -26,6 +26,7 @@ import type {
 import {
     EMPTY_CONTACT, EMPTY_PERSONAL, EMPTY_EMPLOYMENT, EMPTY_PREFERENCES,
 } from '@/lib/types';
+import { promptInstallExtension } from '@/lib/extension-install';
 import { cvToExtensionProfile } from '@/lib/extension-profile';
 import { syncProfileToExtension, syncCvFileToExtension, syncCvDataToExtension } from '@/lib/extension-sync';
 import { renderCvHtml, getTemplate, DEFAULT_TEMPLATE_ID } from '@/lib/cv-templates';
@@ -425,6 +426,7 @@ export default function StepEditCv() {
             if (message === 'NO_EXTENSION') {
                 setAutoApplyStatus('no-extension');
                 setAutoApplyMessage('Extension chưa cài. Đang mở trang ứng tuyển...');
+                promptInstallExtension();
                 window.open(jobUrl, '_blank');
             } else {
                 setAutoApplyStatus('error');
@@ -442,6 +444,7 @@ export default function StepEditCv() {
         if (!isExtensionAvailable()) {
             setAutoApplyStatus('no-extension');
             setAutoApplyMessage('Extension chưa cài! Vui lòng cài JobFit AI Extension trước.');
+            promptInstallExtension();
             setTimeout(() => setAutoApplyStatus('idle'), 5000);
             return;
         }
@@ -495,6 +498,7 @@ export default function StepEditCv() {
         if (!isExtensionAvailable()) {
             setAutoApplyStatus('no-extension');
             setAutoApplyMessage('Extension chưa cài! Vui lòng cài JobFit AI Extension trước.');
+            promptInstallExtension();
             setTimeout(() => setAutoApplyStatus('idle'), 5000);
             return;
         }
