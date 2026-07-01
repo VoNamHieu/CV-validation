@@ -55,7 +55,7 @@ export default function AuthButton() {
                     onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-primary)'; }}
                     onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-secondary)'; }}
                 >
-                    <Plus size={15} weight="bold" /> Xin thêm credit
+                    <Plus size={15} weight="bold" /> Nhận thêm credit
                 </button>
                 <button
                     onClick={() => signOut()}

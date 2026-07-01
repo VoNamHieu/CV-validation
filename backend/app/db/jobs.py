@@ -14,8 +14,8 @@ from app.db.pool import get_pool, row_to_dict, rows_to_dicts
 # Every column EXCEPT embedding — reads must not haul the vector around.
 _COLS = (
     "id, company_id, external_id, title, location, description, role_family, "
-    "industry, seniority, must_have, source_url, content_hash, is_active, "
-    "last_seen_at, last_verified_at, dead_reason, indexed_at, apply_count, "
+    "industry, seniority, required_years_min, must_have, source_url, content_hash, "
+    "is_active, last_seen_at, last_verified_at, dead_reason, indexed_at, apply_count, "
     "bookmark_count, hotness, created_at"
 )
 
@@ -30,6 +30,7 @@ async def upsert(
     role_family: Optional[str] = None,
     industry: Optional[str] = None,
     seniority: Optional[str] = None,
+    required_years_min: Optional[int] = None,
     must_have: Optional[list] = None,
     source_url: Optional[str] = None,
     content_hash: Optional[str] = None,
@@ -44,31 +45,33 @@ async def upsert(
     sql = f"""
         INSERT INTO jobs
             (company_id, external_id, title, location, description, role_family,
-             industry, seniority, must_have, source_url, content_hash, embedding,
-             is_active, last_seen_at, indexed_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::vector, true, now(),
-                CASE WHEN $12::vector IS NULL THEN NULL ELSE now() END)
+             industry, seniority, required_years_min, must_have, source_url,
+             content_hash, embedding, is_active, last_seen_at, indexed_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::vector, true, now(),
+                CASE WHEN $13::vector IS NULL THEN NULL ELSE now() END)
         ON CONFLICT (company_id, external_id) DO UPDATE SET
-            title        = EXCLUDED.title,
-            location     = COALESCE(EXCLUDED.location, jobs.location),
-            description  = COALESCE(EXCLUDED.description, jobs.description),
-            role_family  = COALESCE(EXCLUDED.role_family, jobs.role_family),
-            industry     = COALESCE(EXCLUDED.industry, jobs.industry),
-            seniority    = COALESCE(EXCLUDED.seniority, jobs.seniority),
-            must_have    = COALESCE(EXCLUDED.must_have, jobs.must_have),
-            source_url   = COALESCE(EXCLUDED.source_url, jobs.source_url),
-            content_hash = COALESCE(EXCLUDED.content_hash, jobs.content_hash),
-            embedding    = COALESCE(EXCLUDED.embedding, jobs.embedding),
-            indexed_at   = CASE WHEN EXCLUDED.embedding IS NULL THEN jobs.indexed_at ELSE now() END,
-            is_active    = true,
-            dead_reason  = NULL,
-            last_seen_at = now()
+            title              = EXCLUDED.title,
+            location           = COALESCE(EXCLUDED.location, jobs.location),
+            description        = COALESCE(EXCLUDED.description, jobs.description),
+            role_family        = COALESCE(EXCLUDED.role_family, jobs.role_family),
+            industry           = COALESCE(EXCLUDED.industry, jobs.industry),
+            seniority          = COALESCE(EXCLUDED.seniority, jobs.seniority),
+            required_years_min = COALESCE(EXCLUDED.required_years_min, jobs.required_years_min),
+            must_have          = COALESCE(EXCLUDED.must_have, jobs.must_have),
+            source_url         = COALESCE(EXCLUDED.source_url, jobs.source_url),
+            content_hash       = COALESCE(EXCLUDED.content_hash, jobs.content_hash),
+            embedding          = COALESCE(EXCLUDED.embedding, jobs.embedding),
+            indexed_at         = CASE WHEN EXCLUDED.embedding IS NULL THEN jobs.indexed_at ELSE now() END,
+            is_active          = true,
+            dead_reason        = NULL,
+            last_seen_at       = now()
         RETURNING {_COLS}
     """
     return row_to_dict(
         await pool.fetchrow(
             sql, company_id, external_id, title, location, description, role_family,
-            industry, seniority, must_have, source_url, content_hash, embedding,
+            industry, seniority, required_years_min, must_have, source_url,
+            content_hash, embedding,
         )
     )
 
@@ -149,8 +152,8 @@ async def list_for_facet(*, limit: int = 500) -> list[dict]:
     rows = await pool.fetch(
         """
         SELECT j.title, j.location, j.source_url AS url, j.description,
-               j.role_family, j.industry, j.seniority,
-               c.name AS company, c.career_url
+               j.role_family, j.industry, j.seniority, j.required_years_min,
+               j.must_have, c.name AS company, c.career_url
         FROM jobs j
         LEFT JOIN companies c ON c.id = j.company_id
         WHERE j.is_active

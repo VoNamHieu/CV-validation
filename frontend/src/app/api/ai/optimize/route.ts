@@ -16,6 +16,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ variants });
     } catch (e: unknown) {
         const cr = creditErrorResponse(e); if (cr) return cr;
+        console.error("[/api/ai/optimize] FAILED:", e instanceof Error ? (e.stack || e.message) : e);
         const message = e instanceof Error ? e.message : "Failed to optimize CV";
         return NextResponse.json({ detail: message }, { status: 500 });
     }

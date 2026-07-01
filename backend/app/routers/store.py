@@ -94,6 +94,15 @@ async def upsert_job(body: JobUpsert):
     return await jobs.upsert(**body.model_dump())
 
 
+@router.post("/ingest-featured")
+async def ingest_featured(render: bool = False, limit: Optional[int] = None):
+    """Slice-1 ingest trigger: pull ATS feeds for featured companies into the
+    store (structured, incl. required_years_min). On-demand — no scheduler yet.
+    `render=true` also renders bespoke pages to catch embedded ATS."""
+    from app.services.job_ingest import ingest_featured_ats
+    return await ingest_featured_ats(render=render, limit=limit)
+
+
 @router.post("/jobs/search")
 async def search_jobs(body: JobSearch):
     vec = body.embedding

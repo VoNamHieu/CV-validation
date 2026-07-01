@@ -396,6 +396,9 @@ class SearchRequest(BaseModel):
     cv_roles: list[str] = Field(default_factory=list)
     domains: list[str] = Field(default_factory=list)
     level: str = ""
+    # Candidate's years of professional experience — feeds the years-fit demote
+    # so jobs out-reaching the candidate rank lower (0 = unknown → neutral).
+    years_of_experience: int = 0
     desired_locations: list[str] = Field(default_factory=list)
     salary_floor: int = 0
     limit: int = 60
@@ -497,6 +500,10 @@ async def search(req: SearchRequest):
     # Direction (role_families) stays the target; this rides alongside.
     if req.cv_roles:
         profile.cv_families = families_from_roles(req.cv_roles)
+
+    # Years-of-experience feeds the years-fit demote (0 = unknown → neutral).
+    if req.years_of_experience:
+        profile.candidate_years = req.years_of_experience
 
     # Reuse the featured cache (L1 → Redis); kick a refresh if cold.
     companies = _featured_cache.get("data")

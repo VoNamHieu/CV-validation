@@ -9,11 +9,12 @@ scoring moves to SQL once jobs live in the store.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 
 from app.search.taxonomy import (
     classify_title, adjacent_families, classify_seniority, level_index,
-    FULL_CONFIDENCE, SENIORITY_LEVELS,
+    canon_level, FULL_CONFIDENCE, SENIORITY_LEVELS,
 )
 from app.search.company_industry import classify_company
 
@@ -30,6 +31,11 @@ class SearchProfile:
     desired_locations: list[str] = field(default_factory=list)
     level: str = ""
     salary_floor: int = 0
+    # Candidate's years of professional experience (0 = unknown → years-fit
+    # stays neutral). Lets ranking demote jobs whose stated minimum years
+    # out-reach the candidate — the SAME signal the optimize pipeline uses, so
+    # a job can't rank #1 here and then read "too much experience" downstream.
+    candidate_years: int = 0
     adjacency_threshold: float = 0.5
     # The candidate's PROVEN role families (from the CV) — the CONSTRAINT axis.
     # role_families is where they want to go; cv_families is what they can show.
@@ -92,6 +98,50 @@ def _effective_level(profile_level: str, fit_mult: float) -> str:
     drop = int((1.0 - fit_mult) * _LEVEL_DISCOUNT_SPAN + 0.5)
     eff = max(pi - drop, 0)   # floor at Intern; discount never RAISES the level
     return SENIORITY_LEVELS[eff]
+
+
+# ── Experience-years fit (rank, don't drop) ──────────────────────────────────
+# "5+ years", "ít nhất 3 năm", "3-5 years" → the minimum. Same intent as the
+# frontend's requiredYearsFromJd; kept as a cheap regex (no LLM at rank time).
+_YEARS_RE = re.compile(r"(\d{1,2})(?:\.\d+)?\s*\+?\s*(?:years?|yrs?|năm|nam)", re.I)
+
+
+def _required_years(job: dict) -> int | None:
+    """Minimum years a job asks for, or None when no usable signal.
+    Prefers a pre-indexed `required_years_min`; else scans the available text
+    (title + description + must_have). Takes the LOWER bound across matches so
+    ranking never OVER-demotes on an incidental large number."""
+    rym = job.get("required_years_min")
+    if isinstance(rym, (int, float)) and rym > 0:
+        return int(rym)
+    parts = [str(job.get("title") or ""), str(job.get("description") or "")]
+    mh = job.get("must_have")
+    if isinstance(mh, (list, tuple)):
+        parts.append(" ".join(str(x) for x in mh))
+    elif isinstance(mh, str):
+        parts.append(mh)
+    best: int | None = None
+    for m in _YEARS_RE.finditer(" ".join(parts)):
+        v = int(m.group(1))
+        if 0 < v <= 30:  # ignore junk like "10000 nhân viên"
+            best = v if best is None else min(best, v)
+    return best
+
+
+def _years_fit(required: int | None, candidate_years: int) -> float:
+    """Demote (never drop) a job whose minimum years out-reach the candidate.
+    Unknown requirement or unknown candidate years → neutral (1.0). A 1-year
+    stretch is fine; the demote deepens with the gap so far-reaches sink."""
+    if not required or candidate_years <= 0:
+        return 1.0
+    gap = required - candidate_years
+    if gap <= 1:
+        return 1.0
+    if gap == 2:
+        return 0.7
+    if gap == 3:
+        return 0.5
+    return 0.35
 
 
 def _seniority_mult(job_level: str | None, profile_level: str) -> float:
@@ -171,9 +221,20 @@ def score_job(job: dict, profile: SearchProfile, role_weights: dict[str, float],
     # this job's family (1.0 when same / no CV given). Also discounts the level
     # they're judged at, so a pivot's career seniority doesn't transfer wholesale.
     fit_mult = _fit_mult(fam, profile.cv_families)
-    job_level = classify_seniority(title)
+    # Seniority signal: prefer a stored/body-derived seniority (set at ingest)
+    # over re-classifying the bare title — a title like "Product Manager" carries
+    # no level word and would otherwise default to Mid. Fall back to the title
+    # classifier when nothing is stored.
+    job_level = canon_level(str(job.get("seniority") or "")) or classify_seniority(title)
     eff_level = _effective_level(profile.level, fit_mult)
     sen_mult = _seniority_mult(job_level, eff_level)
+
+    # Experience-years fit: demote (never drop) jobs whose minimum years
+    # out-reach the candidate — makes ranking agree with the optimize pipeline
+    # so a job can't appear #1 here then get rejected there for "too much
+    # experience". Neutral when either side's years are unknown.
+    req_years = _required_years(job)
+    years_mult = _years_fit(req_years, profile.candidate_years)
 
     # Primary = the candidate's OWN role family (e.g. Product). Adjacent families
     # (Analyst/BA, Consultant…) are reachable but must rank as a separate, lower
@@ -182,11 +243,12 @@ def score_job(job: dict, profile: SearchProfile, role_weights: dict[str, float],
     is_primary = fam in profile.role_families
 
     return {
-        "score": round(role_w * ind_mult * conf_mult * sen_mult * fit_mult, 3),
+        "score": round(role_w * ind_mult * conf_mult * sen_mult * fit_mult * years_mult, 3),
         "role_family": fam, "industry": ind, "is_primary": is_primary,
         "role_w": role_w, "in_domain": in_domain, "reachable": reachable,
         "confidence": conf, "seniority": job_level, "seniority_mult": sen_mult,
         "fit_mult": round(fit_mult, 2), "eff_level": eff_level,
+        "required_years": req_years, "years_mult": years_mult,
     }
 
 

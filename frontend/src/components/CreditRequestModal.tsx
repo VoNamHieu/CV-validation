@@ -85,7 +85,7 @@ export default function CreditRequestModal({
 
                 {view === 'intro' && (
                     <>
-                        <h2 style={titleStyle}>Xin thêm token</h2>
+                        <h2 style={titleStyle}>Nhận thêm token</h2>
                         <p style={descStyle}>
                             Lần đầu bạn được tặng thêm <strong style={{ color: 'var(--text-primary)' }}>{FREE_TOPUP} token</strong> miễn phí.
                             Sau đó, để dùng tiếp bạn cần mua thêm qua chuyển khoản.

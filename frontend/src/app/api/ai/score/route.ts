@@ -13,6 +13,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(result);
     } catch (e: unknown) {
         const cr = creditErrorResponse(e); if (cr) return cr;
+        console.error("[/api/ai/score] FAILED:", e instanceof Error ? (e.stack || e.message) : e);
         const message = e instanceof Error ? e.message : "Failed to score fit";
         const status = message.includes("invalid JSON") ? 502 : 500;
         return NextResponse.json({ detail: message }, { status });

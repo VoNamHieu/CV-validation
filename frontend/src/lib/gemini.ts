@@ -47,6 +47,10 @@ function isTransient(err: unknown): boolean {
     return msg.includes("503") || msg.includes("unavailable") || msg.includes("overloaded")
         || msg.includes("resource_exhausted") || msg.includes("quota") || msg.includes("rate_limit")
         || msg.includes("429") || msg.includes("500") || msg.includes("internal")
+        // 504 / deadline are server-side timeouts — retry + fall back to the other
+        // model instead of killing the whole JD entry on one slow call.
+        || msg.includes("504") || msg.includes("deadline") || msg.includes("gateway")
+        || msg.includes("cancelled") || msg.includes("canceled") || msg.includes("aborted")
         || msg.includes("timeout") || msg.includes("timed out")
         || msg.includes("fetch failed") || msg.includes("network") || msg.includes("socket");
 }
@@ -112,7 +116,13 @@ async function callModel(
                 return response.text ?? "";
             } catch (e) {
                 lastErr = e;
-                if (!isTransient(e)) throw e;
+                if (!isTransient(e)) {
+                    // Non-transient (bad schema, safety block, 400) — surfaced to
+                    // the server log so silent optimize/score failures are debuggable.
+                    console.error(`[${tag}] ${model} NON-TRANSIENT error (no retry):`,
+                        e instanceof Error ? (e.stack || e.message) : e);
+                    throw e;
+                }
                 if (attempt < MAX_ATTEMPTS_PER_MODEL) {
                     // Exponential backoff with jitter so parallel callers don't re-stampede.
                     const delay = BASE_BACKOFF_MS * 2 ** (attempt - 1) * (0.5 + Math.random());
@@ -124,6 +134,8 @@ async function callModel(
         }
         console.warn(`[${tag}] ${model} exhausted retries, trying next model...`);
     }
+    console.error(`[${tag}] ALL MODELS FAILED:`,
+        lastErr instanceof Error ? (lastErr.stack || lastErr.message) : lastErr);
     throw lastErr instanceof Error ? lastErr : new Error("All Gemini models failed");
 }
 

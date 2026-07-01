@@ -15,7 +15,7 @@ import {
     findCareer, discoverJobsWarm, inferSearchProfile, searchFeaturedJobsWarm,
     optimizeCvVariants, reportBrokenLink, type JobListing,
 } from '@/lib/api';
-import { buildSearchUrl, matchesCity, titleMatchScore, cityLabel, experienceGapExceeds } from '@/lib/job-targeting';
+import { buildSearchUrl, matchesCity, titleMatchScore, cityLabel } from '@/lib/job-targeting';
 import type { CVData } from '@/lib/types';
 import { buildCvPdfCache } from '@/lib/cv-pdf-cache';
 import { filterUnseenCandidates } from '@/lib/job-dedup';
@@ -322,6 +322,9 @@ export default function StepInputUrl() {
                         // User's seniority pick overrides the CV-inferred level;
                         // empty → backend infers from the CV level.
                         level: targetLevel || cvData.employment?.current_level || '',
+                        // Candidate's years → backend demotes jobs that out-reach
+                        // it (keeps ranking consistent with the optimize step).
+                        years_of_experience: cvData.employment?.years_of_experience || 0,
                         // Pull a deep ranked pool so the role-adjacent backfill has
                         // plenty of same-family spares when postings turn out dead.
                         limit: 200,
@@ -745,20 +748,14 @@ export default function StepInputUrl() {
                     return;
                 }
 
-                // ── Experience-gap rule ──
-                // Drop jobs that out-reach the candidate by more than 1 year
-                // (e.g. JD wants 5y, candidate has 2y). Done before scoring so we
-                // don't spend Gemini calls on jobs the user can't realistically land.
-                const candidateYears = cvData!.employment?.years_of_experience ?? 0;
-                const gap = experienceGapExceeds(jdData, candidateYears);
-                if (gap.exceeds) {
-                    updateJdEntry(entryId, {
-                        status: 'error',
-                        jdData,
-                        error: `Cần ~${gap.required} năm kinh nghiệm, bạn có ${candidateYears} — chênh quá 1 năm`,
-                    });
-                    return;
-                }
+                // ── Experience gap: rank, don't drop ──
+                // We used to hard-drop jobs out-reaching the candidate by >1 year,
+                // but that contradicted the facet search that ranked them first
+                // (search demotes on seniority; a hidden hard gate then killed them).
+                // Keep the job and let scoring reflect the gap — seniority_match (10%)
+                // and experience_match (25%) already penalize over-reach, so the
+                // candidate sees an honest low score and decides, instead of the job
+                // silently vanishing between "top match" and the editor.
 
                 // ── Score ──
                 updateJdEntry(entryId, { status: 'scoring' });

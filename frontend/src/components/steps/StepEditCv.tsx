@@ -103,14 +103,33 @@ export default function StepEditCv() {
         e => e.optimizing || (e.status !== 'done' && e.status !== 'error'),
     ), [jdEntries]);
 
-    // A job re-opened from history that has a saved match report but NO tailored
-    // CV yet (created at scoring time, before optimization). Show its report + an
-    // optimize CTA instead of the dead-end "no optimized CV" empty state.
+    // An entry that has a match report but NO tailored CV yet — either a job
+    // re-opened from history, or a fresh search whose auto-optimize didn't finish
+    // (all variants failed / timed out). Show its report + an optimize CTA
+    // instead of the dead-end "no optimized CV" empty state.
     const reportOnlyEntry = useMemo(() => {
         if (sortedEntries.length > 0) return null;
+        const isReport = (e?: JDEntry) =>
+            !!(e && e.matchResult && e.jdData && !e.optimizedCv && !e.optimizing);
+        // Prefer the job the user clicked through to…
         const sel = jdEntries.find(e => e.id === selectedJdId);
-        return sel?.matchResult && sel?.jdData && !sel.optimizedCv && !sel.optimizing ? sel : null;
+        if (isReport(sel)) return sel!;
+        // …otherwise fall back to the best-scored entry, so a results→editor
+        // handoff that never set selectedJdId (or set a stale one) still lands
+        // on an actionable report instead of the dead-end.
+        return [...jdEntries]
+            .filter(isReport)
+            .sort((a, b) => (b.matchResult?.overall_score ?? 0) - (a.matchResult?.overall_score ?? 0))[0] ?? null;
     }, [sortedEntries, jdEntries, selectedJdId]);
+
+    // Jobs that were found but dropped BEFORE producing an optimized CV — errored
+    // extract/score, or filtered out by the experience-gap rule. When every job
+    // lands here, the editor would otherwise show a generic "no CV" dead-end that
+    // hides WHY. Surface the per-job reasons so the failure is diagnosable.
+    const droppedEntries = useMemo(
+        () => jdEntries.filter(e => e.status === 'error' && !e.optimizedCv),
+        [jdEntries],
+    );
 
     // Open on the job the user clicked through from the report (selectedJdId);
     // fall back to the top-scored CV when there's no selection or it has no
@@ -772,9 +791,27 @@ export default function StepEditCv() {
                 <h3 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: 8 }}>
                     Chưa có CV tối ưu nào
                 </h3>
-                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: 24, lineHeight: 1.6 }}>
-                    Chưa có công việc nào được phân tích và tối ưu. Quay lại tìm việc — mỗi công việc được chấm điểm sẽ tự động tối ưu CV.
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: droppedEntries.length ? 16 : 24, lineHeight: 1.6 }}>
+                    {droppedEntries.length
+                        ? `Tìm được ${droppedEntries.length} việc nhưng chưa việc nào tối ưu được — lý do bên dưới. Thử tìm lại hoặc đổi vị trí/cấp bậc.`
+                        : 'Chưa có công việc nào được phân tích và tối ưu. Quay lại tìm việc — mỗi công việc được chấm điểm sẽ tự động tối ưu CV.'}
                 </p>
+                {droppedEntries.length > 0 && (
+                    <div style={{ textAlign: 'left', maxWidth: 460, margin: '0 auto 24px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {droppedEntries.slice(0, 8).map(e => (
+                            <div key={e.id} style={{
+                                display: 'flex', alignItems: 'flex-start', gap: 8, padding: '8px 12px', borderRadius: 8,
+                                background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.18)',
+                            }}>
+                                <Warning size={13} weight="fill" style={{ color: 'var(--accent-amber)', marginTop: 2, flexShrink: 0 }} />
+                                <span style={{ fontSize: '0.78rem', lineHeight: 1.45 }}>
+                                    <span style={{ fontWeight: 600 }}>{e.jobTitle || e.company || e.label}</span>
+                                    {e.error ? <span style={{ color: 'var(--text-secondary)' }}> — {e.error}</span> : null}
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                )}
                 <button className="btn-secondary" onClick={() => setStep(2)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                     <ArrowLeft size={16} /> Quay lại Tìm việc
                 </button>

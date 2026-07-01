@@ -463,6 +463,10 @@ export interface FacetSearchRequest {
     cv_roles?: string[];
     domains?: string[];
     level?: string;
+    // Candidate's years of experience — lets the backend demote jobs that
+    // out-reach the candidate so they rank lower instead of appearing first
+    // and then being flagged "too much experience" at optimize time.
+    years_of_experience?: number;
     desired_locations?: string[];
     salary_floor?: number;
     limit?: number;
