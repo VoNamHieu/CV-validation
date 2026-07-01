@@ -96,4 +96,18 @@ async def rerank_bucket(jobs: list[dict], query_text: str, top: int = 60) -> lis
             return jobs
         await cache.set_json(f"{_NS}:q:{qk}", qv, _TTL)
 
-    return rerank(qv, bucket, query_phrase=query_text) + tail
+    reranked = rerank(qv, bucket, query_phrase=query_text)
+    if logger.isEnabledFor(logging.INFO):
+        # with_JD vs title_only exposes vector quality: a title-only bucket makes
+        # cosine nearly flat → semantic can't discriminate (the usual "semantic
+        # feels off" cause). cos/fin per top job shows if cosine is doing anything.
+        with_jd = sum(1 for j in bucket if (j.get("description") or "").strip())
+        logger.info(
+            "[semantic] q=%r bucket=%d with_JD=%d title_only=%d | top: %s",
+            query_text[:60], len(bucket), with_jd, len(bucket) - with_jd,
+            " · ".join(
+                f"{(j.get('title') or '')[:28]}[cos={j.get('_cos')},fin={j.get('_final')}]"
+                for j in reranked[:6]
+            ),
+        )
+    return reranked + tail

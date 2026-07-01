@@ -1,10 +1,27 @@
+import logging
 import os
+import sys
 import time
 from collections import defaultdict
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 load_dotenv()  # Load env vars before router imports
+
+# ── Logging: force the `app.*` tree to INFO with its own stdout handler ──
+# Don't rely on logging.basicConfig (a no-op once uvicorn/gunicorn has attached
+# a root handler → our [facet]/[featured]/[search] INFO lines get swallowed).
+# Configure the "app" logger tree directly so INFO reliably reaches Railway
+# stdout, regardless of what the server did to the root logger. LOG_LEVEL env
+# overrides (e.g. WARNING to quiet it).
+_LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+_app_logger = logging.getLogger("app")
+_app_logger.setLevel(_LOG_LEVEL)
+if not any(isinstance(h, logging.StreamHandler) for h in _app_logger.handlers):
+    _h = logging.StreamHandler(sys.stdout)
+    _h.setFormatter(logging.Formatter("%(levelname)s:%(name)s: %(message)s"))
+    _app_logger.addHandler(_h)
+_app_logger.propagate = False  # own handler → don't double-log via root
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware

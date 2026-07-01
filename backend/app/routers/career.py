@@ -505,6 +505,14 @@ async def search(req: SearchRequest):
     if req.years_of_experience:
         profile.candidate_years = req.years_of_experience
 
+    logger.info(
+        "[search] START roles=%s cv_families=%s level=%r years=%s domains=%s "
+        "locs=%s rerank=%s catalog=%s",
+        profile.role_families, profile.cv_families, profile.level,
+        profile.candidate_years, profile.domains, profile.desired_locations,
+        req.rerank, _CATALOG_SOURCE,
+    )
+
     # Reuse the featured cache (L1 → Redis); kick a refresh if cold.
     companies = _featured_cache.get("data")
     if not companies:
@@ -528,12 +536,22 @@ async def search(req: SearchRequest):
         if query_text:
             ranked = await rerank_bucket(ranked, query_text, top=60)
 
+    out = ranked[: max(1, min(req.limit, 200))]
+    logger.info(
+        "[search] DONE pool=%d facet=%d reranked=%s → returned=%d | top: %s",
+        len(pool), len(ranked), req.rerank, len(out),
+        " · ".join(
+            f"{(j.get('title') or '')[:32]}"
+            f"[f={j['_facet'].get('score')},cos={j.get('_cos', '-')}]"
+            for j in out[:5]
+        ),
+    )
     return {
         "warming": False,
         "profile": profile.__dict__,
         "reranked": req.rerank,
         "total_matched": len(ranked),
-        "results": ranked[: max(1, min(req.limit, 200))],
+        "results": out,
     }
 
 
