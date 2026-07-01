@@ -103,6 +103,38 @@ async def ingest_featured(render: bool = False, limit: Optional[int] = None):
     return await ingest_featured_ats(render=render, limit=limit)
 
 
+class JobVerify(BaseModel):
+    url: str = Field(..., max_length=2000)
+    title: str = Field("", max_length=300)
+
+
+@router.post("/jobs/verify")
+async def verify_job(body: JobVerify):
+    """Apply-time liveness gate: is this posting still open? Reuses the link-health
+    validator. FAIL-OPEN — only 'broken' blocks; 'unknown' (couldn't determine)
+    returns alive so we never wrongly block a live job. A confirmed-dead result
+    also feeds the broken-log and deactivates the store row so search stops
+    showing it."""
+    from app.services import link_health
+    res = await link_health.validate_job_url(body.url, body.title)
+    status = res.get("status")
+    alive = status != "broken"
+    if not alive:
+        try:
+            await link_health.record(
+                body.url, title=body.title, source="apply-gate", status=status,
+                reason=res.get("reason", ""), http_code=res.get("http_code"),
+                detail=res.get("detail", ""),
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            await jobs.mark_dead_by_url(body.url, "apply_gate_dead")
+        except Exception:  # noqa: BLE001
+            pass
+    return {"alive": alive, "status": status, "reason": res.get("reason", "")}
+
+
 @router.post("/jobs/search")
 async def search_jobs(body: JobSearch):
     vec = body.embedding

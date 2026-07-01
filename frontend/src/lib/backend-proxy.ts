@@ -22,6 +22,9 @@ export async function proxyToBackend(
     }
 
     const suffix = path.join("/");
+    // No trailing slash when suffix is empty (bare `/me`): backend routes are
+    // registered without one, so `/me/` would force a 307 redirect.
+    const target = suffix ? `/${prefix}/${suffix}` : `/${prefix}`;
     const qs = request.nextUrl.search; // includes leading "?" or ""
     const body = METHODS_WITH_BODY.has(request.method) ? await request.text() : undefined;
 
@@ -33,7 +36,7 @@ export async function proxyToBackend(
     }
 
     try {
-        const response = await fetch(`${backendUrl}/${prefix}/${suffix}${qs}`, {
+        const response = await fetch(`${backendUrl}${target}${qs}`, {
             method: request.method,
             headers,
             body,

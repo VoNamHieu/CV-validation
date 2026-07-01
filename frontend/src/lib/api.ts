@@ -481,6 +481,28 @@ export interface FacetSearchResult {
     results: FacetSearchJob[];
 }
 
+/**
+ * Apply-time liveness gate: is this posting still open? Backend reuses the
+ * link-health validator (fail-open: only a confirmed-dead 'broken' returns
+ * alive=false). ALSO fail-open on any transport/backend error here — a gate
+ * outage must never block a real application.
+ */
+export async function verifyJobAlive(url: string, title = ''): Promise<{ alive: boolean; status?: string; reason?: string }> {
+    try {
+        const res = await fetch('/api/store/jobs/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url, title }),
+            signal: AbortSignal.timeout(15_000),
+        });
+        if (!res.ok) return { alive: true };
+        const data = await res.json();
+        return { alive: data?.alive !== false, status: data?.status, reason: data?.reason };
+    } catch {
+        return { alive: true };
+    }
+}
+
 export async function searchFeaturedJobs(req: FacetSearchRequest): Promise<FacetSearchResult> {
     const res = await fetch('/api/career/search', {
         method: 'POST',

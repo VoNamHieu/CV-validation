@@ -19,7 +19,7 @@ import { applyCvFieldEdit } from '@/lib/cv-inline-edit';
 import { diffCvChanges, type CvImprovement, type CvSuggestion } from '@/lib/cv-improvements';
 import CvTemplatePicker from '@/components/CvTemplatePicker';
 import ScoreRing from '@/components/ScoreRing';
-import { optimizeCvVariants, renderCvPdf } from '@/lib/api';
+import { optimizeCvVariants, renderCvPdf, verifyJobAlive } from '@/lib/api';
 import type {
     CVData, JDData, MatchResult, CategoryScore, RequirementStatus,
     ContactInfo, PersonalInfo, EmploymentInfo, JobPreferences,
@@ -481,6 +481,19 @@ export default function StepEditCv() {
         setAutoApplyMessage('Đang kiểm tra Extension...');
 
         try {
+            // Apply-time liveness gate: don't send the agent to a dead posting.
+            // Fail-open (verifyJobAlive returns alive on any gate error).
+            setAutoApplyStatus('checking');
+            setAutoApplyMessage('Đang kiểm tra công việc còn tuyển…');
+            const live = await verifyJobAlive(jobUrl, currentEntry?.jobTitle);
+            if (!live.alive) {
+                setAutoApplyStatus('error');
+                setAutoApplyMessage('Job này đã đóng — chuyển sang job kế tiếp.');
+                goNext();
+                setTimeout(() => setAutoApplyStatus('idle'), 4000);
+                return;
+            }
+
             if (!isExtensionAvailable()) throw new Error('NO_EXTENSION');
 
             // Ensure this job's PDF exists (re-render on cache miss after reload)
@@ -581,12 +594,28 @@ export default function StepEditCv() {
             );
         }
 
+        // Apply-time liveness gate: verify all jobs (concurrent, fail-open) and
+        // drop the dead ones so the agent never opens a closed posting.
+        setAutoApplyMessage('Đang kiểm tra công việc còn tuyển…');
+        const checked = await Promise.all(
+            jobs.map(async j => ({ j, alive: (await verifyJobAlive(j.jobUrl, j.jobTitle)).alive })),
+        );
+        const liveJobs = checked.filter(c => c.alive).map(c => c.j);
+        const skipped = checked.length - liveJobs.length;
+        if (liveJobs.length === 0) {
+            setAutoApplyMessage('Tất cả công việc đều đã đóng — thử tìm việc lại.');
+            return;
+        }
+        if (skipped > 0) {
+            setAutoApplyMessage(`Bỏ qua ${skipped} job đã đóng · ứng tuyển ${liveJobs.length} job còn mở.`);
+        }
+
         setBatchStarting(true);
 
-        // Send batch command to extension
+        // Send batch command to extension (only the live jobs)
         window.postMessage({
             type: 'JOBFIT_AUTO_APPLY_ALL',
-            jobs,
+            jobs: liveJobs,
         }, '*');
     }, [sortedEntries, buildProfile, ensureAgentConsent]);
 

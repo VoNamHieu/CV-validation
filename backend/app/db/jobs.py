@@ -186,6 +186,20 @@ async def deactivate_missing(company_id: str, live_external_ids: Sequence[str]) 
     return len(rows)
 
 
+async def mark_dead_by_url(source_url: str, reason: str) -> int:
+    """Deactivate any active job with this source_url (apply-time gate found it
+    dead). Returns rows affected (0 if the url isn't in the store)."""
+    if not source_url:
+        return 0
+    pool = await get_pool()
+    rows = await pool.fetch(
+        "UPDATE jobs SET is_active = false, dead_reason = $2, last_verified_at = now() "
+        "WHERE source_url = $1 AND is_active RETURNING id",
+        source_url, reason,
+    )
+    return len(rows)
+
+
 async def mark_dead(job_id: str, reason: str) -> None:
     pool = await get_pool()
     await pool.execute(
