@@ -165,6 +165,27 @@ async def list_for_facet(*, limit: int = 500) -> list[dict]:
     return rows_to_dicts(rows)
 
 
+async def deactivate_missing(company_id: str, live_external_ids: Sequence[str]) -> int:
+    """ATS diff (v1 liveness): mark a company's active jobs dead when they're no
+    longer in its current feed. Returns rows deactivated.
+
+    Empty ``live_external_ids`` → no-op: a transient fetch that returns nothing
+    must NOT wipe a company's whole pool. Reactivation happens automatically on
+    the next successful ingest (``upsert`` sets is_active=true)."""
+    if not company_id or not live_external_ids:
+        return 0
+    pool = await get_pool()
+    rows = await pool.fetch(
+        "UPDATE jobs SET is_active = false, dead_reason = 'left_feed', "
+        "last_verified_at = now() "
+        "WHERE company_id = $1 AND is_active "
+        "AND NOT (external_id = ANY($2::text[])) "
+        "RETURNING id",
+        company_id, list(live_external_ids),
+    )
+    return len(rows)
+
+
 async def mark_dead(job_id: str, reason: str) -> None:
     pool = await get_pool()
     await pool.execute(

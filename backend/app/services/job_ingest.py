@@ -50,7 +50,8 @@ async def ingest_featured_ats(*, render: bool = False, limit: int | None = None)
     from app.db import companies as companies_repo, jobs as jobs_repo
 
     comps = list(FEATURED_COMPANIES)[: limit or None]
-    stats: dict = {"companies_with_feed": 0, "jobs_upserted": 0, "by_source": {}}
+    stats: dict = {"companies_with_feed": 0, "jobs_upserted": 0,
+                   "jobs_deactivated": 0, "by_source": {}}
     sem = asyncio.Semaphore(8)  # bound concurrent ATS fetches / renders
 
     async def one(c) -> tuple[str, int] | None:
@@ -75,6 +76,7 @@ async def ingest_featured_ats(*, render: bool = False, limit: int | None = None)
         cid = company.get("id")
 
         n = 0
+        live_ids: list[str] = []
         for j in jobs_list:
             title = (j.get("title") or "").strip()
             url = j.get("url") or ""
@@ -95,17 +97,25 @@ async def ingest_featured_ats(*, render: bool = False, limit: int | None = None)
                     source_url=url,
                 )
                 n += 1
+                live_ids.append(url)
             except Exception as e:  # noqa: BLE001
                 logger.info("ingest: job upsert failed (%s): %s", url, str(e)[:80])
-        return (jobs_list[0].get("source", "?"), n) if n else None
+        if not n:
+            return None
+        # v1 liveness diff: postings this company had but that are NO LONGER in
+        # the feed are dead → deactivate so search stops showing them. Safe: only
+        # runs when the feed returned jobs (empty feed skipped above).
+        dead = await jobs_repo.deactivate_missing(cid, live_ids)
+        return (jobs_list[0].get("source", "?"), n, dead)
 
     results = await asyncio.gather(*[one(c) for c in comps])
     for r in results:
         if not r:
             continue
-        src, n = r
+        src, n, dead = r
         stats["companies_with_feed"] += 1
         stats["jobs_upserted"] += n
+        stats["jobs_deactivated"] += dead
         stats["by_source"][src] = stats["by_source"].get(src, 0) + 1
 
     logger.info("[ingest] featured ATS → %s", stats)
