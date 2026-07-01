@@ -19,6 +19,20 @@
     <button class="tab" data-tab="settings">⚙️ Settings</button>
   </div>
 
+  <!-- ═══ One-time onboarding: grant all-sites so Auto Apply works everywhere ═══
+       Shown across every tab until the user grants "https://*/*" (or dismisses).
+       The popup is the only gesture-valid place chrome.permissions.request() can
+       run, so we drive the one-time grant from here — not the web app. -->
+  <div id="allSitesOnboard" class="onboard-banner" hidden>
+    <div class="onboard-title">🚀 Bật Auto Apply khắp mọi nơi</div>
+    <p class="onboard-text">Cấp quyền <b>1 lần duy nhất</b> để agent tự ứng tuyển trên mọi trang tuyển dụng — không phải cấp lại từng trang mỗi lần apply.</p>
+    <div class="onboard-actions">
+      <button id="onboardGrantBtn" class="btn-action">Bật cho mọi trang</button>
+      <button id="onboardDismissBtn" class="onboard-dismiss">Để sau</button>
+    </div>
+    <div id="onboardStatus" class="onboard-status"></div>
+  </div>
+
   <!-- ═══ Profile Tab ═══ -->
   <div class="tab-content active" id="tab-profile">
     <div class="field-row">

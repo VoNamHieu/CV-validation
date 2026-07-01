@@ -28,7 +28,9 @@ Return ONLY valid JSON matching this exact schema:
 required_years_min = the MINIMUM years of professional experience the JD asks for, as a plain integer:
 - "3+ years", "at least 3 years", "ít nhất 3 năm", "3-5 years" → 3 (take the lower bound).
 - If no number is stated, infer from seniority: Intern/Fresher → 0, Junior → 1, Mid-level → 3, Senior → 5, Lead/Manager → 7.
-- If experience is not mentioned and seniority is unclear, use 0.`;
+- If experience is not mentioned and seniority is unclear, use 0.
+
+LANGUAGE: Write every human-readable string (must_have, nice_to_have, responsibilities, domain) in Vietnamese, even when the source JD is in English. Keep technology/tool/framework/certification names and established job-title terms in their ORIGINAL form (e.g. React, SQL, Google Analytics, Figma, Product Manager, AWS). Do not translate proper nouns or brand/tech terms.`;
 
 export async function extractJd(rawText: unknown): Promise<Record<string, unknown>> {
     const text = typeof rawText === "string" ? rawText.slice(0, MAX_INPUT_TEXT_LENGTH) : "";
@@ -54,6 +56,23 @@ function normalizeCategory(c: unknown) {
     };
 }
 
+// Per-requirement verdicts for must_have_match — the source of truth for the
+// UI's ✓/✗ chips (replaces the old naive substring match on the frontend).
+const REQ_STATUSES = new Set(["met", "partial", "missing"]);
+function normalizeRequirements(v: unknown) {
+    if (!Array.isArray(v)) return [];
+    return v
+        .map((r) => {
+            const o = (r && typeof r === "object" ? r : {}) as Record<string, unknown>;
+            const requirement = typeof o.requirement === "string" ? o.requirement.trim() : "";
+            const s = typeof o.status === "string" ? o.status.toLowerCase().trim() : "";
+            const status = REQ_STATUSES.has(s) ? s : "missing";
+            const evidence = typeof o.evidence === "string" ? o.evidence : "";
+            return { requirement, status: status as "met" | "partial" | "missing", evidence };
+        })
+        .filter((r) => r.requirement);
+}
+
 // Category weights for the overall score (must sum to 1).
 const WEIGHTS = {
     must_have_match: 0.4,
@@ -71,7 +90,12 @@ const WEIGHTS = {
 function normalizeMatchResult(raw: unknown) {
     const m = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
     const categories = {
-        must_have_match: normalizeCategory(m.must_have_match),
+        must_have_match: {
+            ...normalizeCategory(m.must_have_match),
+            requirements: normalizeRequirements(
+                (m.must_have_match as Record<string, unknown> | undefined)?.requirements,
+            ),
+        },
         experience_match: normalizeCategory(m.experience_match),
         domain_match: normalizeCategory(m.domain_match),
         seniority_match: normalizeCategory(m.seniority_match),
@@ -99,11 +123,36 @@ const CATEGORY_SCHEMA = {
     required: ["score", "reasoning", "gaps"],
 };
 
+// must_have_match additionally carries per-requirement verdicts so the UI can
+// mark each JD requirement met/partial/missing by the model's judgment, not a
+// naive string comparison.
+const MUST_HAVE_CATEGORY_SCHEMA = {
+    type: "OBJECT",
+    properties: {
+        score: { type: "NUMBER" },
+        reasoning: { type: "STRING" },
+        gaps: { type: "ARRAY", items: { type: "STRING" } },
+        requirements: {
+            type: "ARRAY",
+            items: {
+                type: "OBJECT",
+                properties: {
+                    requirement: { type: "STRING" },
+                    status: { type: "STRING" }, // "met" | "partial" | "missing"
+                    evidence: { type: "STRING" },
+                },
+                required: ["requirement", "status", "evidence"],
+            },
+        },
+    },
+    required: ["score", "reasoning", "gaps", "requirements"],
+};
+
 const MATCH_SCHEMA = {
     type: "OBJECT",
     properties: {
         overall_score: { type: "NUMBER" },
-        must_have_match: CATEGORY_SCHEMA,
+        must_have_match: MUST_HAVE_CATEGORY_SCHEMA,
         experience_match: CATEGORY_SCHEMA,
         domain_match: CATEGORY_SCHEMA,
         seniority_match: CATEGORY_SCHEMA,
@@ -121,14 +170,16 @@ const SCORE_SYSTEM_PROMPT = `You are a precise, objective ATS scoring algorithm.
 Return ONLY valid JSON matching this exact schema:
 {
   "overall_score": number (0-100, weighted),
-  "must_have_match": {"score": number, "reasoning": "string", "gaps": ["string"]},
+  "must_have_match": {"score": number, "reasoning": "string", "gaps": ["string"], "requirements": [{"requirement": "string", "status": "met" | "partial" | "missing", "evidence": "string"}]},
   "experience_match": {"score": number, "reasoning": "string", "gaps": ["string"]},
   "domain_match": {"score": number, "reasoning": "string", "gaps": ["string"]},
   "seniority_match": {"score": number, "reasoning": "string", "gaps": ["string"]},
   "nice_to_have_match": {"score": number, "reasoning": "string", "gaps": ["string"]},
   "strength_summary": "string",
   "risk_flags": ["string"]
-}`;
+}
+
+LANGUAGE: Every human-readable string you output — each requirement, evidence, reasoning, every item in gaps, strength_summary, and risk_flags — MUST be written in Vietnamese, even when the CV or JD is in English. Keep technology/tool/framework/certification names and established job-title terms in their ORIGINAL form (e.g. React, SQL, Google Analytics, Figma, Product Manager, AWS). Do not translate proper nouns or brand/tech terms.`;
 
 export async function scoreFit(cv: unknown, jd: unknown): Promise<Record<string, unknown>> {
     if (!cv || !jd) throw new Error("cv and jd are required");
@@ -147,7 +198,12 @@ ${JSON.stringify(cv, null, 2)}
 JOB DESCRIPTION (JSON):
 ${JSON.stringify(jd, null, 2)}
 
-Determine a score from 0-100 for each dimension, explain the reasoning briefly, list the gaps, and calculate the weighted overall score. Be rigorous and identify any risk flags.`;
+Determine a score from 0-100 for each dimension, explain the reasoning briefly, list the gaps, and calculate the weighted overall score. Be rigorous and identify any risk flags.
+
+For must_have_match.requirements: output ONE entry for EVERY item in the JD's must_have list, restating each requirement in natural Vietnamese (keep tech/tool/certification names and established job titles in their original form), and judge each against the WHOLE CV (skills, experience bullets, education, projects) — not just the skills list. Set:
+- "status": "met" if the CV clearly demonstrates it; "partial" if there is related/adjacent evidence but it is not fully or explicitly shown; "missing" if there is no supporting evidence.
+- "evidence": a short quote or reference from the CV that justifies the status (empty string when missing).
+Judge by meaning, not literal keyword overlap — e.g. "led a team of 2-4" is met by "managed 3 engineers", and "3+ years as PM" is met by dated PM roles totaling 3+ years. Keep the per-requirement verdicts consistent with the score and gaps.`;
     const result = await callAI(SCORE_SYSTEM_PROMPT, userPrompt, MATCH_SCHEMA);
     const parsed = safeJsonParse(result);
     if (!parsed) throw new Error("AI returned invalid JSON. Please retry.");
@@ -294,7 +350,8 @@ Return ONLY valid JSON matching this exact schema:
   "experience": [{"title": "string", "company": "string", "duration_months": number, "description": "string"}],
   "education": [{"degree": "string", "institution": "string", "year": "string"}],
   "projects": [{"name": "string", "description": "string"}],
-  "improvements": [{"section": "string", "change": "string", "reason": "string"}]
+  "improvements": [{"section": "string", "change": "string", "reason": "string"}],
+  "suggestions": [{"section": "string", "suggestion": "string", "placeholder": "string"}]
 }
 
 improvements = a list of EVERY concrete change you made, written in VIETNAMESE for the candidate to read. Make each one SPECIFIC and IMPACTFUL — the candidate must immediately see the value:
@@ -302,6 +359,12 @@ improvements = a list of EVERY concrete change you made, written in VIETNAMESE f
 - "change": QUOTE the concrete edit — the exact phrase/metric/keyword you added or the before→after, not a generic summary. Good: 'Thêm "giảm 40% thời gian tải trang" vào gạch đầu dòng đầu'. Bad: 'viết lại bullet cho rõ hơn'.
 - "reason": the SPECIFIC JD requirement/keyword it targets and why it strengthens the match (e.g. 'JD yêu cầu tối ưu hiệu năng — định lượng tác động làm nổi bật điều đó').
 Prefer fewer, high-signal entries over many trivial ones; merge tiny edits. Only list changes you actually made; if you made none, return an empty improvements array (the app shows a deterministic diff in that case).
+
+suggestions = 3-5 PROSPECTIVE improvements you could NOT make yourself because they need a real fact the candidate must supply — a number, a scale, a concrete detail you must NEVER invent. Written in VIETNAMESE. This is how the CV gets stronger without fabrication: you point to the weak spot, the candidate fills in the real figure, then re-optimization uses it.
+- "section": where it applies ("Kinh nghiệm: <company>", "Dự án: <name>", "Mục tiêu nghề nghiệp").
+- "suggestion": point out what would make this stronger, tied to a JD requirement. e.g. 'Định lượng quy mô công việc hậu cần để làm bật năng lực quản lý nguồn lực JD yêu cầu'.
+- "placeholder": the exact quantification question to show inside the input box. e.g. 'Ngân sách phụ trách? Số thành viên? Quy mô sự kiện lớn nhất?'.
+Only suggest things the source CV plausibly supports (do NOT invent achievements the candidate never mentioned). Prioritize gaps that would most raise the JD match. Return an empty suggestions array only if the CV is already fully quantified.
 
 STRICT GUARDRAILS:
 1. Only use information explicitly found in the original CV.
@@ -316,6 +379,7 @@ export interface OptimizedVariant {
     length: OptimizeLength;
     cv: Record<string, unknown>;
     improvements: unknown[];
+    suggestions: unknown[];
 }
 
 export async function optimizeForJd(
@@ -334,8 +398,9 @@ export async function optimizeForJd(
             const raw = await callAI(OPTIMIZE_SYSTEM_PROMPT, userPrompt, OPTIMIZE_RESPONSE_SCHEMA);
             const parsed = safeJsonParse(raw);
             if (!parsed) throw new Error(`Variant "${cfg.label}" returned invalid JSON`);
-            // improvements is explanation metadata, not CV content — split it off.
-            const { improvements, ...optimizedCv } = parsed as Record<string, unknown>;
+            // improvements + suggestions are explanation metadata, not CV
+            // content — split them off before the CV repair pass.
+            const { improvements, suggestions, ...optimizedCv } = parsed as Record<string, unknown>;
             // Deterministic guard: restore any entries/bullets/skills the model dropped.
             const { cv: repairedCv, repairs } = repairOptimizedCv(cv, optimizedCv);
             if (repairs.length) {
@@ -348,6 +413,7 @@ export async function optimizeForJd(
                 length: cfg.length,
                 cv: repairedCv,
                 improvements: Array.isArray(improvements) ? improvements : [],
+                suggestions: Array.isArray(suggestions) ? suggestions : [],
             };
         })
     );

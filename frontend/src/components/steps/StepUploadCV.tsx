@@ -1,8 +1,8 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-    UploadSimple, FileText, X, SpinnerGap, Brain,
+    UploadSimple, FileText, SpinnerGap, Brain,
     CheckCircle, Sparkle, ArrowRight, WarningCircle, Lightning,
     Target, MapPin, Stack,
 } from '@phosphor-icons/react';
@@ -15,7 +15,7 @@ import { CITY_OPTIONS, SENIORITY_OPTIONS, canonSeniority } from '@/lib/job-targe
 
 export default function StepUploadCV() {
     const {
-        setCvRawText, setCvData, setStep, cvFileName, setFullyAutoMode,
+        setCvRawText, setCvData, setStep, cvFileName, cvData, setFullyAutoMode,
         targetJobTitle, setTargetJobTitle, targetLocation, setTargetLocation,
         targetLevel, setTargetLevel,
     } = useAppStore();
@@ -24,13 +24,39 @@ export default function StepUploadCV() {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [dragOver, setDragOver] = useState(false);
     const [error, setError] = useState('');
-    const [uploaded, setUploaded] = useState(!!cvFileName);
+    // "Tải CV mới" — user with an existing CV explicitly chose to replace it.
+    const [wantNew, setWantNew] = useState(false);
     const [processing, setProcessing] = useState(false);
     const [processingFile, setProcessingFile] = useState('');
     // null = not attempted, true = extension ACKed, false = no ACK (not
     // installed / wrong URL / needs tab refresh after extension reload).
     const [extSynced, setExtSynced] = useState<boolean | null>(null);
     const [extSyncError, setExtSyncError] = useState('');
+
+    // A CV already exists (freshly parsed this session OR restored from the
+    // account on login via syncActiveCvProfile). "ready" = we can proceed
+    // without an upload; show the reuse card instead of the empty dropzone.
+    const hasCv = !!cvData;
+    const ready = hasCv && !wantNew;
+    const reuseTitle =
+        cvData?.desired_job_title?.trim()
+        || cvData?.employment?.current_title?.trim()
+        || '';
+
+    // A CV restored from the account (no fresh upload this session, so no
+    // cvFileName) hasn't been pushed to the extension yet — sync it once so the
+    // popup is pre-filled and auto-apply works without re-uploading.
+    const reusedSyncedRef = useRef(false);
+    useEffect(() => {
+        if (!cvData || cvFileName || reusedSyncedRef.current) return;
+        reusedSyncedRef.current = true;
+        const profile = cvToExtensionProfile(cvData);
+        syncProfileToExtension(profile, cvData).then((res) => {
+            setExtSynced(res.ok);
+            setExtSyncError(res.error ?? '');
+        }).catch(() => { });
+        syncCvDataToExtension(cvData).catch(() => { });
+    }, [cvData, cvFileName]);
 
     const handleFile = useCallback(async (file: File) => {
         if (!file.name.toLowerCase().endsWith('.pdf')) {
@@ -72,7 +98,7 @@ export default function StepUploadCV() {
             // page (Mode 1) — the relay drops cvData from the profile message.
             syncCvDataToExtension(structured).catch(() => { });
 
-            setUploaded(true);
+            setWantNew(false);
             setProcessing(false);
         } catch (e: unknown) {
             setError(e instanceof Error ? e.message : 'Tải lên thất bại');
@@ -194,8 +220,21 @@ export default function StepUploadCV() {
                 </div>
             )}
 
-            {/* Upload Zone */}
-            {!uploaded && !processing && (
+            {/* Upload Zone — shown when there's no CV yet, or the user chose "Tải CV mới" */}
+            {!ready && !processing && (
+                <>
+                {wantNew && hasCv && (
+                    <button
+                        onClick={() => { setWantNew(false); setError(''); }}
+                        style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 12,
+                            background: 'none', border: 'none', cursor: 'pointer',
+                            color: 'var(--accent-purple)', fontSize: '0.82rem', fontWeight: 600, padding: 0,
+                        }}
+                    >
+                        <ArrowRight size={14} weight="bold" style={{ transform: 'rotate(180deg)' }} /> Dùng lại CV đã lưu
+                    </button>
+                )}
                 <div
                     className={`upload-zone ${dragOver ? 'drag-over' : ''}`}
                     onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
@@ -230,10 +269,13 @@ export default function StepUploadCV() {
                         onChange={onFileSelect}
                     />
                 </div>
+                </>
             )}
 
-            {/* Success State */}
-            {uploaded && !processing && (
+            {/* Ready state — a CV is available (freshly parsed or reused from the
+                account). Show its identity + a "Tải CV mới" escape hatch instead
+                of forcing a re-upload. */}
+            {ready && !processing && (
                 <div className="glass-card" style={{
                     padding: '20px 24px',
                     display: 'flex', alignItems: 'center', gap: 16,
@@ -245,16 +287,22 @@ export default function StepUploadCV() {
                         background: 'rgba(52, 211, 153, 0.1)',
                         border: '1px solid rgba(52, 211, 153, 0.2)',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        flexShrink: 0,
                     }}>
                         <FileText size={20} weight="duotone" style={{ color: 'var(--accent-green)' }} />
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                        <p style={{ fontWeight: 600, fontSize: '0.9rem', letterSpacing: '-0.01em' }}>{cvFileName}</p>
+                        <p style={{ fontWeight: 600, fontSize: '0.9rem', letterSpacing: '-0.01em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {cvData?.name || cvFileName || 'CV của bạn'}
+                            {reuseTitle && (
+                                <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}> · {reuseTitle}</span>
+                            )}
+                        </p>
                         <p style={{
                             color: 'var(--accent-green)', fontSize: '0.8rem',
                             display: 'flex', alignItems: 'center', gap: 4, marginTop: 2,
                         }}>
-                            <CheckCircle size={12} weight="fill" /> Đã đọc & cấu trúc xong
+                            <CheckCircle size={12} weight="fill" /> {cvFileName ? 'Đã đọc & cấu trúc xong' : 'Đang dùng CV đã lưu — không cần tải lại'}
                         </p>
                         {extSynced !== null && (
                             <p
@@ -272,18 +320,19 @@ export default function StepUploadCV() {
                         )}
                     </div>
                     <button
-                        aria-label="Xoá CV đã tải lên"
-                        onClick={() => { setUploaded(false); setCvRawText('', ''); }}
+                        onClick={() => { setWantNew(true); setError(''); setExtSynced(null); }}
+                        title="Tải lên một CV khác"
                         style={{
+                            display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0,
                             background: 'var(--bg-secondary)', border: '1px solid var(--border-default)',
-                            color: 'var(--text-muted)', cursor: 'pointer', borderRadius: 10,
-                            width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            color: 'var(--text-secondary)', cursor: 'pointer', borderRadius: 10,
+                            padding: '8px 12px', fontSize: '0.8rem', fontWeight: 600,
                             transition: 'all 0.2s ease',
                         }}
-                        onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--accent-red)'; e.currentTarget.style.color = 'var(--accent-red)'; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border-default)'; e.currentTarget.style.color = 'var(--text-muted)'; }}
+                        onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--accent-purple)'; e.currentTarget.style.color = 'var(--accent-purple)'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border-default)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
                     >
-                        <X size={15} />
+                        <UploadSimple size={14} weight="bold" /> Tải CV mới
                     </button>
                 </div>
             )}
@@ -291,7 +340,7 @@ export default function StepUploadCV() {
             {/* Target role + location — confirm before finding jobs.
                 Title is pre-filled from the AI-inferred desired role; the user
                 can edit it or pick a city. No city = freestyle (any location). */}
-            {uploaded && !processing && (
+            {ready && !processing && (
                 <div className="glass-card" style={{ padding: '20px 24px', marginTop: 16 }}>
                     <label style={{
                         display: 'flex', alignItems: 'center', gap: 6,
@@ -415,7 +464,7 @@ export default function StepUploadCV() {
             <div style={{ marginTop: 40, display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
                 <button
                     className="btn-primary"
-                    disabled={!uploaded || processing}
+                    disabled={!ready || processing}
                     onClick={() => { if (gate(GATE_MSG)) setStep(2); }}
                     style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '13px 28px' }}
                 >
@@ -423,7 +472,7 @@ export default function StepUploadCV() {
                 </button>
                 <button
                     className="btn-primary"
-                    disabled={!uploaded || processing}
+                    disabled={!ready || processing}
                     onClick={() => { if (gate(GATE_MSG)) { setFullyAutoMode(true); setStep(2); } }}
                     title="Tự động tìm việc, tối ưu CV và ứng tuyển — không cần thao tác thêm"
                     style={{

@@ -16,6 +16,16 @@ export interface CvImprovement {
     reason: string;  // why — tied to the JD
 }
 
+// A PROSPECTIVE improvement the optimizer did NOT apply because it needs the
+// candidate's real input (a number, a detail) it must not invent. Surfaced in
+// the editor as a "could consider" item with an input; the candidate's answer
+// is fed back into re-optimize. Distinct from CvImprovement (already applied).
+export interface CvSuggestion {
+    section: string;      // where it applies — "Kinh nghiệm: CLB ABC"
+    suggestion: string;   // what could be stronger, pointed out for the candidate
+    placeholder: string;  // hint for the input — the quantification question to answer
+}
+
 function bullets(desc: string | undefined): string[] {
     return (desc ?? "").split("\n").map(l => l.trim()).filter(Boolean);
 }

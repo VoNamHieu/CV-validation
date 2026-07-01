@@ -50,6 +50,14 @@ export const OPTIMIZE_RESPONSE_SCHEMA: Record<string, unknown> = {
                 required: ["section", "change", "reason"],
             },
         },
+        suggestions: {
+            type: "ARRAY",
+            items: {
+                type: "OBJECT",
+                properties: { section: STR, suggestion: STR, placeholder: STR },
+                required: ["section", "suggestion", "placeholder"],
+            },
+        },
     },
     required: ["name", "summary", "skills", "experience", "education", "projects", "improvements"],
 };

@@ -16,12 +16,12 @@ import BeforeAfterModal from '@/components/BeforeAfterModal';
 import CvDocumentPreview from '@/components/CvDocumentPreview';
 import EditableTemplateFrame from '@/components/EditableTemplateFrame';
 import { applyCvFieldEdit } from '@/lib/cv-inline-edit';
-import { diffCvChanges, type CvImprovement } from '@/lib/cv-improvements';
+import { diffCvChanges, type CvImprovement, type CvSuggestion } from '@/lib/cv-improvements';
 import CvTemplatePicker from '@/components/CvTemplatePicker';
 import ScoreRing from '@/components/ScoreRing';
 import { optimizeCvVariants, renderCvPdf } from '@/lib/api';
 import type {
-    CVData, JDData, MatchResult, CategoryScore,
+    CVData, JDData, MatchResult, CategoryScore, RequirementStatus,
     ContactInfo, PersonalInfo, EmploymentInfo, JobPreferences,
 } from '@/lib/types';
 import {
@@ -236,10 +236,14 @@ export default function StepEditCv() {
        still forbids fabrication, so points are only honored where the source
        CV supports them. Invalidates the cached PDF + edits so the preview and
        download reflect the new version. */
-    const handleReoptimize = useCallback(async () => {
+    const handleReoptimize = useCallback(async (extraNotes?: string) => {
         if (!currentEntry || !cvData || !currentEntry.jdData || !currentEntry.matchResult) return;
         // Re-optimize is a paid AI call — gate it for anonymous users.
         if (!gate('Đăng nhập để tối ưu CV bằng AI (tặng 50 credit).')) return;
+        // Combine the free-text box with any answers filled into the
+        // "Có thể cân nhắc" suggestion inputs — both feed one re-optimize pass.
+        const notes = [reoptPoints.trim(), (extraNotes ?? '').trim()]
+            .filter(Boolean).join('\n');
         setReoptimizing(true);
         setReoptimizeError(null);
         try {
@@ -247,13 +251,14 @@ export default function StepEditCv() {
                 cvData,
                 currentEntry.jdData,
                 currentEntry.matchResult,
-                { notes: reoptPoints.trim() || undefined, useGaps: true },
+                { notes: notes || undefined, useGaps: true },
             );
             const variant = data.variants[0];
             if (!variant?.cv) throw new Error('Trình tối ưu không trả về CV nào');
             updateJdEntry(currentEntry.id, {
                 optimizedCv: variant.cv,
                 optimizedCvImprovements: variant.improvements,
+                optimizedCvSuggestions: variant.suggestions,
                 optimizedCvPdfBase64: undefined,
                 optimizedCvFileName: undefined,
             });
@@ -284,6 +289,7 @@ export default function StepEditCv() {
                 optimizing: false,
                 optimizedCv: variant.cv,
                 optimizedCvImprovements: variant.improvements,
+                optimizedCvSuggestions: variant.suggestions,
             });
             useAppStore.getState().attachCvToJobRecord(entry.applyUrl || entry.source, variant.cv);
         } catch {
@@ -388,6 +394,40 @@ export default function StepEditCv() {
         [mergeProfile],
     );
 
+    /* ─── Ensure a job entry has a rendered CV PDF ───
+       The base64 PDF is cached in memory at Optimize time but deliberately
+       stripped from persistence (localStorage ~5MB quota) — see useAppStore
+       persist partialize. After a reload the entry rehydrates WITHOUT it, so
+       the sync/single-apply paths would push no file → the agent uploads
+       "no data". Re-render on miss (same as the fully-auto path) and write it
+       back onto the entry so subsequent applies in this session reuse it. */
+    const ensureEntryPdf = useCallback(
+        async (entry: JDEntry): Promise<{ base64: string; fileName: string } | null> => {
+            if (entry.optimizedCvPdfBase64 && entry.optimizedCvFileName) {
+                return { base64: entry.optimizedCvPdfBase64, fileName: entry.optimizedCvFileName };
+            }
+            const cv = entry.optimizedCv;
+            if (!cv) return null;
+            try {
+                const html = renderCvHtml(mergeProfile(cv), entry.selectedTemplateId, {
+                    avatarBase64: userAvatarBase64 ?? undefined,
+                });
+                const safeTitle = (entry.jobTitle || 'job').replace(/\s+/g, '_').slice(0, 40);
+                const filename = `${cv.name.replace(/\s+/g, '_')}_${safeTitle}.pdf`;
+                const { base64, filename: outName } = await renderCvPdf(html, filename);
+                updateJdEntry(entry.id, {
+                    optimizedCvPdfBase64: base64,
+                    optimizedCvFileName: outName,
+                });
+                return { base64, fileName: outName };
+            } catch (err) {
+                console.warn('[Copo] ensureEntryPdf render failed:', err);
+                return null;
+            }
+        },
+        [mergeProfile, userAvatarBase64, updateJdEntry],
+    );
+
     /* ─── Auto-push profile to extension whenever cvData changes ───
        Debounced so a burst of edits in the Personal info section only emits
        one postMessage. Bypassed entirely if cvData is null. */
@@ -424,6 +464,10 @@ export default function StepEditCv() {
         try {
             if (!isExtensionAvailable()) throw new Error('NO_EXTENSION');
 
+            // Ensure this job's PDF exists (re-render on cache miss after reload)
+            // so the agent has a file to upload instead of applying text-only.
+            const pdf = currentEntry ? await ensureEntryPdf(currentEntry) : null;
+
             setAutoApplyStatus('sending');
             setAutoApplyMessage('Đang gửi lệnh tự động ứng tuyển...');
 
@@ -447,10 +491,11 @@ export default function StepEditCv() {
                 type: 'JOBFIT_AUTO_APPLY',
                 jobUrl,
                 profile,
-                // Cached PDF from Optimize so the agent can satisfy required
-                // CV-upload fields — without it every single apply runs hasCV=false.
-                cvFileBase64: currentEntry?.optimizedCvPdfBase64,
-                cvFileName: currentEntry?.optimizedCvFileName,
+                // Cached PDF from Optimize (re-rendered above on cache miss) so
+                // the agent can satisfy required CV-upload fields — without it
+                // every single apply runs hasCV=false.
+                cvFileBase64: pdf?.base64,
+                cvFileName: pdf?.fileName,
             }, '*');
             const response = await responsePromise;
 
@@ -802,17 +847,21 @@ export default function StepEditCv() {
                                 ? '\n✅ CV (cho tính năng tinh chỉnh) đã đồng bộ.'
                                 : `\n⚠️ Đồng bộ CV tinh chỉnh lỗi: ${cvDataRes.error}`;
 
+                            // Render the PDF on the fly if it's missing (dropped
+                            // from persistence after a reload) so the extension
+                            // always gets a file — otherwise apply uploads "no data".
                             let cvFileMsg = '';
-                            if (currentEntry?.optimizedCvPdfBase64 && currentEntry?.optimizedCvFileName) {
-                                const fileRes = await syncCvFileToExtension(
-                                    currentEntry.optimizedCvPdfBase64,
-                                    currentEntry.optimizedCvFileName,
-                                );
-                                cvFileMsg = fileRes.ok
-                                    ? '\n✅ File CV PDF đã đồng bộ.'
-                                    : `\n⚠️ Đồng bộ file CV PDF lỗi: ${fileRes.error}`;
-                            } else {
-                                cvFileMsg = '\nℹ️ Chưa có CV PDF lưu sẵn — bấm tối ưu để tạo trước.';
+                            if (currentEntry) {
+                                setResyncMsg('⏳ Đang tạo file CV PDF để đồng bộ...');
+                                const pdf = await ensureEntryPdf(currentEntry);
+                                if (pdf) {
+                                    const fileRes = await syncCvFileToExtension(pdf.base64, pdf.fileName);
+                                    cvFileMsg = fileRes.ok
+                                        ? '\n✅ File CV PDF đã đồng bộ.'
+                                        : `\n⚠️ Đồng bộ file CV PDF lỗi: ${fileRes.error}`;
+                                } else {
+                                    cvFileMsg = '\n⚠️ Không tạo được file CV PDF — thử lại hoặc bấm tối ưu.';
+                                }
                             }
                             setResyncMsg(profileRes.ok
                                 ? `✅ Profile đã đồng bộ sang extension.${cvDataMsg}${cvFileMsg}`
@@ -1648,6 +1697,13 @@ export default function StepEditCv() {
                         jobTitle={currentEntry.jobTitle || currentEntry.company || currentEntry.label}
                     />
                 )}
+                {/* Prospective improvements needing the candidate's real input —
+                    fills the aside's empty space and drives a targeted re-optimize. */}
+                <SuggestionsPanel
+                    suggestions={currentEntry.optimizedCvSuggestions ?? []}
+                    busy={reoptimizing}
+                    onApply={(notes) => void handleReoptimize(notes)}
+                />
             </aside>
 
             </div>
@@ -1785,6 +1841,111 @@ function ImprovementsPanel({
     );
 }
 
+/* ─── "Có thể cân nhắc" — PROSPECTIVE improvements the optimizer flagged but
+   could not apply without a real fact from the candidate (a number, a scale).
+   Point out + placeholder input; the candidate's answers are appended to notes
+   and fed straight into re-optimize. This is the anti-fabrication probe: AI
+   points to the weak spot, the human supplies the truth, then the CV is
+   rewritten with it. */
+function SuggestionsPanel({
+    suggestions, busy, onApply,
+}: {
+    suggestions: CvSuggestion[];
+    busy: boolean;
+    onApply: (notes: string) => void;
+}) {
+    const [open, setOpen] = useState(true);
+    const [answers, setAnswers] = useState<Record<number, string>>({});
+
+    if (!suggestions || suggestions.length === 0) return null;
+
+    const filled = suggestions
+        .map((s, i) => ({ s, v: (answers[i] ?? '').trim() }))
+        .filter(x => x.v);
+    const canApply = filled.length > 0 && !busy;
+
+    const apply = () => {
+        if (!canApply) return;
+        const notes = filled
+            .map(({ s, v }) => `${s.section} — ${s.suggestion}: ${v}`)
+            .join('\n');
+        onApply(notes);
+    };
+
+    return (
+        <div style={{
+            marginBottom: 10, borderRadius: 8,
+            border: '1px solid rgba(139,92,246,0.35)', background: 'rgba(139,92,246,0.05)',
+        }}>
+            <button
+                type="button"
+                onClick={() => setOpen(v => !v)}
+                style={{
+                    display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    padding: '10px 12px', textAlign: 'left',
+                }}
+            >
+                <Lightning size={15} weight="fill" style={{ color: 'var(--accent-purple, #8b5cf6)', flexShrink: 0 }} />
+                <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)', flex: 1, minWidth: 0 }}>
+                    Có thể cân nhắc để mạnh hơn
+                    <span style={{ color: 'var(--text-muted)', fontWeight: 400, marginLeft: 6, fontSize: '0.72rem' }}>
+                        {suggestions.length} gợi ý
+                    </span>
+                </span>
+                <CaretRight size={12} style={{
+                    color: 'var(--text-muted)', flexShrink: 0,
+                    transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s',
+                }} />
+            </button>
+
+            {open && (
+                <div style={{ padding: '0 12px 12px' }}>
+                    <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', margin: '0 0 10px', lineHeight: 1.5 }}>
+                        AI không tự điền số liệu — điền thông tin thật của bạn rồi tối ưu lại. Bỏ trống mục nào cũng được.
+                    </p>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                        {suggestions.map((s, i) => (
+                            <div key={i}>
+                                <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', lineHeight: 1.45, marginBottom: 5 }}>
+                                    <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{s.section}: </span>
+                                    {s.suggestion}
+                                </div>
+                                <input
+                                    type="text"
+                                    value={answers[i] ?? ''}
+                                    onChange={(e) => setAnswers(a => ({ ...a, [i]: e.target.value }))}
+                                    placeholder={s.placeholder}
+                                    disabled={busy}
+                                    style={{
+                                        width: '100%', padding: '6px 9px', borderRadius: 6,
+                                        background: 'var(--bg-secondary)', border: '1px solid var(--border-subtle)',
+                                        color: 'var(--text-primary)', fontSize: '0.78rem', fontFamily: 'inherit',
+                                    }}
+                                />
+                            </div>
+                        ))}
+                    </div>
+                    <button
+                        onClick={apply}
+                        disabled={!canApply}
+                        className="btn-primary"
+                        style={{
+                            display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.8rem',
+                            padding: '7px 16px', marginTop: 12, opacity: canApply ? 1 : 0.5,
+                            cursor: canApply ? 'pointer' : 'not-allowed',
+                        }}
+                    >
+                        {busy
+                            ? <><CircleNotch size={13} className="spin" /> Đang tối ưu lại…</>
+                            : <><ArrowsClockwise size={13} weight="bold" /> Tối ưu lại với {filled.length > 0 ? `${filled.length} điểm` : 'các điểm này'}</>}
+                    </button>
+                </div>
+            )}
+        </div>
+    );
+}
+
 /* ─── Match analysis panel — Must-Have coverage, scoring breakdown, risk flags
    and strength summary. Mirrors what used to live on the standalone report
    page; now docked to the right of the editor. */
@@ -1811,10 +1972,17 @@ function MatchAnalysisPanel({
     if (!jd || !m) return null;
 
     const mustHave = jd.must_have ?? [];
+    // Per-requirement verdicts from the AI are the source of truth for the ✓/✗
+    // chips when present; older cached results fall back to the naive substring
+    // match against the CV skills list.
+    const reqItems = (m.must_have_match?.requirements ?? []).filter(r => r.requirement?.trim());
+    const useReq = reqItems.length > 0;
     const aligned = mustHave.filter(sk =>
         cvSkillsLower.some(cs => cs.includes(sk.toLowerCase()) || sk.toLowerCase().includes(cs)));
     const missing = mustHave.filter(sk =>
         !cvSkillsLower.some(cs => cs.includes(sk.toLowerCase()) || sk.toLowerCase().includes(cs)));
+    const metCount = useReq ? reqItems.filter(r => r.status === 'met').length : aligned.length;
+    const totalCount = useReq ? reqItems.length : mustHave.length;
 
     return (
         <div className="glass-card" style={{ padding: '16px 18px' }}>
@@ -1837,20 +2005,38 @@ function MatchAnalysisPanel({
             <>
             {/* ── Must-Have coverage ── */}
             <p style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)', margin: '0 0 8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                Kỹ năng bắt buộc ({aligned.length}/{mustHave.length} khớp)
+                Kỹ năng bắt buộc ({metCount}/{totalCount} khớp)
             </p>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 18 }}>
-                {aligned.map((s, i) => (
-                    <span key={`a-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 6, fontSize: '0.72rem', background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.3)', color: 'var(--accent-green)' }}>
-                        <CheckCircle size={10} /> {s}
-                    </span>
-                ))}
-                {missing.map((s, i) => (
-                    <span key={`m-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 6, fontSize: '0.72rem', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', color: 'var(--accent-red)' }}>
-                        <XCircle size={10} /> {s}
-                    </span>
-                ))}
-                {mustHave.length === 0 && (
+                {useReq ? (
+                    reqItems.map((r, i) => {
+                        const v = reqVisual(r.status);
+                        const Icon = v.Icon;
+                        return (
+                            <span
+                                key={`r-${i}`}
+                                title={r.evidence || undefined}
+                                style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 6, fontSize: '0.72rem', background: v.bg, border: `1px solid ${v.border}`, color: v.color }}
+                            >
+                                <Icon size={10} /> {r.requirement}
+                            </span>
+                        );
+                    })
+                ) : (
+                    <>
+                        {aligned.map((s, i) => (
+                            <span key={`a-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 6, fontSize: '0.72rem', background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.3)', color: 'var(--accent-green)' }}>
+                                <CheckCircle size={10} /> {s}
+                            </span>
+                        ))}
+                        {missing.map((s, i) => (
+                            <span key={`m-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 6, fontSize: '0.72rem', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', color: 'var(--accent-red)' }}>
+                                <XCircle size={10} /> {s}
+                            </span>
+                        ))}
+                    </>
+                )}
+                {totalCount === 0 && (
                     <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Không có yêu cầu bắt buộc rõ ràng.</span>
                 )}
             </div>
@@ -1909,6 +2095,13 @@ function MatchAnalysisPanel({
             )}
         </div>
     );
+}
+
+/* ─── Visual style for a per-requirement verdict chip (met / partial / missing) ─── */
+function reqVisual(status: RequirementStatus) {
+    if (status === 'met') return { bg: 'rgba(16,185,129,0.12)', border: 'rgba(16,185,129,0.3)', color: 'var(--accent-green)', Icon: CheckCircle };
+    if (status === 'partial') return { bg: 'rgba(245,158,11,0.1)', border: 'rgba(245,158,11,0.3)', color: 'var(--accent-amber)', Icon: Warning };
+    return { bg: 'rgba(239,68,68,0.1)', border: 'rgba(239,68,68,0.3)', color: 'var(--accent-red)', Icon: XCircle };
 }
 
 /* ─── Collapsible scoring-category row (score chip → reasoning + gaps) ─── */

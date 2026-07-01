@@ -309,6 +309,7 @@ async function renderGrantedList() {
             const { optionalGrants: cur = [] } = await chrome.storage.local.get('optionalGrants');
             await chrome.storage.local.set({ optionalGrants: cur.filter(o => o !== origin) });
             refreshPermUI();
+            refreshOnboarding();
         });
         row.append(label, btn);
         wrap.appendChild(row);
@@ -393,9 +394,49 @@ async function grantAllSites() {
         await trackGrant('https://*/*');
         statusEl.textContent = '✅ Đã cấp quyền cho mọi trang tuyển dụng.';
         refreshPermUI();
+        refreshOnboarding();
     } catch (e) {
         statusEl.textContent = `❌ ${e.message || e}`;
     }
+}
+
+// ── One-time all-sites onboarding ───────────────────────────────────────────
+// The banner is the frictionless path to a single "https://*/*" grant, which
+// makes ensureHostAccess() pass on every job site forever — no per-site prompt.
+// Shown until the user grants it (permission check) or explicitly dismisses.
+async function refreshOnboarding() {
+    const banner = document.getElementById('allSitesOnboard');
+    if (!banner) return;
+    const allGranted = await chrome.permissions.contains({ origins: ['https://*/*'] }).catch(() => false);
+    const { allSitesOnboardDismissed = false } = await chrome.storage.local.get('allSitesOnboardDismissed');
+    banner.hidden = allGranted || allSitesOnboardDismissed;
+}
+
+async function onboardGrantAll() {
+    const statusEl = document.getElementById('onboardStatus');
+    const btn = document.getElementById('onboardGrantBtn');
+    try {
+        // Must run synchronously off the click gesture — request first, then UI.
+        const granted = await chrome.permissions.request({ origins: ['https://*/*'] });
+        btn.disabled = true;
+        if (!granted) {
+            statusEl.textContent = '❌ Bạn đã từ chối — có thể bật lại trong tab Career bất cứ lúc nào.';
+            btn.disabled = false;
+            return;
+        }
+        await trackGrant('https://*/*');
+        statusEl.textContent = '✅ Đã bật! Auto Apply chạy được trên mọi trang tuyển dụng.';
+        refreshPermUI();
+        setTimeout(refreshOnboarding, 1400);
+    } catch (e) {
+        statusEl.textContent = `❌ ${e.message || e}`;
+        btn.disabled = false;
+    }
+}
+
+async function dismissOnboarding() {
+    await chrome.storage.local.set({ allSitesOnboardDismissed: true });
+    refreshOnboarding();
 }
 
 
@@ -429,7 +470,10 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('tailorJobBtn').addEventListener('click', tailorCurrentJob);
     document.getElementById('grantSiteBtn').addEventListener('click', grantCurrentSite);
     document.getElementById('grantAllBtn').addEventListener('click', grantAllSites);
+    document.getElementById('onboardGrantBtn').addEventListener('click', onboardGrantAll);
+    document.getElementById('onboardDismissBtn').addEventListener('click', dismissOnboarding);
     refreshPermUI();
+    refreshOnboarding();
 
     // CV upload
     const cvFileInput = document.getElementById('cvFileInput');

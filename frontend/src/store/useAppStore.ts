@@ -11,7 +11,7 @@ import type {
   CVData, JDData, CategoryScore, MatchResult,
 } from '@/lib/types';
 import type { CvTemplateId } from '@/lib/cv-templates';
-import type { CvImprovement } from '@/lib/cv-improvements';
+import type { CvImprovement, CvSuggestion } from '@/lib/cv-improvements';
 import { account, type Application, type ApplicationStatus } from '@/lib/db';
 import { hasAuth } from '@/lib/auth-headers';
 import type { GapReport } from '@/lib/gap-report';
@@ -118,6 +118,9 @@ export interface JDEntry {
   optimizedCv?: CVData;
   // Why/what the optimizer changed for this job — shown in the editor.
   optimizedCvImprovements?: CvImprovement[];
+  // Prospective improvements needing the candidate's real input (quantify →
+  // re-optimize). Rendered as the "Có thể cân nhắc" section in the editor.
+  optimizedCvSuggestions?: CvSuggestion[];
   optimizedCvPdfBase64?: string;
   optimizedCvFileName?: string;
   jobTitle?: string;

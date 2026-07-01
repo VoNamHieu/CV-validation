@@ -832,6 +832,7 @@ export default function StepInputUrl() {
                                 optimizing: false,
                                 optimizedCv: variant.cv,
                                 optimizedCvImprovements: variant.improvements,
+                                optimizedCvSuggestions: variant.suggestions,
                                 ...pdfCache,
                             });
                             // Persist the tailored CV onto the saved-job record

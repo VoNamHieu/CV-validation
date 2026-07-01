@@ -1,7 +1,7 @@
 // All API calls use Next.js API routes (relative paths)
 import { getAuthHeaders } from './auth-headers';
 import type { CVData } from './types';
-import type { CvImprovement } from './cv-improvements';
+import type { CvImprovement, CvSuggestion } from './cv-improvements';
 
 export type OptimizeStyle = 'formal' | 'direct' | 'impact-driven' | 'storytelling';
 export type OptimizeFocus = 'balanced' | 'technical' | 'leadership' | 'metrics' | 'ats-keyword';
@@ -26,6 +26,8 @@ export interface OptimizeVariant {
     cv: CVData;
     // Model-stated explanation of what was changed for this job (Vietnamese).
     improvements?: CvImprovement[];
+    // Prospective improvements needing the candidate's real input (Vietnamese).
+    suggestions?: CvSuggestion[];
 }
 
 export interface OptimizeResponse {

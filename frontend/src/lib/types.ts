@@ -129,10 +129,22 @@ export interface JDData {
     domain: string;
 }
 
+export type RequirementStatus = "met" | "partial" | "missing";
+
+export interface RequirementMatch {
+    requirement: string;
+    status: RequirementStatus;
+    evidence: string;
+}
+
 export interface CategoryScore {
     score: number;
     reasoning: string;
     gaps: string[];
+    // Only populated on must_have_match: the AI's verdict per JD requirement.
+    // Drives the ✓/✗ chips in the UI (replaces naive frontend substring match).
+    // Absent on older cached results — callers must fall back gracefully.
+    requirements?: RequirementMatch[];
 }
 
 export interface MatchResult {
