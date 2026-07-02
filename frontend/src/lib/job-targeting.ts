@@ -61,17 +61,33 @@ export function matchesCity(location: string, cityKey: string): boolean {
     return opt.aliases.some((a) => loc.includes(a));
 }
 
+// Fold Vietnamese diacritics to ASCII so tokenizers/matchers can see VN text
+// ("Kỹ sư phần mềm" → "ky su phan mem"). NFD splits base char + combining
+// marks; strip the marks, then map đ (not decomposable) to d. Without this,
+// the [^a-z0-9] strips below DELETE every accented character and Vietnamese
+// titles tokenize to nothing.
+function foldAccents(s: string): string {
+    return (s || '')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/đ/g, 'd');
+}
+
 // Ultra-generic role words that match almost any title — they don't prove a
 // real title match on their own, so they're excluded from the "core" score.
 const GENERIC_TITLE_TOKENS = new Set([
     'engineer', 'developer', 'dev', 'senior', 'junior', 'mid', 'lead', 'staff',
     'principal', 'manager', 'specialist', 'intern', 'fresher', 'officer',
     'executive', 'assistant', 'associate', 'consultant', 'analyst', 'and', 'the',
+    // Vietnamese rank/role words (accent-folded) that are equally generic:
+    // "chuyên viên"/"nhân viên"/"trưởng phòng"… name a level, not a domain.
+    'chuyen', 'vien', 'nhan', 'truong', 'phong', 'nhom', 'giam', 'doc',
+    'thuc', 'tap', 'sinh', 'quan', 'chinh', 'cao', 'cap',
 ]);
 
 function titleTokens(s: string): string[] {
-    return (s || '')
-        .toLowerCase()
+    return foldAccents(s)
         .replace(/[^a-z0-9\s]/g, ' ')
         .replace(/\s+/g, ' ')
         .trim()
@@ -107,7 +123,8 @@ interface BuiltSearch {
 }
 
 function hyphenate(s: string): string {
-    return s.trim().toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, '-');
+    // foldAccents first — otherwise "Kỹ sư phần mềm" slugs to "k-s-ph-n-m-m".
+    return foldAccents(s.trim()).replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, '-');
 }
 
 export function buildSearchUrl(siteUrl: string, jobTitle: string, cityKey = ''): BuiltSearch {
@@ -166,8 +183,12 @@ export function requiredYearsFromJd(
         return jd.required_years_min;
     }
     const s = (jd.seniority_expected || '').toLowerCase();
-    // Numeric: "3+ years", "3-5 years", "ít nhất 3 năm", "3 nam"
-    const m = s.match(/(\d+(?:\.\d+)?)\s*(?:years?|năm|nam|yrs?)/);
+    // Numeric: "3+ years", "3-5 years" / "3-5 năm" (take the LOWER bound),
+    // "ít nhất 3 năm". Unaccented "nam" also means MALE ("tuyển 05 nam" =
+    // hiring 5 men, not 5 years), so it only counts when "kinh nghi(ệm)"
+    // follows — the same guard as the backend's facet._YEARS_RE. Accented
+    // "năm" must not be mid-word (nắm/năng after fold-collisions).
+    const m = s.match(/(\d+(?:\.\d+)?)\s*(?:[-–]\s*\d+(?:\.\d+)?)?\s*\+?\s*(?:years?\b|yrs?\b|năm(?![a-zà-ỹ])|nam(?=\s+kinh\s+nghi))/);
     if (m) return Math.round(parseFloat(m[1]));
     // Word-level seniority fallback
     if (/(intern|fresher|thực tập|sinh viên)/.test(s)) return 0;

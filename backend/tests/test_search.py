@@ -316,3 +316,33 @@ async def test_rerank_bucket_caches_and_skips_reembed(fake_embed):
 async def test_rerank_bucket_passthrough_on_empty():
     assert await semantic.rerank_bucket([], "q") == []
     assert await semantic.rerank_bucket([{"title": "x"}], "") == [{"title": "x"}]
+
+
+# ── Experience-years context guard (facet._required_years) ──────────────────
+from app.search.facet import _required_years
+
+
+def test_required_years_reads_experience_context():
+    assert _required_years({"description": "Yêu cầu: 3 năm kinh nghiệm Product"}) == 3
+    assert _required_years({"description": "Tối thiểu 2 năm ở vị trí tương đương"}) == 2
+    assert _required_years({"description": "Requirements: 5+ years of experience"}) == 5
+    assert _required_years({"description": "3 nam kinh nghiem ban hang"}) == 3
+
+
+def test_required_years_ignores_company_age():
+    d = "Công ty hoạt động hơn 15 năm trong ngành. Không yêu cầu kinh nghiệm."
+    assert _required_years({"title": "Nhân viên kho", "description": d}) is None
+    assert _required_years({"description": "Established 20 years ago, we lead the market."}) is None
+
+
+def test_required_years_ignores_gender_hiring_line():
+    d = "Tuyển 05 nam làm việc tại kho, yêu cầu nhanh nhẹn"
+    assert _required_years({"description": d}) is None
+
+
+def test_required_years_takes_lower_bound_of_range():
+    assert _required_years({"description": "3-5 năm kinh nghiệm"}) == 3
+
+
+def test_required_years_prefers_indexed_field():
+    assert _required_years({"required_years_min": 4, "description": "no years here"}) == 4
