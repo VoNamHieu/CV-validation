@@ -23,6 +23,7 @@ from urllib.parse import urlparse
 import httpx
 
 from app.services import cache
+from app.services.url_validator import is_allowed_url_resolved
 
 logger = logging.getLogger(__name__)
 
@@ -176,6 +177,11 @@ async def validate_job_url(url: str, expected_title: str = "", allow_render: boo
       broken   — bad HTTP, or the rendered DOM has no posting / says it's gone
       unknown  — couldn't decide (network/anti-bot, or render unavailable)
     """
+    # SSRF backstop: never fetch/render a non-public URL, whatever the caller.
+    # Resolved check → also rejects a public host that DNS-resolves internal.
+    if not await is_allowed_url_resolved(url):
+        return {"status": "unknown", "http_code": 0, "reason": "url_disallowed",
+                "detail": "blocked by SSRF guard", "method": "none"}
     words = set(_title_words(expected_title))
 
     async def _render_verdict(code: int, fallback: dict) -> dict:

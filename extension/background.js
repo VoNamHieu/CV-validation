@@ -285,8 +285,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const { formFields, profileData } = message;
         (async () => {
             try {
-                const data = await chrome.storage.local.get('jobfitAppUrl');
+                const data = await chrome.storage.local.get(['jobfitAppUrl', 'jobfitToken']);
                 const appUrl = data.jobfitAppUrl || 'https://cv-validation.vercel.app';
+                // The AI routes require a login (the synced JWT) server-side.
+                const authHeaders = data.jobfitToken
+                    ? { Authorization: `Bearer ${data.jobfitToken}` } : {};
 
                 // Try Vercel first, then localhost
                 const urls = [
@@ -299,12 +302,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     try {
                         const res = await fetch(`${baseUrl}/api/ai/map-form`, {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
+                            headers: { 'Content-Type': 'application/json', ...authHeaders },
                             body: JSON.stringify({ formFields, profileData }),
                             signal: AbortSignal.timeout(30000),
                         });
                         if (!res.ok) {
                             const err = await res.json().catch(() => ({}));
+                            // The AI routes now require the synced login; a
+                            // stale/expired token 401s → tell the user to re-sync.
+                            if (res.status === 401) {
+                                throw new Error('Phiên đăng nhập đã hết hạn — mở Copo và đồng bộ lại để tiếp tục.');
+                            }
                             throw new Error(err.detail || `API error: ${res.status}`);
                         }
                         const result = await res.json();
@@ -330,8 +338,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const { pageState, profileData, history, hasCV } = message;
         (async () => {
             try {
-                const data = await chrome.storage.local.get('jobfitAppUrl');
+                const data = await chrome.storage.local.get(['jobfitAppUrl', 'jobfitToken']);
                 const appUrl = data.jobfitAppUrl || 'https://cv-validation.vercel.app';
+                // The AI routes require a login (the synced JWT) server-side.
+                const authHeaders = data.jobfitToken
+                    ? { Authorization: `Bearer ${data.jobfitToken}` } : {};
 
                 const urls = [
                     appUrl,
@@ -343,12 +354,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     try {
                         const res = await fetch(`${baseUrl}/api/ai/agent-plan`, {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
+                            headers: { 'Content-Type': 'application/json', ...authHeaders },
                             body: JSON.stringify({ pageState, profileData, history, hasCV }),
                             signal: AbortSignal.timeout(30000),
                         });
                         if (!res.ok) {
                             const err = await res.json().catch(() => ({}));
+                            // The AI routes now require the synced login; a
+                            // stale/expired token 401s → tell the user to re-sync.
+                            if (res.status === 401) {
+                                throw new Error('Phiên đăng nhập đã hết hạn — mở Copo và đồng bộ lại để tiếp tục.');
+                            }
                             throw new Error(err.detail || `API error: ${res.status}`);
                         }
                         const result = await res.json();
@@ -402,8 +418,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     sendResponse({ success: false, error: 'Missing cv, jdText, sourceRef, or jobUrl' });
                     return;
                 }
-                const data = await chrome.storage.local.get('jobfitAppUrl');
+                const data = await chrome.storage.local.get(['jobfitAppUrl', 'jobfitToken']);
                 const appUrl = data.jobfitAppUrl || 'https://cv-validation.vercel.app';
+                // The AI routes require a login (the synced JWT) server-side.
+                const authHeaders = data.jobfitToken
+                    ? { Authorization: `Bearer ${data.jobfitToken}` } : {};
                 const urls = [
                     appUrl,
                     appUrl.includes('localhost') ? null : 'http://localhost:3000',
@@ -428,7 +447,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                         console.log(`${M1} → POST ${baseUrl}/api/ai/tailor`);
                         const res = await fetch(`${baseUrl}/api/ai/tailor`, {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
+                            headers: { 'Content-Type': 'application/json', ...authHeaders },
                             body: JSON.stringify({ cv, jd_text: jdText, source_ref: sourceRef, options }),
                             // Pipeline = 3 sequential LLM calls (extract → score → optimize).
                             signal: AbortSignal.timeout(120000),
@@ -436,6 +455,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                         console.log(`${M1} ← ${baseUrl} status=${res.status} ok=${res.ok} in ${Date.now() - t0}ms`);
                         if (!res.ok) {
                             const err = await res.json().catch(() => ({}));
+                            // The AI routes now require the synced login; a
+                            // stale/expired token 401s → tell the user to re-sync.
+                            if (res.status === 401) {
+                                throw new Error('Phiên đăng nhập đã hết hạn — mở Copo và đồng bộ lại để tiếp tục.');
+                            }
                             throw new Error(err.detail || `API error: ${res.status}`);
                         }
                         const result = await res.json();

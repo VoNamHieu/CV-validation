@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireUser } from '@/lib/auth-guard';
 import { callAIJudge } from '@/lib/gemini';
 import { safeJsonParse } from '@/lib/safe-json';
 
@@ -14,6 +15,10 @@ import { safeJsonParse } from '@/lib/safe-json';
  */
 export async function POST(request: Request) {
     try {
+        // Login required — without it this route is an anonymous Gemini proxy.
+        const unauth = await requireUser(request);
+        if (unauth) return unauth;
+
         const { formFields, profileData } = await request.json();
 
         if (!formFields || !Array.isArray(formFields) || formFields.length === 0) {

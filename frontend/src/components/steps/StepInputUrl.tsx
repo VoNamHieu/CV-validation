@@ -597,9 +597,16 @@ export default function StepInputUrl() {
         let navigated = false;
         let legacySaved = false;
 
+        // True only while THIS run is the active one. A run goes stale when the
+        // user starts a new search (clearJdEntries + ++runRef) — background
+        // workers from the old run must stop writing to the store, or their
+        // backfill/results contaminate the new run's job list.
+        const stillCurrent = () => runRef.current === runId;
+
         const processEntry = async (entry: JDEntry) => {
             const entryId = entry.id;
             if (entry.status === 'error') return;
+            if (!stillCurrent()) return;
             let jobUrl = entry.source;
             let entryTitle = entry.jobTitle || '';
             let entryCompany = entry.company || '';
@@ -769,6 +776,10 @@ export default function StepInputUrl() {
                 const resolvedTitle = jobTitle || entryTitle || fallbackTitle;
                 const resolvedCompany = company || entryCompany || '';
 
+                // A slow crawl/score may have finished after the user launched a
+                // new search — don't write this dead run's result into the store.
+                if (!stillCurrent()) return;
+
                 updateJdEntry(entryId, {
                     status: 'done',
                     jdData,
@@ -816,7 +827,7 @@ export default function StepInputUrl() {
                     try {
                         const data = await withRetry(() => optimizeCvVariants(cvData!, jdData, matchResult));
                         const variant = data.variants[0];
-                        if (variant?.cv) {
+                        if (variant?.cv && stillCurrent()) {
                             // Eager PDF render + extension sync, same as a manual
                             // Optimize click — batch apply gets the file for free.
                             const state = useAppStore.getState();
@@ -870,6 +881,9 @@ export default function StepInputUrl() {
         // it — so a few dead/expired postings no longer strand the whole run.
         const queue: JDEntry[] = [...entries];
         const takeNext = (deadFamily?: string): JDEntry | null => {
+            // Stale run → stop feeding workers (and stop pulling backfill, which
+            // would addJdEntry into whatever search is now active).
+            if (!stillCurrent()) return null;
             if (queue.length) return queue.shift()!;
             if (scoredCount >= targetScored) return null;
             return nextBackfill ? nextBackfill(deadFamily) : null;

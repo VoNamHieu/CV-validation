@@ -48,7 +48,10 @@ function postAndAwait(
         };
 
         window.addEventListener("message", handler);
-        window.postMessage(message, "*");
+        // Same-window relay to the content script — never "*": the profile
+        // sync carries the user's JWT, and a wildcard target would hand it to
+        // any listener in the document (third-party scripts included).
+        window.postMessage(message, window.location.origin);
     });
 }
 

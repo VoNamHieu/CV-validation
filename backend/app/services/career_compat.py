@@ -127,6 +127,13 @@ async def probe(url: str) -> dict:
     """
     from app.services import crawler
     from app.services.ats_adapters import core as ats
+    from app.services.url_validator import is_allowed_url_resolved
+
+    # SSRF backstop: never fetch/render a non-public URL, whatever the caller.
+    # Resolved check → also rejects a public host that DNS-resolves internal.
+    if not await is_allowed_url_resolved(url):
+        return _verdict("unsupported", blockers=["url_disallowed"],
+                        detail="blocked by SSRF guard")
 
     # ── Rung 1: cheap fetch ───────────────────────────────────────────────
     try:

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
+import { requireUser } from "@/lib/auth-guard";
 import { tailorForJob, type OptimizeOptions } from "@/lib/tailor";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -20,6 +21,10 @@ const MAX_BODY_BYTES = 256 * 1024; // guard against oversized DOM dumps
 export async function POST(request: NextRequest) {
     const reqId = randomUUID();
     try {
+        // Login required — without it this route is an anonymous Gemini proxy.
+        const unauth = await requireUser(request);
+        if (unauth) return unauth;
+
         // Size guard — reject oversized payloads before parsing/forwarding.
         const len = Number(request.headers.get("content-length") || 0);
         if (len > MAX_BODY_BYTES) {

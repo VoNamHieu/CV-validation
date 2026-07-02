@@ -8,6 +8,10 @@ career page, and if not, why?
   POST /compat/remove     drop one URL from the log
   POST /compat/clear      wipe the log
 
+The whole surface is admin-only: probe/scan/recheck fetch and even headless-
+render caller-supplied URLs server-side, so they must never be anonymous, and
+every URL passes the SSRF guard first.
+
 See app.services.career_compat for the ladder/diagnostic logic.
 """
 from __future__ import annotations
@@ -15,10 +19,12 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.services import career_compat
+from app.services.auth import require_admin
+from app.services.url_validator import is_allowed_url
 
 logger = logging.getLogger(__name__)
 
@@ -35,15 +41,18 @@ class UrlPayload(BaseModel):
 
 
 @router.post("/probe")
-async def probe(p: UrlPayload):
+async def probe(p: UrlPayload, _admin: str = Depends(require_admin)):
     """Probe one career URL and log the verdict."""
+    if not is_allowed_url(p.url):
+        raise HTTPException(status_code=400, detail="URL not allowed")
     res = await career_compat.probe(p.url)
     rec = await career_compat.record(p.url, res, company=p.company, source="probe")
     return {"ok": True, "record": rec}
 
 
 @router.post("/scan")
-async def scan(limit: int = Query(100, ge=1, le=500), company: str = Query("")):
+async def scan(limit: int = Query(100, ge=1, le=500), company: str = Query(""),
+               _admin: str = Depends(require_admin)):
     """Probe the featured companies' own career pages and log each verdict.
     Bounded by `limit`; optionally filter to one company (substring, ci)."""
     from app.data.featured_companies import FEATURED_COMPANIES
@@ -84,26 +93,28 @@ async def scan(limit: int = Query(100, ge=1, le=500), company: str = Query("")):
 
 
 @router.get("/results")
-async def results():
+async def results(_admin: str = Depends(require_admin)):
     items = await career_compat.list_results()
     usable = sum(1 for e in items if e.get("usable"))
     return {"count": len(items), "usable": usable, "results": items}
 
 
 @router.post("/recheck")
-async def recheck(p: UrlPayload):
+async def recheck(p: UrlPayload, _admin: str = Depends(require_admin)):
+    if not is_allowed_url(p.url):
+        raise HTTPException(status_code=400, detail="URL not allowed")
     res = await career_compat.probe(p.url)
     rec = await career_compat.record(p.url, res, company=p.company, source="recheck")
     return {"ok": True, "record": rec}
 
 
 @router.post("/remove")
-async def remove(p: UrlPayload):
+async def remove(p: UrlPayload, _admin: str = Depends(require_admin)):
     removed = await career_compat.remove(p.url)
     return {"ok": True, "removed": removed}
 
 
 @router.post("/clear")
-async def clear():
+async def clear(_admin: str = Depends(require_admin)):
     n = await career_compat.clear()
     return {"ok": True, "cleared": n}

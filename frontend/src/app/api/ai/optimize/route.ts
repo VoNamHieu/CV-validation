@@ -11,7 +11,12 @@ export async function POST(request: NextRequest) {
         if (!cv || !jd || !match) {
             return NextResponse.json({ detail: "cv, jd, and match are required" }, { status: 400 });
         }
-        await spendCredits(request, "optimize", (options?.variants ?? 1));
+        // Clamp to the same 1–3 range as clampVariantCount BEFORE spending:
+        // a non-integer (e.g. 1.5) would 422 on the backend's `units: int`,
+        // which the guard treats as a backend error and fails open — a
+        // client-triggerable free ride on the most expensive action.
+        const units = Math.max(1, Math.min(3, Math.floor(Number(options?.variants) || 1)));
+        await spendCredits(request, "optimize", units);
         const variants = await optimizeForJd(cv, jd, match, options);
         return NextResponse.json({ variants });
     } catch (e: unknown) {

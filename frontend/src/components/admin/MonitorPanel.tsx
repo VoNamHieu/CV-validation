@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
+import { getAuthHeaders } from '@/lib/auth-headers';
+
 type LinkRecord = {
     url: string;
     host: string;
@@ -43,7 +45,7 @@ export default function MonitorPanel() {
     const load = useCallback(async () => {
         setLoading(true);
         try {
-            const r = await fetch('/api/monitor/links');
+            const r = await fetch('/api/monitor/links', { headers: await getAuthHeaders() });
             const d = await r.json();
             setLinks(Array.isArray(d.links) ? d.links : []);
         } catch (e) {
@@ -61,7 +63,7 @@ export default function MonitorPanel() {
         try {
             const qs = new URLSearchParams({ limit: '300' });
             if (companyFilter.trim()) qs.set('company', companyFilter.trim());
-            const r = await fetch(`/api/monitor/scan?${qs}`, { method: 'POST' });
+            const r = await fetch(`/api/monitor/scan?${qs}`, { method: 'POST', headers: await getAuthHeaders() });
             const d = await r.json();
             if (!r.ok) throw new Error(d.detail || `Scan failed (${r.status})`);
             setMsg(
@@ -81,7 +83,7 @@ export default function MonitorPanel() {
         try {
             await fetch('/api/monitor/recheck', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
                 body: JSON.stringify({ url: rec.url, title: rec.title }),
             });
             await load();
@@ -95,7 +97,7 @@ export default function MonitorPanel() {
         try {
             await fetch('/api/monitor/remove', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
                 body: JSON.stringify({ url: rec.url }),
             });
             setLinks((prev) => prev.filter((l) => l.url !== rec.url));
@@ -106,7 +108,7 @@ export default function MonitorPanel() {
 
     const clearAll = async () => {
         if (!confirm('Clear the entire link-health log?')) return;
-        await fetch('/api/monitor/clear', { method: 'POST' });
+        await fetch('/api/monitor/clear', { method: 'POST', headers: await getAuthHeaders() });
         setLinks([]);
         setMsg('Log cleared.');
     };

@@ -103,7 +103,13 @@ def _effective_level(profile_level: str, fit_mult: float) -> str:
 # ── Experience-years fit (rank, don't drop) ──────────────────────────────────
 # "5+ years", "ít nhất 3 năm", "3-5 years" → the minimum. Same intent as the
 # frontend's requiredYearsFromJd; kept as a cheap regex (no LLM at rank time).
-_YEARS_RE = re.compile(r"(\d{1,2})(?:\.\d+)?\s*\+?\s*(?:years?|yrs?|năm|nam)", re.I)
+# Unaccented "nam" also means MALE ("tuyển 05 nam" = hiring 5 men, not 5 years),
+# so it only counts when "kinh nghiem" (accent-stripped "kinh nghiệm") follows.
+_YEARS_RE = re.compile(
+    r"(\d{1,2})(?:\.\d+)?\s*(?:[-–]\s*\d{1,2})?\s*\+?\s*"
+    r"(?:years?\b|yrs?\b|năm(?![a-zà-ỹ])|nam(?=\s+kinh\s+nghi))",
+    re.I,
+)
 
 
 def _required_years(job: dict) -> int | None:

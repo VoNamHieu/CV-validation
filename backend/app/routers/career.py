@@ -484,7 +484,9 @@ async def search(req: SearchRequest):
     the facet engine (role-adjacency × industry × location). No LLM at retrieval;
     LLM only if a CV is distilled. Serves the cached pool (warming if cold)."""
     # Build profile: distill CV first (if given), then let explicit fields win.
-    profile = distill_from_cv(req.cv_text) if req.cv_text else build_profile([])
+    # distill_from_cv is a blocking Gemini call → off the event loop.
+    profile = (await asyncio.to_thread(distill_from_cv, req.cv_text)
+               if req.cv_text else build_profile([]))
     if req.target_roles:
         profile = build_profile(req.target_roles, req.domains or profile.domains,
                                 req.level or profile.level,
