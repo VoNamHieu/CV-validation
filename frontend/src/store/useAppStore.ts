@@ -123,6 +123,12 @@ export interface JDEntry {
   optimizedCvSuggestions?: CvSuggestion[];
   optimizedCvPdfBase64?: string;
   optimizedCvFileName?: string;
+  // Per-job tailored cover letter (from /api/ai/cover-letter), on-demand in the
+  // chosen language. Switching language regenerates + replaces it (no cache).
+  // Fed into the extension profile at apply time so auto-apply fills a letter
+  // written for THIS job, not the generic summary. coverLetterLang labels it.
+  coverLetter?: string;
+  coverLetterLang?: string;
   jobTitle?: string;
   company?: string;
   // Job's free-text location (from the listing), used for city matching.

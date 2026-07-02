@@ -288,8 +288,7 @@ export default function JobResultsView({
                 }}>
                     <Sparkle size={14} weight="fill" style={{ color: 'var(--accent-purple)', flexShrink: 0, marginTop: 2 }} />
                     <span>
-                        Đã sắp xếp theo <strong style={{ color: 'var(--text-primary)' }}>độ phù hợp với CV của bạn</strong> (semantic
-                        search) — việc khớp nhất ở trên. Điểm khớp % chi tiết hiện sau khi chấm điểm.
+                        Đã sắp xếp theo <strong style={{ color: 'var(--text-primary)' }}>độ phù hợp với CV của bạn</strong> — việc khớp nhất ở trên. Điểm khớp % chi tiết hiện sau khi chấm điểm.
                     </span>
                 </div>
             )}

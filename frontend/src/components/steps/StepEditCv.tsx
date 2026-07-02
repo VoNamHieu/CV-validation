@@ -6,26 +6,25 @@ import {
     CheckCircle, FilePdf, FloppyDisk, CaretLeft, CaretRight,
     RocketLaunch, Lightning, CircleNotch,
     XCircle, Stop, CaretDown, CaretUp, ShieldWarning, ChartBar,
-    ArrowsClockwise, MagnifyingGlassPlus, PencilSimple, ArrowsLeftRight,
+    ArrowsClockwise, MagnifyingGlassPlus, PencilSimple, ArrowsLeftRight, Note,
 } from '@phosphor-icons/react';
 import { useAppStore, type JDEntry } from '@/store/useAppStore';
 import { useAuthGate } from '@/lib/auth';
 import { useConsent } from '@/lib/consent-context';
 import GapReportSection from '@/components/GapReportSection';
 import BeforeAfterModal from '@/components/BeforeAfterModal';
-import CvDocumentPreview from '@/components/CvDocumentPreview';
 import EditableTemplateFrame from '@/components/EditableTemplateFrame';
 import { applyCvFieldEdit } from '@/lib/cv-inline-edit';
 import { diffCvChanges, type CvImprovement, type CvSuggestion } from '@/lib/cv-improvements';
 import CvTemplatePicker from '@/components/CvTemplatePicker';
 import ScoreRing from '@/components/ScoreRing';
-import { optimizeCvVariants, renderCvPdf, verifyJobAlive } from '@/lib/api';
+import { optimizeCvVariants, renderCvPdf, generateCoverLetter } from '@/lib/api';
 import type {
     CVData, JDData, MatchResult, CategoryScore, RequirementStatus,
     ContactInfo, PersonalInfo, EmploymentInfo, JobPreferences,
 } from '@/lib/types';
 import {
-    EMPTY_CONTACT, EMPTY_PERSONAL, EMPTY_EMPLOYMENT, EMPTY_PREFERENCES,
+    EMPTY_CONTACT, EMPTY_PERSONAL, EMPTY_EMPLOYMENT, EMPTY_PREFERENCES, COVER_LETTER_LANGUAGES,
 } from '@/lib/types';
 import { promptInstallExtension } from '@/lib/extension-install';
 import { cvToExtensionProfile } from '@/lib/extension-profile';
@@ -77,6 +76,24 @@ function isExtensionAvailable(): boolean {
    MAIN: StepEditCv — Tab-based CV Viewer
    CV always visible, jobs as switchable tabs
    ═══════════════════════════════════════════════════════════════════════════════ */
+
+
+// Minimal, print-ready HTML for a cover letter PDF (reuses /render-cv-pdf).
+// Escapes the body, turns blank lines into paragraphs and single newlines into
+// <br> so the letter's formatting survives into the PDF.
+function coverLetterHtml(name: string, body: string): string {
+    const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const paras = esc(body)
+        .split(/\n{2,}/)
+        .map((p: string) => `<p>${p.replace(/\n/g, '<br>')}</p>`)
+        .join('');
+    return `<!doctype html><html><head><meta charset="utf-8"><style>
+      @page { size: A4; margin: 2.2cm; }
+      body { font-family: Georgia, 'Times New Roman', serif; font-size: 12pt; line-height: 1.7; color: #1a1a1a; }
+      .name { font-size: 16pt; font-weight: 700; margin-bottom: 22px; }
+      p { margin: 0 0 12px; text-align: justify; }
+    </style></head><body><div class="name">${esc(name)}</div>${paras}</body></html>`;
+}
 
 export default function StepEditCv() {
     const {
@@ -139,7 +156,7 @@ export default function StepEditCv() {
         return i >= 0 ? i : 0;
     });
     // Main editor tab: edit the CV vs. the deep gap analysis (its own full-width tab).
-    const [mainTab, setMainTab] = useState<'editor' | 'analysis'>('editor');
+    const [mainTab, setMainTab] = useState<'editor' | 'analysis' | 'cover'>('editor');
     // The initializer above only runs on mount. When the editor is ALREADY
     // mounted (e.g. the extension's Mode-1 tailor pushes a new CV and navigates
     // here), selectedJdId changes but selectedIdx wouldn't follow — leaving the
@@ -165,20 +182,19 @@ export default function StepEditCv() {
     const [reoptPoints, setReoptPoints] = useState('');
     const [reoptimizing, setReoptimizing] = useState(false);
     const [reoptimizeError, setReoptimizeError] = useState<string | null>(null);
+    const [coverLetterLoading, setCoverLetterLoading] = useState(false);
+    const [coverLetterError, setCoverLetterError] = useState<string | null>(null);
+    const [coverLang, setCoverLang] = useState<string>('vi');
+    const [coverPdfBusy, setCoverPdfBusy] = useState(false);
+    const [refineOpen, setRefineOpen] = useState(false);
+    const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
 
     // ── Template / preview / avatar state ──
     // Preview mode and edit mode are mutually exclusive: while the template
-    // preview is open, the editable document is hidden (display:none — still
-    // mounted so in-progress edits survive). editedCv mirrors those edits
-    // so the preview and downloads match what the user sees in the editor.
-    // Defaults to preview: the optimized CV rendered in the chosen template
-    // is what the user lands on; editing is the opt-in mode.
-    const [livePreviewOpen, setLivePreviewOpen] = useState(true);
+    // editedCv mirrors in-progress inline edits so the preview and downloads
+    // match what the user sees in the editor.
     const [compareOpen, setCompareOpen] = useState(false);
     const [editedCv, setEditedCv] = useState<CVData | null>(null);
-    const handleEditedChange = useCallback((cv: CVData) => {
-        setEditedCv(cv);
-    }, []);
     const [avatarBusy, setAvatarBusy] = useState(false);
     const [avatarError, setAvatarError] = useState<string | null>(null);
 
@@ -232,7 +248,6 @@ export default function StepEditCv() {
     }, []);
 
     const currentEntry = sortedEntries[selectedIdx];
-    const score = currentEntry?.matchResult?.overall_score ?? 0;
 
     // Switching jobs must show THAT job's optimized CV immediately — without
     // this, the previous entry's in-progress edits (editedCv) keep winning the
@@ -243,12 +258,6 @@ export default function StepEditCv() {
         setReoptPoints('');
         setReoptimizeError(null);
     }, [currentEntryId]);
-
-    // ATS keywords drawn from the JD must-have list (used by CvDocumentPreview to highlight)
-    const atsKeywords = useMemo(
-        () => (currentEntry?.jdData?.must_have ?? []).filter(Boolean),
-        [currentEntry],
-    );
 
     /* ─── Re-optimize this CV, folding in the candidate's own emphasis points ───
        Notes are sent to the optimizer as high-priority guidance; the prompt
@@ -290,6 +299,53 @@ export default function StepEditCv() {
             setReoptimizing(false);
         }
     }, [currentEntry, cvData, reoptPoints, updateJdEntry, gate]);
+
+    // On-demand cover letter for THIS job. Uses the tailored CV when present
+    // (falls back to the base CV) + the JD + match; stored on the entry and fed
+    // into the extension profile at apply time.
+    const handleGenerateCoverLetter = useCallback(async () => {
+        if (!currentEntry?.jdData) return;
+        const cv = currentEntry.optimizedCv ?? cvData;
+        if (!cv) return;
+        if (!gate('Đăng nhập để tạo thư giới thiệu bằng AI (tặng 50 credit).')) return;
+        setCoverLetterLoading(true);
+        setCoverLetterError(null);
+        try {
+            const letter = await generateCoverLetter(cv, currentEntry.jdData, currentEntry.matchResult, coverLang);
+            updateJdEntry(currentEntry.id, { coverLetter: letter, coverLetterLang: coverLang });
+        } catch (err) {
+            setCoverLetterError(err instanceof Error ? err.message : 'Tạo thư giới thiệu thất bại');
+        } finally {
+            setCoverLetterLoading(false);
+        }
+    }, [currentEntry, cvData, coverLang, updateJdEntry, gate]);
+
+    // Render the currently-selected-language letter to a downloadable PDF —
+    // reuses the same /render-cv-pdf backend as the CV, with a simple letter layout.
+    const handleDownloadCoverLetter = useCallback(async () => {
+        const letter = currentEntry?.coverLetter;
+        if (!letter || coverPdfBusy) return;
+        setCoverPdfBusy(true);
+        setCoverLetterError(null);
+        try {
+            const name = ((currentEntry.optimizedCv ?? cvData)?.name) || 'Cover Letter';
+            const html = coverLetterHtml(name, letter);
+            const base = `${name.replace(/\s+/g, '_')}_${(currentEntry.jobTitle || 'cover_letter').replace(/\s+/g, '_')}_${currentEntry.coverLetterLang ?? coverLang}.pdf`;
+            const { base64, filename } = await renderCvPdf(html, base);
+            const bin = atob(base64);
+            const bytes = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+            const blob = new Blob([bytes], { type: 'application/pdf' });
+            const urlObj = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = urlObj; a.download = filename; a.click();
+            URL.revokeObjectURL(urlObj);
+        } catch (e) {
+            setCoverLetterError(e instanceof Error ? e.message : 'Xuất PDF thất bại');
+        } finally {
+            setCoverPdfBusy(false);
+        }
+    }, [currentEntry, cvData, coverLang, coverPdfBusy]);
 
     /* ─── Optimize a re-opened (report-only) job: first tailored CV for a saved
        job that was only scored. Reuses the standard optimizer; on success the
@@ -409,7 +465,9 @@ export default function StepEditCv() {
        Merge the base cvData's profile sub-objects in so every per-job push
        carries the same contact info, address, etc. */
     const buildProfile = useCallback(
-        (cv: CVData) => cvToExtensionProfile(mergeProfile(cv)),
+        // coverLetter (per-job, on-demand) overrides the generic CV summary so
+        // the auto-apply agent fills a letter tailored to THIS job.
+        (cv: CVData, coverLetter?: string) => cvToExtensionProfile(mergeProfile(cv), coverLetter),
         [mergeProfile],
     );
 
@@ -475,25 +533,18 @@ export default function StepEditCv() {
             return;
         }
 
-        const profile = buildProfile(cv);
+        const profile = buildProfile(cv, currentEntry?.coverLetter);
 
         setAutoApplyStatus('checking');
         setAutoApplyMessage('Đang kiểm tra Extension...');
 
         try {
-            // Apply-time liveness gate: don't send the agent to a dead posting.
-            // Fail-open (verifyJobAlive returns alive on any gate error).
-            setAutoApplyStatus('checking');
-            setAutoApplyMessage('Đang kiểm tra công việc còn tuyển…');
-            const live = await verifyJobAlive(jobUrl, currentEntry?.jobTitle);
-            if (!live.alive) {
-                setAutoApplyStatus('error');
-                setAutoApplyMessage('Job này đã đóng — chuyển sang job kế tiếp.');
-                goNext();
-                setTimeout(() => setAutoApplyStatus('idle'), 4000);
-                return;
-            }
-
+            // No pre-flight liveness gate here: the job was already crawled +
+            // scored + tailored to reach this screen (a dead posting errors out
+            // before it gets an optimizedCv), and the extension opens the URL in
+            // a real tab next — so it, not a headless re-fetch, is the source of
+            // truth. The old check hit a 40s Playwright render, blew the 15s
+            // client timeout, and failed open anyway.
             if (!isExtensionAvailable()) throw new Error('NO_EXTENSION');
 
             // Ensure this job's PDF exists (re-render on cache miss after reload)
@@ -577,7 +628,7 @@ export default function StepEditCv() {
                 jobUrl: entry.applyUrl || entry.source!,
                 jobTitle: entry.jobTitle || 'Unknown',
                 company: entry.company || entry.label || '',
-                profile: buildProfile(entry.optimizedCv!),
+                profile: buildProfile(entry.optimizedCv!, entry.coverLetter),
                 cvFileBase64: entry.optimizedCvPdfBase64,
                 cvFileName: entry.optimizedCvFileName,
             }));
@@ -594,28 +645,17 @@ export default function StepEditCv() {
             );
         }
 
-        // Apply-time liveness gate: verify all jobs (concurrent, fail-open) and
-        // drop the dead ones so the agent never opens a closed posting.
-        setAutoApplyMessage('Đang kiểm tra công việc còn tuyển…');
-        const checked = await Promise.all(
-            jobs.map(async j => ({ j, alive: (await verifyJobAlive(j.jobUrl, j.jobTitle)).alive })),
-        );
-        const liveJobs = checked.filter(c => c.alive).map(c => c.j);
-        const skipped = checked.length - liveJobs.length;
-        if (liveJobs.length === 0) {
-            setAutoApplyMessage('Tất cả công việc đều đã đóng — thử tìm việc lại.');
-            return;
-        }
-        if (skipped > 0) {
-            setAutoApplyMessage(`Bỏ qua ${skipped} job đã đóng · ứng tuyển ${liveJobs.length} job còn mở.`);
-        }
-
+        // No pre-flight liveness gate: every job here was already crawled +
+        // scored + tailored (a dead posting never gets an optimizedCv, so it's
+        // filtered out above), and the extension opens each URL in a real tab —
+        // the tab is the source of truth. The old concurrent verify hammered the
+        // headless-render pool and timed out (failing open) on SPA boards.
         setBatchStarting(true);
 
-        // Send batch command to extension (only the live jobs)
+        // Send batch command to extension.
         window.postMessage({
             type: 'JOBFIT_AUTO_APPLY_ALL',
-            jobs: liveJobs,
+            jobs,
         }, '*');
     }, [sortedEntries, buildProfile, ensureAgentConsent]);
 
@@ -678,7 +718,7 @@ export default function StepEditCv() {
                     jobUrl: entry.applyUrl || entry.source!,
                     jobTitle: entry.jobTitle || 'Unknown',
                     company: entry.company || entry.label || '',
-                    profile: buildProfile(cv),
+                    profile: buildProfile(cv, entry.coverLetter),
                     cvFileBase64: base64,
                     cvFileName: outFilename,
                 });
@@ -690,7 +730,7 @@ export default function StepEditCv() {
                     jobUrl: entry.applyUrl || entry.source!,
                     jobTitle: entry.jobTitle || 'Unknown',
                     company: entry.company || entry.label || '',
-                    profile: buildProfile(cv),
+                    profile: buildProfile(cv, entry.coverLetter),
                 });
             }
             setFullAutoProgress({ done: i + 1, total: candidates.length });
@@ -895,7 +935,7 @@ export default function StepEditCv() {
                             // base cvData so the extension still gets something.
                             const cv = currentEntry?.optimizedCv ?? cvData;
                             if (!cv) return;
-                            const profile = buildProfile(cv);
+                            const profile = buildProfile(cv, currentEntry?.coverLetter);
                             navigator.clipboard.writeText(JSON.stringify(profile, null, 2)).catch(() => { });
 
                             // Wait for the extension's real ACK — a fire-and-forget
@@ -1367,82 +1407,12 @@ export default function StepEditCv() {
                 )}
             </div>
 
-            {/* ══════ Current Job Context Card ══════ */}
-            <div className="glass-card" style={{
-                padding: '14px 20px', marginBottom: 16,
-                display: 'flex', alignItems: 'center', gap: 16,
-                background: 'linear-gradient(135deg, rgba(59,130,246,0.05), rgba(139,92,246,0.03))',
-            }}>
-                <ScoreRing score={score} size={48} label="" />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                    <p style={{ fontWeight: 600, fontSize: '0.95rem', marginBottom: 2 }}>
-                        {currentEntry.jobTitle || 'Unknown Position'}
-                    </p>
-                    <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                        {currentEntry.company && (
-                            <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-                                <Briefcase size={11} /> {currentEntry.company}
-                            </span>
-                        )}
-                        {currentEntry.company && <span style={{ opacity: 0.4 }}>·</span>}
-                        <span>{currentEntry.label}</span>
-                    </p>
-                </div>
-                <div style={{ display: 'flex', gap: 6 }}>
-                    {currentEntry.jdData?.domain && (
-                        <span style={{
-                            fontSize: '0.7rem', padding: '3px 10px', borderRadius: 12,
-                            background: 'rgba(59,130,246,0.1)', color: 'var(--accent-blue)',
-                        }}>{currentEntry.jdData.domain}</span>
-                    )}
-                    {currentEntry.jdData?.seniority_expected && (
-                        <span style={{
-                            fontSize: '0.7rem', padding: '3px 10px', borderRadius: 12,
-                            background: 'rgba(139,92,246,0.1)', color: 'var(--accent-purple)',
-                        }}>{currentEntry.jdData.seniority_expected}</span>
-                    )}
-                </div>
-                {/* Navigation: x of y */}
-                <div style={{
-                    fontSize: '0.75rem', color: 'var(--text-muted)',
-                    display: 'flex', alignItems: 'center', gap: 8,
-                    flexShrink: 0,
-                }}>
-                    <button
-                        onClick={goPrev}
-                        aria-label="CV trước"
-                        disabled={selectedIdx === 0}
-                        style={{
-                            background: 'none', border: 'none', cursor: selectedIdx === 0 ? 'default' : 'pointer',
-                            color: selectedIdx === 0 ? 'var(--text-muted)' : 'var(--accent-blue)',
-                            padding: 4, display: 'flex', opacity: selectedIdx === 0 ? 0.3 : 1,
-                        }}
-                    >
-                        <CaretLeft size={14} weight="bold" />
-                    </button>
-                    <span style={{ fontWeight: 600 }}>{selectedIdx + 1} / {sortedEntries.length}</span>
-                    <button
-                        onClick={goNext}
-                        aria-label="CV tiếp theo"
-                        disabled={selectedIdx === sortedEntries.length - 1}
-                        style={{
-                            background: 'none', border: 'none',
-                            cursor: selectedIdx === sortedEntries.length - 1 ? 'default' : 'pointer',
-                            color: selectedIdx === sortedEntries.length - 1 ? 'var(--text-muted)' : 'var(--accent-blue)',
-                            padding: 4, display: 'flex',
-                            opacity: selectedIdx === sortedEntries.length - 1 ? 0.3 : 1,
-                        }}
-                    >
-                        <CaretRight size={14} weight="bold" />
-                    </button>
-                </div>
-            </div>
-
             {/* ══════ Main tabs: edit CV · deep analysis (its own tab) ══════ */}
             <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
                 {([
                     { id: 'editor' as const, label: 'Chỉnh sửa CV', icon: PencilSimple },
                     { id: 'analysis' as const, label: 'Phân tích chuyên sâu', icon: MagnifyingGlassPlus },
+                    { id: 'cover' as const, label: 'Thư giới thiệu', icon: Note },
                 ]).map(({ id, label, icon: Icon }) => {
                     const active = mainTab === id;
                     return (
@@ -1462,22 +1432,99 @@ export default function StepEditCv() {
                 })}
             </div>
 
+            {/* ══════ Cover letter (thư giới thiệu) — its own tab, on-demand ══════ */}
+            {mainTab === 'cover' && (
+                <div style={{ marginBottom: 16, padding: 16, background: 'var(--bg-card)', borderRadius: 12, border: '1px solid var(--border-subtle)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', marginBottom: 6 }}>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                            <Note size={17} weight="fill" /> Thư giới thiệu cho {currentEntry.jobTitle || 'công việc này'}
+                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                            <select
+                                value={coverLang}
+                                onChange={(e) => setCoverLang(e.target.value)}
+                                aria-label="Ngôn ngữ thư giới thiệu"
+                                style={{
+                                    padding: '8px 12px', borderRadius: 8, fontSize: '0.82rem', cursor: 'pointer',
+                                    border: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)', color: 'var(--text-primary)',
+                                }}
+                            >
+                                {Object.entries(COVER_LETTER_LANGUAGES).map(([code, label]) => (
+                                    <option key={code} value={code}>{label}</option>
+                                ))}
+                            </select>
+                            <button
+                                onClick={() => void handleGenerateCoverLetter()}
+                                disabled={coverLetterLoading || !currentEntry.jdData}
+                                className="btn-primary"
+                                style={{
+                                    display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.84rem',
+                                    padding: '9px 18px', opacity: coverLetterLoading ? 0.6 : 1,
+                                }}
+                            >
+                                {coverLetterLoading
+                                    ? <><CircleNotch size={14} className="spin" /> Đang viết…</>
+                                    : <><Sparkle size={14} weight="fill" /> {currentEntry.coverLetter ? 'Viết lại' : 'Tạo thư giới thiệu'}</>}
+                            </button>
+                        </div>
+                    </div>
+                    <p style={{ fontSize: '0.76rem', color: 'var(--text-muted)', margin: '0 0 12px' }}>
+                        Chọn ngôn ngữ rồi bấm tạo — thư viết riêng cho job này từ CV thật của bạn (không bịa), tự động điền khi ứng tuyển. Có thể chỉnh sửa trực tiếp.
+                    </p>
+                    {currentEntry.coverLetter ? (
+                        <>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 8, flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                                Ngôn ngữ: <strong style={{ color: 'var(--text-secondary)' }}>{COVER_LETTER_LANGUAGES[currentEntry.coverLetterLang || ''] || currentEntry.coverLetterLang || '—'}</strong>
+                            </span>
+                            <button
+                                type="button" onClick={() => void handleDownloadCoverLetter()} disabled={coverPdfBusy}
+                                style={{
+                                    display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.8rem', padding: '7px 14px',
+                                    borderRadius: 8, border: '1px solid var(--border-subtle)', background: 'var(--bg-card)',
+                                    color: 'var(--text-primary)', cursor: 'pointer', opacity: coverPdfBusy ? 0.6 : 1,
+                                }}
+                            >
+                                {coverPdfBusy ? <><CircleNotch size={13} className="spin" /> Đang xuất…</> : <><FilePdf size={13} weight="bold" /> Tải PDF</>}
+                            </button>
+                        </div>
+                        <textarea
+                            value={currentEntry.coverLetter}
+                            onChange={(e) => updateJdEntry(currentEntry.id, { coverLetter: e.target.value })}
+                            rows={18}
+                            style={{
+                                width: '100%', resize: 'vertical', padding: '12px 14px', borderRadius: 8,
+                                background: 'var(--bg-secondary)', border: '1px solid var(--border-subtle)',
+                                color: 'var(--text-primary)', fontSize: '0.9rem', fontFamily: 'inherit',
+                                lineHeight: 1.7, whiteSpace: 'pre-wrap',
+                            }}
+                        />
+                        </>
+                    ) : !coverLetterLoading && (
+                        <div style={{
+                            padding: '28px 16px', textAlign: 'center', borderRadius: 8,
+                            border: '1px dashed var(--border-subtle)', color: 'var(--text-muted)', fontSize: '0.84rem',
+                        }}>
+                            Chưa có thư giới thiệu bằng <strong style={{ color: 'var(--text-secondary)' }}>{COVER_LETTER_LANGUAGES[coverLang] || coverLang}</strong>. Bấm <strong style={{ color: 'var(--text-secondary)' }}>Tạo thư giới thiệu</strong> để AI viết.
+                        </div>
+                    )}
+                    {coverLetterError && (
+                        <div style={{
+                            marginTop: 10, padding: '8px 12px', borderRadius: 8,
+                            background: 'rgba(239,68,68,0.08)', color: '#ef4444',
+                            fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: 6,
+                        }}>
+                            <Warning size={13} /> {coverLetterError}
+                        </div>
+                    )}
+                </div>
+            )}
+
             {/* ══════ Two-column workspace: CV editor (left) · job match analysis (right) ══════ */}
             {mainTab === 'editor' && (
             <div className="editor-layout">
             {/* ───────────────────────── LEFT: CV editor ───────────────────────── */}
             <div style={{ minWidth: 0 }}>
-
-            {/* ══════ AI Disclaimer ══════ */}
-            <div style={{
-                background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)',
-                borderRadius: 'var(--radius-sm)', padding: '8px 14px', marginBottom: 12,
-                fontSize: '0.78rem', color: 'var(--accent-amber)',
-                display: 'flex', alignItems: 'center', gap: 6,
-            }}>
-                <Warning size={12} />
-                Được AI tối ưu cho &quot;{currentEntry.jobTitle || 'vị trí này'}&quot; — Bấm vào nội dung bất kỳ để sửa, di chuột lên từng mục để sắp xếp lại / xoá
-            </div>
 
             {/* Personal info is edited in the standalone CV editor's "Thông tin
                 cá nhân" tab; here it's pulled straight from the base cvData and
@@ -1485,10 +1532,24 @@ export default function StepEditCv() {
 
             {/* ══════ Re-optimize with the candidate's own points ══════ */}
             <div className="glass-card" style={{ marginBottom: 12, padding: '14px 18px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                    <Sparkle size={14} weight="duotone" style={{ color: 'var(--accent-purple)' }} />
-                    <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Tinh chỉnh thêm theo ý bạn</span>
-                </div>
+                <button
+                    type="button"
+                    onClick={() => setRefineOpen(v => !v)}
+                    style={{
+                        display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+                        background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+                        textAlign: 'left', marginBottom: refineOpen ? 6 : 0,
+                    }}
+                >
+                    <Sparkle size={14} weight="duotone" style={{ color: 'var(--accent-purple)', flexShrink: 0 }} />
+                    <span style={{ fontSize: '0.85rem', fontWeight: 600, flex: 1, minWidth: 0 }}>Tinh chỉnh thêm theo ý bạn</span>
+                    <CaretRight size={12} style={{
+                        color: 'var(--text-muted)', flexShrink: 0,
+                        transform: refineOpen ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s',
+                    }} />
+                </button>
+                {refineOpen && (
+                <>
                 <p style={{ fontSize: '0.74rem', color: 'var(--text-muted)', margin: '0 0 8px', lineHeight: 1.5 }}>
                     Nhập những điểm bạn muốn nhấn mạnh hoặc bổ sung (dựa trên kinh nghiệm thật của bạn).
                     AI sẽ viết lại CV cho công việc này theo các điểm đó — không bịa thêm thông tin không có trong CV.
@@ -1533,10 +1594,34 @@ export default function StepEditCv() {
                         <Warning size={12} /> {reoptimizeError}
                     </div>
                 )}
+                </>
+                )}
             </div>
 
             {/* ══════ Template Picker + Avatar + Live Preview ══════ */}
             <div style={{ marginBottom: 12, padding: 12, background: 'var(--bg-card)', borderRadius: 10, border: '1px solid var(--border-subtle)' }}>
+                <button
+                    type="button"
+                    onClick={() => setTemplatePickerOpen(v => !v)}
+                    style={{
+                        display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+                        background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+                        textAlign: 'left', marginBottom: templatePickerOpen ? 10 : 0,
+                    }}
+                >
+                    <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary)', flex: 1, minWidth: 0 }}>
+                        Mẫu CV
+                        <span style={{ color: 'var(--text-muted)', fontWeight: 400, marginLeft: 6, fontSize: '0.72rem' }}>
+                            — {getTemplate(currentEntry.selectedTemplateId).name}
+                        </span>
+                    </span>
+                    <CaretRight size={12} style={{
+                        color: 'var(--text-muted)', flexShrink: 0,
+                        transform: templatePickerOpen ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s',
+                    }} />
+                </button>
+                {templatePickerOpen && (
+                <>
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, marginBottom: 10 }}>
                     {/* Avatar uploader — only for templates that have an image holder */}
                     {getTemplate(currentEntry.selectedTemplateId).hasPhoto ? (
@@ -1629,9 +1714,6 @@ export default function StepEditCv() {
                                     optimizedCvPdfBase64: undefined,
                                     optimizedCvFileName: undefined,
                                 });
-                                // Picking a template implies the user wants to
-                                // see the CV in that template — switch to preview.
-                                setLivePreviewOpen(true);
                             }}
                         />
                     </div>
@@ -1646,99 +1728,64 @@ export default function StepEditCv() {
                         {avatarError}
                     </div>
                 )}
-
-                {/* Preview/edit mode switch — only one CV is visible at a time */}
-                <button
-                    type="button"
-                    onClick={() => setLivePreviewOpen(v => !v)}
-                    style={{
-                        display: 'flex', alignItems: 'center', gap: 6,
-                        background: 'none', border: 'none',
-                        color: 'var(--text-secondary)', fontSize: '0.78rem',
-                        fontWeight: 600, cursor: 'pointer', padding: '4px 0',
-                    }}
-                >
-                    {livePreviewOpen ? <CaretLeft size={12} style={{ transform: 'rotate(-90deg)' }} /> : <CaretRight size={12} style={{ transform: 'rotate(90deg)' }} />}
-                    {livePreviewOpen ? 'Quay lại chỉnh sửa nội dung' : 'Xem trước mẫu đã chọn'}
-                    <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: '0.72rem' }}>
-                        {livePreviewOpen
-                            ? '— CV đang hiển thị đúng theo mẫu sẽ xuất PDF'
-                            : '— xem CV hiển thị theo mẫu trước khi tải xuống'}
-                    </span>
-                </button>
-
-                {livePreviewOpen && (
-                    <>
-                        <div style={{
-                            display: 'flex', alignItems: 'center',
-                            justifyContent: 'flex-end', gap: 8, marginTop: 8,
-                        }}>
-                            <button
-                                onClick={() => setCompareOpen(true)}
-                                className="btn-secondary"
-                                title="Xem CV gốc và bản đã tối ưu cạnh nhau"
-                                style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '8px 16px', fontSize: '0.82rem' }}
-                            >
-                                <ArrowsLeftRight size={14} weight="bold" /> So sánh trước/sau
-                            </button>
-                            <button
-                                onClick={() => void handleDownload(editedCv ?? currentEntry.optimizedCv!)}
-                                disabled={downloadingPdf}
-                                className="btn-primary"
-                                style={{
-                                    display: 'flex', alignItems: 'center', gap: 5,
-                                    padding: '8px 20px', fontSize: '0.82rem',
-                                    opacity: downloadingPdf ? 0.6 : 1,
-                                }}
-                            >
-                                <FloppyDisk size={14} weight="fill" />
-                                {downloadingPdf ? 'Đang xuất PDF…' : 'Lưu & Tải xuống'}
-                            </button>
-                        </div>
-                        {compareOpen && (
-                            <BeforeAfterModal
-                                original={cvData ?? currentEntry.optimizedCv!}
-                                optimized={mergeProfile(editedCv ?? currentEntry.optimizedCv!)}
-                                templateId={currentEntry.selectedTemplateId}
-                                avatarBase64={userAvatarBase64 ?? undefined}
-                                onClose={() => setCompareOpen(false)}
-                            />
-                        )}
-                        <div style={{
-                            marginTop: 8, fontSize: '0.74rem', color: 'var(--text-muted)',
-                        }}>
-                            ✏️ Click vào nội dung trên CV để sửa trực tiếp — Enter để lưu, Esc để huỷ.
-                        </div>
-                        <div style={{
-                            marginTop: 8, border: '1px solid var(--border-subtle)',
-                            borderRadius: 6, overflow: 'hidden', background: '#fff',
-                        }}>
-                            <EditableTemplateFrame
-                                key={`${currentEntry.id}-${currentEntry.selectedTemplateId ?? DEFAULT_TEMPLATE_ID}-${userAvatarBase64?.length ?? 0}`}
-                                html={renderCvHtml(
-                                    mergeProfile(editedCv ?? currentEntry.optimizedCv!),
-                                    currentEntry.selectedTemplateId,
-                                    { avatarBase64: userAvatarBase64 ?? undefined },
-                                )}
-                                onFieldEdit={handleTemplateFieldEdit}
-                                height={900}
-                            />
-                        </div>
-                    </>
+                </>
                 )}
-            </div>
 
-            {/* ══════ Editable CV document — hidden (not unmounted, so edits
-                 survive) while the template preview above is open ══════ */}
-            <div style={{ display: livePreviewOpen ? 'none' : undefined }}>
-                <CvDocumentPreview
-                    key={currentEntry.id}
-                    originalCv={cvData ?? currentEntry.optimizedCv!}
-                    optimizedCv={currentEntry.optimizedCv!}
-                    onSave={handleDownload}
-                    onEditedChange={handleEditedChange}
-                    keywords={atsKeywords}
-                />
+                <div style={{
+                    display: 'flex', alignItems: 'center',
+                    justifyContent: 'flex-end', gap: 8,
+                }}>
+                    <button
+                        onClick={() => setCompareOpen(true)}
+                        className="btn-secondary"
+                        title="Xem CV gốc và bản đã tối ưu cạnh nhau"
+                        style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '8px 16px', fontSize: '0.82rem' }}
+                    >
+                        <ArrowsLeftRight size={14} weight="bold" /> So sánh trước/sau
+                    </button>
+                    <button
+                        onClick={() => void handleDownload(editedCv ?? currentEntry.optimizedCv!)}
+                        disabled={downloadingPdf}
+                        className="btn-primary"
+                        style={{
+                            display: 'flex', alignItems: 'center', gap: 5,
+                            padding: '8px 20px', fontSize: '0.82rem',
+                            opacity: downloadingPdf ? 0.6 : 1,
+                        }}
+                    >
+                        <FloppyDisk size={14} weight="fill" />
+                        {downloadingPdf ? 'Đang xuất PDF…' : 'Lưu & Tải xuống'}
+                    </button>
+                </div>
+                {compareOpen && (
+                    <BeforeAfterModal
+                        original={cvData ?? currentEntry.optimizedCv!}
+                        optimized={mergeProfile(editedCv ?? currentEntry.optimizedCv!)}
+                        templateId={currentEntry.selectedTemplateId}
+                        avatarBase64={userAvatarBase64 ?? undefined}
+                        onClose={() => setCompareOpen(false)}
+                    />
+                )}
+                <div style={{
+                    marginTop: 8, fontSize: '0.74rem', color: 'var(--text-muted)',
+                }}>
+                    ✏️ Click vào nội dung trên CV để sửa trực tiếp — Enter để lưu, Esc để huỷ.
+                </div>
+                <div style={{
+                    marginTop: 8, border: '1px solid var(--border-subtle)',
+                    borderRadius: 6, overflow: 'hidden', background: '#fff',
+                }}>
+                    <EditableTemplateFrame
+                        key={`${currentEntry.id}-${currentEntry.selectedTemplateId ?? DEFAULT_TEMPLATE_ID}-${userAvatarBase64?.length ?? 0}`}
+                        html={renderCvHtml(
+                            mergeProfile(editedCv ?? currentEntry.optimizedCv!),
+                            currentEntry.selectedTemplateId,
+                            { avatarBase64: userAvatarBase64 ?? undefined },
+                        )}
+                        onFieldEdit={handleTemplateFieldEdit}
+                        height={900}
+                    />
+                </div>
             </div>
 
             </div>{/* ───────── /LEFT ───────── */}
@@ -1826,7 +1873,7 @@ function ImprovementsPanel({
     improvements?: CvImprovement[];
     jobTitle?: string;
 }) {
-    const [open, setOpen] = useState(true);
+    const [open, setOpen] = useState(false);
     const diff = useMemo(
         () => diffCvChanges(originalCv, optimizedCv),
         [originalCv, optimizedCv],
@@ -1920,7 +1967,7 @@ function SuggestionsPanel({
     busy: boolean;
     onApply: (notes: string) => void;
 }) {
-    const [open, setOpen] = useState(true);
+    const [open, setOpen] = useState(false);
     const [answers, setAnswers] = useState<Record<number, string>>({});
 
     if (!suggestions || suggestions.length === 0) return null;
@@ -2028,7 +2075,7 @@ function MatchAnalysisPanel({
         () => (cvData.skills || []).map(s => s.toLowerCase()),
         [cvData.skills],
     );
-    const [open, setOpen] = useState(true);
+    const [open, setOpen] = useState(false);
     // The button below opens the "Phân tích chuyên sâu" tab; it reflects the
     // deep-analysis state (which lives on the jdEntry, so it keeps running across
     // tab switches — see GapReportSection).
