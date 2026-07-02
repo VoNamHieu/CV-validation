@@ -36,29 +36,93 @@ async def get_balance(user_id: str) -> int:
             return await conn.fetchval("SELECT balance FROM credits WHERE user_id = $1", user_id)
 
 
-async def spend(user_id: str, action: str, cost: int) -> tuple[bool, int]:
+async def spend(user_id: str, action: str, cost: int,
+                request_id: str | None = None) -> tuple[bool, int]:
     """Atomically debit ``cost`` credits. Returns (ok, balance_after_or_current).
-    ok=False means insufficient balance (nothing was debited)."""
+    ok=False means insufficient balance (nothing was debited).
+
+    ``request_id`` makes the debit IDEMPOTENT: replaying the same
+    (user, request_id) — a client/proxy retry after a timeout — returns ok=True
+    without debiting again. The credits row is locked FOR UPDATE so the
+    replay-check + debit + ledger insert are serial per user; the partial
+    unique index on (user_id, reason, request_id) is the invariant backstop.
+    A REJECTED spend writes no ledger row, so the same request_id may be
+    retried after a top-up and will then debit normally."""
     if cost < 0:
         raise ValueError("cost must be >= 0")
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
             await _ensure(conn, user_id)
+            cur = await conn.fetchval(
+                "SELECT balance FROM credits WHERE user_id = $1 FOR UPDATE", user_id)
+            if request_id:
+                prior = await conn.fetchval(
+                    "SELECT 1 FROM credit_ledger "
+                    "WHERE user_id = $1 AND request_id = $2 AND reason = 'spend'",
+                    user_id, request_id,
+                )
+                if prior:  # replay — already charged, report current balance
+                    return True, cur
             bal = await conn.fetchval(
                 "UPDATE credits SET balance = balance - $2, spent_total = spent_total + $2, "
                 "updated_at = now() WHERE user_id = $1 AND balance >= $2 RETURNING balance",
                 user_id, cost,
             )
             if bal is None:  # insufficient — report current balance, debit nothing
-                cur = await conn.fetchval("SELECT balance FROM credits WHERE user_id = $1", user_id)
                 return False, cur
             await conn.execute(
-                "INSERT INTO credit_ledger (user_id, delta, reason, action, balance_after) "
-                "VALUES ($1, $2, 'spend', $3, $4)",
-                user_id, -cost, action, bal,
+                "INSERT INTO credit_ledger (user_id, delta, reason, action, balance_after, request_id) "
+                "VALUES ($1, $2, 'spend', $3, $4, $5)",
+                user_id, -cost, action, bal, request_id,
             )
             return True, bal
+
+
+async def refund(user_id: str, request_id: str) -> dict:
+    """Reverse a spend identified by ``request_id``. Server-initiated only
+    (the route gates on an internal key) — called when the AI work FAILED
+    after a successful debit, so the user isn't charged for nothing.
+
+    Idempotent: refunding twice returns already_refunded and changes nothing
+    (FOR UPDATE serializes; the unique index forbids a second 'refund' row).
+    Unknown request_id → spend_not_found, nothing granted. spent_total is
+    decremented (a refund reverses a spend; granted_total stays money-in)."""
+    if not request_id:
+        return {"refunded": 0, "balance": None, "status": "spend_not_found"}
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await _ensure(conn, user_id)
+            cur = await conn.fetchval(
+                "SELECT balance FROM credits WHERE user_id = $1 FOR UPDATE", user_id)
+            spent = await conn.fetchrow(
+                "SELECT delta, action FROM credit_ledger "
+                "WHERE user_id = $1 AND request_id = $2 AND reason = 'spend'",
+                user_id, request_id,
+            )
+            if spent is None:
+                return {"refunded": 0, "balance": cur, "status": "spend_not_found"}
+            already = await conn.fetchval(
+                "SELECT 1 FROM credit_ledger "
+                "WHERE user_id = $1 AND request_id = $2 AND reason = 'refund'",
+                user_id, request_id,
+            )
+            if already:
+                return {"refunded": 0, "balance": cur, "status": "already_refunded"}
+            amount = -spent["delta"]  # spend delta is negative
+            bal = await conn.fetchval(
+                "UPDATE credits SET balance = balance + $2, "
+                "spent_total = GREATEST(spent_total - $2, 0), updated_at = now() "
+                "WHERE user_id = $1 RETURNING balance",
+                user_id, amount,
+            )
+            await conn.execute(
+                "INSERT INTO credit_ledger (user_id, delta, reason, action, balance_after, request_id) "
+                "VALUES ($1, $2, 'refund', $3, $4, $5)",
+                user_id, amount, spent["action"], bal, request_id,
+            )
+            return {"refunded": amount, "balance": bal, "status": "refunded"}
 
 
 FREE_TOPUP_AMOUNT = int(os.getenv("CREDIT_FREE_TOPUP", "50"))

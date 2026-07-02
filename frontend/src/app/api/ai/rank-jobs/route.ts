@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { spendCredits, creditErrorResponse } from "@/lib/credits-guard";
+import { withCredits, creditErrorResponse } from "@/lib/credits-guard";
 import { callAIJudge } from "@/lib/gemini";
 import { safeJsonParse } from "@/lib/safe-json";
 
@@ -120,16 +120,20 @@ ${candidates.map((c, i) => `${i + 1}. [${c.url}] ${c.title || "(no title)"}`).jo
 
 Rank these jobs from best to worst fit for this candidate.`;
 
-        await spendCredits(request, "rank_jobs");
-        const raw = await callAIJudge(systemPrompt, userPrompt, RANK_SCHEMA);
         let parsed: { ranked?: Array<{ url: string; title?: string; fit_score?: number; reason?: string }> };
         try {
-            parsed = safeJsonParse(raw);
-        } catch {
-            return NextResponse.json(
-                { detail: "AI returned invalid JSON. Please retry." },
-                { status: 502 }
-            );
+            parsed = await withCredits(request, "rank_jobs", 1, async () => {
+                const raw = await callAIJudge(systemPrompt, userPrompt, RANK_SCHEMA);
+                return safeJsonParse<{ ranked?: Array<{ url: string; title?: string; fit_score?: number; reason?: string }> }>(raw);
+            });
+        } catch (e) {
+            if (e instanceof SyntaxError) {
+                return NextResponse.json(
+                    { detail: "AI returned invalid JSON. Please retry." },
+                    { status: 502 }
+                );
+            }
+            throw e;
         }
 
         // Defensive: keep only URLs we actually sent, in the AI's order, then

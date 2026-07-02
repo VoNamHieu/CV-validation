@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { spendCredits, creditErrorResponse } from "@/lib/credits-guard";
+import { withCredits, creditErrorResponse } from "@/lib/credits-guard";
 import { generateGapReport } from "@/lib/gap-report";
 
 export async function POST(request: NextRequest) {
@@ -8,8 +8,7 @@ export async function POST(request: NextRequest) {
         if (!cv || !jd) {
             return NextResponse.json({ detail: "cv and jd are required" }, { status: 400 });
         }
-        await spendCredits(request, "gap_report");
-        const result = await generateGapReport(cv, jd, match);
+        const result = await withCredits(request, "gap_report", 1, () => generateGapReport(cv, jd, match));
         return NextResponse.json(result);
     } catch (e: unknown) {
         const cr = creditErrorResponse(e); if (cr) return cr;

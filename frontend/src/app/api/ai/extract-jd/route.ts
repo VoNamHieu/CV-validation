@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { spendCredits, creditErrorResponse } from "@/lib/credits-guard";
+import { withCredits, creditErrorResponse } from "@/lib/credits-guard";
 import { extractJd } from "@/lib/tailor";
 
 export async function POST(request: NextRequest) {
@@ -8,8 +8,7 @@ export async function POST(request: NextRequest) {
         if (!raw_text) {
             return NextResponse.json({ detail: "raw_text is required" }, { status: 400 });
         }
-        await spendCredits(request, "extract_jd");
-        const parsed = await extractJd(raw_text);
+        const parsed = await withCredits(request, "extract_jd", 1, () => extractJd(raw_text));
         return NextResponse.json(parsed);
     } catch (e: unknown) {
         const cr = creditErrorResponse(e); if (cr) return cr;

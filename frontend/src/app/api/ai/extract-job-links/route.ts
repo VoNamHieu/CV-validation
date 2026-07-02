@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { spendCredits, creditErrorResponse } from "@/lib/credits-guard";
+import { withCredits, creditErrorResponse } from "@/lib/credits-guard";
 import { callAILight } from "@/lib/gemini";
 import { safeJsonParse } from "@/lib/safe-json";
 
@@ -102,17 +102,22 @@ SITE: ${site_url || "unknown"}
 ${compactLinks ? "LINKS ON PAGE (one per line):" : "PAGE CONTENT:"}
 ${payload}`;
 
-        await spendCredits(request, "extract_job_links");
-        const result = await callAILight(systemPrompt, userPrompt);
-        console.log("[extract-job-links] AI raw response", {
-            len: result?.length || 0,
-            sample: (result || "").slice(0, 500),
-        });
         let parsed: { found?: boolean; jobs?: Array<{ url?: string; title?: string }>; total_found?: number };
-        try { parsed = safeJsonParse(result); }
-        catch {
-            console.warn("[extract-job-links] AI returned invalid JSON");
-            return NextResponse.json({ detail: "AI returned invalid JSON. Please retry." }, { status: 502 });
+        try {
+            parsed = await withCredits(request, "extract_job_links", 1, async () => {
+                const result = await callAILight(systemPrompt, userPrompt);
+                console.log("[extract-job-links] AI raw response", {
+                    len: result?.length || 0,
+                    sample: (result || "").slice(0, 500),
+                });
+                return safeJsonParse<{ found?: boolean; jobs?: Array<{ url?: string; title?: string }>; total_found?: number }>(result);
+            });
+        } catch (e) {
+            if (e instanceof SyntaxError) {
+                console.warn("[extract-job-links] AI returned invalid JSON");
+                return NextResponse.json({ detail: "AI returned invalid JSON. Please retry." }, { status: 502 });
+            }
+            throw e;
         }
 
         // Normalize: re-resolve each URL to absolute (safety net in case the AI

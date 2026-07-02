@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { spendCredits, creditErrorResponse } from "@/lib/credits-guard";
+import { withCredits, creditErrorResponse } from "@/lib/credits-guard";
 import { optimizeForJd, type OptimizeOptions } from "@/lib/tailor";
 
 export async function POST(request: NextRequest) {
@@ -16,8 +16,10 @@ export async function POST(request: NextRequest) {
         // which the guard treats as a backend error and fails open — a
         // client-triggerable free ride on the most expensive action.
         const units = Math.max(1, Math.min(3, Math.floor(Number(options?.variants) || 1)));
-        await spendCredits(request, "optimize", units);
-        const variants = await optimizeForJd(cv, jd, match, options);
+        // Pass the CHARGED unit count down as the variant count so billing and
+        // output can never disagree (a string "3" used to charge 3, produce 1).
+        const variants = await withCredits(request, "optimize", units, () =>
+            optimizeForJd(cv, jd, match, { ...options, variants: units }));
         return NextResponse.json({ variants });
     } catch (e: unknown) {
         const cr = creditErrorResponse(e); if (cr) return cr;

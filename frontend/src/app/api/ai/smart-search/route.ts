@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { spendCredits, creditErrorResponse } from "@/lib/credits-guard";
+import { withCredits, creditErrorResponse } from "@/lib/credits-guard";
 import { callAILight } from "@/lib/gemini";
 import { safeJsonParse } from "@/lib/safe-json";
 
@@ -59,11 +59,18 @@ TARGET JOB SITE URL: ${siteUrl}
 
 Generate the most relevant job search URL for this candidate on this site.`;
 
-        await spendCredits(request, "smart_search");
-        const raw = await callAILight(systemPrompt, userPrompt);
         let parsed: Record<string, unknown> | Record<string, unknown>[];
-        try { parsed = safeJsonParse<Record<string, unknown> | Record<string, unknown>[]>(raw); }
-        catch { return NextResponse.json({ detail: "AI returned invalid JSON. Please retry." }, { status: 502 }); }
+        try {
+            parsed = await withCredits(request, "smart_search", 1, async () => {
+                const raw = await callAILight(systemPrompt, userPrompt);
+                return safeJsonParse<Record<string, unknown> | Record<string, unknown>[]>(raw);
+            });
+        } catch (e) {
+            if (e instanceof SyntaxError) {
+                return NextResponse.json({ detail: "AI returned invalid JSON. Please retry." }, { status: 502 });
+            }
+            throw e;
+        }
 
         // LLM sometimes returns an array instead of an object — unwrap it
         if (Array.isArray(parsed)) {
