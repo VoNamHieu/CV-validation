@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { spendCredits, creditErrorResponse } from "@/lib/credits-guard";
+import { withCredits, creditErrorResponse } from "@/lib/credits-guard";
 import { scoreFit } from "@/lib/tailor";
 
 export async function POST(request: NextRequest) {
@@ -8,8 +8,7 @@ export async function POST(request: NextRequest) {
         if (!cv || !jd) {
             return NextResponse.json({ detail: "cv and jd are required" }, { status: 400 });
         }
-        await spendCredits(request, "score");
-        const result = await scoreFit(cv, jd);
+        const result = await withCredits(request, "score", 1, () => scoreFit(cv, jd));
         return NextResponse.json(result);
     } catch (e: unknown) {
         const cr = creditErrorResponse(e); if (cr) return cr;

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { spendCredits, creditErrorResponse } from "@/lib/credits-guard";
+import { withCredits, creditErrorResponse } from "@/lib/credits-guard";
 import { callAIExtract } from "@/lib/gemini";
 import { safeJsonParse } from "@/lib/safe-json";
 import { MAX_INPUT_TEXT_LENGTH } from "@/lib/validation";
@@ -20,12 +20,21 @@ export async function POST(request: NextRequest) {
 
         const userPrompt = `Extract the following information from this CV text:\n\n${text}`;
 
-        await spendCredits(request, "extract_cv");
-        const result = await callAIExtract(CV_EXTRACTION_SYSTEM_PROMPT, userPrompt, CV_EXTRACTION_RESPONSE_SCHEMA);
-
+        // Parse INSIDE the envelope: invalid AI JSON throws SyntaxError, which
+        // refunds the charge before the 502 goes out — the user must not pay
+        // for a "please retry".
         let parsed;
-        try { parsed = safeJsonParse(result); }
-        catch { return NextResponse.json({ detail: "AI returned invalid JSON. Please retry." }, { status: 502 }); }
+        try {
+            parsed = await withCredits(request, "extract_cv", 1, async () => {
+                const result = await callAIExtract(CV_EXTRACTION_SYSTEM_PROMPT, userPrompt, CV_EXTRACTION_RESPONSE_SCHEMA);
+                return safeJsonParse(result);
+            });
+        } catch (e) {
+            if (e instanceof SyntaxError) {
+                return NextResponse.json({ detail: "AI returned invalid JSON. Please retry." }, { status: 502 });
+            }
+            throw e;
+        }
 
         return NextResponse.json(normalizeCVResponse(parsed));
     } catch (e: unknown) {

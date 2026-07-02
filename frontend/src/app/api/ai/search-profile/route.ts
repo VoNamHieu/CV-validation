@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { spendCredits, creditErrorResponse } from "@/lib/credits-guard";
+import { withCredits, creditErrorResponse } from "@/lib/credits-guard";
 import { callAIExtract } from "@/lib/gemini";
 import { safeJsonParse } from "@/lib/safe-json";
 import { SEARCH_PROFILE_RESPONSE_SCHEMA } from "@/lib/cv-extraction-schema";
@@ -34,11 +34,18 @@ Rules:
 
         const userPrompt = `Infer the candidate's job-search profile from this CV (JSON):\n\n${JSON.stringify(cv)}`;
 
-        await spendCredits(request, "search_profile");
-        const result = await callAIExtract(systemPrompt, userPrompt, SEARCH_PROFILE_RESPONSE_SCHEMA);
         let parsed;
-        try { parsed = safeJsonParse(result); }
-        catch { return NextResponse.json({ detail: "AI returned invalid JSON. Please retry." }, { status: 502 }); }
+        try {
+            parsed = await withCredits(request, "search_profile", 1, async () => {
+                const result = await callAIExtract(systemPrompt, userPrompt, SEARCH_PROFILE_RESPONSE_SCHEMA);
+                return safeJsonParse(result);
+            });
+        } catch (e) {
+            if (e instanceof SyntaxError) {
+                return NextResponse.json({ detail: "AI returned invalid JSON. Please retry." }, { status: 502 });
+            }
+            throw e;
+        }
 
         return NextResponse.json(parsed);
     } catch (e: unknown) {
