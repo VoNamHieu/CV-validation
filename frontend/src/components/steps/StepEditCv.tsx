@@ -24,7 +24,7 @@ import type {
     ContactInfo, PersonalInfo, EmploymentInfo, JobPreferences,
 } from '@/lib/types';
 import {
-    EMPTY_CONTACT, EMPTY_PERSONAL, EMPTY_EMPLOYMENT, EMPTY_PREFERENCES,
+    EMPTY_CONTACT, EMPTY_PERSONAL, EMPTY_EMPLOYMENT, EMPTY_PREFERENCES, COVER_LETTER_LANGUAGES,
 } from '@/lib/types';
 import { promptInstallExtension } from '@/lib/extension-install';
 import { cvToExtensionProfile } from '@/lib/extension-profile';
@@ -184,7 +184,7 @@ export default function StepEditCv() {
     const [reoptimizeError, setReoptimizeError] = useState<string | null>(null);
     const [coverLetterLoading, setCoverLetterLoading] = useState(false);
     const [coverLetterError, setCoverLetterError] = useState<string | null>(null);
-    const [coverLang, setCoverLang] = useState<'vi' | 'en'>('vi');
+    const [coverLang, setCoverLang] = useState<string>('vi');
     const [coverPdfBusy, setCoverPdfBusy] = useState(false);
     const [refineOpen, setRefineOpen] = useState(false);
     const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
@@ -311,26 +311,26 @@ export default function StepEditCv() {
         setCoverLetterLoading(true);
         setCoverLetterError(null);
         try {
-            const letter = await generateCoverLetter(cv, currentEntry.jdData, currentEntry.matchResult);
-            updateJdEntry(currentEntry.id, { coverLetter: letter });
+            const letter = await generateCoverLetter(cv, currentEntry.jdData, currentEntry.matchResult, coverLang);
+            updateJdEntry(currentEntry.id, { coverLetter: letter, coverLetterLang: coverLang });
         } catch (err) {
             setCoverLetterError(err instanceof Error ? err.message : 'Tạo thư giới thiệu thất bại');
         } finally {
             setCoverLetterLoading(false);
         }
-    }, [currentEntry, cvData, updateJdEntry, gate]);
+    }, [currentEntry, cvData, coverLang, updateJdEntry, gate]);
 
     // Render the currently-selected-language letter to a downloadable PDF —
     // reuses the same /render-cv-pdf backend as the CV, with a simple letter layout.
     const handleDownloadCoverLetter = useCallback(async () => {
-        const letter = currentEntry?.coverLetter?.[coverLang];
+        const letter = currentEntry?.coverLetter;
         if (!letter || coverPdfBusy) return;
         setCoverPdfBusy(true);
         setCoverLetterError(null);
         try {
             const name = ((currentEntry.optimizedCv ?? cvData)?.name) || 'Cover Letter';
             const html = coverLetterHtml(name, letter);
-            const base = `${name.replace(/\s+/g, '_')}_${(currentEntry.jobTitle || 'cover_letter').replace(/\s+/g, '_')}_${coverLang}.pdf`;
+            const base = `${name.replace(/\s+/g, '_')}_${(currentEntry.jobTitle || 'cover_letter').replace(/\s+/g, '_')}_${currentEntry.coverLetterLang ?? coverLang}.pdf`;
             const { base64, filename } = await renderCvPdf(html, base);
             const bin = atob(base64);
             const bytes = new Uint8Array(bin.length);
@@ -533,7 +533,7 @@ export default function StepEditCv() {
             return;
         }
 
-        const profile = buildProfile(cv, currentEntry?.coverLetter?.vi);
+        const profile = buildProfile(cv, currentEntry?.coverLetter);
 
         setAutoApplyStatus('checking');
         setAutoApplyMessage('Đang kiểm tra Extension...');
@@ -628,7 +628,7 @@ export default function StepEditCv() {
                 jobUrl: entry.applyUrl || entry.source!,
                 jobTitle: entry.jobTitle || 'Unknown',
                 company: entry.company || entry.label || '',
-                profile: buildProfile(entry.optimizedCv!, entry.coverLetter?.vi),
+                profile: buildProfile(entry.optimizedCv!, entry.coverLetter),
                 cvFileBase64: entry.optimizedCvPdfBase64,
                 cvFileName: entry.optimizedCvFileName,
             }));
@@ -718,7 +718,7 @@ export default function StepEditCv() {
                     jobUrl: entry.applyUrl || entry.source!,
                     jobTitle: entry.jobTitle || 'Unknown',
                     company: entry.company || entry.label || '',
-                    profile: buildProfile(cv, entry.coverLetter?.vi),
+                    profile: buildProfile(cv, entry.coverLetter),
                     cvFileBase64: base64,
                     cvFileName: outFilename,
                 });
@@ -730,7 +730,7 @@ export default function StepEditCv() {
                     jobUrl: entry.applyUrl || entry.source!,
                     jobTitle: entry.jobTitle || 'Unknown',
                     company: entry.company || entry.label || '',
-                    profile: buildProfile(cv, entry.coverLetter?.vi),
+                    profile: buildProfile(cv, entry.coverLetter),
                 });
             }
             setFullAutoProgress({ done: i + 1, total: candidates.length });
@@ -935,7 +935,7 @@ export default function StepEditCv() {
                             // base cvData so the extension still gets something.
                             const cv = currentEntry?.optimizedCv ?? cvData;
                             if (!cv) return;
-                            const profile = buildProfile(cv, currentEntry?.coverLetter?.vi);
+                            const profile = buildProfile(cv, currentEntry?.coverLetter);
                             navigator.clipboard.writeText(JSON.stringify(profile, null, 2)).catch(() => { });
 
                             // Wait for the extension's real ACK — a fire-and-forget
@@ -1439,40 +1439,44 @@ export default function StepEditCv() {
                         <span style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-primary)' }}>
                             <Note size={17} weight="fill" /> Thư giới thiệu cho {currentEntry.jobTitle || 'công việc này'}
                         </span>
-                        <button
-                            onClick={() => void handleGenerateCoverLetter()}
-                            disabled={coverLetterLoading || !currentEntry.jdData}
-                            className="btn-primary"
-                            style={{
-                                display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.84rem',
-                                padding: '9px 18px', opacity: coverLetterLoading ? 0.6 : 1,
-                            }}
-                        >
-                            {coverLetterLoading
-                                ? <><CircleNotch size={14} className="spin" /> Đang viết…</>
-                                : <><Sparkle size={14} weight="fill" /> {currentEntry.coverLetter ? 'Viết lại' : 'Tạo thư giới thiệu'}</>}
-                        </button>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                            <select
+                                value={coverLang}
+                                onChange={(e) => setCoverLang(e.target.value)}
+                                aria-label="Ngôn ngữ thư giới thiệu"
+                                style={{
+                                    padding: '8px 12px', borderRadius: 8, fontSize: '0.82rem', cursor: 'pointer',
+                                    border: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)', color: 'var(--text-primary)',
+                                }}
+                            >
+                                {Object.entries(COVER_LETTER_LANGUAGES).map(([code, label]) => (
+                                    <option key={code} value={code}>{label}</option>
+                                ))}
+                            </select>
+                            <button
+                                onClick={() => void handleGenerateCoverLetter()}
+                                disabled={coverLetterLoading || !currentEntry.jdData}
+                                className="btn-primary"
+                                style={{
+                                    display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.84rem',
+                                    padding: '9px 18px', opacity: coverLetterLoading ? 0.6 : 1,
+                                }}
+                            >
+                                {coverLetterLoading
+                                    ? <><CircleNotch size={14} className="spin" /> Đang viết…</>
+                                    : <><Sparkle size={14} weight="fill" /> {currentEntry.coverLetter ? 'Viết lại' : 'Tạo thư giới thiệu'}</>}
+                            </button>
+                        </div>
                     </div>
                     <p style={{ fontSize: '0.76rem', color: 'var(--text-muted)', margin: '0 0 12px' }}>
-                        Viết riêng cho job này từ CV thật của bạn (không bịa) — tự động điền vào ô thư giới thiệu khi ứng tuyển. Bạn có thể chỉnh sửa trực tiếp.
+                        Chọn ngôn ngữ rồi bấm tạo — thư viết riêng cho job này từ CV thật của bạn (không bịa), tự động điền khi ứng tuyển. Có thể chỉnh sửa trực tiếp.
                     </p>
                     {currentEntry.coverLetter ? (
                         <>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 8, flexWrap: 'wrap' }}>
-                            <div style={{ display: 'inline-flex', border: '1px solid var(--border-subtle)', borderRadius: 8, overflow: 'hidden' }}>
-                                {(['vi', 'en'] as const).map((lng) => (
-                                    <button
-                                        key={lng} type="button" onClick={() => setCoverLang(lng)}
-                                        style={{
-                                            padding: '6px 14px', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer', border: 'none',
-                                            background: coverLang === lng ? 'var(--gradient-hero)' : 'var(--bg-card)',
-                                            color: coverLang === lng ? '#fff' : 'var(--text-secondary)',
-                                        }}
-                                    >
-                                        {lng === 'vi' ? 'Tiếng Việt' : 'English'}
-                                    </button>
-                                ))}
-                            </div>
+                            <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                                Ngôn ngữ: <strong style={{ color: 'var(--text-secondary)' }}>{COVER_LETTER_LANGUAGES[currentEntry.coverLetterLang || ''] || currentEntry.coverLetterLang || '—'}</strong>
+                            </span>
                             <button
                                 type="button" onClick={() => void handleDownloadCoverLetter()} disabled={coverPdfBusy}
                                 style={{
@@ -1485,8 +1489,8 @@ export default function StepEditCv() {
                             </button>
                         </div>
                         <textarea
-                            value={currentEntry.coverLetter[coverLang]}
-                            onChange={(e) => updateJdEntry(currentEntry.id, { coverLetter: { ...currentEntry.coverLetter!, [coverLang]: e.target.value } })}
+                            value={currentEntry.coverLetter}
+                            onChange={(e) => updateJdEntry(currentEntry.id, { coverLetter: e.target.value })}
                             rows={18}
                             style={{
                                 width: '100%', resize: 'vertical', padding: '12px 14px', borderRadius: 8,
@@ -1501,7 +1505,7 @@ export default function StepEditCv() {
                             padding: '28px 16px', textAlign: 'center', borderRadius: 8,
                             border: '1px dashed var(--border-subtle)', color: 'var(--text-muted)', fontSize: '0.84rem',
                         }}>
-                            Chưa có thư giới thiệu. Bấm <strong style={{ color: 'var(--text-secondary)' }}>Tạo thư giới thiệu</strong> để AI viết một lá thư khớp với job này.
+                            Chưa có thư giới thiệu bằng <strong style={{ color: 'var(--text-secondary)' }}>{COVER_LETTER_LANGUAGES[coverLang] || coverLang}</strong>. Bấm <strong style={{ color: 'var(--text-secondary)' }}>Tạo thư giới thiệu</strong> để AI viết.
                         </div>
                     )}
                     {coverLetterError && (

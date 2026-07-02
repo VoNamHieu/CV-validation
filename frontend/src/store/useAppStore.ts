@@ -8,7 +8,7 @@ const MAX_JOB_HISTORY = 200;
 // ── Shared types — single source of truth in types.ts (M1) ──
 import type {
   ExperienceDetail, EducationDetail, ProjectDetail,
-  CVData, JDData, CategoryScore, MatchResult, CoverLetter,
+  CVData, JDData, CategoryScore, MatchResult,
 } from '@/lib/types';
 import type { CvTemplateId } from '@/lib/cv-templates';
 import type { CvImprovement, CvSuggestion } from '@/lib/cv-improvements';
@@ -123,10 +123,12 @@ export interface JDEntry {
   optimizedCvSuggestions?: CvSuggestion[];
   optimizedCvPdfBase64?: string;
   optimizedCvFileName?: string;
-  // Per-job tailored cover letter (from /api/ai/cover-letter), on-demand,
-  // bilingual. The VI version is fed into the extension profile at apply time
-  // so auto-apply fills a letter written for THIS job, not the generic summary.
-  coverLetter?: CoverLetter;
+  // Per-job tailored cover letter (from /api/ai/cover-letter), on-demand in the
+  // chosen language. Switching language regenerates + replaces it (no cache).
+  // Fed into the extension profile at apply time so auto-apply fills a letter
+  // written for THIS job, not the generic summary. coverLetterLang labels it.
+  coverLetter?: string;
+  coverLetterLang?: string;
   jobTitle?: string;
   company?: string;
   // Job's free-text location (from the listing), used for city matching.

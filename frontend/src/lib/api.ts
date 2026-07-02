@@ -1,6 +1,6 @@
 // All API calls use Next.js API routes (relative paths)
 import { getAuthHeaders } from './auth-headers';
-import type { CVData, CoverLetter } from './types';
+import type { CVData } from './types';
 import type { CvImprovement, CvSuggestion } from './cv-improvements';
 
 export type OptimizeStyle = 'formal' | 'direct' | 'impact-driven' | 'storytelling';
@@ -125,20 +125,22 @@ export async function optimizeCvVariants(
     return res.json();
 }
 
-// Generate a per-job tailored cover letter (bilingual VI+EN; anti-fabrication,
-// CV facts only).
-export async function generateCoverLetter(cv: unknown, jd: unknown, match?: unknown): Promise<CoverLetter> {
+// Generate a per-job tailored cover letter in the CHOSEN language (anti-
+// fabrication, CV facts only). Returns the letter text for that language.
+export async function generateCoverLetter(
+    cv: unknown, jd: unknown, match: unknown, lang: string,
+): Promise<string> {
     const res = await fetch('/api/ai/cover-letter', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
-        body: JSON.stringify({ cv, jd, match }),
+        body: JSON.stringify({ cv, jd, match, lang }),
     });
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.detail || 'Failed to generate cover letter');
     }
     const data = await res.json();
-    return data.coverLetter as CoverLetter;
+    return data.coverLetter as string;
 }
 
 export async function crawlUrl(url: string, keepLinks = false): Promise<{ text: string; textWithLinks?: string; jsonLd?: Record<string, unknown> | null; source_url?: string }> {

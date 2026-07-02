@@ -77,11 +77,21 @@ export interface JobPreferences {
     desired_salary: string;
 }
 
-// Per-job cover letter, generated in both languages so the user can switch.
-export interface CoverLetter {
-    vi: string;
-    en: string;
-}
+// Languages a cover letter can be generated in. Add an entry here and it shows
+// up in the picker + is accepted by the generator — no other code changes.
+// The value is the native label shown in the dropdown AND passed to the model
+// as the target language, so keep it in that language's own script.
+export const COVER_LETTER_LANGUAGES: Record<string, string> = {
+    vi: 'Tiếng Việt',
+    en: 'English',
+    ja: '日本語',
+    ko: '한국어',
+    zh: '中文',
+    fr: 'Français',
+    de: 'Deutsch',
+    es: 'Español',
+};
+
 
 export interface CVData {
     name: string;
