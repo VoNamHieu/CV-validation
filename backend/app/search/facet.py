@@ -111,12 +111,30 @@ _YEARS_RE = re.compile(
     re.I,
 )
 
+# A years-number only counts as a REQUIREMENT when it sits in experience
+# context. "Công ty hoạt động hơn 15 năm" (company age) matches the years
+# pattern but must not demote a job — a false positive costs a 0.35 demote,
+# while a miss just stays neutral, so precision beats recall here. Windows are
+# accent-folded via taxonomy._norm; bare unaccented "nam" keeps its stricter
+# inline guard in _YEARS_RE (gender lines like "tuyển 05 nam" often sit right
+# next to a "yêu cầu" that would satisfy this looser window check).
+_YEARS_POS_CTX = re.compile(
+    r"kinh nghiem|experience|\bexp\b|tro len|it nhat|toi thieu|minimum|"
+    r"at least|require|yeu cau|tuong duong|trong nghe|trong linh vuc|trong nganh")
+_YEARS_NEG_BEFORE = re.compile(   # company-age phrasing that PRECEDES the number
+    r"hoat dong|thanh lap|phat trien|xay dung|co mat|established|founded")
+_YEARS_NEG_AFTER = re.compile(    # company-age phrasing that FOLLOWS the number
+    r"in business|of history|on the market|of operation")
+_CTX_WINDOW = 30
+
 
 def _required_years(job: dict) -> int | None:
     """Minimum years a job asks for, or None when no usable signal.
     Prefers a pre-indexed `required_years_min`; else scans the available text
-    (title + description + must_have). Takes the LOWER bound across matches so
-    ranking never OVER-demotes on an incidental large number."""
+    (title + description + must_have). A match must carry experience context
+    in a ±30-char window (and no company-age phrasing) to count. Takes the
+    LOWER bound across matches so ranking never OVER-demotes on an incidental
+    large number."""
     rym = job.get("required_years_min")
     if isinstance(rym, (int, float)) and rym > 0:
         return int(rym)
@@ -126,11 +144,19 @@ def _required_years(job: dict) -> int | None:
         parts.append(" ".join(str(x) for x in mh))
     elif isinstance(mh, str):
         parts.append(mh)
+    text = " ".join(parts)
     best: int | None = None
-    for m in _YEARS_RE.finditer(" ".join(parts)):
+    for m in _YEARS_RE.finditer(text):
         v = int(m.group(1))
-        if 0 < v <= 30:  # ignore junk like "10000 nhân viên"
-            best = v if best is None else min(best, v)
+        if not (0 < v <= 30):  # ignore junk like "10000 nhân viên"
+            continue
+        before = _norm(text[max(0, m.start() - _CTX_WINDOW):m.start()])
+        after = _norm(text[m.end():m.end() + _CTX_WINDOW])
+        if _YEARS_NEG_BEFORE.search(before) or _YEARS_NEG_AFTER.search(after):
+            continue  # "hoạt động hơn 15 năm…" — company age, not a requirement
+        if not (_YEARS_POS_CTX.search(before) or _YEARS_POS_CTX.search(after)):
+            continue  # bare number-of-years with no experience context
+        best = v if best is None else min(best, v)
     return best
 
 

@@ -65,3 +65,23 @@ describe('job-dedup', () => {
         expect(keys.has('tc:acme|backend engineer')).toBe(true);
     });
 });
+
+describe('job-dedup — query-keyed ATS URLs', () => {
+    it('treats detail pages differing only by job-id param as distinct jobs', () => {
+        const history = [rec({ jobUrl: 'https://careers.acme.com/job/detail?id=101' })];
+        const { kept } = filterUnseenCandidates(
+            [cand({ url: 'https://careers.acme.com/job/detail?id=202', title: 'Data Engineer', company: 'Beta' })],
+            history, [],
+        );
+        expect(kept).toHaveLength(1);
+    });
+
+    it('still dedupes when only tracking params / param order differ', () => {
+        const history = [rec({ jobUrl: 'https://careers.acme.com/job/detail?id=101&utm_source=zalo' })];
+        const { removed } = filterUnseenCandidates(
+            [cand({ url: 'https://careers.acme.com/job/detail?utm_campaign=x&id=101', title: 'Other', company: 'Other' })],
+            history, [],
+        );
+        expect(removed).toBe(1);
+    });
+});

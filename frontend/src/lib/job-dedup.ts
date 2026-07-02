@@ -2,13 +2,26 @@
 // currently being processed in jdEntries) from a fresh search's results.
 //
 // A job is matched on two independent keys so it dedupes across sources:
-//   - the specific posting URL (host + path, ignoring protocol/query/slash)
+//   - the specific posting URL (host + path + job-identity params, ignoring
+//     protocol/tracking-query/trailing slash)
 //   - a company|title composite (catches the same posting found via a different
 //     URL, e.g. an aggregator vs the official link)
 // We deliberately key on the SPECIFIC job url (not applyUrl/careerUrl) — those
 // are often one shared listing page per company and would over-exclude.
 
 import type { CandidateJob, JobRecord, JDEntry } from '@/store/useAppStore';
+
+// Query params that IDENTIFY a posting. Many ATS detail pages are query-keyed
+// (iCIMS/Taleo "?job=123", SuccessFactors "?jobId=…", Greenhouse embeds
+// "?gh_jid=…") — dropping the whole query string made DISTINCT jobs collide
+// onto one key and hid real search results. Tracking params (utm_*, ref,
+// locale) stay stripped so the same posting shared via different links still
+// dedupes.
+const JOB_ID_PARAMS = new Set([
+    'id', 'jobid', 'job_id', 'job', 'jid', 'gh_jid',
+    'requisitionid', 'jobrequisitionid', 'reqid', 'req_id', 'req',
+    'vacancyid', 'postingid', 'positionid', 'opportunityid',
+]);
 
 function normUrl(u?: string): string {
     if (!u) return '';
@@ -18,7 +31,13 @@ function normUrl(u?: string): string {
         const x = new URL(raw);
         const host = x.host.toLowerCase().replace(/^www\./, '');
         const path = x.pathname.replace(/\/+$/, '');
-        return `u:${host}${path}`;
+        const idParts: string[] = [];
+        x.searchParams.forEach((v, k) => {
+            const key = k.toLowerCase();
+            if (v && JOB_ID_PARAMS.has(key)) idParts.push(`${key}=${v.toLowerCase()}`);
+        });
+        idParts.sort(); // param order must not change the key
+        return `u:${host}${path}${idParts.length ? `?${idParts.join('&')}` : ''}`;
     } catch {
         return `u:${raw.toLowerCase().replace(/\/+$/, '')}`;
     }

@@ -853,7 +853,10 @@ def _norm_title(s: str) -> str:
 
 def _finalize(jobs: list[dict]) -> list[dict]:
     """Single exit gate for every adapter: keep title+url rows, drop nav/section
-    labels and date-range rows, dedup by url then by title, cap per company."""
+    labels and date-range rows, dedup by url then by (title, location), cap per
+    company. Location is part of the title key because big employers (banks,
+    retail, logistics) legitimately post the SAME title per city — those are
+    distinct jobs, not duplicates."""
     out, seen_url, seen_title = [], set(), set()
     for j in jobs:
         title = (j.get("title") or "").strip()
@@ -863,7 +866,7 @@ def _finalize(jobs: list[dict]) -> list[dict]:
         nt = _norm_title(title)
         if nt in _BAD_TITLES or nt.startswith(("tu ngay ", "from ")):  # date-range rows (Canon)
             continue
-        tkey = nt[:80]
+        tkey = (nt[:80], _norm_title(str(j.get("location") or ""))[:40])
         if url in seen_url or tkey in seen_title:
             continue
         seen_url.add(url)

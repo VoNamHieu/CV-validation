@@ -1,6 +1,6 @@
 """Repository for ``public.credits`` + ``public.credit_ledger`` — usage metering.
 
-User-scoped. New users are lazily granted ``CREDIT_SIGNUP_GRANT`` (default 20)
+User-scoped. New users are lazily granted ``CREDIT_SIGNUP_GRANT`` (default 50)
 on first touch — no GoTrue trigger needed. Spending is atomic: the balance is
 decremented in a single guarded UPDATE so concurrent AI calls can't overspend.
 """
