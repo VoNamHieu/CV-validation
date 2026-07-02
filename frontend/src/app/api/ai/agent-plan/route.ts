@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireUser } from '@/lib/auth-guard';
 import { callAIJudge } from '@/lib/gemini';
 import { safeJsonParse } from '@/lib/safe-json';
 
@@ -122,6 +123,10 @@ const SENSITIVE_TARGET = /password|passwd|mật khẩu|matkhau|\botp\b|verificat
 
 export async function POST(request: Request) {
     try {
+        // Login required — without it this route is an anonymous Gemini proxy.
+        const unauth = await requireUser(request);
+        if (unauth) return unauth;
+
         const { pageState, profileData, history, hasCV } = (await request.json()) as AgentPlanRequest;
 
         if (!pageState || !profileData) {

@@ -7,6 +7,10 @@
   POST /monitor/remove    drop one URL from the log
   POST /monitor/clear     wipe the log
 
+/report comes from the user pipeline (any logged-in user); everything else is
+the admin panel — recheck/scan fetch caller-supplied URLs server-side, so they
+must never be anonymous, and every URL passes the SSRF guard first.
+
 See app.services.link_health for the validation heuristics.
 """
 from __future__ import annotations
@@ -14,10 +18,12 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.services import link_health
+from app.services.auth import get_current_user_id, require_admin
+from app.services.url_validator import is_allowed_url
 
 logger = logging.getLogger(__name__)
 
@@ -40,9 +46,11 @@ class UrlPayload(BaseModel):
 
 
 @router.post("/report")
-async def report(p: ReportPayload):
+async def report(p: ReportPayload, _user: str = Depends(get_current_user_id)):
     """Passive feed: log a job the pipeline already failed on. We don't re-fetch
     here — the pipeline's own failure IS the signal."""
+    if not is_allowed_url(p.url):
+        raise HTTPException(status_code=400, detail="URL not allowed")
     rec = await link_health.record(
         p.url, company=p.company, title=p.title, source=p.source or "pipeline",
         status="broken", reason=p.reason or "pipeline_error",
@@ -51,14 +59,15 @@ async def report(p: ReportPayload):
 
 
 @router.get("/links")
-async def links():
+async def links(_admin: str = Depends(require_admin)):
     items = await link_health.list_links()
     broken = sum(1 for e in items if e.get("status") == "broken")
     return {"count": len(items), "broken": broken, "links": items}
 
 
 @router.post("/scan")
-async def scan(limit: int = Query(150, ge=1, le=1000), company: str = Query("")):
+async def scan(limit: int = Query(150, ge=1, le=1000), company: str = Query(""),
+               _admin: str = Depends(require_admin)):
     """Validate featured-job URLs and log the broken/suspect ones. Bounded by
     `limit`; optionally filter to one company (substring, case-insensitive)."""
     from app.routers.career import _read_featured_entry
@@ -117,7 +126,9 @@ async def scan(limit: int = Query(150, ge=1, le=1000), company: str = Query(""))
 
 
 @router.post("/recheck")
-async def recheck(p: UrlPayload):
+async def recheck(p: UrlPayload, _admin: str = Depends(require_admin)):
+    if not is_allowed_url(p.url):
+        raise HTTPException(status_code=400, detail="URL not allowed")
     res = await link_health.validate_job_url(p.url, p.title)
     if res["status"] == "ok":
         # Recovered → keep a record marked ok so the user sees the transition.
@@ -134,12 +145,12 @@ async def recheck(p: UrlPayload):
 
 
 @router.post("/remove")
-async def remove(p: UrlPayload):
+async def remove(p: UrlPayload, _admin: str = Depends(require_admin)):
     removed = await link_health.remove(p.url)
     return {"ok": True, "removed": removed}
 
 
 @router.post("/clear")
-async def clear():
+async def clear(_admin: str = Depends(require_admin)):
     n = await link_health.clear()
     return {"ok": True, "cleared": n}

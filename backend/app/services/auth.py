@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 import os
 
-from fastapi import Header, HTTPException
+from fastapi import Depends, Header, HTTPException
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +101,29 @@ async def get_current_user_id(
         return x_user_id
 
     raise HTTPException(status_code=401, detail="Authentication required")
+
+
+def _admin_emails() -> set[str]:
+    return {e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()}
+
+
+async def require_admin(user_id: str = Depends(get_current_user_id)) -> str:
+    """Dependency → the caller's user id, only if they're an allowlisted admin.
+
+    Allowlist = ``ADMIN_EMAILS`` env (comma-separated). The caller's email is
+    read from their ``profiles`` row (resolved from the verified JWT ``sub``),
+    so admin status can't be spoofed by a header. Empty allowlist = the whole
+    surface is closed (403). Guards operator tooling: ``/admin``, catalog
+    writes on ``/store``, and the ``/monitor`` + ``/compat`` panels."""
+    allow = _admin_emails()
+    if not allow:
+        raise HTTPException(status_code=403, detail="Admin surface is disabled")
+    from app.db import profiles as profiles_repo  # lazy — avoid import cycle
+    profile = await profiles_repo.get(user_id)
+    email = ((profile or {}).get("email") or "").lower()
+    if email not in allow:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user_id
 
 
 async def get_optional_user_id(

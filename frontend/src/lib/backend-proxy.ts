@@ -15,6 +15,7 @@ export async function proxyToBackend(
     request: NextRequest,
     prefix: string,
     path: string[],
+    timeoutMs = 60_000,
 ): Promise<NextResponse> {
     const backendUrl = process.env.BACKEND_URL;
     if (!backendUrl) {
@@ -40,7 +41,7 @@ export async function proxyToBackend(
             method: request.method,
             headers,
             body,
-            signal: AbortSignal.timeout(60_000),
+            signal: AbortSignal.timeout(timeoutMs),
         });
         const data = await response.json().catch(() => ({}));
         return NextResponse.json(data, { status: response.status });

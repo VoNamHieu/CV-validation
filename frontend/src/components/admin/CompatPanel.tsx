@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
+import { getAuthHeaders } from '@/lib/auth-headers';
+
 type CompatRecord = {
     url: string;
     host: string;
@@ -69,7 +71,7 @@ export default function CompatPanel() {
     const load = useCallback(async () => {
         setLoading(true);
         try {
-            const r = await fetch('/api/compat/results');
+            const r = await fetch('/api/compat/results', { headers: await getAuthHeaders() });
             const d = await r.json();
             setRows(Array.isArray(d.results) ? d.results : []);
         } catch (e) {
@@ -91,7 +93,7 @@ export default function CompatPanel() {
         try {
             const r = await fetch('/api/compat/probe', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
                 body: JSON.stringify({ url }),
             });
             const d = await r.json();
@@ -113,7 +115,7 @@ export default function CompatPanel() {
         try {
             const qs = new URLSearchParams({ limit: '200' });
             if (companyFilter.trim()) qs.set('company', companyFilter.trim());
-            const r = await fetch(`/api/compat/scan?${qs}`, { method: 'POST' });
+            const r = await fetch(`/api/compat/scan?${qs}`, { method: 'POST', headers: await getAuthHeaders() });
             const d = await r.json();
             if (!r.ok) throw new Error(d.detail || `Quét lỗi (${r.status})`);
             setMsg(
@@ -133,7 +135,7 @@ export default function CompatPanel() {
         try {
             await fetch('/api/compat/recheck', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
                 body: JSON.stringify({ url: rec.url, company: rec.company }),
             });
             await load();
@@ -147,7 +149,7 @@ export default function CompatPanel() {
         try {
             await fetch('/api/compat/remove', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
                 body: JSON.stringify({ url: rec.url }),
             });
             setRows((prev) => prev.filter((l) => l.url !== rec.url));
@@ -158,7 +160,7 @@ export default function CompatPanel() {
 
     const clearAll = async () => {
         if (!confirm('Xoá toàn bộ nhật ký tương thích?')) return;
-        await fetch('/api/compat/clear', { method: 'POST' });
+        await fetch('/api/compat/clear', { method: 'POST', headers: await getAuthHeaders() });
         setRows([]);
         setMsg('Đã xoá nhật ký.');
     };

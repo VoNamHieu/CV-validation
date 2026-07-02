@@ -57,20 +57,49 @@ app = FastAPI(title="AI Job Fit Optimizer API", version="1.0.0", lifespan=lifesp
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """Simple in-memory IP-based rate limiter."""
 
+    # Sweep idle buckets once the dict grows past this many keys.
+    _SWEEP_AT = 10_000
+
     def __init__(self, app, max_requests: int = 30, window_seconds: int = 60):
         super().__init__(app)
         self.max_requests = max_requests
         self.window = window_seconds
         self.clients: dict[str, list[float]] = defaultdict(list)
 
+    # How many trusted proxy hops sit in front of the app. The real client IP
+    # is the Nth-from-last X-Forwarded-For entry. Default 1 = the single hop
+    # the trusted edge (Railway) appends. Set TRUSTED_PROXY_HOPS to match the
+    # actual chain if a CDN sits in front (e.g. Cloudflare→Railway = 2), so the
+    # key can't be pinned to a client-supplied hop.
+    _TRUSTED_HOPS = max(1, int(os.getenv("TRUSTED_PROXY_HOPS", "1")))
+
+    @classmethod
+    def _client_key(cls, request: Request) -> str:
+        # Behind the Railway edge, request.client.host is the proxy for ALL
+        # external traffic — keying on it collapses every user into one shared
+        # bucket. Trust only the hop the edge appended; earlier hops are
+        # client-supplied and spoofable.
+        xff = request.headers.get("x-forwarded-for", "")
+        if xff:
+            parts = [p.strip() for p in xff.split(",") if p.strip()]
+            if parts:
+                idx = len(parts) - cls._TRUSTED_HOPS
+                return parts[idx] if idx >= 0 else parts[0]
+        return request.client.host if request.client else "unknown"
+
     async def dispatch(self, request: Request, call_next):
-        client_ip = request.client.host if request.client else "unknown"
+        key = self._client_key(request)
         now = time.time()
-        # Clean expired timestamps
-        self.clients[client_ip] = [t for t in self.clients[client_ip] if now - t < self.window]
-        if len(self.clients[client_ip]) >= self.max_requests:
+        stamps = [t for t in self.clients[key] if now - t < self.window]
+        if len(stamps) >= self.max_requests:
+            self.clients[key] = stamps
             return JSONResponse({"detail": "Too many requests. Please wait."}, status_code=429)
-        self.clients[client_ip].append(now)
+        stamps.append(now)
+        self.clients[key] = stamps
+        if len(self.clients) > self._SWEEP_AT:
+            cutoff = now - self.window
+            for k in [k for k, ts in self.clients.items() if not ts or ts[-1] < cutoff]:
+                del self.clients[k]
         return await call_next(request)
 
 

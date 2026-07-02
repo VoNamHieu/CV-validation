@@ -65,10 +65,24 @@ async def delete_account(user_id: str) -> None:
     """Hard-delete the user and ALL their data (Privacy §5 — right to erasure).
     One transaction: app rows first, then the profile, then the auth.users row
     (which also cascades auth identities/sessions). Explicit per-table deletes
-    so cleanup doesn't depend on every FK being ON DELETE CASCADE."""
+    so cleanup doesn't depend on every FK being ON DELETE CASCADE.
+
+    ``feedback`` rows keep their message (product feedback, not personal data)
+    but are anonymized: the FK only SET NULLs ``user_id``, so the free-text
+    ``email`` column must be scrubbed here — including rows submitted while
+    logged out that carry the same address."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
+            email = await conn.fetchval(
+                "SELECT email FROM profiles WHERE id = $1", user_id
+            )
+            await conn.execute(
+                "UPDATE feedback SET user_id = NULL, email = NULL "
+                "WHERE user_id = $1 "
+                "   OR (email IS NOT NULL AND lower(email) = lower($2))",
+                user_id, email or "",
+            )
             for table in ("applications", "saved_jobs", "cv_profiles",
                           "credit_ledger", "credits"):
                 await conn.execute(f"DELETE FROM {table} WHERE user_id = $1", user_id)

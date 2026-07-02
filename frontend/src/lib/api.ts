@@ -175,11 +175,13 @@ export function reportBrokenLink(input: {
     url: string; company?: string; title?: string; reason?: string;
 }): void {
     if (!input.url) return;
-    void fetch('/api/monitor/report', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source: 'pipeline', ...input }),
-    }).catch(() => { /* monitoring must never break the flow */ });
+    void (async () => {
+        await fetch('/api/monitor/report', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
+            body: JSON.stringify({ source: 'pipeline', ...input }),
+        });
+    })().catch(() => { /* monitoring must never break the flow */ });
 }
 
 export interface RankedJob {
@@ -491,7 +493,7 @@ export async function verifyJobAlive(url: string, title = ''): Promise<{ alive: 
     try {
         const res = await fetch('/api/store/jobs/verify', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
             body: JSON.stringify({ url, title }),
             signal: AbortSignal.timeout(15_000),
         });

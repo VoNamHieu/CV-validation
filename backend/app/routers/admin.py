@@ -7,8 +7,6 @@ header. When ``ADMIN_EMAILS`` is empty, the whole surface is closed (403).
 """
 from __future__ import annotations
 
-import os
-
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
@@ -16,28 +14,12 @@ from app.db import credits as credits_repo
 from app.db import events as events_repo
 from app.db import feedback as feedback_repo
 from app.db import profiles as profiles_repo
-from app.services.auth import get_current_user_id
+from app.services.auth import require_admin
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
 # Hard cap per grant so a typo can't mint a fortune.
 MAX_GRANT = 100_000
-
-
-def _admin_emails() -> set[str]:
-    return {e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()}
-
-
-async def require_admin(user_id: str = Depends(get_current_user_id)) -> str:
-    """Dependency → the caller's user id, only if they're an allowlisted admin."""
-    allow = _admin_emails()
-    if not allow:
-        raise HTTPException(status_code=403, detail="Admin surface is disabled")
-    profile = await profiles_repo.get(user_id)
-    email = ((profile or {}).get("email") or "").lower()
-    if email not in allow:
-        raise HTTPException(status_code=403, detail="Admin access required")
-    return user_id
 
 
 @router.get("/check")

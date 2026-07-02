@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isAllowedUrl } from "@/lib/validation";
+import { isAllowedUrlResolved } from "@/lib/ssrf-server";
 
 /**
  * Crawls a URL and returns cleaned text.
@@ -14,19 +14,34 @@ export async function POST(request: NextRequest) {
         }
 
         // ── SSRF Protection (H1) ──
-        if (!isAllowedUrl(url)) {
-            return NextResponse.json({ detail: "URL not allowed" }, { status: 400 });
+        // Follow redirects manually and re-validate every hop: an allowed
+        // public URL must not be able to 302 us into 169.254.x / private
+        // ranges and have the body returned to the caller. The resolved check
+        // also rejects a public hostname that DNS-resolves to an internal IP.
+        const headers = {
+            "User-Agent":
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            Accept: "text/html,application/xhtml+xml",
+            "Accept-Language": "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7",
+        };
+        let currentUrl: string = url;
+        let response: Response;
+        for (let hop = 0; ; hop++) {
+            if (!(await isAllowedUrlResolved(currentUrl))) {
+                return NextResponse.json({ detail: "URL not allowed" }, { status: 400 });
+            }
+            response = await fetch(currentUrl, {
+                headers,
+                redirect: "manual",
+                signal: AbortSignal.timeout(15000),
+            });
+            const location = response.headers.get("location");
+            if (response.status < 300 || response.status >= 400 || !location) break;
+            if (hop >= 5) {
+                return NextResponse.json({ detail: "Too many redirects" }, { status: 502 });
+            }
+            currentUrl = new URL(location, currentUrl).toString();
         }
-
-        const response = await fetch(url, {
-            headers: {
-                "User-Agent":
-                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                Accept: "text/html,application/xhtml+xml",
-                "Accept-Language": "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7",
-            },
-            signal: AbortSignal.timeout(15000),
-        });
 
         if (!response.ok) {
             return NextResponse.json(

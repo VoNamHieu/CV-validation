@@ -1,17 +1,23 @@
 """Catalog API — the public job/company universe (``/store``).
 
-Reads are open; writes (upserts) are ingestion endpoints the crawler/indexer
-calls. Semantic search accepts either a raw ``query`` (embedded server-side) or
-a precomputed ``embedding``.
+Reads are open; writes (upserts + the ingest trigger) are operator tooling and
+require an allowlisted admin — the service-role DSN bypasses RLS, so an open
+upsert would let anyone poison the catalog every user searches over. The
+apply-time liveness gate (``/jobs/verify``) fetches a caller-supplied URL, so
+it requires a logged-in user and an SSRF-checked URL. Semantic search accepts
+either a raw ``query`` (embedded server-side) or a precomputed ``embedding``.
 """
 from __future__ import annotations
 
+import asyncio
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.db import companies, jobs
+from app.services.auth import get_current_user_id, require_admin
+from app.services.url_validator import is_allowed_url
 
 router = APIRouter(prefix="/store", tags=["Store"])
 
@@ -38,7 +44,7 @@ async def list_companies(
 
 
 @router.post("/companies")
-async def upsert_company(body: CompanyUpsert):
+async def upsert_company(body: CompanyUpsert, _admin: str = Depends(require_admin)):
     return await companies.upsert(**body.model_dump())
 
 
@@ -90,12 +96,13 @@ async def list_jobs(
 
 
 @router.post("/jobs")
-async def upsert_job(body: JobUpsert):
+async def upsert_job(body: JobUpsert, _admin: str = Depends(require_admin)):
     return await jobs.upsert(**body.model_dump())
 
 
 @router.post("/ingest-featured")
-async def ingest_featured(render: bool = False, limit: Optional[int] = None):
+async def ingest_featured(render: bool = False, limit: Optional[int] = None,
+                          _admin: str = Depends(require_admin)):
     """Slice-1 ingest trigger: pull ATS feeds for featured companies into the
     store (structured, incl. required_years_min). On-demand — no scheduler yet.
     `render=true` also renders bespoke pages to catch embedded ATS."""
@@ -109,12 +116,14 @@ class JobVerify(BaseModel):
 
 
 @router.post("/jobs/verify")
-async def verify_job(body: JobVerify):
+async def verify_job(body: JobVerify, _user: str = Depends(get_current_user_id)):
     """Apply-time liveness gate: is this posting still open? Reuses the link-health
     validator. FAIL-OPEN — only 'broken' blocks; 'unknown' (couldn't determine)
     returns alive so we never wrongly block a live job. A confirmed-dead result
     also feeds the broken-log and deactivates the store row so search stops
     showing it."""
+    if not is_allowed_url(body.url):
+        raise HTTPException(status_code=400, detail="URL not allowed")
     from app.services import link_health
     res = await link_health.validate_job_url(body.url, body.title)
     status = res.get("status")
@@ -142,7 +151,8 @@ async def search_jobs(body: JobSearch):
         if not body.query:
             raise HTTPException(status_code=400, detail="Provide `query` or `embedding`")
         from app.search.embed import embed_query
-        vec = embed_query(body.query)
+        # Blocking Gemini embed call → off the event loop.
+        vec = await asyncio.to_thread(embed_query, body.query)
     return await jobs.search_semantic(
         embedding=vec, limit=body.limit,
         role_family=body.role_family, industry=body.industry,

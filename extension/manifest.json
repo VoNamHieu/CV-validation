@@ -32,7 +32,7 @@
     "https://*.recruitee.com/*",
     "https://*.teamtailor.com/*",
     "http://localhost:3000/*",
-    "https://*.vercel.app/*"
+    "https://cv-validation.vercel.app/*"
   ],
   "optional_host_permissions": [
     "https://*/*"
@@ -41,7 +41,7 @@
     {
       "matches": [
         "http://localhost:3000/*",
-        "https://*.vercel.app/*"
+        "https://cv-validation.vercel.app/*"
       ],
       "js": [
         "content-webapp.js"

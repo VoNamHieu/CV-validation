@@ -55,8 +55,13 @@
     }
 
     // ── Listen for messages FROM the web app ──
+    // Only trust messages posted BY this same document. The content script is
+    // already scoped by the manifest to the app's own origins, but validating
+    // event.origin too keeps a stray same-window frame or reflected content
+    // from driving privileged background actions (crawl / auto-apply / spend).
     window.addEventListener('message', (event) => {
         if (event.source !== window) return;
+        if (event.origin !== window.location.origin) return;
 
         // ─── Single Auto Apply (legacy) ───
         if (event.data?.type === 'JOBFIT_AUTO_APPLY') {

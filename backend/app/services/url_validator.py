@@ -1,10 +1,40 @@
 """
 URL validation to prevent SSRF attacks.
 Mirrors the frontend's isAllowedUrl() logic from validation.ts.
+
+``is_allowed_url`` is the cheap, synchronous, no-I/O gate (scheme + IP-literal /
+private-hostname checks). ``is_allowed_url_resolved`` adds a DNS-resolution pass
+that closes the rebinding gap: a public hostname whose A/AAAA record points at a
+private / metadata IP. Use the resolved variant at the actual fetch site;
+``is_allowed_url`` alone is fine as a fast pre-reject.
 """
 
+import asyncio
 import ipaddress
+import socket
 from urllib.parse import urlparse
+
+
+def _parse_ip(hostname: str):
+    """Parse a hostname as an IP if it is one, or None.
+
+    Beyond the canonical forms, catches inet_aton-style IPv4 encodings that
+    dodge string checks while still reaching internal hosts: integer
+    (``2130706433``), hex (``0x7f000001``), octal (``0177.0.0.1``), and short
+    dotted (``127.1``). ``inet_aton`` parses only — it never resolves DNS."""
+    try:
+        return ipaddress.ip_address(hostname)
+    except ValueError:
+        pass
+    if hostname.isdigit():
+        try:
+            return ipaddress.ip_address(int(hostname))
+        except ValueError:
+            pass
+    try:
+        return ipaddress.ip_address(socket.inet_aton(hostname))
+    except (OSError, ValueError):
+        return None
 
 
 def is_allowed_url(url: str) -> bool:
@@ -27,21 +57,11 @@ def is_allowed_url(url: str) -> bool:
         if hostname in ("localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0"):
             return False
 
-        # Block private IP ranges (RFC 1918) and link-local.
-        # Also catch integer-encoded hosts (e.g. http://2130706433 == 127.0.0.1),
-        # which urlparse keeps as a bare digit string that ip_address(str) rejects.
-        ip = None
-        try:
-            ip = ipaddress.ip_address(hostname)
-        except ValueError:
-            if hostname.isdigit():
-                try:
-                    ip = ipaddress.ip_address(int(hostname))
-                except ValueError:
-                    ip = None
-        if ip is not None and (
-            ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
-        ):
+        # IP-literal hosts (incl. integer/hex/octal/short-dotted encodings):
+        # only globally-routable addresses pass — is_global rejects private,
+        # loopback, link-local, reserved, CGNAT, multicast and unspecified.
+        ip = _parse_ip(hostname)
+        if ip is not None and not ip.is_global:
             return False
 
         # Block private IP string patterns (in case ipaddress parsing was skipped)
@@ -73,3 +93,52 @@ def is_allowed_url(url: str) -> bool:
         return True
     except Exception:
         return False
+
+
+async def _host_resolves_public(hostname: str) -> bool:
+    """Resolve ``hostname`` and return True only if EVERY resolved address is
+    globally routable. Closes the DNS-rebinding gap where a public hostname has
+    a private / metadata A/AAAA record. Fails CLOSED (False) on any resolution
+    error — an unresolvable host can't be a legitimate fetch target anyway.
+
+    Note: this narrows but doesn't fully eliminate rebinding — the OS re-resolves
+    at connect time, so a record that flips between this check and the socket
+    connect (sub-TTL) can still slip. Pinning the connection to the validated IP
+    would close that; this covers the realistic misconfig / static-record case.
+    """
+    try:
+        infos = await asyncio.to_thread(
+            socket.getaddrinfo, hostname, None, 0, socket.SOCK_STREAM
+        )
+    except OSError:
+        return False
+    if not infos:
+        return False
+    for info in infos:
+        ip_str = info[4][0]
+        # Strip any IPv6 scope id (e.g. "fe80::1%eth0").
+        ip_str = ip_str.split("%", 1)[0]
+        try:
+            ip = ipaddress.ip_address(ip_str)
+        except ValueError:
+            return False
+        # IPv4-mapped IPv6 (::ffff:10.0.0.1) — judge the embedded v4.
+        if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+            ip = ip.ipv4_mapped
+        if not ip.is_global:
+            return False
+    return True
+
+
+async def is_allowed_url_resolved(url: str) -> bool:
+    """SSRF gate WITH DNS resolution — the cheap ``is_allowed_url`` checks plus a
+    resolve-and-validate pass on the hostname. Use this at the fetch site."""
+    if not is_allowed_url(url):
+        return False
+    hostname = (urlparse(url).hostname or "").lower()
+    if not hostname:
+        return False
+    # Literal IPs already passed is_global in is_allowed_url — no DNS needed.
+    if _parse_ip(hostname) is not None:
+        return True
+    return await _host_resolves_public(hostname)
