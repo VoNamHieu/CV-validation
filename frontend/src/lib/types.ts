@@ -77,6 +77,12 @@ export interface JobPreferences {
     desired_salary: string;
 }
 
+// Per-job cover letter, generated in both languages so the user can switch.
+export interface CoverLetter {
+    vi: string;
+    en: string;
+}
+
 export interface CVData {
     name: string;
     summary: string;
