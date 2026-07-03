@@ -15,6 +15,7 @@ COMPANY_INDUSTRY: dict[str, str] = {
     "Shopee": "E-commerce & Marketplace", "Lazada": "E-commerce & Marketplace",
     "Tiki": "E-commerce & Marketplace", "TikTok": "E-commerce & Marketplace",
     "ByteDance": "E-commerce & Marketplace", "Sendo": "E-commerce & Marketplace",
+    "Amazon": "E-commerce & Marketplace",
 
     # Technology Platform / SaaS
     "VNG": "Technology Platform / SaaS", "Grab": "Technology Platform / SaaS",

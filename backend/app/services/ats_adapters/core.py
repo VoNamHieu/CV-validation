@@ -1068,6 +1068,69 @@ def _fptsoft(career_url: str) -> list[dict]:
     return out
 
 
+# ── Odoo website_hr_recruitment (skyhr.vietnamairlines.com, …) ──────────────
+# Odoo's built-in recruitment site is fully SSR: /jobs lists <a href="/jobs/
+# detail/<slug>-<id>"> tiles and each detail page server-renders the whole
+# posting (title, location, JD). No API, no JS. We parse the list here and pull
+# each JD from its SSR detail page (bounded). Generic across Odoo tenants — the
+# oe_website_jobs marker + /jobs/detail/ route are Odoo standard.
+_ODOO_MAX_JD = 30  # bound per-detail fetches for large Odoo tenants
+
+
+def _is_odoo_jobs(career_url: str, html: str | None) -> bool:
+    host = (urlparse(career_url or "").netloc or "").lower()
+    if host == "skyhr.vietnamairlines.com":
+        return True
+    if not html:
+        return False
+    h = html.lower()
+    return "oe_website_jobs" in h and "/jobs/detail/" in h
+
+
+def _odoo_jobs(career_url: str, html: str | None) -> list[dict]:
+    from bs4 import BeautifulSoup
+    p = urlparse(career_url)
+    origin = f"{p.scheme}://{p.netloc}"
+    if not html:
+        try:
+            r = requests.get(f"{origin}/jobs", headers=_HTML_HEADERS, timeout=_TIMEOUT)
+            html = r.text if r.status_code == 200 else ""
+        except Exception:
+            html = ""
+    if not html:
+        return []
+    soup = BeautifulSoup(html, "html.parser")
+    seen, tiles = set(), []
+    for a in soup.select('a[href*="/jobs/detail/"]'):
+        href = (a.get("href") or "").split("?")[0]
+        title = a.get_text(" ", strip=True)
+        if not href or not title or len(title) < 4 or href in seen:
+            continue
+        seen.add(href)
+        tiles.append((urljoin(origin + "/", href), title))
+
+    loc_rx = re.compile(r"Địa điểm tuyển dụng\s*(.+?)\s*(?:Kinh nghiệm|Số lượng|Mức lương|Hạn nộp)")
+    out = []
+    for i, (url, title) in enumerate(tiles):
+        loc, desc = "", ""
+        if i < _ODOO_MAX_JD:  # SSR detail carries location + full JD
+            try:
+                dr = requests.get(url, headers=_HTML_HEADERS, timeout=_TIMEOUT)
+                if dr.status_code == 200:
+                    dsoup = BeautifulSoup(dr.text, "html.parser")
+                    main = dsoup.select_one("#wrap") or dsoup.find("main") or dsoup
+                    text = main.get_text("\n", strip=True)
+                    m = loc_rx.search(text.replace("\n", " "))
+                    loc = (m.group(1).strip() if m else "")[:120]
+                    idx = text.find("Mô tả công việc")
+                    desc = _strip_html(text[idx:] if idx >= 0 else text)[:6000]
+            except Exception:
+                pass
+        out.append({"title": title[:200], "url": url, "location": loc, "description": desc})
+    logger.info(f"[ats] odoo → {len(out)} jobs ({origin})")
+    return out
+
+
 # ── Phenom apply/v2 (HSBC + other portal.careers.* portals) ─────────────────
 # Phenom career portals expose a public list API:
 #   GET https://<host>/api/apply/v2/jobs?domain=<reg-domain>&location=<country>
@@ -1118,7 +1181,75 @@ def _phenom_v2(career_url: str) -> list[dict]:
 # [{title,url,location,description}]). Tried in order; the first whose detect()
 # matches AND returns rows wins. Output always passes through _finalize. To add
 # an ATS: write _is_x / _x and append one line here — no other edits.
+# ── Amazon (amazon.jobs) — public search.json, no auth ──────────────────────
+# GET https://www.amazon.jobs/en/search.json?loc_query=Vietnam&country=VNM
+#   -> {jobs:[{title, location, job_path, description_short, ...}]}
+# Detail = https://www.amazon.jobs + job_path. country=VNM scopes to VN, so we
+# trust it rather than re-filtering on _is_vn_loc (Amazon's "VN, Hanoi" strings
+# aren't all in _VN_MARKERS).
+def _is_amazon(career_url: str) -> bool:
+    return "amazon.jobs" in (urlparse(career_url or "").netloc or "").lower()
+
+
+def _amazon(career_url: str) -> list[dict]:
+    params = {"loc_query": "Vietnam", "country": "VNM",
+              "result_limit": _MAX_ATS_JOBS, "sort": "recent"}
+    try:
+        r = requests.get("https://www.amazon.jobs/en/search.json",
+                         params=params, headers=_HEADERS, timeout=_TIMEOUT)
+        if r.status_code != 200:
+            return []
+        data = r.json() or {}
+    except Exception as e:
+        logger.info(f"[ats] amazon failed: {str(e)[:80]}")
+        return []
+    out = []
+    for j in data.get("jobs", []):
+        title = (j.get("title") or "").strip()
+        path = j.get("job_path") or ""
+        if not title or not path:
+            continue
+        out.append({
+            "title": title[:200],
+            "url": "https://www.amazon.jobs" + path,
+            "location": str(j.get("location") or j.get("normalized_location") or "")[:120],
+            "description": _strip_html(j.get("description_short") or "")[:600],
+        })
+    logger.info(f"[ats] amazon -> {len(out)} VN jobs")
+    return out
+
+
+# ── Avature (custom-domain career sites: careers.nike.com, careers.bain.com) ─
+# Avature tenants sit on bespoke domains, so the only reliable signal is the
+# "avature" marker in the page HTML. Listings are server-rendered as
+# <a href=".../job/<id>">Title</a>, so we parse the rendered HTML (ingest
+# supplies it via the render fallback). The career_url should already carry a
+# Vietnam location filter, so we trust it rather than per-job location parsing.
+def _is_avature(career_url: str, html: str | None) -> bool:
+    return bool(html) and "avature" in html.lower()
+
+
+def _avature(career_url: str, html: str | None) -> list[dict]:
+    if not html:
+        return []
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(html, "html.parser")
+    out, seen = [], set()
+    for a in soup.select('a[href*="/job/"]'):
+        href = (a.get("href") or "").strip()
+        title = a.get_text(" ", strip=True)
+        if not href or not title or len(title) < 4 or href in seen:
+            continue
+        seen.add(href)
+        out.append({"title": title[:200], "url": urljoin(career_url, href),
+                    "location": "", "description": ""})
+    logger.info(f"[ats] avature -> {len(out)} jobs ({career_url})")
+    return out
+
+
 _ADAPTERS: list = [
+    ("avature",        _is_avature,                      lambda u, h: _avature(u, h)),
+    ("amazon",         lambda u, h: _is_amazon(u),       lambda u, h: _amazon(u)),
     ("workday",        lambda u, h: _resolve_workday_url(u, h) is not None,
                        lambda u, h: _workday(_resolve_workday_url(u, h))),
     ("base.vn",        _is_basevn,                       lambda u, h: _basevn(u, h)),
@@ -1133,6 +1264,7 @@ _ADAPTERS: list = [
     ("ahamove",        _is_ahamove,                      lambda u, h: _ahamove(u)),
     ("fptsoft",        _is_fptsoft,                      lambda u, h: _fptsoft(u)),
     ("phenom-v2",      _is_phenom_v2,                    lambda u, h: _phenom_v2(u)),
+    ("odoo",           _is_odoo_jobs,                    lambda u, h: _odoo_jobs(u, h)),
     ("phenom",         lambda u, h: _is_phenom_services(u), lambda u, h: _phenom_services(u)),
     ("eightfold",      _is_eightfold,                    lambda u, h: _eightfold(u)),
     ("successfactors", _is_successfactors,               lambda u, h: _successfactors(u, h)),

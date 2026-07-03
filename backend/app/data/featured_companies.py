@@ -403,7 +403,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="TH Group",
         homepage="https://thmilk.vn",
-        career_url="https://www.thmilk.vn/tuyen-dung/",
+        career_url="https://jobs.thgroupglobal.com/search/?q=",
     ),
     FeaturedCompany(
         name="Mondelez Kinh Do",
@@ -443,7 +443,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Nike",
         homepage="https://nike.com",
-        career_url="https://careers.nike.com",
+        career_url="https://careers.nike.com/vi/jobs?location_name=Ho%20Chi%20Minh%2C%20Vietnam&location_type=2",
     ),
     FeaturedCompany(
         name="Thế Giới Di Động",
@@ -782,6 +782,13 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         career_url="https://careers.ihg.com",
     ),
 
+    # ── Aviation ──────────────────────────────────────────────────────
+    FeaturedCompany(
+        name="Vietnam Airlines",
+        homepage="https://www.vietnamairlines.com",
+        career_url="https://skyhr.vietnamairlines.com/jobs",
+    ),
+
     # ── Global Tech ───────────────────────────────────────────────────
     FeaturedCompany(
         name="Oracle",
@@ -879,5 +886,10 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         name="Base Inc",
         homepage="https://base.vn",
         career_url="https://baseinc.talent.vn/",
+    ),
+    FeaturedCompany(
+        name="Amazon",
+        homepage="https://www.amazon.com",
+        career_url="https://www.amazon.jobs/en/locations/hanoi-vietnam",
     ),
 )
