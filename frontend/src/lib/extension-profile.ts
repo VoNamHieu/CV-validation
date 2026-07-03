@@ -30,7 +30,10 @@ export interface ExtensionProfile {
     skills: string;
 }
 
-export function cvToExtensionProfile(cv: CVData): ExtensionProfile {
+// `coverLetterOverride` is the per-job tailored letter (from /api/ai/cover-letter),
+// preferred over the generic CV summary so the auto-apply agent fills a letter
+// written for THIS job. Falls back to the summary when no letter was generated.
+export function cvToExtensionProfile(cv: CVData, coverLetterOverride?: string): ExtensionProfile {
     const nameParts = (cv.name ?? "").trim().split(/\s+/);
     const firstName = nameParts.length > 0 ? nameParts[nameParts.length - 1] : "";
     const lastName = nameParts.slice(0, -1).join(" ");
@@ -69,7 +72,7 @@ export function cvToExtensionProfile(cv: CVData): ExtensionProfile {
         currentFields: employment.current_fields ?? "",
         desiredLocations: preferences.desired_locations ?? "",
         desiredSalary: preferences.desired_salary ?? "",
-        coverLetter: cv.summary ?? "",
+        coverLetter: (coverLetterOverride && coverLetterOverride.trim()) || (cv.summary ?? ""),
         skills: (cv.skills ?? []).join(", "),
     };
 }
