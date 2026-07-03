@@ -20,16 +20,32 @@ async function getConfig() {
     };
 }
 
-async function collectFromTab(tabId, note) {
+function askCollector(tabId, note) {
     return new Promise((resolve) => {
         chrome.tabs.sendMessage(tabId, { type: 'COLLECT', note }, (resp) => {
-            if (chrome.runtime.lastError) {
-                resolve({ ok: false, error: 'Collector không phản hồi — tải lại (F5) trang rồi thử lại. ' + chrome.runtime.lastError.message });
-                return;
-            }
-            resolve(resp || { ok: false, error: 'no response from collector' });
+            // lastError = no receiver (collector not injected on this tab yet).
+            resolve(chrome.runtime.lastError ? null : (resp || null));
         });
     });
+}
+
+async function collectFromTab(tabId, note) {
+    // Happy path: the content script is already there.
+    let resp = await askCollector(tabId, note);
+    if (resp) return resp;
+
+    // The tab was open before the extension loaded/reloaded, so the manifest
+    // content scripts never injected. Inject the collector on demand and retry
+    // — no more "reload the page first". (Network sniffing of the page's own
+    // fetch/XHR still needs a reload, since netsniff must patch from
+    // document_start; the DOM/anchors/state capture works immediately.)
+    try {
+        await chrome.scripting.executeScript({ target: { tabId }, files: ['collector.js'] });
+    } catch (e) {
+        return { ok: false, error: 'Không inject được collector vào trang này (trang bị chặn?): ' + e.message };
+    }
+    resp = await askCollector(tabId, note);
+    return resp || { ok: false, error: 'Collector vẫn không phản hồi sau khi inject — thử F5 trang.' };
 }
 
 async function upload(payload) {

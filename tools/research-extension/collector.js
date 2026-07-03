@@ -5,15 +5,22 @@
 // payload of the fully-rendered page and returns it for upload.
 // ═══════════════════════════════════════════════════════════════════════════
 
-const __apis = [];
-window.addEventListener('message', (e) => {
-    if (e.source !== window) return;
-    const d = e.data;
-    if (d && d.__copoNet && d.rec) {
-        __apis.push(d.rec);
-        if (__apis.length > 300) __apis.shift();
-    }
-});
+// Buffer + listeners hang off window so the background's inject-on-demand
+// fallback (chrome.scripting.executeScript) can re-run this file without
+// stacking duplicate listeners or losing already-buffered API records.
+window.__copoApis = window.__copoApis || [];
+const __apis = window.__copoApis;
+if (!window.__copoNetListener) {
+    window.__copoNetListener = true;
+    window.addEventListener('message', (e) => {
+        if (e.source !== window) return;
+        const d = e.data;
+        if (d && d.__copoNet && d.rec) {
+            __apis.push(d.rec);
+            if (__apis.length > 300) __apis.shift();
+        }
+    });
+}
 
 const cap = (s, n) => (s == null ? '' : String(s)).slice(0, n);
 
@@ -148,13 +155,16 @@ function buildPayload(note) {
     };
 }
 
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-    if (msg && msg.type === 'COLLECT') {
-        try {
-            sendResponse({ ok: true, payload: buildPayload(msg.note) });
-        } catch (e) {
-            sendResponse({ ok: false, error: String(e) });
+if (!window.__copoMsgListener) {
+    window.__copoMsgListener = true;
+    chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+        if (msg && msg.type === 'COLLECT') {
+            try {
+                sendResponse({ ok: true, payload: buildPayload(msg.note) });
+            } catch (e) {
+                sendResponse({ ok: false, error: String(e) });
+            }
         }
-    }
-    // synchronous response — no need to return true
-});
+        // synchronous response — no need to return true
+    });
+}
