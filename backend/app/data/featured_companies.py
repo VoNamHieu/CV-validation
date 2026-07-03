@@ -441,6 +441,11 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         career_url="https://careers.nike.com/vi/jobs?location_name=Ho%20Chi%20Minh%2C%20Vietnam&location_type=2",
     ),
     FeaturedCompany(
+        name="Puma",
+        homepage="https://puma.com",
+        career_url="https://puma.wd502.myworkdayjobs.com/Jobs_at_Puma",
+    ),
+    FeaturedCompany(
         name="Thế Giới Di Động",
         homepage="https://thegioididong.com",
         career_url="https://vieclam.thegioididong.com",
