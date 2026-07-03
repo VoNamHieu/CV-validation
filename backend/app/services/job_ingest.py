@@ -39,6 +39,37 @@ async def _render(url: str) -> str:
         return ""
 
 
+async def _spa_sniff(url: str) -> list[dict]:
+    """Last-resort acquisition: render the page and watch its XHR for the job
+    feed. Many career SPAs (Grab, Siemens, EY, DHL, Renesas, KiotViet, Sea…)
+    render jobs the static ATS parser can't see; this is the same path
+    career_compat.probe uses. Best-effort → [] on failure.
+
+    VN guard: if some results are VN-tagged, keep only those; if all are tagged
+    but none VN, it's a global page with no VN roles → drop (don't flood the
+    store with foreign jobs); if none are location-tagged (VN-domestic sites
+    often aren't), keep them all."""
+    try:
+        from app.services.spa_sniff import sniff_jobs
+        from app.services.ats_adapters.core import _is_vn_loc, _finalize
+        jobs = await asyncio.wait_for(sniff_jobs(url), timeout=50)
+    except Exception as e:  # noqa: BLE001
+        logger.info("ingest: spa_sniff failed for %s: %s", url, str(e)[:80])
+        return []
+    # _finalize drops nav/section labels + date rows, dedups, caps — spa_sniff
+    # is heuristic and picks up some category/location labels as "jobs".
+    jobs = _finalize([j for j in (jobs or []) if j.get("title") and j.get("url")])
+    vn = [j for j in jobs if _is_vn_loc(j.get("location") or "")]
+    located = [j for j in jobs if (j.get("location") or "").strip()]
+    if vn:
+        jobs = vn
+    elif located:
+        jobs = []            # all located, none VN → global page, skip
+    for j in jobs:
+        j.setdefault("source", "spa_sniff")
+    return jobs
+
+
 async def ingest_featured_ats(*, render: bool = False, limit: int | None = None) -> dict:
     """Ingest ATS-backed featured companies into the store. `render=True` also
     renders bespoke pages to catch embedded ATS (slower, needs the browser)."""
@@ -61,6 +92,10 @@ async def ingest_featured_ats(*, render: bool = False, limit: int | None = None)
                 html = await _render(c.career_url)
                 if html:
                     jobs_list = await asyncio.to_thread(fetch_ats_jobs, c.career_url, html)
+                if not jobs_list:
+                    # SPA whose jobs load via XHR — the static ATS parser can't
+                    # read them; watch the network instead.
+                    jobs_list = await _spa_sniff(c.career_url)
         if not jobs_list:
             return None
 

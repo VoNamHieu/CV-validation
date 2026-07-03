@@ -18,3 +18,8 @@ backend/data/
 
 # packaged extension build artifact (rebuild: zip -r extension.zip extension)
 extension.zip
+
+# Internal-only DOM research extension — lives on the `internal/research-extension`
+# branch (force-added there). Ignored everywhere else so it never gets swept into
+# a product commit or the user-facing extension build.
+tools/research-extension/

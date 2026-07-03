@@ -331,11 +331,6 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         career_url="https://careers.theheinekencompany.com/Tieng-Viet/HEINEKEN-Vietnam",
     ),
     FeaturedCompany(
-        name="MSB",
-        homepage="https://msb.com.vn",
-        career_url="https://jobs.msb.com.vn/",
-    ),
-    FeaturedCompany(
         name="FE Credit",
         homepage="https://fecredit.com.vn",
         career_url="https://tuyendung.fecredit.com.vn/ung-tuyen/",
