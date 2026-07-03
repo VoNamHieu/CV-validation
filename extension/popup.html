@@ -8,8 +8,11 @@
 </head>
 <body>
   <div class="header">
-    <div class="logo">⚡ Copo</div>
-    <div class="subtitle">Auto Apply Extension</div>
+    <div class="header-brand">
+      <a class="logo" href="https://cv-validation.vercel.app/" target="_blank" rel="noopener" data-app-link title="Mở Copo App">⚡ Copo</a>
+      <div class="subtitle">Auto Apply Extension</div>
+    </div>
+    <a class="header-open" href="https://cv-validation.vercel.app/" target="_blank" rel="noopener" data-app-link>Mở app ↗</a>
   </div>
 
   <div class="tabs">
@@ -36,7 +39,7 @@
   <div class="tab-content active" id="tab-apply">
     <div class="field" style="margin-bottom:12px;">
       <button id="tailorJobBtn" class="btn-action" style="width:100%;">✨ Tailor CV cho job đang mở</button>
-      <div id="tailorStatus" style="font-size:12px;margin-top:6px;color:#a5b4fc;"></div>
+      <div id="tailorStatus" style="font-size:12px;margin-top:6px;color:var(--accent-blue);"></div>
     </div>
 
     <!-- Tailor progress (Copo-style stepper) — shown after bấm apply,
@@ -53,6 +56,7 @@
         <li><span class="step-icon">📊</span><span class="step-label">Tính điểm phù hợp</span><span class="step-state"></span></li>
       </ul>
       <div class="progress-tip" id="progressTip">Mẹo: quá trình này mất khoảng 20–60 giây.</div>
+      <a id="progressAction" class="progress-action" href="https://cv-validation.vercel.app/" target="_blank" rel="noopener" data-app-link hidden>Mở Copo App →</a>
     </div>
 
     <div class="perm-card" id="permCard">

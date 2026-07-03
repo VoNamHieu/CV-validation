@@ -280,6 +280,7 @@ function startTailorProgress() {
     card.className = 'progress-card running';
     document.getElementById('progressTitle').textContent = 'AI đang tối ưu CV của bạn…';
     document.getElementById('progressTip').textContent = 'Mẹo: quá trình này mất khoảng 20–60 giây.';
+    document.getElementById('progressAction').hidden = true;
     steps.forEach(li => li.className = '');
     steps[0].classList.add('active');
     // Advance step i → done, i+1 → active on a rough schedule; the last step
@@ -298,18 +299,26 @@ function finishTailorProgress(success, errorMsg) {
     const steps = progressSteps();
     __stepTimers.forEach(clearTimeout);
     __stepTimers = [];
+    const action = document.getElementById('progressAction');
     if (success) {
         steps.forEach(li => li.className = 'done');
         card.className = 'progress-card success';
         document.getElementById('progressTitle').textContent = '✅ CV đã được tối ưu!';
         document.getElementById('progressTip').textContent = 'Mở Copo App để xem CV và ứng tuyển.';
+        action.textContent = 'Mở Copo App để xem CV →';
+        action.hidden = false;
     } else {
         const current = steps.findIndex(li => li.classList.contains('active'));
         const failedAt = current === -1 ? 0 : current;
         steps.forEach((li, i) => li.className = i < failedAt ? 'done' : (i === failedAt ? 'error' : ''));
         card.className = 'progress-card failed';
         document.getElementById('progressTitle').textContent = 'Tối ưu CV thất bại';
-        document.getElementById('progressTip').textContent = `❌ ${errorMsg || 'Không tailor được'}`;
+        // Not everything can be tailored inside the extension (SPA shells,
+        // login-walled JDs, etc.) — steer the user to the web app to continue.
+        document.getElementById('progressTip').textContent =
+            `❌ ${errorMsg || 'Không tailor được'} — vui lòng truy cập web để tiếp tục.`;
+        action.textContent = 'Mở Copo App để tiếp tục →';
+        action.hidden = false;
     }
 }
 
@@ -536,10 +545,14 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }, 15000);
 
-    // Load app URL
+    // Load app URL + point the header links ("Copo" logo + "Mở app") at it, so
+    // the quick-jump matches whatever App URL the user configured. Falls back to
+    // the production URL already hardcoded in the markup.
     chrome.storage.local.get('jobfitAppUrl', (data) => {
         if (data.jobfitAppUrl) {
             document.getElementById('appUrl').value = data.jobfitAppUrl;
+            const href = data.jobfitAppUrl.replace(/\/+$/, '') + '/';
+            document.querySelectorAll('[data-app-link]').forEach((a) => { a.href = href; });
         }
     });
 
