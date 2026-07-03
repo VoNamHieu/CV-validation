@@ -15,7 +15,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from app.db import companies, jobs
+from app.db import companies, jobs, promoted
 from app.services.auth import get_current_user_id, require_admin
 from app.services.url_validator import is_allowed_url
 
@@ -165,3 +165,94 @@ async def get_job(job_id: str):
     if not row:
         raise HTTPException(status_code=404, detail="Job not found")
     return row
+
+
+# ── Promoted job landing pages ("trang truyền thông") ────────────────────────
+# Admin publishes a job from the store as a self-hosted public page. Writes are
+# admin-only; the by-slug read is OPEN (the public page) and only ever serves a
+# `published` row with internal snapshot fields stripped.
+class PromoteCreate(BaseModel):
+    job_id: str
+    slug: Optional[str] = None            # auto from title+company when omitted
+    status: str = "published"
+    template: str = "default"
+
+
+class PromotePatch(BaseModel):
+    slug: Optional[str] = None
+    status: Optional[str] = None
+    template: Optional[str] = None
+    snapshot: Optional[dict] = None
+    og_image_url: Optional[str] = None
+
+
+@router.post("/promoted")
+async def promote_job(body: PromoteCreate, admin: str = Depends(require_admin)):
+    job = await jobs.get(body.job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    company_name = ""
+    if job.get("company_id"):
+        company = await companies.get(job["company_id"])
+        company_name = (company or {}).get("name") or ""
+
+    # Materialize the JD now — a public landing page renders server-side, but
+    # many stored jobs keep an empty description (SPA/Phenom/Workday expose the
+    # JD only at apply-time). Best-effort: ATS API → full crawl.
+    from app.services.jd_resolver import resolve_full_jd
+    full_jd = await resolve_full_jd(job.get("source_url") or "", job.get("description") or "")
+    if full_jd and len(full_jd) > len(job.get("description") or ""):
+        job = {**job, "description": full_jd}
+    snapshot = promoted.build_snapshot(job, company_name=company_name)
+    jd_chars = len(snapshot.get("description") or "")
+
+    # Idempotent re-publish: refresh the snapshot on the existing page instead
+    # of minting a second link for the same job.
+    existing = await promoted.get_by_job(body.job_id)
+    if existing:
+        row = await promoted.update(existing["id"], snapshot=snapshot,
+                                    status=body.status, template=body.template)
+        return {**row, "reused": True, "jd_chars": jd_chars}
+
+    base = body.slug or f"{snapshot['title']}-{company_name}"
+    slug = await promoted.unique_slug(base)
+    row = await promoted.create(
+        slug=slug, job_id=body.job_id, snapshot=snapshot,
+        status=body.status, template=body.template, created_by=admin,
+    )
+    return {**row, "reused": False, "jd_chars": jd_chars}
+
+
+@router.get("/promoted")
+async def list_promoted(
+    limit: int = Query(100, le=500), offset: int = 0,
+    _admin: str = Depends(require_admin),
+):
+    return await promoted.list_pages(limit=limit, offset=offset)
+
+
+@router.get("/promoted/by-slug/{slug}")
+async def get_promoted_public(slug: str):
+    """PUBLIC — the landing page read. Only published pages; internal fields
+    (source_url) are stripped by public_view()."""
+    row = await promoted.get_by_slug(slug)
+    if not row or row.get("status") != "published":
+        raise HTTPException(status_code=404, detail="Page not found")
+    await promoted.increment_view(slug)
+    return promoted.public_view(row)
+
+
+@router.patch("/promoted/{page_id}")
+async def patch_promoted(page_id: str, body: PromotePatch, _admin: str = Depends(require_admin)):
+    row = await promoted.update(page_id, **body.model_dump(exclude_none=True))
+    if not row:
+        raise HTTPException(status_code=404, detail="Page not found")
+    return row
+
+
+@router.delete("/promoted/{page_id}")
+async def delete_promoted(page_id: str, _admin: str = Depends(require_admin)):
+    ok = await promoted.delete(page_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Page not found")
+    return {"deleted": True}

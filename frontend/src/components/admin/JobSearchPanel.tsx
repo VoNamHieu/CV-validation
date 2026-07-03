@@ -7,7 +7,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
     MagnifyingGlass, ArrowsClockwise, CaretLeft, CaretRight, CaretDown,
     Briefcase, MapPin, ArrowSquareOut, SpinnerGap, Brain, TextAa,
-    DownloadSimple, CheckCircle, WarningCircle,
+    DownloadSimple, CheckCircle, WarningCircle, Megaphone, Copy, Check,
 } from '@phosphor-icons/react';
 import { admin, type AdminJob, type FacetValue, type IngestState } from '@/lib/db';
 
@@ -67,6 +67,31 @@ export default function JobSearchPanel() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [expanded, setExpanded] = useState<string | null>(null);
+
+    // Promoted landing pages: jobId → public slug, plus in-flight + copied state.
+    const [promoted, setPromoted] = useState<Record<string, string>>({});
+    const [promoting, setPromoting] = useState<string | null>(null);
+    const [copiedSlug, setCopiedSlug] = useState<string | null>(null);
+
+    const promote = useCallback(async (jobId: string) => {
+        setPromoting(jobId);
+        try {
+            const r = await admin.promoteJob(jobId);
+            setPromoted((m) => ({ ...m, [jobId]: r.slug }));
+        } catch {
+            setError('Không tạo được trang truyền thông.');
+        } finally {
+            setPromoting(null);
+        }
+    }, []);
+
+    const copyLink = useCallback((slug: string) => {
+        const url = `${window.location.origin}/j/${slug}`;
+        navigator.clipboard?.writeText(url).then(() => {
+            setCopiedSlug(slug);
+            setTimeout(() => setCopiedSlug((s) => (s === slug ? null : s)), 1800);
+        }).catch(() => { });
+    }, []);
     // Drops out-of-order responses (fast page-2 answer landing after page 3's).
     const seq = useRef(0);
 
@@ -419,7 +444,24 @@ export default function JobSearchPanel() {
                                             {j.description}
                                         </p>
                                     )}
-                                    <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                                    <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+                                        <button
+                                            type="button"
+                                            onClick={() => promote(j.id)}
+                                            disabled={promoting === j.id}
+                                            style={{
+                                                display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.8rem',
+                                                fontWeight: 700, color: '#fff', cursor: 'pointer',
+                                                background: 'var(--gradient-hero, linear-gradient(135deg,#4f46e5,#7c3aed))',
+                                                border: 'none', borderRadius: 8, padding: '7px 14px',
+                                                opacity: promoting === j.id ? 0.6 : 1,
+                                            }}
+                                        >
+                                            {promoting === j.id
+                                                ? <SpinnerGap size={14} style={{ animation: 'spin 0.8s linear infinite' }} />
+                                                : <Megaphone size={14} weight="fill" />}
+                                            {promoted[j.id] ? 'Tạo lại trang truyền thông' : 'Tạo trang truyền thông'}
+                                        </button>
                                         {j.source_url && (
                                             <a href={j.source_url} target="_blank" rel="noreferrer" style={{
                                                 display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.78rem',
@@ -437,6 +479,36 @@ export default function JobSearchPanel() {
                                             </a>
                                         )}
                                     </div>
+
+                                    {promoted[j.id] && (
+                                        <div style={{
+                                            display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, flexWrap: 'wrap',
+                                            padding: '8px 10px', borderRadius: 8, background: 'var(--bg-elevated)',
+                                            border: '1px solid var(--border-subtle)',
+                                        }}>
+                                            <a href={`/j/${promoted[j.id]}`} target="_blank" rel="noreferrer" style={{
+                                                fontSize: '0.76rem', color: 'var(--accent-blue, #3b82f6)',
+                                                textDecoration: 'none', fontWeight: 600, wordBreak: 'break-all',
+                                            }}>
+                                                /j/{promoted[j.id]}
+                                            </a>
+                                            <button
+                                                type="button"
+                                                onClick={() => copyLink(promoted[j.id])}
+                                                title="Sao chép link công khai"
+                                                style={{
+                                                    display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.72rem',
+                                                    color: 'var(--text-secondary)', background: 'none',
+                                                    border: '1px solid var(--border-subtle)', borderRadius: 6,
+                                                    padding: '3px 8px', cursor: 'pointer',
+                                                }}
+                                            >
+                                                {copiedSlug === promoted[j.id]
+                                                    ? <><Check size={12} /> Đã chép</>
+                                                    : <><Copy size={12} /> Chép link</>}
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </div>

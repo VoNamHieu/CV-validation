@@ -204,3 +204,40 @@ def resolve_jd_via_ats(jd_url: str) -> str | None:
     text = "\n".join(p for p in parts if p).strip()
     logger.info(f"[jd_resolver] resolved {jd_url} via ATS ({len(text)} chars)")
     return text or None
+
+
+async def resolve_full_jd(source_url: str, existing: str = "") -> str:
+    """Best-effort full JD text for a promoted landing-page snapshot.
+
+    Many stored jobs keep an empty/thin ``description`` — SPA/Phenom/Workday
+    listings expose the JD only at apply-time (via the browser extension). A
+    public landing page renders server-side, so we must materialize the JD now:
+      1. keep the stored description if it's already substantial,
+      2. else the ATS detail/listing API (fast, no browser),
+      3. else a full crawl (HTTP → Playwright) for SPA career pages.
+    Returns the best text found (falls back to ``existing`` on total miss).
+    """
+    import asyncio
+
+    existing = (existing or "").strip()
+    if len(existing) >= 200 or not source_url:
+        return existing
+
+    best = existing
+    try:
+        ats = await asyncio.to_thread(resolve_jd_via_ats, source_url)
+        if ats and len(ats) > len(best):
+            best = ats
+    except Exception as e:  # never break publish
+        logger.info(f"[resolve_full_jd] ats miss {source_url}: {str(e)[:80]}")
+
+    if len(best) < 200:
+        try:
+            from app.services.crawler import crawl_url
+            cr = await crawl_url(source_url)
+            if cr.cleaned_text and len(cr.cleaned_text) > len(best):
+                best = cr.cleaned_text
+        except Exception as e:
+            logger.info(f"[resolve_full_jd] crawl miss {source_url}: {str(e)[:80]}")
+
+    return best

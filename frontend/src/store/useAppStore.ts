@@ -294,6 +294,20 @@ interface AppState {
   // Clears per-user content (CV, JD entries, history cache, avatar, targets)
   // but keeps app-shell flags (entered/view). Used on logout / account switch.
   resetUserData: () => void;
+
+  // Promoted job landing pages ("trang truyền thông"). The public /j/<slug> CTA
+  // routes to /?promoted=<slug>; the app resumes here. Persisted so it survives
+  // the anonymous→login→enter-app hop before we can seed the wizard (which needs
+  // the user's CV). Cleared once the job is seeded into the editor.
+  pendingPromotedSlug: string | null;
+  setPendingPromotedSlug: (slug: string | null) => void;
+  // Seed a self-contained JD entry from a promoted snapshot (JD already
+  // extracted + scored by the caller) and jump to the editor. Mirrors
+  // loadJobRecordIntoWizard so the editor renders it as the only entry.
+  seedPromotedEntry: (payload: {
+    slug: string; title: string; company: string; applyUrl?: string;
+    jdData: JDData; matchResult: MatchResult;
+  }) => void;
 }
 
 const initialState = {
@@ -322,6 +336,7 @@ const initialState = {
   fullyAutoMode: false,
   userAvatarBase64: null as string | null,
   ownerUserId: null as string | null,
+  pendingPromotedSlug: null as string | null,
 };
 
 export const useAppStore = create<AppState>()(
@@ -456,6 +471,33 @@ export const useAppStore = create<AppState>()(
           optimizedCv: record.optimizedCv ?? null,
           currentStep: 3,
           view: 'apply',
+        });
+      },
+
+      setPendingPromotedSlug: (slug) => set({ pendingPromotedSlug: slug }),
+
+      seedPromotedEntry: ({ slug, title, company, applyUrl, jdData, matchResult }) => {
+        const entryId = `promoted-${slug}`;
+        const entry: JDEntry = {
+          id: entryId,
+          source: applyUrl || entryId,
+          applyUrl: applyUrl || undefined,
+          label: title || company || 'Việc làm',
+          status: 'done',
+          jdData,
+          matchResult,
+          jobTitle: title || undefined,
+          company: company || undefined,
+        };
+        set({
+          jdEntries: [entry],
+          selectedJdId: entryId,
+          jdData,
+          matchResult,
+          optimizedCv: null,
+          currentStep: 3,
+          view: 'apply',
+          pendingPromotedSlug: null,
         });
       },
 

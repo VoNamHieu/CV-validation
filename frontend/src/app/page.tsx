@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { Suspense, useEffect } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuth } from '@/lib/auth';
 import Sidebar, { SIDEBAR_WIDTH } from '@/components/Sidebar';
@@ -11,6 +11,7 @@ import StepEditCv from '@/components/steps/StepEditCv';
 import CvEditorView from '@/components/views/CvEditorView';
 import HistoryView from '@/components/views/HistoryView';
 import Mode1ResultBanner from '@/components/Mode1ResultBanner';
+import PromotedResume from '@/components/PromotedResume';
 import Landing from '@/components/Landing';
 
 export default function Home() {
@@ -56,6 +57,9 @@ export default function Home() {
       }} />
 
       <Sidebar />
+
+      {/* Resume "optimize CV for this job" started on a public /j/<slug> page */}
+      <Suspense fallback={null}><PromotedResume /></Suspense>
 
       {/* Mode 1 — tailored-CV result pushed from the extension */}
       <Mode1ResultBanner />
