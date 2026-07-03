@@ -231,8 +231,12 @@ def _parse_openings(html: str) -> list:
 _JSON_POST = {"User-Agent": "Mozilla/5.0 Chrome/120", "Accept": "application/json",
               "Content-Type": "application/json"}
 _VN_MARKERS = ("vietnam", "viet nam", "việt nam", "hanoi", "ha noi", "hà nội",
-               "ho chi minh", "hồ chí minh", "hcmc", "da nang", "đà nẵng",
-               "hai phong", "can tho", ", vn")
+               "ho chi minh", "hồ chí minh", "hcmc", "tp.hcm", "tp hcm", "tphcm",
+               "saigon", "sài gòn", "sai gon", "da nang", "đà nẵng", "hai phong",
+               "hải phòng", "can tho", "cần thơ", "binh duong", "bình dương",
+               "bac ninh", "bắc ninh", "dong nai", "đồng nai", "vung tau",
+               "vũng tàu", "long an", "hung yen", "hưng yên", "thai nguyen",
+               "thái nguyên", "quang ninh", "bien hoa", ", vn")
 _WD_RX = re.compile(r"https?://([^.]+)\.(wd\d+)\.myworkdayjobs\.com(/[^?]*)?", re.I)
 
 
@@ -1306,7 +1310,14 @@ def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
         logger.info(f"[ats] {ats}:{slug} fetch failed: {str(e)[:80]}")
         return []
     vn = [j for j in jobs if _is_vn_loc(j.get("location") or "")]
+    located = [j for j in jobs if (j.get("location") or "").strip()]
     if vn:
         jobs = vn
+    elif located and len(located) == len(jobs):
+        # Every posting is location-tagged and none is in Vietnam → a global
+        # board with no VN roles (e.g. Agoda's Greenhouse). Return nothing rather
+        # than flooding the VN store with foreign jobs. (Untagged jobs = likely
+        # VN-domestic → keep-all, handled by falling through.)
+        jobs = []
     logger.info(f"[ats] {ats}:{slug} → {len(jobs)} jobs ({career_url})")
     return _finalize(jobs)
