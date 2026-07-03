@@ -443,7 +443,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Nike",
         homepage="https://nike.com",
-        career_url="https://careers.nike.com",
+        career_url="https://careers.nike.com/vi/jobs?location_name=Ho%20Chi%20Minh%2C%20Vietnam&location_type=2",
     ),
     FeaturedCompany(
         name="Thế Giới Di Động",

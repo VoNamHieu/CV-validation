@@ -1219,7 +1219,36 @@ def _amazon(career_url: str) -> list[dict]:
     return out
 
 
+# ── Avature (custom-domain career sites: careers.nike.com, careers.bain.com) ─
+# Avature tenants sit on bespoke domains, so the only reliable signal is the
+# "avature" marker in the page HTML. Listings are server-rendered as
+# <a href=".../job/<id>">Title</a>, so we parse the rendered HTML (ingest
+# supplies it via the render fallback). The career_url should already carry a
+# Vietnam location filter, so we trust it rather than per-job location parsing.
+def _is_avature(career_url: str, html: str | None) -> bool:
+    return bool(html) and "avature" in html.lower()
+
+
+def _avature(career_url: str, html: str | None) -> list[dict]:
+    if not html:
+        return []
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(html, "html.parser")
+    out, seen = [], set()
+    for a in soup.select('a[href*="/job/"]'):
+        href = (a.get("href") or "").strip()
+        title = a.get_text(" ", strip=True)
+        if not href or not title or len(title) < 4 or href in seen:
+            continue
+        seen.add(href)
+        out.append({"title": title[:200], "url": urljoin(career_url, href),
+                    "location": "", "description": ""})
+    logger.info(f"[ats] avature -> {len(out)} jobs ({career_url})")
+    return out
+
+
 _ADAPTERS: list = [
+    ("avature",        _is_avature,                      lambda u, h: _avature(u, h)),
     ("amazon",         lambda u, h: _is_amazon(u),       lambda u, h: _amazon(u)),
     ("workday",        lambda u, h: _resolve_workday_url(u, h) is not None,
                        lambda u, h: _workday(_resolve_workday_url(u, h))),
