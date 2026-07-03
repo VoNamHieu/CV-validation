@@ -506,6 +506,97 @@ def _workatsea(career_url: str) -> list[dict]:
     return out
 
 
+# ── Moka (mokahr.com — Klook, …) ─────────────────────────────────────────────
+# Chinese ATS hosting career sites at hire-*.mokahr.com/social-recruitment/
+# {orgId}/{siteId}. The SPA shell is cookie-gated (302 that only sets csrfCk/
+# moka-apply and re-serves the same URL), so a plain GET on the career page
+# primes a session, after which the job API accepts anonymous POSTs:
+#   POST /api/outer/ats-apply/website/jobs/v2
+#     {"orgId", "siteId", "limit": 30, "offset", "needStat": true, ...}
+#   → {"code": 0, "data": {"jobStats": {"total"}, "jobs": [{id, title,
+#      jobDescription(html), locations: [{country, cityName?}], ...}]}}
+# limit must stay ≤30 (the API rejects larger pages with code 102). Detail URL
+# is the hash route {career_url_base}?locale=en-US#/job/{uuid} (matches the
+# rows seeded in the store). Sites list GLOBAL jobs → keep VN only, unless the
+# org tags no locations at all (VN-domestic tenants).
+_MOKA_RX = re.compile(r"https?://([a-z0-9-]+\.mokahr\.(?:com|io))/social-recruitment/([a-z0-9_-]+)/(\d+)", re.I)
+
+
+def _is_mokahr(career_url: str) -> bool:
+    return bool(_MOKA_RX.match(career_url or ""))
+
+
+def _mokahr(career_url: str) -> list[dict]:
+    m = _MOKA_RX.match(career_url or "")
+    if not m:
+        return []
+    host, org, site = m.group(1), m.group(2), m.group(3)
+    base = f"https://{host}/social-recruitment/{org}/{site}"
+
+    s = requests.Session()
+    s.headers.update(_HEADERS)
+    try:
+        s.get(f"{base}?locale=en-US", timeout=_TIMEOUT)  # cookie gate
+    except Exception as e:
+        logger.info(f"[ats] mokahr gate failed ({base}): {str(e)[:80]}")
+        return []
+
+    raw: list[dict] = []
+    total = None
+    while total is None or len(raw) < min(total, _MAX_ATS_JOBS * 3):
+        try:
+            r = s.post(
+                f"https://{host}/api/outer/ats-apply/website/jobs/v2",
+                json={"orgId": org, "siteId": site, "limit": 30, "offset": len(raw),
+                      "needStat": True, "jobIdTopList": [], "customFields": {},
+                      "site": "social", "locale": "en-US"},
+                timeout=_TIMEOUT,
+            )
+            d = r.json() if r.status_code == 200 else {}
+        except Exception as e:
+            logger.info(f"[ats] mokahr page {len(raw)} failed: {str(e)[:80]}")
+            break
+        if d.get("code") != 0:
+            logger.info(f"[ats] mokahr API code {d.get('code')} ({base})")
+            break
+        page = (d.get("data", {}) or {}).get("jobs", []) or []
+        if total is None:
+            total = int(((d.get("data", {}) or {}).get("jobStats", {}) or {}).get("total") or 0)
+        if not page:
+            break
+        raw.extend(page)
+
+    out = []
+    for j in raw:
+        title = (j.get("title") or "").strip()
+        jid = j.get("id")
+        if not title or not jid:
+            continue
+        locs = j.get("locations") or []
+        loc = ", ".join(
+            p for p in (
+                (locs[0].get("cityName") if locs else None),
+                (locs[0].get("country") if locs else None),
+            ) if p
+        )
+        out.append({
+            "title": title[:200],
+            "url": f"{base}?locale=en-US#/job/{jid}",
+            "location": loc,
+            "description": _strip_html(j.get("jobDescription") or ""),
+        })
+
+    # Global tenant → VN postings only; keep everything only when the org tags
+    # no locations at all (otherwise we'd pour 100+ SG/MY jobs into a VN store).
+    vn = [j for j in out if _is_vn_loc(j.get("location") or "")]
+    if vn:
+        out = vn
+    elif any(j.get("location") for j in out):
+        out = []
+    logger.info(f"[ats] mokahr → {len(out)} jobs of {total} total ({base})")
+    return out
+
+
 # ── Phenom "ph-services" (Nestlé, …) ────────────────────────────────────────
 # Phenom career sites render via JS on a Cloudflare-protected host (www.nestle
 # .com → 403 to datacenters), but the underlying job API lives on a separate,
@@ -1032,6 +1123,7 @@ _ADAPTERS: list = [
                        lambda u, h: _workday(_resolve_workday_url(u, h))),
     ("base.vn",        _is_basevn,                       lambda u, h: _basevn(u, h)),
     ("workatsea",      _is_workatsea,                    lambda u, h: _workatsea(u)),
+    ("mokahr",         lambda u, h: _is_mokahr(u),       lambda u, h: _mokahr(u)),
     ("oracle-hcm",     lambda u, h: _is_oracle_hcm(u),   lambda u, h: _oracle_hcm(u)),
     ("bytedance",      lambda u, h: bool(_bd_config(u)), lambda u, h: _bytedance_family(u)),
     ("vpbanks",        lambda u, h: _is_vpbanks(u),      lambda u, h: _vpbanks(u)),
