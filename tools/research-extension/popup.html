@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=380">
+  <title>Copo DOM Research</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="header">
+    <div class="logo">🔬 DOM Research</div>
+    <div class="subtitle">Internal — capture career pages → backend</div>
+  </div>
+
+  <div class="body">
+    <label class="lbl">Ghi chú (tuỳ chọn)</label>
+    <input id="note" type="text" placeholder="vd: trang list job của công ty X">
+
+    <button id="captureBtn" class="btn-primary">📸 Capture trang đang mở</button>
+    <div id="result" class="result"></div>
+
+    <details id="cfg" class="cfg">
+      <summary>⚙️ Cấu hình backend</summary>
+      <label class="lbl">Backend URL</label>
+      <input id="backendUrl" type="text" placeholder="http://localhost:8000">
+      <label class="lbl">Debug token <span class="req">(= DEBUG_CAPTURE_TOKEN)</span></label>
+      <input id="debugToken" type="password" placeholder="token ở backend .env">
+      <button id="saveCfg" class="btn-ghost">Lưu cấu hình</button>
+      <div id="cfgStatus" class="cfg-status"></div>
+    </details>
+
+    <p class="hint">Sau khi capture, bảo Claude: <b>“đọc capture host &lt;host&gt;”</b> — Claude gọi <code>/debug/capture/latest</code> để phân tích DOM + API đã bắt được.</p>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

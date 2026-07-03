@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "Copo DOM Research (INTERNAL)",
+  "version": "1.0.0",
+  "description": "Internal-only tool. Captures a fully-rendered career page (DOM + the page's own XHR/fetch APIs + embedded state) and ships it to the backend /debug/capture for reverse-engineering ATS adapters. NOT for the Web Store.",
+  "permissions": [
+    "storage",
+    "tabs",
+    "scripting",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["netsniff.js"],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": true
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["collector.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Copo DOM Research (internal)"
+  }
+}

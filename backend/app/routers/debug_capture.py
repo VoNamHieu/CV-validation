@@ -56,8 +56,9 @@ class CapturePayload(BaseModel):
     tables: list = Field(default_factory=list)     # [[ "cell", ... ], ...]
     nextData: str = ""                              # raw __NEXT_DATA__ JSON
     jsonld: list = Field(default_factory=list)      # raw ld+json blocks
-    apis: list = Field(default_factory=list)        # [{method,url,status}] page's own XHR/fetch — reveals backend job APIs
+    apis: list = Field(default_factory=list)        # [{method,url,status,type,reqBody,respSnippet}] page's own XHR/fetch — reveals backend job APIs + response shape
     state: str = Field("", max_length=600000)       # embedded JS state (__NUXT__/__INITIAL_STATE__/__APOLLO_STATE__)
+    extras: dict = Field(default_factory=dict)      # advanced research metadata (framework, iframes, shadow DOM, metas, forms…)
     note: str = Field("", max_length=1000)
 
 
@@ -93,7 +94,7 @@ async def capture(payload: CapturePayload, x_debug_token: str | None = Header(de
     index.insert(0, {"host": host, "url": payload.url, "title": payload.title,
                      "ts": ts, "bytes": len(data.get("html", "")),
                      "anchors": len(payload.anchors), "tables": len(payload.tables),
-                     "apis": len(payload.apis)})
+                     "apis": len(payload.apis), "extras": len(payload.extras or {})})
     await cache.set_json(_INDEX_KEY, index[:_MAX_INDEX], _TTL)
 
     logger.info(f"[debug-capture] stored {host} "
