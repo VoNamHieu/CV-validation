@@ -66,8 +66,18 @@ async def ingest_featured_ats(*, render: bool = False, limit: int | None = None)
 
         industry = classify_company(c.name, c.career_url)
         try:
+            # Dedupe key = the company's OWN identity domain (homepage), NOT the
+            # career_url host. Many career pages live on a third-party ATS
+            # (mokahr / myworkdayjobs / greenhouse / smartrecruiters …) or a
+            # careers subdomain, so keying on career_url both splits a company
+            # from its real-domain row and — on SHARED ATS hosts like
+            # boards.greenhouse.io — collides two different companies onto one
+            # row. homepage is stable and unique per company. Fall back to the
+            # career_url host only when a company has no homepage.
             company = await companies_repo.upsert(
-                name=c.name, domain=_domain(c.career_url), career_url=c.career_url,
+                name=c.name,
+                domain=_domain(c.homepage) or _domain(c.career_url),
+                career_url=c.career_url,
                 industry=industry, in_universe=True,
             )
         except Exception as e:  # noqa: BLE001
