@@ -585,7 +585,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Maersk",
         homepage="https://www.maersk.com",
-        career_url="https://www.maersk.com/careers/vacancies?searchText=&city=vietnam",
+        career_url="https://maersk.wd3.myworkdayjobs.com/Maersk_Careers",
     ),
 
     # ── International Banking ─────────────────────────────────────────

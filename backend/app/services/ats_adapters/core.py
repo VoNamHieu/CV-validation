@@ -319,10 +319,51 @@ def _is_successfactors(career_url: str, html: str | None) -> bool:
                                 "/tile-search-results/", "careersite"))
 
 
+def _sf_v4(origin: str) -> list[dict]:
+    """Modern SuccessFactors RMK (v4) JSON API — POST /services/recruiting/v1/jobs,
+    server-side filtered to Vietnam + paginated. JS-rendered SF sites (Standard
+    Chartered, …) expose NO /job/ tiles in static HTML, so the scrape below
+    returns 0 for them; this covers those. Returns [] when the site isn't v4."""
+    out: list[dict] = []
+    for page in range(0, 6):
+        body = {"locale": "en_GB", "pageNumber": page, "keywords": "",
+                "facetFilters": {"jobLocationCountry": ["Viet Nam"]},
+                "brand": "", "skills": []}
+        try:
+            r = requests.post(f"{origin}/services/recruiting/v1/jobs", json=body,
+                              headers={**_JSON_POST, "Referer": origin}, timeout=_TIMEOUT)
+            if r.status_code != 200:
+                break
+            results = (r.json() or {}).get("jobSearchResult") or []
+        except Exception:
+            break
+        if not results:
+            break
+        for j in results:
+            rp = j.get("response") or {}
+            title = (rp.get("unifiedStandardTitle") or "").strip()
+            if not title:
+                continue
+            loc = (rp.get("jobLocationShort") or [""])[0]
+            jid, ut = rp.get("id"), rp.get("unifiedUrlTitle")
+            url = f"{origin}/job/{ut}/{jid}/" if ut and jid else origin
+            out.append({"title": title[:200], "url": url,
+                        "location": str(loc)[:120], "description": ""})
+        if len(results) < 10 or len(out) >= _MAX_ATS_JOBS:
+            break
+    return out
+
+
 def _successfactors(career_url: str, html: str | None) -> list[dict]:
     from bs4 import BeautifulSoup
     p = urlparse(career_url)
     origin = f"{p.scheme}://{p.netloc}"
+    # Modern RMK (v4) JSON API first; falls through to the legacy HTML tile
+    # scrape when the site isn't v4 (VN banks, TH Group, …).
+    v4 = _sf_v4(origin)
+    if v4:
+        logger.info(f"[ats] successfactors(v4) → {len(v4)} VN jobs ({origin})")
+        return v4[:_MAX_ATS_JOBS]
     # No locationsearch: VN-domestic SF sites tag locations as "Hà Nội" etc., so
     # locationsearch=Vietnam returns nothing. Return all tiles; the downstream
     # role/city filter narrows. (Most SF sites in the featured list are VN banks.)
