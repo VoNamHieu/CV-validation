@@ -221,6 +221,14 @@ export const admin = {
             `/api/admin/jobs/ingest?render=${render}`, { method: 'POST', auth: true },
         ),
     ingestStatus: () => req<IngestState>(`/api/admin/jobs/ingest/status`, { auth: true }),
+
+    // Publish a stored job as a public landing page ("trang truyền thông").
+    // Admin-gated on the backend; idempotent per job (reused=true on re-publish).
+    promoteJob: (jobId: string) =>
+        req<{ slug: string; status: string; reused: boolean }>(
+            `/api/store/promoted`,
+            { method: 'POST', body: JSON.stringify({ job_id: jobId }), auth: true },
+        ),
 };
 
 export interface IngestState {
