@@ -1292,7 +1292,55 @@ def _avature(career_url: str, html: str | None) -> list[dict]:
     return out
 
 
+# ── Eightfold PCS (apply.careers.<company>.com — Microsoft, …) ───────────────
+# Eightfold's candidate site exposes a public search API:
+#   GET {origin}/api/pcsx/search?domain=<company.com>&location=Vietnam&start=N&num=50
+#   → {data:{positions:[{id, displayJobId, name, locations:[...]}], count}}
+# The site host is apply.careers.<company>.com and the `domain` param is the
+# company's registrable domain (microsoft.com). Detail = {origin}/careers?pid=<id>.
+# locations is an array of "Country, State, City" strings; keep only VN ones.
+def _is_pcsx(career_url: str) -> bool:
+    host = (urlparse(career_url or "").netloc or "").lower()
+    return host.startswith("apply.careers.") or "/api/pcsx/" in (career_url or "")
+
+
+def _pcsx(career_url: str) -> list[dict]:
+    p = urlparse(career_url)
+    origin = f"{p.scheme}://{p.netloc}"
+    domain = _registrable_domain(p.netloc)
+    country = os.getenv("DISCOVER_COUNTRY", "Vietnam")
+    out, seen = [], set()
+    for start in range(0, 200, 50):
+        try:
+            r = requests.get(f"{origin}/api/pcsx/search",
+                             headers={**_HEADERS, "Accept": "application/json"}, timeout=_TIMEOUT,
+                             params={"domain": domain, "query": "", "location": country,
+                                     "start": start, "num": 50})
+            if r.status_code != 200 or "json" not in r.headers.get("content-type", ""):
+                break
+            data = (r.json() or {}).get("data", {}) or {}
+        except Exception as e:
+            logger.info(f"[ats] pcsx failed: {str(e)[:80]}")
+            break
+        pos = data.get("positions", []) or []
+        if not pos:
+            break
+        for j in pos:
+            vn = next((l for l in (j.get("locations") or []) if _is_vn_loc(l)), "")
+            title, jid = (j.get("name") or "").strip(), j.get("id")
+            if not title or not vn or not jid or jid in seen:
+                continue
+            seen.add(jid)
+            out.append({"title": title[:200], "url": f"{origin}/careers?pid={jid}",
+                        "location": str(vn)[:120], "description": ""})
+        if start + 50 >= (data.get("count") or 0) or len(out) >= _MAX_ATS_JOBS:
+            break
+    logger.info(f"[ats] pcsx → {len(out)} VN jobs ({origin})")
+    return out
+
+
 _ADAPTERS: list = [
+    ("pcsx",           lambda u, h: _is_pcsx(u),         lambda u, h: _pcsx(u)),
     ("avature",        _is_avature,                      lambda u, h: _avature(u, h)),
     ("amazon",         lambda u, h: _is_amazon(u),       lambda u, h: _amazon(u)),
     ("workday",        lambda u, h: _resolve_workday_url(u, h) is not None,
