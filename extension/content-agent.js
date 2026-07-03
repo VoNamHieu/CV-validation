@@ -1805,8 +1805,7 @@ async function runMode1() {
     });
     if (!cv.cv) {
         console.warn(`${M1} ✖ no CV synced — open Copo and sync first`);
-        showToast('⚠️ Chưa có CV. Hãy mở Copo và đồng bộ CV trước.', 5000);
-        return { success: false, error: 'no CV synced' };
+        return { success: false, error: 'Chưa có CV. Hãy mở Copo và đồng bộ CV trước.' };
     }
     console.log(`${M1} ✓ CV synced`, {
         name: cv.cv.name || cv.cv.full_name || '(unnamed)',
@@ -1821,13 +1820,13 @@ async function runMode1() {
     });
     if (jdText.length < 80) {
         console.warn(`${M1} ✖ JD too short (${jdText.length} chars) — page may be an SPA shell or wrong tab`);
-        showToast('⚠️ Không đọc được JD trên trang này.', 5000);
-        return { success: false, error: 'no JD text' };
+        return { success: false, error: 'Không đọc được JD trên trang này.' };
     }
 
     const sourceRef = _newSourceRef();
+    // No in-page toast here — the popup's Apply tab owns all progress UI for
+    // Mode 1 (the old fixed toast doubled up with the popup stepper).
     console.log(`${M1} → sending MODE1_TAILOR to background`, { sourceRef, jdChars: jdText.length });
-    showToast('✨ Đang tailor CV cho job này… (có thể mất ~1 phút)', 0);
     try {
         const resp = await chrome.runtime.sendMessage({
             type: 'MODE1_TAILOR',
@@ -1839,7 +1838,6 @@ async function runMode1() {
             options: { length: 'concise' },
         });
         const ms = Date.now() - t0;
-        document.getElementById('jobfit-toast')?.remove();
         if (resp?.success) {
             const v0 = resp.data?.variants?.[0];
             console.log(`${M1} ✅ tailored in ${ms}ms`, {
@@ -1847,16 +1845,12 @@ async function runMode1() {
                 improvements: v0?.improvements?.length ?? 0,
                 score: resp.data?.match?.overall_score,
             });
-            showToast('✅ CV đã tailor — mở Copo để xem & ứng tuyển.', 6000);
         } else {
             console.warn(`${M1} ✖ tailor failed in ${ms}ms:`, resp?.error, resp);
-            showToast(`❌ Tailor lỗi: ${resp?.error || 'unknown'}`, 6000);
         }
         return resp || { success: false, error: 'no response' };
     } catch (e) {
         console.error(`${M1} ✖ exception after ${Date.now() - t0}ms:`, e);
-        document.getElementById('jobfit-toast')?.remove();
-        showToast(`❌ Tailor lỗi: ${e.message}`, 6000);
         return { success: false, error: e.message };
     }
 }
