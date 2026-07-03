@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 
 export default function PrivacyPage() {
     return (
-        <LegalShell title="Chính sách Quyền riêng tư" updated="30/06/2026">
+        <LegalShell title="Chính sách Quyền riêng tư" updated="02/07/2026">
             <PrivacyContent />
         </LegalShell>
     );

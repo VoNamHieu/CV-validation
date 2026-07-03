@@ -11,7 +11,8 @@
 body {
     width: 400px;
     min-height: 500px;
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    /* System font stack — no remotely-hosted font (Web Store privacy/CSP). */
+    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
     background: #0f0f1a;
     color: #e2e8f0;
     overflow-x: hidden;

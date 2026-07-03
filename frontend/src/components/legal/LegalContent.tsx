@@ -192,6 +192,10 @@ export function PrivacyContent() {
                 quyền truy cập được giới hạn ở mức cần thiết cho chức năng này; tiện ích không theo dõi hoạt động
                 duyệt web của bạn ngoài mục đích đã nêu, và không thu thập hay truyền dữ liệu mà không có hành
                 động chủ động từ bạn.</p>
+            <p>Để tiện ích thực hiện các thao tác AI có tính phí credit thay cho bạn (tự động điền đơn, tối ưu
+                CV), mã phiên đăng nhập (JWT) của bạn được đồng bộ từ ứng dụng web và lưu trong bộ nhớ cục bộ của
+                tiện ích (chrome.storage). Mã này chỉ dùng để xác thực với máy chủ Copo, không bao giờ được gửi
+                tới các trang tuyển dụng bên thứ ba, và bị trình duyệt xoá khi bạn gỡ cài đặt tiện ích.</p>
 
             <h2>8. Cookie</h2>
             <p>Ứng dụng web sử dụng cookie/local storage cần thiết để duy trì phiên đăng nhập của bạn. Chúng tôi

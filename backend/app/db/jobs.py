@@ -142,6 +142,110 @@ async def search_semantic(
     return rows_to_dicts(await pool.fetch(sql, *args))
 
 
+async def search_admin(
+    *,
+    q: Optional[str] = None,
+    role_family: Optional[str] = None,
+    industry: Optional[str] = None,
+    seniority: Optional[str] = None,
+    is_active: Optional[bool] = None,
+    embedding: Optional[Sequence[float]] = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[dict], int]:
+    """Operator search over the whole job store (admin console).
+
+    Unlike the public endpoints this sees dead rows too (``is_active=None``),
+    joins the company name, and matches ``q`` as a keyword against
+    title / company / location / description. When ``embedding`` is given the
+    result is ordered by cosine distance instead (rows without a vector are
+    excluded, as in ``search_semantic``). Returns ``(rows, total)`` where total
+    counts all matches before LIMIT/OFFSET."""
+    pool = await get_pool()
+    cols = ", ".join(f"j.{c.strip()}" for c in _COLS.split(","))
+    conds: list[str] = []
+    args: list = []
+    if is_active is not None:
+        args.append(is_active)
+        conds.append(f"j.is_active = ${len(args)}")
+    if q and q.strip():
+        args.append(f"%{q.strip()}%")
+        n = len(args)
+        conds.append(
+            f"(j.title ILIKE ${n} OR c.name ILIKE ${n} "
+            f"OR j.location ILIKE ${n} OR j.description ILIKE ${n})"
+        )
+    for col, val in (("role_family", role_family), ("industry", industry), ("seniority", seniority)):
+        if val:
+            args.append(val)
+            conds.append(f"j.{col} = ${len(args)}")
+
+    order = "j.hotness DESC, j.created_at DESC"
+    dist_col = ""
+    if embedding is not None:
+        args.append(list(embedding))
+        n = len(args)
+        conds.append("j.embedding IS NOT NULL")
+        dist_col = f", (j.embedding <=> ${n}) AS distance"
+        order = f"j.embedding <=> ${n}"
+
+    where = f"WHERE {' AND '.join(conds)}" if conds else ""
+    args.extend([limit, offset])
+    sql = (
+        f"SELECT {cols}, c.name AS company_name, c.career_url, "
+        f"COUNT(*) OVER() AS total{dist_col} "
+        f"FROM jobs j LEFT JOIN companies c ON c.id = j.company_id "
+        f"{where} ORDER BY {order} LIMIT ${len(args)-1} OFFSET ${len(args)}"
+    )
+    rows = rows_to_dicts(await pool.fetch(sql, *args))
+    total = int(rows[0].pop("total")) if rows else 0
+    for r in rows:
+        r.pop("total", None)
+    return rows, total
+
+
+async def list_unembedded(*, limit: int = 1000) -> list[dict]:
+    """Active jobs still missing their vector (embedding backfill queue)."""
+    pool = await get_pool()
+    rows = await pool.fetch(
+        "SELECT id, title, description, must_have FROM jobs "
+        "WHERE is_active AND embedding IS NULL ORDER BY created_at DESC LIMIT $1",
+        limit,
+    )
+    return rows_to_dicts(rows)
+
+
+async def set_embedding(job_id: str, embedding: Sequence[float]) -> None:
+    pool = await get_pool()
+    await pool.execute(
+        "UPDATE jobs SET embedding = $2::vector, indexed_at = now() WHERE id = $1",
+        job_id, list(embedding),
+    )
+
+
+async def facet_values() -> dict:
+    """Distinct facet values actually present in the store — feeds the admin
+    search filters so dropdowns never offer an empty facet."""
+    pool = await get_pool()
+    rows = await pool.fetch(
+        """
+        SELECT 'role_family' AS facet, role_family AS value, count(*) AS n
+          FROM jobs WHERE role_family IS NOT NULL GROUP BY role_family
+        UNION ALL
+        SELECT 'industry', industry, count(*) FROM jobs
+          WHERE industry IS NOT NULL GROUP BY industry
+        UNION ALL
+        SELECT 'seniority', seniority, count(*) FROM jobs
+          WHERE seniority IS NOT NULL GROUP BY seniority
+        ORDER BY facet, n DESC
+        """
+    )
+    out: dict[str, list[dict]] = {"role_family": [], "industry": [], "seniority": []}
+    for r in rows:
+        out[r["facet"]].append({"value": r["value"], "count": r["n"]})
+    return out
+
+
 async def list_for_facet(*, limit: int = 500) -> list[dict]:
     """Active jobs reshaped for the in-memory facet engine (app.search.facet).
 

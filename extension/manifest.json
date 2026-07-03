@@ -31,7 +31,6 @@
     "https://*.workable.com/*",
     "https://*.recruitee.com/*",
     "https://*.teamtailor.com/*",
-    "http://localhost:3000/*",
     "https://cv-validation.vercel.app/*"
   ],
   "optional_host_permissions": [
@@ -40,7 +39,6 @@
   "content_scripts": [
     {
       "matches": [
-        "http://localhost:3000/*",
         "https://cv-validation.vercel.app/*"
       ],
       "js": [
