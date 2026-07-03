@@ -10,7 +10,7 @@ import { Suspense, useCallback, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
     ShieldCheck, MagnifyingGlass, Coins, ArrowLeft, SpinnerGap, CheckCircle, WarningCircle,
-    Heartbeat, PlugsConnected, ChatCircleDots, FunnelSimple,
+    Heartbeat, PlugsConnected, ChatCircleDots, FunnelSimple, Briefcase,
 } from '@phosphor-icons/react';
 import { useAuth } from '@/lib/auth';
 import { admin } from '@/lib/db';
@@ -18,13 +18,15 @@ import MonitorPanel from '@/components/admin/MonitorPanel';
 import CompatPanel from '@/components/admin/CompatPanel';
 import FeedbackPanel from '@/components/admin/FeedbackPanel';
 import FunnelPanel from '@/components/admin/FunnelPanel';
+import JobSearchPanel from '@/components/admin/JobSearchPanel';
 
 type Access = 'checking' | 'granted' | 'denied';
-type Tab = 'credits' | 'analytics' | 'monitor' | 'compat' | 'feedback';
+type Tab = 'credits' | 'jobs' | 'analytics' | 'monitor' | 'compat' | 'feedback';
 
 const QUICK_AMOUNTS = [50, 100, 250, 500];
 const TABS: { id: Tab; label: string; icon: typeof Coins }[] = [
     { id: 'credits', label: 'Cấp credit', icon: Coins },
+    { id: 'jobs', label: 'Tìm job', icon: Briefcase },
     { id: 'analytics', label: 'Funnel', icon: FunnelSimple },
     { id: 'monitor', label: 'Link monitor', icon: Heartbeat },
     { id: 'compat', label: 'Compatibility', icon: PlugsConnected },
@@ -222,6 +224,7 @@ function AdminConsole() {
                 </div>
 
                 {tab === 'credits' && creditsTab}
+                {tab === 'jobs' && <JobSearchPanel />}
                 {tab === 'analytics' && <FunnelPanel />}
                 {tab === 'monitor' && <MonitorPanel />}
                 {tab === 'compat' && <CompatPanel />}

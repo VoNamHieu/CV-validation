@@ -162,6 +162,25 @@ export const credits = {
 };
 
 // ── Admin (allowlisted operators only; backend enforces via ADMIN_EMAILS) ─────
+// Job row as the admin search returns it: full jobs columns + joined company.
+export type AdminJob = Job & {
+    company_name: string | null;
+    career_url: string | null;
+};
+
+export interface AdminJobSearchParams {
+    q?: string;
+    mode?: 'keyword' | 'semantic';
+    roleFamily?: string;
+    industry?: string;
+    seniority?: string;
+    status?: 'all' | 'active' | 'dead';
+    limit?: number;
+    offset?: number;
+}
+
+export type FacetValue = { value: string; count: number };
+
 export const admin = {
     // 200 when the caller is an admin; throws (403) otherwise. Used to gate the page.
     check: () => req<{ ok: boolean }>(`/api/admin/check`, { auth: true }),
@@ -174,7 +193,52 @@ export const admin = {
             `/api/admin/credits/grant`, { method: 'POST', body: JSON.stringify(body), auth: true },
         ),
     listFeedback: () => req<Feedback[]>(`/api/admin/feedback`, { auth: true }),
+
+    // Operator search over the whole job store (dead rows included).
+    searchJobs: (p: AdminJobSearchParams = {}) => {
+        const qs = new URLSearchParams();
+        if (p.q) qs.set('q', p.q);
+        if (p.mode) qs.set('mode', p.mode);
+        if (p.roleFamily) qs.set('role_family', p.roleFamily);
+        if (p.industry) qs.set('industry', p.industry);
+        if (p.seniority) qs.set('seniority', p.seniority);
+        if (p.status) qs.set('status', p.status);
+        if (p.limit !== undefined) qs.set('limit', String(p.limit));
+        if (p.offset !== undefined) qs.set('offset', String(p.offset));
+        return req<{ total: number; results: AdminJob[] }>(
+            `/api/admin/jobs/search?${qs}`, { auth: true },
+        );
+    },
+    jobFacets: () =>
+        req<{ role_family: FacetValue[]; industry: FacetValue[]; seniority: FacetValue[] }>(
+            `/api/admin/jobs/facets`, { auth: true },
+        ),
+
+    // Crawl trigger: ATS ingest + embedding backfill runs as a backend
+    // background task; POST kicks it off, GET polls until running=false.
+    triggerIngest: (render = false) =>
+        req<IngestState & { started: boolean }>(
+            `/api/admin/jobs/ingest?render=${render}`, { method: 'POST', auth: true },
+        ),
+    ingestStatus: () => req<IngestState>(`/api/admin/jobs/ingest/status`, { auth: true }),
 };
+
+export interface IngestState {
+    running: boolean;
+    last: {
+        at: number;
+        phase: 'crawling' | 'embedding' | 'done' | 'error';
+        duration_s?: number;
+        error: string | null;
+        stats: {
+            companies_with_feed: number;
+            jobs_upserted: number;
+            jobs_deactivated: number;
+            jobs_embedded?: number;
+            by_source: Record<string, number>;
+        } | null;
+    } | null;
+}
 
 // ── Account (user-scoped, requires auth) ──────────────────────────────────────
 export interface Profile {

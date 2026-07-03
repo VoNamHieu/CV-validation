@@ -7,14 +7,22 @@ header. When ``ADMIN_EMAILS`` is empty, the whole surface is closed (403).
 """
 from __future__ import annotations
 
+import asyncio
+import logging
+import time
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.db import credits as credits_repo
 from app.db import events as events_repo
 from app.db import feedback as feedback_repo
+from app.db import jobs as jobs_repo
 from app.db import profiles as profiles_repo
 from app.services.auth import require_admin
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -73,6 +81,125 @@ async def grant_credits(body: GrantBody, _admin: str = Depends(require_admin)):
 async def list_feedback(_admin: str = Depends(require_admin)):
     """Recent user feedback / support messages (newest first)."""
     return await feedback_repo.list_recent(limit=200)
+
+
+@router.get("/jobs/search")
+async def search_jobs(
+    q: Optional[str] = Query(None, max_length=200, description="Keyword over title/company/location/description"),
+    mode: str = Query("keyword", pattern="^(keyword|semantic)$"),
+    role_family: Optional[str] = Query(None, max_length=64),
+    industry: Optional[str] = Query(None, max_length=64),
+    seniority: Optional[str] = Query(None, max_length=32),
+    status: str = Query("all", pattern="^(all|active|dead)$"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    _admin: str = Depends(require_admin),
+):
+    """Operator search over the whole job store (dead rows included).
+
+    ``mode=semantic`` embeds ``q`` server-side and orders by cosine distance
+    (rows without a vector are excluded); default keyword mode is a plain
+    ILIKE match ordered by hotness."""
+    embedding = None
+    if mode == "semantic":
+        if not (q and q.strip()):
+            raise HTTPException(status_code=400, detail="Semantic mode cần từ khoá tìm kiếm")
+        from app.search.embed import embed_query
+        embedding = await asyncio.to_thread(embed_query, q.strip())
+
+    is_active = {"all": None, "active": True, "dead": False}[status]
+    rows, total = await jobs_repo.search_admin(
+        q=None if mode == "semantic" else q,
+        role_family=role_family,
+        industry=industry,
+        seniority=seniority,
+        is_active=is_active,
+        embedding=embedding,
+        limit=limit,
+        offset=offset,
+    )
+    return {"total": total, "results": rows}
+
+
+@router.get("/jobs/facets")
+async def job_facets(_admin: str = Depends(require_admin)):
+    """Distinct role_family / industry / seniority values (with counts) present
+    in the store — populates the admin search filter dropdowns."""
+    return await jobs_repo.facet_values()
+
+
+# ── Crawl trigger — ATS ingest + embedding backfill, as ONE shared background
+# task (same pattern as the featured-crawl refresh in career.py). The ingest
+# sweeps every featured company's ATS feed and can run for minutes, far past
+# the 60s frontend proxy timeout, so the POST only kicks it off and the panel
+# polls /jobs/ingest/status.
+_ingest_task: Optional[asyncio.Task] = None
+_ingest_last: dict = {}
+
+
+async def _embed_backfill(limit: int = 1000) -> int:
+    """Vectorize active jobs still missing an embedding so they show up in
+    semantic search. Returns rows embedded."""
+    from app.search.embed import build_job_doc, embed_jobs
+
+    todo = await jobs_repo.list_unembedded(limit=limit)
+    if not todo:
+        return 0
+    docs = [
+        build_job_doc(j["title"], jd=j.get("description") or "", must_have=j.get("must_have"))
+        for j in todo
+    ]
+    vectors = await asyncio.to_thread(embed_jobs, docs)
+    n = 0
+    for j, vec in zip(todo, vectors):
+        if not vec:
+            continue
+        try:
+            await jobs_repo.set_embedding(j["id"], vec)
+            n += 1
+        except Exception as e:  # noqa: BLE001
+            logger.info("embed backfill: job %s failed: %s", j["id"], str(e)[:80])
+    return n
+
+
+async def _run_ingest(render: bool) -> None:
+    global _ingest_last
+    t0 = time.time()
+    _ingest_last = {"at": t0, "phase": "crawling", "stats": None, "error": None}
+    try:
+        from app.services.job_ingest import ingest_featured_ats
+
+        stats = await ingest_featured_ats(render=render)
+        _ingest_last["phase"] = "embedding"
+        stats["jobs_embedded"] = await _embed_backfill()
+        _ingest_last.update(phase="done", stats=stats)
+    except Exception as e:  # noqa: BLE001
+        logger.exception("admin ingest failed")
+        _ingest_last.update(phase="error", error=str(e)[:300])
+    finally:
+        _ingest_last["duration_s"] = round(time.time() - t0, 1)
+
+
+@router.post("/jobs/ingest")
+async def trigger_ingest(
+    render: bool = Query(False, description="Also render bespoke pages (slower, catches embedded ATS)"),
+    _admin: str = Depends(require_admin),
+):
+    """Kick the store crawl: pull every featured company's ATS feed into
+    ``public.jobs`` (upsert + liveness diff), then backfill embeddings for any
+    job missing a vector. No-op (returns running state) if one is in flight."""
+    global _ingest_task
+    if _ingest_task and not _ingest_task.done():
+        return {"started": False, "running": True, "last": _ingest_last or None}
+    _ingest_task = asyncio.create_task(_run_ingest(render))
+    return {"started": True, "running": True, "last": _ingest_last or None}
+
+
+@router.get("/jobs/ingest/status")
+async def ingest_status(_admin: str = Depends(require_admin)):
+    """Poll target for the admin panel while a crawl runs."""
+    running = bool(_ingest_task and not _ingest_task.done())
+    return {"running": running, "last": _ingest_last or None}
 
 
 @router.get("/analytics/funnel")
