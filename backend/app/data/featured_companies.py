@@ -433,7 +433,10 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Adidas",
         homepage="https://adidas-group.com",
-        career_url="https://careers.adidas-group.com",
+        # careers.adidas-group.com is a JS shell; the real board is the
+        # SuccessFactors career site jobs.adidas-group.com. locationsearch=Vietnam
+        # scopes it to VN (roles tagged "Hanoi, 64, VN" / "Ho Chi Minh City").
+        career_url="https://jobs.adidas-group.com/search/?q=&locationsearch=Vietnam",
     ),
     FeaturedCompany(
         name="Nike",

@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import os
 import re
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, parse_qsl
 
 import requests
 
@@ -368,14 +368,25 @@ def _successfactors(career_url: str, html: str | None) -> list[dict]:
     if v4:
         logger.info(f"[ats] successfactors(v4) → {len(v4)} VN jobs ({origin})")
         return v4[:_MAX_ATS_JOBS]
-    # No locationsearch: VN-domestic SF sites tag locations as "Hà Nội" etc., so
-    # locationsearch=Vietnam returns nothing. Return all tiles; the downstream
-    # role/city filter narrows. (Most SF sites in the featured list are VN banks.)
+    # Legacy HTML tiles. VN-domestic SF sites (banks) tag locations as "Hà Nội"
+    # and a locationsearch=Vietnam facet returns nothing, so their career_url is
+    # a bare /search/?q= and we return all tiles (downstream role/city filter
+    # narrows). Global boards (Adidas) instead carry an explicit
+    # locationsearch=Vietnam in career_url — honour it by fetching the career_url
+    # AS GIVEN rather than resetting to /search/?q=, else the VN filter is lost.
     try:
-        r = requests.get(f"{origin}/search/?q=", headers=_HTML_HEADERS, timeout=_TIMEOUT)
-        if r.status_code != 200:
-            return []
-        soup = BeautifulSoup(r.text, "html.parser")
+        is_search = "/search" in (p.path or "")
+        # Use the passed HTML only when career_url IS the search page (so its
+        # rendered tiles are what we parse). For a homepage career_url the passed
+        # HTML has no tiles, so fetch the search endpoint instead.
+        if html and is_search:
+            soup = BeautifulSoup(html, "html.parser")
+        else:
+            fetch_url = career_url if is_search else f"{origin}/search/?q="
+            r = requests.get(fetch_url, headers=_HTML_HEADERS, timeout=_TIMEOUT)
+            if r.status_code != 200:
+                return []
+            soup = BeautifulSoup(r.text, "html.parser")
     except Exception:
         return []
     out, seen = [], set()
@@ -385,7 +396,13 @@ def _successfactors(career_url: str, html: str | None) -> list[dict]:
         if not href or not title or len(title) < 4 or href in seen:
             continue
         seen.add(href)
-        out.append({"title": title[:200], "url": origin + href, "location": "", "description": ""})
+        # SF classic pairs each title link with a span.jobLocation in the same
+        # row (e.g. "Hanoi, 64, VN"); grab it so ingest/VN-filter has a location.
+        row = a.find_parent(["tr", "li", "div"])
+        loc_el = row.select_one("span.jobLocation") if row else None
+        loc = loc_el.get_text(" ", strip=True) if loc_el else ""
+        out.append({"title": title[:200], "url": origin + href,
+                    "location": loc[:120], "description": ""})
     logger.info(f"[ats] successfactors → {len(out)} jobs ({origin})")
     return out[:50]
 
@@ -1292,7 +1309,61 @@ def _avature(career_url: str, html: str | None) -> list[dict]:
     return out
 
 
+# ── Radancy / TalentBrew (careers.se.com, many large-enterprise boards) ──────
+# TalentBrew sites live on bespoke domains but share a public JSON feed:
+#   GET {origin}/api/jobs?<same location facets as the career_url>&page=N
+#   → {jobs:[{data:{title, req_id, slug, full_location, country_code,
+#              apply_url, description, ...}}], totalCount}
+# Signature: the career_url carries Radancy's geo facets (woe= + regionCode=),
+# which no other adapter uses — safe to key on. The career_url should already
+# scope to Vietnam (regionCode=VN); we still re-filter on country_code/location
+# because the radius facet (stretch=) can pull in neighbouring-country roles.
+def _is_radancy(career_url: str) -> bool:
+    q = (urlparse(career_url or "").query or "").lower()
+    return "woe=" in q and "regioncode=" in q
+
+
+def _radancy(career_url: str) -> list[dict]:
+    p = urlparse(career_url)
+    origin = f"{p.scheme}://{p.netloc}"
+    base = dict(parse_qsl(p.query))            # preserve location/woe/regionCode
+    out, seen = [], set()
+    for page in range(1, 12):                  # 10/page, cap ~110
+        base["page"] = str(page)
+        try:
+            r = requests.get(f"{origin}/api/jobs", params=base,
+                             headers=_JSON_POST, timeout=_TIMEOUT)
+            if r.status_code != 200 or "json" not in r.headers.get("content-type", ""):
+                break
+            jobs = (r.json() or {}).get("jobs", []) or []
+        except Exception as e:
+            logger.info(f"[ats] radancy failed: {str(e)[:80]}")
+            break
+        if not jobs:
+            break
+        for it in jobs:
+            d = it.get("data", it)
+            title = (d.get("title") or "").strip()
+            loc = d.get("full_location") or d.get("short_location") or d.get("location_name") or ""
+            if (d.get("country_code") or "").upper() != "VN" and not _is_vn_loc(loc):
+                continue
+            url = (d.get("apply_url") or "").rstrip("/")
+            if url.endswith("/login"):
+                url = url[: -len("/login")]
+            url = url or f"{origin}/jobs/{d.get('slug') or d.get('req_id')}"
+            if not title or url in seen:
+                continue
+            seen.add(url)
+            out.append({"title": title[:200], "url": url, "location": str(loc)[:120],
+                        "description": _strip_html(d.get("description") or "")[:600]})
+        if len(jobs) < 10 or len(out) >= _MAX_ATS_JOBS:
+            break
+    logger.info(f"[ats] radancy → {len(out)} VN jobs ({origin})")
+    return out
+
+
 _ADAPTERS: list = [
+    ("radancy",        lambda u, h: _is_radancy(u),      lambda u, h: _radancy(u)),
     ("avature",        _is_avature,                      lambda u, h: _avature(u, h)),
     ("amazon",         lambda u, h: _is_amazon(u),       lambda u, h: _amazon(u)),
     ("workday",        lambda u, h: _resolve_workday_url(u, h) is not None,
