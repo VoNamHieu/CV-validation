@@ -279,7 +279,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     // ══════════════════════════════════════════════════════════════
-    // ── LLM PROXY — content scripts can't fetch localhost (CORS) ──
+    // ── LLM PROXY — content scripts route AI calls through the background ──
     // ══════════════════════════════════════════════════════════════
     if (message.type === 'PROXY_LLM_MAP_FORM') {
         const { formFields, profileData } = message;
@@ -291,11 +291,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 const authHeaders = data.jobfitToken
                     ? { Authorization: `Bearer ${data.jobfitToken}` } : {};
 
-                // Try Vercel first, then localhost
-                const urls = [
-                    appUrl,
-                    appUrl.includes('localhost') ? null : 'http://localhost:3000',
-                ].filter(Boolean);
+                const urls = [appUrl];
 
                 let lastError = null;
                 for (const baseUrl of urls) {
@@ -344,10 +340,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 const authHeaders = data.jobfitToken
                     ? { Authorization: `Bearer ${data.jobfitToken}` } : {};
 
-                const urls = [
-                    appUrl,
-                    appUrl.includes('localhost') ? null : 'http://localhost:3000',
-                ].filter(Boolean);
+                const urls = [appUrl];
 
                 let lastError = null;
                 for (const baseUrl of urls) {
@@ -423,10 +416,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 // The AI routes require a login (the synced JWT) server-side.
                 const authHeaders = data.jobfitToken
                     ? { Authorization: `Bearer ${data.jobfitToken}` } : {};
-                const urls = [
-                    appUrl,
-                    appUrl.includes('localhost') ? null : 'http://localhost:3000',
-                ].filter(Boolean);
+                const urls = [appUrl];
                 console.log(`${M1} endpoints to try (in order):`, urls);
 
                 // Charge the tailor fee up front (the pipeline is 3 LLM calls).
