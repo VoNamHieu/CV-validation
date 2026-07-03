@@ -3,11 +3,26 @@
 # Not used by the web service — that reads railway.toml. To wire this up:
 #   1. Railway → New Service → deploy from this same repo.
 #   2. Service → Settings → Config-as-code → set path to "railway.cron.toml".
-#   3. Share the web service's variables (DATABASE_URL, GEMINI_API_KEY, …).
+#   3. Set the service variables below (NOT stored here — they're secrets /
+#      env-specific, set them in Railway → cron service → Variables).
 #
 # Railway runs `startCommand` on `cronSchedule`; the process does its work and
 # exits (see app/tasks/cron_refresh.py), so restartPolicy is NEVER — a clean
 # exit must NOT be treated as a crash-and-restart.
+#
+# ── Required service variables (set in Railway, not here) ────────────────────
+#   GEMINI_API_KEY   — reference the web service's value (needed to embed new jobs)
+#   DATABASE_URL     — MUST use the Supabase TRANSACTION pooler (port :6543),
+#                      NOT the session pooler (:5432). The web service already
+#                      holds ~10 of the 15 session-mode client slots; a cron on
+#                      :5432 exhausts them mid-run → EMAXCONNSESSION and every
+#                      upsert fails. :6543 (transaction mode) has a far higher
+#                      client cap and is the correct choice for a batch job.
+#                      Our pool sets statement_cache_size=0, so it's compatible.
+#   DB_POOL_MAX=3    — small pool; the cron writes sequentially, doesn't need 10.
+#
+# Optional:
+#   CRON_SCAN_LIMIT  — how many featured job URLs the link scan checks (default 300).
 
 [build]
 builder = "DOCKERFILE"
