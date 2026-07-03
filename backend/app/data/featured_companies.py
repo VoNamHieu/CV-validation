@@ -774,7 +774,10 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="IHG",
         homepage="https://ihg.com",
-        career_url="https://careers.ihg.com",
+        # careers.ihg.com is a 403 anti-bot shell; the real board is IHG's
+        # Oracle HCM candidate-experience tenant (siteName "IHG Career",
+        # site CX_1001) → _oracle_hcm pulls VN reqs from its public REST API.
+        career_url="https://fa-evax-saasfaprod1.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/",
     ),
 
     # ── Aviation ──────────────────────────────────────────────────────
