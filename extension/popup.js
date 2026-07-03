@@ -240,6 +240,12 @@ function resetAll() {
 function initTabs() {
     const tabs = document.querySelectorAll('.tab');
     const contents = document.querySelectorAll('.tab-content');
+    const footer = document.querySelector('.footer');
+
+    const applyFooterVisibility = (tabName) => {
+        // "Lưu Profile" only makes sense where profile fields live.
+        if (footer) footer.style.display = tabName === 'apply' ? 'none' : '';
+    };
 
     tabs.forEach(tab => {
         tab.addEventListener('click', () => {
@@ -247,24 +253,79 @@ function initTabs() {
             contents.forEach(c => c.classList.remove('active'));
             tab.classList.add('active');
             document.getElementById(`tab-${tab.dataset.tab}`).classList.add('active');
+            applyFooterVisibility(tab.dataset.tab);
         });
     });
+
+    applyFooterVisibility(document.querySelector('.tab.active')?.dataset.tab);
+}
+
+// ── Tailor progress stepper (replaces the old in-page toast overlay) ────────
+// The pipeline is one long background request (extract → score → optimize,
+// ~20–60s), so the steps advance on a timer and the final step keeps spinning
+// until the real response lands.
+const STEP_ADVANCE_MS = [1500, 6000, 9000, 14000, 18000];
+let __stepTimers = [];
+
+function progressSteps() {
+    return [...document.querySelectorAll('#progressSteps li')];
+}
+
+function startTailorProgress() {
+    const card = document.getElementById('tailorProgress');
+    const steps = progressSteps();
+    __stepTimers.forEach(clearTimeout);
+    __stepTimers = [];
+    card.hidden = false;
+    card.className = 'progress-card running';
+    document.getElementById('progressTitle').textContent = 'AI đang tối ưu CV của bạn…';
+    document.getElementById('progressTip').textContent = 'Mẹo: quá trình này mất khoảng 20–60 giây.';
+    steps.forEach(li => li.className = '');
+    steps[0].classList.add('active');
+    // Advance step i → done, i+1 → active on a rough schedule; the last step
+    // never auto-completes — finishTailorProgress() resolves it.
+    STEP_ADVANCE_MS.forEach((ms, i) => {
+        if (i + 1 >= steps.length) return;
+        __stepTimers.push(setTimeout(() => {
+            steps[i].className = 'done';
+            steps[i + 1].className = 'active';
+        }, ms));
+    });
+}
+
+function finishTailorProgress(success, errorMsg) {
+    const card = document.getElementById('tailorProgress');
+    const steps = progressSteps();
+    __stepTimers.forEach(clearTimeout);
+    __stepTimers = [];
+    if (success) {
+        steps.forEach(li => li.className = 'done');
+        card.className = 'progress-card success';
+        document.getElementById('progressTitle').textContent = '✅ CV đã được tối ưu!';
+        document.getElementById('progressTip').textContent = 'Mở Copo App để xem CV và ứng tuyển.';
+    } else {
+        const current = steps.findIndex(li => li.classList.contains('active'));
+        const failedAt = current === -1 ? 0 : current;
+        steps.forEach((li, i) => li.className = i < failedAt ? 'done' : (i === failedAt ? 'error' : ''));
+        card.className = 'progress-card failed';
+        document.getElementById('progressTitle').textContent = 'Tối ưu CV thất bại';
+        document.getElementById('progressTip').textContent = `❌ ${errorMsg || 'Không tailor được'}`;
+    }
 }
 
 // ── Mode 1: tell the content script on the active job tab to tailor the CV ──
 async function tailorCurrentJob() {
     const statusEl = document.getElementById('tailorStatus');
     const btn = document.getElementById('tailorJobBtn');
-    btn.disabled = true; btn.textContent = '⏳ Đang tailor…'; statusEl.textContent = '';
+    btn.disabled = true; btn.textContent = '⏳ Đang tối ưu…'; statusEl.textContent = '';
     try {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
         if (!tab || !/^https?:/.test(tab.url || '')) throw new Error('Mở một trang job (https) trước.');
+        startTailorProgress();
         const resp = await chrome.tabs.sendMessage(tab.id, { type: 'RUN_MODE1' });
-        statusEl.textContent = resp?.success
-            ? '✅ Đã tailor — mở Copo để xem & ứng tuyển.'
-            : `❌ ${resp?.error || 'Không tailor được'}`;
+        finishTailorProgress(!!resp?.success, resp?.error);
     } catch (e) {
-        statusEl.textContent = `❌ ${e.message || e}`;
+        finishTailorProgress(false, e.message || String(e));
     } finally {
         btn.disabled = false; btn.textContent = '✨ Tailor CV cho job đang mở';
     }
@@ -290,6 +351,7 @@ async function trackGrant(origin) {
     }
 }
 
+// Lives in the Settings tab — the Apply-tab perm card only asks for grants.
 async function renderGrantedList() {
     const wrap = document.getElementById('grantedList');
     const { optionalGrants = [] } = await chrome.storage.local.get('optionalGrants');
@@ -308,16 +370,26 @@ async function renderGrantedList() {
             await chrome.permissions.remove({ origins: [origin] }).catch(() => { });
             const { optionalGrants: cur = [] } = await chrome.storage.local.get('optionalGrants');
             await chrome.storage.local.set({ optionalGrants: cur.filter(o => o !== origin) });
+            renderGrantedList();
             refreshPermUI();
             refreshOnboarding();
         });
         row.append(label, btn);
         wrap.appendChild(row);
     }
+    if (!wrap.children.length) {
+        const empty = document.createElement('div');
+        empty.className = 'perm-granted-empty';
+        empty.textContent = 'Chưa cấp quyền cho trang nào.';
+        wrap.appendChild(empty);
+    }
 }
 
-// Reflect the active tab's access state in the card.
+// Reflect the active tab's access state in the card. Once the active tab is
+// already covered (known host / all-sites / per-site grant) the whole card
+// hides — it only exists to ask for a grant, not to sit there confirming one.
 async function refreshPermUI() {
+    const card = document.getElementById('permCard');
     const pill = document.getElementById('permPill');
     const siteEl = document.getElementById('permSite');
     const grantBtn = document.getElementById('grantSiteBtn');
@@ -333,33 +405,36 @@ async function refreshPermUI() {
         known = KNOWN_HOST_RE.test(host);
     } catch (e) { /* non-web tab */ }
 
-    if (!isHttp) {
-        siteEl.textContent = 'Mở một trang tuyển dụng (https) để cấp quyền.';
-        setPill('muted', '—');
-        grantBtn.disabled = true;
-        renderGrantedList();
-        return;
-    }
-    siteEl.textContent = host;
     // "All job sites" opt-in covers everything — the recommended path for the
     // featured pool, whose company career pages live on hundreds of bespoke
     // domains we can't statically allowlist.
     const allGranted = await chrome.permissions.contains({ origins: ['https://*/*'] }).catch(() => false);
-    const grantAllBtn = document.getElementById('grantAllBtn');
-    if (grantAllBtn) grantAllBtn.disabled = allGranted;
-
-    if (known) {
-        setPill('ok', '✓ Đã hỗ trợ sẵn');
-        grantBtn.disabled = true;
-    } else if (allGranted) {
-        setPill('ok', '✓ Đã bật mọi trang');
-        grantBtn.disabled = true;
-    } else {
-        const has = await chrome.permissions.contains({ origins: [origin] }).catch(() => false);
-        if (has) { setPill('ok', '✓ Đã cấp'); grantBtn.disabled = true; }
-        else { setPill('warn', 'Cần cấp quyền'); grantBtn.disabled = false; }
+    if (allGranted) {
+        card.hidden = true;
+        return;
     }
-    renderGrantedList();
+
+    if (!isHttp) {
+        card.hidden = false;
+        siteEl.textContent = 'Mở một trang tuyển dụng (https) để cấp quyền.';
+        setPill('muted', '—');
+        grantBtn.disabled = true;
+        return;
+    }
+
+    const siteGranted = known
+        || await chrome.permissions.contains({ origins: [origin] }).catch(() => false);
+    if (siteGranted) {
+        card.hidden = true;
+        return;
+    }
+
+    card.hidden = false;
+    siteEl.textContent = host;
+    const grantAllBtn = document.getElementById('grantAllBtn');
+    if (grantAllBtn) grantAllBtn.disabled = false;
+    setPill('warn', 'Cần cấp quyền');
+    grantBtn.disabled = false;
 }
 
 async function grantCurrentSite() {
@@ -380,7 +455,9 @@ async function grantCurrentSite() {
             await chrome.scripting.insertCSS({ target: { tabId: __activeTab.id }, files: ['content.css'] });
             await chrome.scripting.executeScript({ target: { tabId: __activeTab.id }, files: ['utils.js', 'content-agent.js'] });
         } catch (e) { /* already present (declarative) — ignore */ }
-        refreshPermUI();
+        renderGrantedList();
+        // Let the ✅ line breathe before the card hides itself.
+        setTimeout(refreshPermUI, 1400);
     } catch (e) {
         statusEl.textContent = `❌ ${e.message || e}`;
     }
@@ -393,7 +470,8 @@ async function grantAllSites() {
         if (!granted) { statusEl.textContent = '❌ Bạn đã từ chối cấp quyền.'; return; }
         await trackGrant('https://*/*');
         statusEl.textContent = '✅ Đã cấp quyền cho mọi trang tuyển dụng.';
-        refreshPermUI();
+        renderGrantedList();
+        setTimeout(refreshPermUI, 1400);
         refreshOnboarding();
     } catch (e) {
         statusEl.textContent = `❌ ${e.message || e}`;
@@ -420,12 +498,13 @@ async function onboardGrantAll() {
         const granted = await chrome.permissions.request({ origins: ['https://*/*'] });
         btn.disabled = true;
         if (!granted) {
-            statusEl.textContent = '❌ Bạn đã từ chối — có thể bật lại trong tab Career bất cứ lúc nào.';
+            statusEl.textContent = '❌ Bạn đã từ chối — có thể bật lại trong tab Apply job bất cứ lúc nào.';
             btn.disabled = false;
             return;
         }
         await trackGrant('https://*/*');
         statusEl.textContent = '✅ Đã bật! Auto Apply chạy được trên mọi trang tuyển dụng.';
+        renderGrantedList();
         refreshPermUI();
         setTimeout(refreshOnboarding, 1400);
     } catch (e) {
@@ -474,6 +553,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('onboardDismissBtn').addEventListener('click', dismissOnboarding);
     refreshPermUI();
     refreshOnboarding();
+    renderGrantedList();
 
     // CV upload
     const cvFileInput = document.getElementById('cvFileInput');

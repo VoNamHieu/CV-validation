@@ -13,8 +13,8 @@
   </div>
 
   <div class="tabs">
-    <button class="tab active" data-tab="profile">👤 Profile</button>
-    <button class="tab" data-tab="career">💼 Career</button>
+    <button class="tab active" data-tab="apply">⚡ Apply job</button>
+    <button class="tab" data-tab="profile">👤 Hồ sơ</button>
     <button class="tab" data-tab="settings">⚙️ Settings</button>
   </div>
 
@@ -32,8 +32,46 @@
     <div id="onboardStatus" class="onboard-status"></div>
   </div>
 
-  <!-- ═══ Profile Tab ═══ -->
-  <div class="tab-content active" id="tab-profile">
+  <!-- ═══ Apply Job Tab ═══ -->
+  <div class="tab-content active" id="tab-apply">
+    <div class="field" style="margin-bottom:12px;">
+      <button id="tailorJobBtn" class="btn-action" style="width:100%;">✨ Tailor CV cho job đang mở</button>
+      <div id="tailorStatus" style="font-size:12px;margin-top:6px;color:#a5b4fc;"></div>
+    </div>
+
+    <!-- Tailor progress (Copo-style stepper) — shown after bấm apply,
+         replaces the old in-page toast overlay entirely. -->
+    <div id="tailorProgress" class="progress-card" hidden>
+      <div class="progress-icon">✨</div>
+      <div class="progress-title" id="progressTitle">AI đang tối ưu CV của bạn…</div>
+      <div class="progress-sub">Điều chỉnh kinh nghiệm theo yêu cầu công việc để tăng điểm ATS.</div>
+      <ul class="progress-steps" id="progressSteps">
+        <li><span class="step-icon">📄</span><span class="step-label">Đọc mô tả công việc trên trang</span><span class="step-state"></span></li>
+        <li><span class="step-icon">📋</span><span class="step-label">Trích xuất yêu cầu chính</span><span class="step-state"></span></li>
+        <li><span class="step-icon">🤝</span><span class="step-label">Đối chiếu với kinh nghiệm của bạn</span><span class="step-state"></span></li>
+        <li><span class="step-icon">⚙️</span><span class="step-label">Tạo CV đã tối ưu</span><span class="step-state"></span></li>
+        <li><span class="step-icon">📊</span><span class="step-label">Tính điểm phù hợp</span><span class="step-state"></span></li>
+      </ul>
+      <div class="progress-tip" id="progressTip">Mẹo: quá trình này mất khoảng 20–60 giây.</div>
+    </div>
+
+    <div class="perm-card" id="permCard">
+      <div class="perm-head">
+        <span class="perm-title">🔓 Quyền truy cập trang</span>
+        <span id="permPill" class="perm-pill muted">…</span>
+      </div>
+      <div id="permSite" class="perm-site">Đang kiểm tra trang đang mở…</div>
+      <div class="perm-actions">
+        <button id="grantSiteBtn" class="btn-action">Cho phép trang này</button>
+        <button id="grantAllBtn" class="btn-ghost">Mọi trang tuyển dụng</button>
+      </div>
+      <div id="grantStatus" class="perm-status-line"></div>
+      <p class="hint">Công ty trong danh sách gợi ý thường dùng trang tuyển dụng trên domain riêng. Bật <b>"Mọi trang tuyển dụng"</b> để agent tự ứng tuyển khắp nơi — có thể thu hồi bất cứ lúc nào trong tab Settings.</p>
+    </div>
+  </div>
+
+  <!-- ═══ Hồ sơ Tab (Profile + Career merged) ═══ -->
+  <div class="tab-content" id="tab-profile">
     <div class="field-row">
       <div class="field">
         <label>Họ <span class="req">*</span></label>
@@ -109,30 +147,8 @@
       <label>Địa chỉ chi tiết</label>
       <input type="text" id="addressStreet" placeholder="123 Nguyễn Huệ">
     </div>
-  </div>
 
-  <!-- ═══ Career Tab ═══ -->
-  <div class="tab-content" id="tab-career">
-    <div class="field" style="margin-bottom:12px;">
-      <button id="tailorJobBtn" class="btn-action" style="width:100%;">✨ Tailor CV cho job đang mở</button>
-      <div id="tailorStatus" style="font-size:12px;margin-top:6px;color:#a5b4fc;"></div>
-    </div>
-
-    <div class="perm-card">
-      <div class="perm-head">
-        <span class="perm-title">🔓 Quyền truy cập trang</span>
-        <span id="permPill" class="perm-pill muted">…</span>
-      </div>
-      <div id="permSite" class="perm-site">Đang kiểm tra trang đang mở…</div>
-      <div class="perm-actions">
-        <button id="grantSiteBtn" class="btn-action">Cho phép trang này</button>
-        <button id="grantAllBtn" class="btn-ghost">Mọi trang tuyển dụng</button>
-      </div>
-      <div id="grantStatus" class="perm-status-line"></div>
-      <p class="hint">Công ty trong danh sách gợi ý thường dùng trang tuyển dụng trên domain riêng. Bật <b>"Mọi trang tuyển dụng"</b> để agent tự ứng tuyển khắp nơi — có thể thu hồi bất cứ lúc nào.</p>
-      <div id="grantedList" class="perm-granted"></div>
-    </div>
-
+    <div class="section-title">💼 Nghề nghiệp</div>
     <div class="field">
       <label>Chức danh hiện tại <span class="req">*</span></label>
       <input type="text" id="currentTitle" placeholder="Product Manager">
@@ -232,6 +248,14 @@
         <button id="uploadCvBtn" class="btn-action">Upload</button>
         <span id="cvFileName" style="font-size: 11px; opacity: 0.7; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"></span>
       </div>
+    </div>
+
+    <div class="setting-card" style="display: block;">
+      <div class="setting-label">
+        <span>🔓 Quyền đã cấp</span>
+        <p class="hint">Các trang extension được phép chạy — thu hồi bất cứ lúc nào</p>
+      </div>
+      <div id="grantedList" class="perm-granted"></div>
     </div>
 
     <div class="setting-card">
