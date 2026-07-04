@@ -44,33 +44,44 @@ function StatusPill({
 }: { status: JobStatus; onChange: (s: JobStatus) => void }) {
     const meta = STATUS_META[status];
     return (
-        <select
-            value={status}
-            onChange={(e) => onChange(e.target.value as JobStatus)}
-            onClick={(e) => e.stopPropagation()}
-            aria-label="Trạng thái ứng tuyển"
-            style={{
-                appearance: 'none',
-                background: meta.bg,
-                color: meta.color,
-                border: `1px solid ${meta.border}`,
-                borderRadius: 20,
-                padding: '4px 26px 4px 10px',
-                fontSize: '0.75rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-                backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'><path fill='${encodeURIComponent(meta.color)}' d='M1 3l4 4 4-4z'/></svg>")`,
-                backgroundRepeat: 'no-repeat',
-                backgroundPosition: 'right 8px center',
-                backgroundSize: '8px',
-            }}
-        >
-            {JOB_STATUS_ORDER.map((s) => (
-                <option key={s} value={s} style={{ background: 'var(--bg-card)', color: 'var(--text-primary)' }}>
-                    {STATUS_META[s].label}
-                </option>
-            ))}
-        </select>
+        // The caret used to be a CSS backgroundImage on the <select> itself —
+        // on macOS Safari/WebKit that inline background bleeds into and tiles
+        // across the native OPEN dropdown popup (each option row repaints the
+        // parent's background), rendering as a wall of "▼▼▼▼" over the option
+        // text. Rendering the caret as a separate overlay element instead keeps
+        // the <select>'s own background a plain solid color, which WebKit's
+        // native popup always paints correctly.
+        <span style={{ position: 'relative', display: 'inline-block' }}>
+            <select
+                value={status}
+                onChange={(e) => onChange(e.target.value as JobStatus)}
+                onClick={(e) => e.stopPropagation()}
+                aria-label="Trạng thái ứng tuyển"
+                style={{
+                    appearance: 'none',
+                    WebkitAppearance: 'none',
+                    MozAppearance: 'none',
+                    background: meta.bg,
+                    color: meta.color,
+                    border: `1px solid ${meta.border}`,
+                    borderRadius: 20,
+                    padding: '4px 24px 4px 10px',
+                    fontSize: '0.75rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                }}
+            >
+                {JOB_STATUS_ORDER.map((s) => (
+                    <option key={s} value={s} style={{ background: 'var(--bg-card)', color: 'var(--text-primary)' }}>
+                        {STATUS_META[s].label}
+                    </option>
+                ))}
+            </select>
+            <CaretDown size={9} weight="bold" style={{
+                position: 'absolute', right: 9, top: '50%', transform: 'translateY(-50%)',
+                color: meta.color, pointerEvents: 'none',
+            }} />
+        </span>
     );
 }
 
