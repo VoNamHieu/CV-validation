@@ -31,6 +31,7 @@ def rerank(query_vec: list[float], jobs: list[dict],
            facet_key=lambda j: j["_facet"]["score"],
            vec_key=lambda j: j.get("_vec"),
            tier_key=lambda j: j["_facet"].get("is_primary", False),
+           reachable_key=lambda j: j["_facet"].get("reachable", True),
            query_phrase: str = "") -> list[dict]:
     """Each job needs a facet score (Phase 1) + an embedding (_vec). Returns the
     list re-sorted by (literal, tier, blended score), annotating _cos/_final/_literal.
@@ -54,5 +55,10 @@ def rerank(query_vec: list[float], jobs: list[dict],
         j["_cos"] = round(cos, 4)
         j["_literal"] = lit
         j["_final"] = round(_W_FACET * facet_key(j) + _W_COS * cos, 4)
-    jobs.sort(key=lambda j: (j.get("_literal", False), tier_key(j), j["_final"]), reverse=True)
+    # (literal, is_primary, reachable, final) — `reachable` must stay in the key
+    # so Phase 1's invariant holds through rerank: a high-cosine UNREACHABLE job
+    # can never leapfrog a reachable one (they share is_primary=False, so without
+    # this the blended score alone decides and cosine leaks across the tier).
+    jobs.sort(key=lambda j: (j.get("_literal", False), tier_key(j), reachable_key(j), j["_final"]),
+              reverse=True)
     return jobs
