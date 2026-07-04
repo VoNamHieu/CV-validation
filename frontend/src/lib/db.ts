@@ -233,7 +233,10 @@ export const admin = {
 
     // ── Promoted-page management (audit / publish / delete) ──
     listPromoted: () => req<PromotedPage[]>(`/api/store/promoted`, { auth: true }),
-    patchPromoted: (id: string, body: Partial<Pick<PromotedPage, 'status' | 'slug' | 'template'>>) =>
+    patchPromoted: (
+        id: string,
+        body: { status?: PromotedStatus; slug?: string; template?: string; snapshot?: Record<string, unknown> },
+    ) =>
         req<PromotedPage>(`/api/store/promoted/${id}`, {
             method: 'PATCH', body: JSON.stringify(body), auth: true,
         }),
@@ -255,6 +258,8 @@ export interface PromotedPage {
         industry?: string;
         seniority?: string;
         source_url?: string;
+        logo_mime?: string;
+        has_logo?: boolean;   // list endpoint strips raw logo_b64, exposes this
     };
     status: PromotedStatus;
     template: string;
