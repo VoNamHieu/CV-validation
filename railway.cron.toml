@@ -20,6 +20,9 @@
 #                      client cap and is the correct choice for a batch job.
 #                      Our pool sets statement_cache_size=0, so it's compatible.
 #   DB_POOL_MAX=3    — small pool; the cron writes sequentially, doesn't need 10.
+#   REDIS_URL        — reference the web service's value. The link-scan step reads
+#                      the featured-jobs cache from Redis; without it the scan
+#                      finds 0 URLs (ingest still works — it hits ATS directly).
 #
 # Optional:
 #   CRON_SCAN_LIMIT  — how many featured job URLs the link scan checks (default 300).
