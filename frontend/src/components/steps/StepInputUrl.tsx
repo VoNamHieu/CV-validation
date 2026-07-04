@@ -1258,7 +1258,10 @@ export default function StepInputUrl() {
                 AI tìm công ty phù hợp với CV và chấm điểm tin tuyển dụng của họ
             </div>
 
-            {/* Divider */}
+            {/* Divider + manual URL input — hidden once a search is running so
+                the processing pipeline below isn't competing with a still-usable
+                (but pointless-to-touch-mid-run) form for attention. */}
+            {!isProcessing && <>
             <div style={{
                 display: 'flex', alignItems: 'center', gap: 12,
                 margin: '20px 0',
@@ -1308,6 +1311,7 @@ export default function StepInputUrl() {
                     Tìm trên URL này
                 </button>
             </div>
+            </>}
             </>}
 
             {/* Inferred title badge */}
