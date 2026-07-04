@@ -109,7 +109,9 @@ async function req<T>(path: string, init?: RequestInit & { auth?: boolean }): Pr
     const res = await fetch(path, { ...init, headers });
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || `Request failed: ${res.status}`);
+        const e = new Error(err.detail || `Request failed: ${res.status}`) as Error & { status?: number };
+        e.status = res.status;   // let callers distinguish 403 (real) from 401/5xx (transient)
+        throw e;
     }
     return res.json();
 }
