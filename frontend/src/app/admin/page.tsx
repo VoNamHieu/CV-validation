@@ -21,7 +21,7 @@ import FunnelPanel from '@/components/admin/FunnelPanel';
 import JobSearchPanel from '@/components/admin/JobSearchPanel';
 import PromotedPanel from '@/components/admin/PromotedPanel';
 
-type Access = 'checking' | 'granted' | 'denied';
+type Access = 'checking' | 'granted' | 'denied' | 'error';
 type Tab = 'credits' | 'jobs' | 'promoted' | 'analytics' | 'monitor' | 'compat' | 'feedback';
 
 const QUICK_AMOUNTS = [50, 100, 250, 500];
@@ -53,11 +53,34 @@ function AdminConsole() {
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
 
+    // Verify admin access. Only a genuine 403 means "not an admin" → denied.
+    // A 401 (token not refreshed yet) or 5xx/network blip is TRANSIENT — retry a
+    // few times, and if it never succeeds show a "connection error / retry"
+    // screen instead of the misleading "no access" (which made real admins think
+    // they'd been locked out). This is why the page occasionally flashed denied.
+    const [checkNonce, setCheckNonce] = useState(0);
     useEffect(() => {
         if (enabled && authLoading) return;
         if (enabled && !user) { setAccess('denied'); return; }
-        admin.check().then(() => setAccess('granted')).catch(() => setAccess('denied'));
-    }, [enabled, authLoading, user]);
+        let cancelled = false;
+        setAccess('checking');
+        (async () => {
+            for (let attempt = 0; attempt < 4; attempt++) {
+                try {
+                    await admin.check();
+                    if (!cancelled) setAccess('granted');
+                    return;
+                } catch (e) {
+                    const status = (e as { status?: number })?.status;
+                    if (status === 403) { if (!cancelled) setAccess('denied'); return; }
+                    // transient (401 / 5xx / network) → back off and retry
+                    await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
+                }
+            }
+            if (!cancelled) setAccess('error');
+        })();
+        return () => { cancelled = true; };
+    }, [enabled, authLoading, user, checkNonce]);
 
     const doLookup = useCallback(async () => {
         if (!email.trim()) return;
@@ -96,6 +119,25 @@ function AdminConsole() {
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, color: 'var(--text-muted)' }}>
                 <SpinnerGap size={32} style={{ animation: 'spin 0.8s linear infinite' }} />
                 <span style={{ fontSize: '0.9rem' }}>Đang kiểm tra quyền truy cập…</span>
+            </div>,
+        );
+    }
+    if (access === 'error') {
+        return centered(
+            <div className="glass-card" style={{ padding: 32, textAlign: 'center' }}>
+                <WarningCircle size={40} weight="duotone" style={{ color: 'var(--accent-amber, #d97706)', marginBottom: 12 }} />
+                <h2 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 8, color: 'var(--text-primary)' }}>Không kiểm tra được quyền</h2>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: 20, lineHeight: 1.5 }}>
+                    Kết nối tới máy chủ đang trục trặc (không phải do tài khoản). Thử lại sau giây lát.
+                </p>
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+                    <button className="btn-primary" onClick={() => setCheckNonce((n) => n + 1)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                        Thử lại
+                    </button>
+                    <button className="btn-secondary" onClick={() => router.replace('/')} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                        <ArrowLeft size={16} weight="bold" /> Về trang chủ
+                    </button>
+                </div>
             </div>,
         );
     }
