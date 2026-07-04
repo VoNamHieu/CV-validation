@@ -61,12 +61,15 @@ def build_snapshot(job: dict, company_name: Optional[str] = None) -> dict:
 
 def public_view(row: dict) -> dict:
     """Serialize a row for the ANONYMOUS public page — strips internal snapshot
-    fields (source_url) and operator metadata."""
+    fields (source_url, raw logo bytes) and operator metadata. `has_logo` tells
+    the page whether to render the uploaded company logo (served as bytes by the
+    logo-by-slug endpoint) instead of the letter avatar."""
     snap = row.get("snapshot") or {}
     return {
         "slug": row.get("slug"),
         "template": row.get("template") or "default",
         "og_image_url": row.get("og_image_url"),
+        "has_logo": bool(snap.get("logo_b64")),
         "job": {k: snap.get(k, "") for k in _PUBLIC_SNAPSHOT_KEYS},
     }
 
@@ -135,12 +138,20 @@ async def list_pages(*, limit: int = 100, offset: int = 0) -> list[dict]:
 
 
 async def update(page_id: str, **fields) -> Optional[dict]:
-    """Patch mutable columns (slug, snapshot, status, template, og_image_url)."""
+    """Patch mutable columns (slug, snapshot, status, template, og_image_url).
+
+    ``snapshot`` is MERGED (jsonb ``||``), not replaced — so a partial edit (just
+    the JD, or just the logo) keeps the other snapshot fields intact. To drop a
+    key, pass it explicitly as null in the snapshot payload."""
     allowed = {"slug", "snapshot", "status", "template", "og_image_url"}
     sets, args = [], []
     for k, v in fields.items():
-        if k in allowed and v is not None:
-            args.append(v)
+        if k not in allowed or v is None:
+            continue
+        args.append(v)
+        if k == "snapshot":
+            sets.append(f"snapshot = coalesce(snapshot, '{{}}'::jsonb) || ${len(args)}::jsonb")
+        else:
             sets.append(f"{k} = ${len(args)}")
     if not sets:
         return await get(page_id)
