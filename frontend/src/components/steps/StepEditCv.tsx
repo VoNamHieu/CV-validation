@@ -11,6 +11,7 @@ import {
 import { useAppStore, type JDEntry } from '@/store/useAppStore';
 import { useAuthGate } from '@/lib/auth';
 import { useConsent } from '@/lib/consent-context';
+import ErrorBoundary from '@/components/ErrorBoundary';
 import GapReportSection from '@/components/GapReportSection';
 import BeforeAfterModal from '@/components/BeforeAfterModal';
 import EditableTemplateFrame from '@/components/EditableTemplateFrame';
@@ -1791,6 +1792,10 @@ export default function StepEditCv() {
             </div>{/* ───────── /LEFT ───────── */}
 
             {/* ──────────────────── RIGHT: job match analysis ──────────────────── */}
+            {/* Boundary keyed by entry: one job's malformed match/improvements/
+                suggestions shows an inline fallback instead of blanking the whole
+                editor — the CV column + job switcher stay usable. */}
+            <ErrorBoundary resetKey={currentEntry.id} label="phần phân tích của job này">
             <aside className="analysis-sidebar">
                 <MatchAnalysisPanel
                     entryId={currentEntry.id}
@@ -1818,6 +1823,7 @@ export default function StepEditCv() {
                     onApply={(notes) => void handleReoptimize(notes)}
                 />
             </aside>
+            </ErrorBoundary>
 
             </div>
             )}{/* ───────── /editor-layout ───────── */}
