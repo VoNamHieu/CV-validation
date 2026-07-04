@@ -1,3 +1,14 @@
+# Web service config (the API). The cron service uses railway.cron.toml.
+#
+# ── DATABASE_URL note (set in Railway → Variables, not here) ─────────────────
+# MUST use the Supabase TRANSACTION pooler (port :6543), NOT the session pooler
+# (:5432). Session mode caps the WHOLE project at 15 client connections — with
+# Supabase's own internals (PostgREST, pg_cron, auth) already holding several,
+# the web pool (up to DB_POOL_MAX=10) intermittently tips over the cap →
+# EMAXCONNSESSION → sporadic 500s (e.g. admin job search). Transaction mode has
+# a far higher client cap. Compatible because pool.py sets statement_cache_size=0
+# and the code uses no session-level features (LISTEN/NOTIFY, advisory locks).
+
 [build]
 builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
