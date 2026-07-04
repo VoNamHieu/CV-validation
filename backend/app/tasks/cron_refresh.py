@@ -89,6 +89,14 @@ async def main() -> None:
         logger.info("[cron] link scan starting (limit=%s)…", _SCAN_LIMIT)
         scan = await _link_scan()
         logger.info("[cron] link scan done: %s", scan)
+
+        # Prune promoted landing pages whose backing job just went inactive
+        # (deactivate_missing ran during ingest above) — a closed posting
+        # shouldn't keep a public "apply" page.
+        from app.db import promoted
+        dead = await promoted.delete_dead()
+        logger.info("[cron] promoted cleanup: deleted %d dead page(s)%s",
+                    len(dead), (" — " + ", ".join(dead[:20])) if dead else "")
     except Exception:
         logger.exception("[cron] refresh failed")
         raise

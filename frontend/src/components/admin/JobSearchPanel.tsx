@@ -7,7 +7,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
     MagnifyingGlass, ArrowsClockwise, CaretLeft, CaretRight, CaretDown,
     Briefcase, MapPin, ArrowSquareOut, SpinnerGap, Brain, TextAa,
-    DownloadSimple, CheckCircle, WarningCircle, Megaphone, Copy, Check,
+    DownloadSimple, CheckCircle, WarningCircle, Megaphone,
 } from '@phosphor-icons/react';
 import { admin, type AdminJob, type FacetValue, type IngestState } from '@/lib/db';
 
@@ -68,29 +68,22 @@ export default function JobSearchPanel() {
     const [error, setError] = useState('');
     const [expanded, setExpanded] = useState<string | null>(null);
 
-    // Promoted landing pages: jobId → public slug, plus in-flight + copied state.
-    const [promoted, setPromoted] = useState<Record<string, string>>({});
+    // Promoted landing pages: created as DRAFTS here, then reviewed/published in
+    // the "Trang truyền thông" tab. Track jobId → {slug, id, jdChars} for the
+    // preview link + status hint.
+    const [promoted, setPromoted] = useState<Record<string, { slug: string; id: string; jdChars: number }>>({});
     const [promoting, setPromoting] = useState<string | null>(null);
-    const [copiedSlug, setCopiedSlug] = useState<string | null>(null);
 
     const promote = useCallback(async (jobId: string) => {
         setPromoting(jobId);
         try {
             const r = await admin.promoteJob(jobId);
-            setPromoted((m) => ({ ...m, [jobId]: r.slug }));
+            setPromoted((m) => ({ ...m, [jobId]: { slug: r.slug, id: r.id, jdChars: r.jd_chars } }));
         } catch {
             setError('Không tạo được trang truyền thông.');
         } finally {
             setPromoting(null);
         }
-    }, []);
-
-    const copyLink = useCallback((slug: string) => {
-        const url = `${window.location.origin}/j/${slug}`;
-        navigator.clipboard?.writeText(url).then(() => {
-            setCopiedSlug(slug);
-            setTimeout(() => setCopiedSlug((s) => (s === slug ? null : s)), 1800);
-        }).catch(() => { });
     }, []);
     // Drops out-of-order responses (fast page-2 answer landing after page 3's).
     const seq = useRef(0);
@@ -482,31 +475,23 @@ export default function JobSearchPanel() {
 
                                     {promoted[j.id] && (
                                         <div style={{
-                                            display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, flexWrap: 'wrap',
+                                            display: 'flex', alignItems: 'center', gap: 10, marginTop: 10, flexWrap: 'wrap',
                                             padding: '8px 10px', borderRadius: 8, background: 'var(--bg-elevated)',
-                                            border: '1px solid var(--border-subtle)',
+                                            border: '1px solid var(--border-subtle)', fontSize: '0.74rem',
                                         }}>
-                                            <a href={`/j/${promoted[j.id]}`} target="_blank" rel="noreferrer" style={{
-                                                fontSize: '0.76rem', color: 'var(--accent-blue, #3b82f6)',
-                                                textDecoration: 'none', fontWeight: 600, wordBreak: 'break-all',
+                                            <span style={{ color: 'var(--accent-amber)', fontWeight: 700 }}>✓ Đã tạo nháp</span>
+                                            <span style={{ color: 'var(--text-muted)' }}>
+                                                JD {promoted[j.id].jdChars.toLocaleString()} ký tự
+                                            </span>
+                                            <a href={`/j/${promoted[j.id].slug}?preview=${promoted[j.id].id}`} target="_blank" rel="noreferrer" style={{
+                                                display: 'flex', alignItems: 'center', gap: 4,
+                                                color: 'var(--accent-blue)', textDecoration: 'none', fontWeight: 600,
                                             }}>
-                                                /j/{promoted[j.id]}
+                                                <ArrowSquareOut size={13} /> Xem thử
                                             </a>
-                                            <button
-                                                type="button"
-                                                onClick={() => copyLink(promoted[j.id])}
-                                                title="Sao chép link công khai"
-                                                style={{
-                                                    display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.72rem',
-                                                    color: 'var(--text-secondary)', background: 'none',
-                                                    border: '1px solid var(--border-subtle)', borderRadius: 6,
-                                                    padding: '3px 8px', cursor: 'pointer',
-                                                }}
-                                            >
-                                                {copiedSlug === promoted[j.id]
-                                                    ? <><Check size={12} /> Đã chép</>
-                                                    : <><Copy size={12} /> Chép link</>}
-                                            </button>
+                                            <span style={{ color: 'var(--text-muted)', marginLeft: 'auto' }}>
+                                                Vào tab <b>Trang truyền thông</b> để công bố / xóa
+                                            </span>
                                         </div>
                                     )}
                                 </div>

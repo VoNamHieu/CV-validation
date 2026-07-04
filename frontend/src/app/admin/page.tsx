@@ -10,7 +10,7 @@ import { Suspense, useCallback, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
     ShieldCheck, MagnifyingGlass, Coins, ArrowLeft, SpinnerGap, CheckCircle, WarningCircle,
-    Heartbeat, PlugsConnected, ChatCircleDots, FunnelSimple, Briefcase,
+    Heartbeat, PlugsConnected, ChatCircleDots, FunnelSimple, Briefcase, Megaphone,
 } from '@phosphor-icons/react';
 import { useAuth } from '@/lib/auth';
 import { admin } from '@/lib/db';
@@ -19,14 +19,16 @@ import CompatPanel from '@/components/admin/CompatPanel';
 import FeedbackPanel from '@/components/admin/FeedbackPanel';
 import FunnelPanel from '@/components/admin/FunnelPanel';
 import JobSearchPanel from '@/components/admin/JobSearchPanel';
+import PromotedPanel from '@/components/admin/PromotedPanel';
 
 type Access = 'checking' | 'granted' | 'denied';
-type Tab = 'credits' | 'jobs' | 'analytics' | 'monitor' | 'compat' | 'feedback';
+type Tab = 'credits' | 'jobs' | 'promoted' | 'analytics' | 'monitor' | 'compat' | 'feedback';
 
 const QUICK_AMOUNTS = [50, 100, 250, 500];
 const TABS: { id: Tab; label: string; icon: typeof Coins }[] = [
     { id: 'credits', label: 'Cấp credit', icon: Coins },
     { id: 'jobs', label: 'Tìm job', icon: Briefcase },
+    { id: 'promoted', label: 'Trang truyền thông', icon: Megaphone },
     { id: 'analytics', label: 'Funnel', icon: FunnelSimple },
     { id: 'monitor', label: 'Link monitor', icon: Heartbeat },
     { id: 'compat', label: 'Compatibility', icon: PlugsConnected },
@@ -225,6 +227,7 @@ function AdminConsole() {
 
                 {tab === 'credits' && creditsTab}
                 {tab === 'jobs' && <JobSearchPanel />}
+                {tab === 'promoted' && <PromotedPanel />}
                 {tab === 'analytics' && <FunnelPanel />}
                 {tab === 'monitor' && <MonitorPanel />}
                 {tab === 'compat' && <CompatPanel />}

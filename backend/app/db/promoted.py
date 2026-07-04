@@ -162,3 +162,19 @@ async def increment_view(slug: str) -> None:
     await pool.execute(
         "UPDATE promoted_jobs SET view_count = view_count + 1 WHERE slug = $1", slug,
     )
+
+
+async def delete_dead() -> list[str]:
+    """Delete promoted pages whose backing job is now inactive (posting closed).
+
+    Only touches pages with a ``job_id`` that JOINs an ``is_active = false`` job —
+    manual pages (job_id NULL) and pages whose job still lives are left alone.
+    Returns the deleted slugs (for the cron log). This is the auto-cleanup the
+    periodic refresh calls after re-ingesting the store."""
+    pool = await get_pool()
+    rows = await pool.fetch(
+        "DELETE FROM promoted_jobs p USING jobs j "
+        "WHERE p.job_id = j.id AND j.is_active = false "
+        "RETURNING p.slug"
+    )
+    return [r["slug"] for r in rows]
