@@ -1,14 +1,19 @@
 """Regression tests for the four verified ranking/classification bugs + the two
-cross-module invariants they violate.
+cross-module invariants they touch.
 
-The known-broken assertions are marked ``xfail(strict=True)``: the suite stays
-GREEN today (they're expected to fail), each marker documents the exact defect,
-and the moment a bug is fixed the strict-xfail turns into a hard failure —
-forcing whoever fixes it to delete the marker so the test flips to *guarding*
-the fix. Passing tests alongside each bug lock in the behaviour that must NOT
-regress while fixing (e.g. real warehouse titles must stay Operations).
+All four bugs are now FIXED — these assert the corrected behaviour and guard
+against regression, paired with tests locking in what must NOT change while
+fixing (real warehouse titles stay Operations, bare "Product Manager" stays
+unsignalled, exact company keys keep working, facet's tier order holds). They
+were originally landed as xfail(strict) documenting the live defects; once each
+fix flipped the xfail to XPASS the markers were removed.
 
-Grounded against the live code on 2026-07-04 (all four reproduce).
+Fixes:
+  #1 taxonomy Operations rule: bare "kho" → \\bkho\\b (was matching "khoa"/"khóa")
+  #2 company_industry: name normalization + whole-word key match + word-bounded
+     fallback (was folding "TikTok Shop"/"Shopee Vietnam" into Retail)
+  #3 ranker.rerank: `reachable` restored to the sort tuple (Phase-1 invariant)
+  #4 taxonomy seniority: leader/supervisor/giám sát/trưởng nhóm/deputy → Lead/Manager
 """
 import pytest
 
@@ -21,7 +26,6 @@ from app.search.facet import rank_jobs, SearchProfile
 # ─────────────────── BUG #1 — "kho" substring poisons Operations ───────────────
 # _norm folds "khóa"/"khoa" → "khoa", which contains "kho"; the Operations rule
 # lists a bare "kho", so medical/academic titles match at full 0.8 confidence.
-@pytest.mark.xfail(strict=True, reason="BUG#1: bare 'kho' matches 'khoa'/'khóa' → misclassified as Operations")
 @pytest.mark.parametrize("title", [
     "Bác sĩ đa khoa",
     "Trưởng khoa Dược",
@@ -42,7 +46,6 @@ def test_genuine_warehouse_stays_operations():
 # classify_company does an exact dict lookup then an unbounded r"retail|shop|..."
 # fallback. A naming variant ("TikTok Shop", "Shopee Vietnam") misses the exact
 # key and the bare "shop" fallback (also ⊂ "Shopee") drags it to Retail.
-@pytest.mark.xfail(strict=True, reason="BUG#2: unbounded 'shop' fallback + no name normalization flips e-commerce variants to Retail")
 @pytest.mark.parametrize("name", ["TikTok Shop", "Shopee Vietnam"])
 def test_ecommerce_name_variant_not_retail(name):
     assert classify_company(name) == "E-commerce & Marketplace", \
@@ -63,7 +66,6 @@ def test_company_exact_keys_and_genuine_retail_unaffected():
 # NB: "Team Lead" already works (matches \blead\b) — the gap is specifically the
 # titles below that carry NO level word: "Team Leader" (\blead\b misses "leader"),
 # Vietnamese "trưởng nhóm"/"giám sát", "Supervisor", and "X Deputy Manager".
-@pytest.mark.xfail(strict=True, reason="BUG#4: mid-management titles carry no seniority signal → default Mid")
 @pytest.mark.parametrize("title", [
     "Team Leader", "Trưởng nhóm", "Supervisor", "Giám sát", "Deputy Manager",
 ])
@@ -105,7 +107,6 @@ def test_facet_reachable_outranks_unreachable():
 # rerank sorts by (literal, is_primary, final) — `reachable` is dropped, so a
 # high-cosine unreachable job leapfrogs a lower-cosine reachable one whenever
 # they share is_primary=False (the small/niche-pool case).
-@pytest.mark.xfail(strict=True, reason="BUG#3: rerank's tier key omits `reachable`, so an unreachable high-cosine job outranks a reachable one")
 def test_rerank_preserves_reachable_tier():
     q = [1.0, 0.0]
     unreachable_hi_cos = {  # HR: facet .25, cosine ~1.0

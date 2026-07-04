@@ -126,21 +126,54 @@ COMPANY_INDUSTRY: dict[str, str] = {
     "Vingroup": "Conglomerate / Other", "Vinhomes": "Conglomerate / Other",
 }
 
-# keyword fallback on name/url for anything not explicitly mapped
+# keyword fallback on name/url for anything not explicitly mapped. Keywords are
+# WORD-BOUNDED so a substring can't hijack a name — bare "shop" used to fold
+# "Shopee" into Retail; \bshop\b only matches a standalone "shop"/"X Shop".
 _KW = [
-    ("Banking", r"bank|ngan hang"),
+    ("Banking", r"\bbank\b|ngan hang"),
     ("Securities & Investment", r"securit|chung khoan|\bvcbs\b|\btcbs\b"),
-    ("Insurance", r"insur|bao hiem|life\b"),
-    ("Logistics & Delivery", r"logistic|express|delivery|giao hang|cargo|freight|post\b|van tai"),
+    ("Insurance", r"insur|bao hiem|\blife\b"),
+    ("Logistics & Delivery", r"logistic|express|delivery|giao hang|cargo|freight|\bpost\b|van tai"),
     ("IT Services / Outsourcing", r"software|technolog|solutions|\bit\b|digital"),
-    ("Retail", r"retail|shop|store|mart"),
-    ("Education", r"edu|english|academy|school|university"),
+    ("Retail", r"\bretail\b|\bshop\b|\bstore\b|\bmart\b"),
+    ("Education", r"\bedu\b|english|academy|school|university"),
 ]
+
+# Legal forms + country tags stripped when normalizing a company name for lookup,
+# so "Shopee Vietnam", "FE Credit JSC" match their bare dict key.
+_LEGAL = re.compile(
+    r"\b(vietnam|viet nam|vn|jsc|ltd|limited|co|corp|corporation|company|group|"
+    r"holdings?|inc|plc|pte|llc)\b", re.I)
+
+
+def _norm_name(s: str) -> str:
+    s = _LEGAL.sub(" ", (s or "").lower())
+    return re.sub(r"[^a-z0-9]+", " ", s).strip()
+
+
+# Precomputed once: normalized dict key → industry (for the normalized-exact pass).
+_NORM_KEYS = {_norm_name(k): v for k, v in COMPANY_INDUSTRY.items()}
 
 
 def classify_company(name: str, url: str = "") -> str:
+    # 1. exact key
     if name in COMPANY_INDUSTRY:
         return COMPANY_INDUSTRY[name]
+    nn = _norm_name(name)
+    # 2. normalized-exact ("Shopee Vietnam" → "shopee")
+    if nn and nn in _NORM_KEYS:
+        return _NORM_KEYS[nn]
+    # 3. whole-word key containment ("TikTok Shop" contains the "tiktok" key).
+    #    Match single-token keys as a whole token; multi-word keys as a phrase —
+    #    so a short key ("sea") can't hit a longer word ("seabank").
+    toks = set(nn.split())
+    for k, ind in COMPANY_INDUSTRY.items():
+        kn = _norm_name(k)
+        if not kn:
+            continue
+        if (" " in kn and kn in nn) or (" " not in kn and kn in toks):
+            return ind
+    # 4. word-bounded keyword fallback
     blob = f"{name} {url}".lower()
     for ind, rx in _KW:
         if re.search(rx, blob):
