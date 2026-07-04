@@ -425,6 +425,7 @@ export interface TailorResult {
     source_ref: string;       // caller-supplied opaque handle (or "" if none)
     improved_cv: Record<string, unknown>;
     improvements: unknown[];
+    suggestions: unknown[];   // prospective "Có thể cân nhắc" probes — carry to the editor
     match: Record<string, unknown>;
     jd: Record<string, unknown>;   // extracted JD — lets the editor show context + re-optimize
 }
@@ -447,6 +448,7 @@ export async function tailorForJob(
         source_ref: typeof sourceRef === "string" ? sourceRef : "",
         improved_cv: best.cv,
         improvements: best.improvements,
+        suggestions: best.suggestions,
         match,
         jd: jd as Record<string, unknown>,
     };

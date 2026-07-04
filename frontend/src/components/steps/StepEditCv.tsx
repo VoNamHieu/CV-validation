@@ -1970,7 +1970,23 @@ function SuggestionsPanel({
     const [open, setOpen] = useState(false);
     const [answers, setAnswers] = useState<Record<number, string>>({});
 
-    if (!suggestions || suggestions.length === 0) return null;
+    // Empty state — the optimizer returned no prospective suggestions (CV already
+    // well-quantified, or none surfaced). Show a quiet, self-explaining line
+    // instead of vanishing the whole section (which read as a missing feature).
+    if (!suggestions || suggestions.length === 0) {
+        return (
+            <div style={{
+                marginBottom: 10, borderRadius: 8, padding: '10px 12px',
+                border: '1px solid var(--border-subtle)', background: 'var(--bg-card)',
+                display: 'flex', alignItems: 'center', gap: 8,
+            }}>
+                <Lightning size={15} weight="fill" style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>
+                    Không có gợi ý bổ sung — CV đã khá đầy đủ cho vị trí này.
+                </span>
+            </div>
+        );
+    }
 
     const filled = suggestions
         .map((s, i) => ({ s, v: (answers[i] ?? '').trim() }))
