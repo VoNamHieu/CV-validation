@@ -12,7 +12,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { onMode1Result, triggerMode1Apply, type Mode1Result } from '@/lib/extension-sync';
 import { buildCvPdfCache } from '@/lib/cv-pdf-cache';
 import { useAppStore, type JDData, type MatchResult } from '@/store/useAppStore';
-import type { CvImprovement } from '@/lib/cv-improvements';
+import type { CvImprovement, CvSuggestion } from '@/lib/cv-improvements';
 
 const hostnameOf = (u: string) => { try { return new URL(u).hostname; } catch { return ''; } };
 
@@ -45,6 +45,7 @@ export default function Mode1ResultBanner() {
                 matchResult: r.match as unknown as MatchResult,
                 optimizedCv: r.improved_cv,
                 optimizedCvImprovements: r.improvements as CvImprovement[],
+                optimizedCvSuggestions: r.suggestions as CvSuggestion[],
                 jobTitle: title || undefined,
             });
         }
