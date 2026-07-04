@@ -203,14 +203,28 @@ export default function PromotedPanel() {
 
                             {open && (
                                 <div style={{ padding: '0 16px 14px', borderTop: '1px solid var(--border-subtle)' }}>
-                                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', margin: '10px 0 4px' }}>
-                                        /j/{p.slug}
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', margin: '10px 0 4px' }}>
+                                        <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>/j/{p.slug}</span>
+                                        {p.snapshot.source_url && (
+                                            <a href={p.snapshot.source_url} target="_blank" rel="noreferrer"
+                                                style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.72rem', fontWeight: 600, color: 'var(--accent-blue)', textDecoration: 'none' }}>
+                                                <ArrowSquareOut size={12} /> Tin gốc
+                                            </a>
+                                        )}
                                     </div>
 
                                     {editing === p.id ? (
                                         // ── Edit mode: sửa JD + upload logo ──
                                         <div style={{ marginBottom: 12 }}>
-                                            <label style={{ fontSize: '0.74rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>Mô tả công việc (JD)</label>
+                                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
+                                                <label style={{ fontSize: '0.74rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Mô tả công việc (JD)</label>
+                                                {p.snapshot.source_url && (
+                                                    <a href={p.snapshot.source_url} target="_blank" rel="noreferrer"
+                                                        style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.72rem', fontWeight: 600, color: 'var(--accent-blue)', textDecoration: 'none' }}>
+                                                        <ArrowSquareOut size={12} /> Mở tin gốc để copy mô tả
+                                                    </a>
+                                                )}
+                                            </div>
                                             <textarea value={jdDraft} onChange={(e) => setJdDraft(e.target.value)} rows={10}
                                                 style={{ width: '100%', fontSize: '0.78rem', lineHeight: 1.5, padding: 10, borderRadius: 8, border: '1px solid var(--border-default)', background: 'var(--bg-secondary)', color: 'var(--text-primary)', fontFamily: 'inherit', resize: 'vertical' }} />
 
