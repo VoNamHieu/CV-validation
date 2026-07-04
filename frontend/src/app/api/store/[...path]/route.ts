@@ -11,3 +11,13 @@ export async function POST(request: NextRequest, ctx: { params: Promise<{ path: 
     const { path } = await ctx.params;
     return proxyToBackend(request, "store", path);
 }
+
+export async function PATCH(request: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
+    const { path } = await ctx.params;
+    return proxyToBackend(request, "store", path);
+}
+
+export async function DELETE(request: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
+    const { path } = await ctx.params;
+    return proxyToBackend(request, "store", path);
+}
