@@ -17,7 +17,7 @@ import { admin } from '@/lib/db';
 import MonitorPanel from '@/components/admin/MonitorPanel';
 import CompatPanel from '@/components/admin/CompatPanel';
 import FeedbackPanel from '@/components/admin/FeedbackPanel';
-import FunnelPanel from '@/components/admin/FunnelPanel';
+import AnalyticsPanel from '@/components/admin/AnalyticsPanel';
 import JobSearchPanel from '@/components/admin/JobSearchPanel';
 import PromotedPanel from '@/components/admin/PromotedPanel';
 
@@ -29,7 +29,7 @@ const TABS: { id: Tab; label: string; icon: typeof Coins }[] = [
     { id: 'credits', label: 'Cấp credit', icon: Coins },
     { id: 'jobs', label: 'Tìm job', icon: Briefcase },
     { id: 'promoted', label: 'Trang truyền thông', icon: Megaphone },
-    { id: 'analytics', label: 'Funnel', icon: FunnelSimple },
+    { id: 'analytics', label: 'Thống kê', icon: FunnelSimple },
     { id: 'monitor', label: 'Link monitor', icon: Heartbeat },
     { id: 'compat', label: 'Compatibility', icon: PlugsConnected },
     { id: 'feedback', label: 'Feedback', icon: ChatCircleDots },
@@ -275,7 +275,7 @@ function AdminConsole() {
                 {tab === 'credits' && creditsTab}
                 {tab === 'jobs' && <JobSearchPanel />}
                 {tab === 'promoted' && <PromotedPanel />}
-                {tab === 'analytics' && <FunnelPanel />}
+                {tab === 'analytics' && <AnalyticsPanel />}
                 {tab === 'monitor' && <MonitorPanel />}
                 {tab === 'compat' && <CompatPanel />}
                 {tab === 'feedback' && <FeedbackPanel />}

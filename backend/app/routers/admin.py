@@ -15,6 +15,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from app.db import analytics as analytics_repo
 from app.db import credits as credits_repo
 from app.db import events as events_repo
 from app.db import feedback as feedback_repo
@@ -210,3 +211,21 @@ async def analytics_funnel(
     """Distinct sessions per funnel event → {event: count} for FunnelPanel,
     restricted to the last `days` days (0 = all time)."""
     return await events_repo.funnel_counts(days=days)
+
+
+@router.get("/analytics/summary")
+async def analytics_summary(
+    days: int = Query(30, ge=0, le=3650, description="Time window in days; 0 = all time"),
+    _admin: str = Depends(require_admin),
+):
+    """KPI counters + distributions for the comprehensive analytics dashboard."""
+    return await analytics_repo.summary(days=days)
+
+
+@router.get("/analytics/timeseries")
+async def analytics_timeseries(
+    days: int = Query(30, ge=1, le=365, description="Time window in days (1–365)"),
+    _admin: str = Depends(require_admin),
+):
+    """Daily trend series (signups / sessions / applications / credit spend)."""
+    return await analytics_repo.timeseries(days=days)

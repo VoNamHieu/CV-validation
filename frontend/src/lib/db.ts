@@ -183,6 +183,31 @@ export interface AdminJobSearchParams {
 
 export type FacetValue = { value: string; count: number };
 
+// ── Analytics dashboard payloads ──
+export interface AnalyticsSummary {
+    window_days: number;
+    users: { total: number; new: number };
+    engagement: { sessions: number; events: number };
+    applications: { total: number; new: number; by_status: Record<string, number> };
+    credits: {
+        granted: number; spent: number;
+        by_reason: Record<string, { count: number; total: number }>;
+    };
+    jobs: { total: number; active: number; dead: number; companies: number };
+    promoted: { total: number; published: number; views: number };
+    interview: { preps: number; attempts: number };
+    feedback: { total: number; avg_rating: number | null; rating_dist: Record<string, number> };
+    top_events: { event: string; count: number }[];
+    facets: { role_family?: FacetValue[]; industry?: FacetValue[]; seniority?: FacetValue[] };
+}
+export interface AnalyticsTimeseries {
+    dates: string[];
+    signups: number[];
+    sessions: number[];
+    applications: number[];
+    spend: number[];
+}
+
 export const admin = {
     // 200 when the caller is an admin; throws (403) otherwise. Used to gate the page.
     check: () => req<{ ok: boolean }>(`/api/admin/check`, { auth: true }),
@@ -244,6 +269,14 @@ export const admin = {
         }),
     deletePromoted: (id: string) =>
         req<{ deleted: boolean }>(`/api/store/promoted/${id}`, { method: 'DELETE', auth: true }),
+
+    // ── Analytics dashboard ──
+    analyticsSummary: (days: number) =>
+        req<AnalyticsSummary>(`/api/admin/analytics/summary?days=${days}`, { auth: true }),
+    analyticsTimeseries: (days: number) =>
+        req<AnalyticsTimeseries>(`/api/admin/analytics/timeseries?days=${days}`, { auth: true }),
+    analyticsFunnel: (days: number) =>
+        req<Record<string, number>>(`/api/admin/analytics/funnel?days=${days}`, { auth: true }),
 };
 
 export type PromotedStatus = 'draft' | 'published' | 'unpublished';
