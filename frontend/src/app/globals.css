@@ -28,7 +28,11 @@
   /* ── Text ── */
   --text-primary: #111827;
   --text-secondary: #4b5563;
-  --text-muted: #9097a1;
+  /* #9097a1 read at 2.95:1 on --bg-card / 2.75:1 on --bg-primary — fails WCAG
+     AA (4.5:1) for normal text. #6b7280 clears 4.5:1 on every light surface
+     this token is used against (182+ usages incl. phase-progress detail text,
+     placeholders, the footer) while keeping the same muted role. */
+  --text-muted: #6b7280;
   --text-inverse: #ffffff;
 
   /* ── Accents (tuned for contrast on light surfaces) ── */
@@ -135,6 +139,20 @@
   outline: 2px solid var(--accent-blue);
   outline-offset: 2px;
   border-radius: var(--radius-xs);
+}
+
+/* Respect the OS-level "reduce motion" preference. `!important` + the
+   universal selector is deliberate: spin/pulse/fade animations are declared
+   all over the app, including inline <style> tags inside individual step
+   components (not just here), so this is the one rule that reaches all of
+   them without hunting down every @keyframes usage. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 body {

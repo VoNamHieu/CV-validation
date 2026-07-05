@@ -433,12 +433,20 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Adidas",
         homepage="https://adidas-group.com",
-        career_url="https://careers.adidas-group.com",
+        # careers.adidas-group.com is a JS shell; the real board is the
+        # SuccessFactors career site jobs.adidas-group.com. locationsearch=Vietnam
+        # scopes it to VN (roles tagged "Hanoi, 64, VN" / "Ho Chi Minh City").
+        career_url="https://jobs.adidas-group.com/search/?q=&locationsearch=Vietnam",
     ),
     FeaturedCompany(
         name="Nike",
         homepage="https://nike.com",
         career_url="https://careers.nike.com/vi/jobs?location_name=Ho%20Chi%20Minh%2C%20Vietnam&location_type=2",
+    ),
+    FeaturedCompany(
+        name="Puma",
+        homepage="https://puma.com",
+        career_url="https://puma.wd502.myworkdayjobs.com/Jobs_at_Puma",
     ),
     FeaturedCompany(
         name="Thế Giới Di Động",
@@ -774,7 +782,10 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="IHG",
         homepage="https://ihg.com",
-        career_url="https://careers.ihg.com",
+        # careers.ihg.com is a 403 anti-bot shell; the real board is IHG's
+        # Oracle HCM candidate-experience tenant (siteName "IHG Career",
+        # site CX_1001) → _oracle_hcm pulls VN reqs from its public REST API.
+        career_url="https://fa-evax-saasfaprod1.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/",
     ),
 
     # ── Aviation ──────────────────────────────────────────────────────

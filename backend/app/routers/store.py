@@ -174,7 +174,7 @@ async def get_job(job_id: str):
 class PromoteCreate(BaseModel):
     job_id: str
     slug: Optional[str] = None            # auto from title+company when omitted
-    status: str = "published"
+    status: str = "draft"                 # draft-first: review before going public
     template: str = "default"
 
 
@@ -206,12 +206,13 @@ async def promote_job(body: PromoteCreate, admin: str = Depends(require_admin)):
     snapshot = promoted.build_snapshot(job, company_name=company_name)
     jd_chars = len(snapshot.get("description") or "")
 
-    # Idempotent re-publish: refresh the snapshot on the existing page instead
-    # of minting a second link for the same job.
+    # Idempotent re-create: refresh the snapshot on the existing page instead of
+    # minting a second link for the same job. Preserve the existing status —
+    # re-running must NOT silently un-publish a live page back to draft.
     existing = await promoted.get_by_job(body.job_id)
     if existing:
         row = await promoted.update(existing["id"], snapshot=snapshot,
-                                    status=body.status, template=body.template)
+                                    template=body.template)
         return {**row, "reused": True, "jd_chars": jd_chars}
 
     base = body.slug or f"{snapshot['title']}-{company_name}"
@@ -228,22 +229,67 @@ async def list_promoted(
     limit: int = Query(100, le=500), offset: int = 0,
     _admin: str = Depends(require_admin),
 ):
-    return await promoted.list_pages(limit=limit, offset=offset)
+    # Strip the (potentially large) logo bytes from the list; expose has_logo so
+    # the panel can show/preview without shipping every base64 blob.
+    rows = await promoted.list_pages(limit=limit, offset=offset)
+    for r in rows:
+        snap = r.get("snapshot") or {}
+        snap["has_logo"] = bool(snap.pop("logo_b64", None))
+    return rows
 
 
 @router.get("/promoted/by-slug/{slug}")
-async def get_promoted_public(slug: str):
-    """PUBLIC — the landing page read. Only published pages; internal fields
-    (source_url) are stripped by public_view()."""
+async def get_promoted_public(slug: str, preview: Optional[str] = None):
+    """PUBLIC — the landing page read. Only PUBLISHED pages are served, EXCEPT
+    when `preview` matches the row's own id: admins preview a draft via the real
+    /j/ page by appending ?preview=<id> (the id is a random uuid only the admin
+    list exposes, so it doubles as the preview token). Preview reads don't count
+    as views. Internal fields (source_url) are always stripped by public_view()."""
     row = await promoted.get_by_slug(slug)
-    if not row or row.get("status") != "published":
+    if not row:
         raise HTTPException(status_code=404, detail="Page not found")
-    await promoted.increment_view(slug)
+    is_preview = bool(preview) and preview == str(row.get("id"))
+    if row.get("status") != "published" and not is_preview:
+        raise HTTPException(status_code=404, detail="Page not found")
+    if not is_preview:
+        await promoted.increment_view(slug)
     return promoted.public_view(row)
+
+
+@router.get("/promoted/logo-by-slug/{slug}")
+async def get_promoted_logo(slug: str, preview: Optional[str] = None):
+    """PUBLIC — serve the uploaded company logo as image bytes (real URL, usable
+    as og:image + <img src>). Same publish/preview gate as the page."""
+    import base64
+    from fastapi import Response
+    row = await promoted.get_by_slug(slug)
+    if not row:
+        raise HTTPException(status_code=404, detail="Not found")
+    is_preview = bool(preview) and preview == str(row.get("id"))
+    if row.get("status") != "published" and not is_preview:
+        raise HTTPException(status_code=404, detail="Not found")
+    snap = row.get("snapshot") or {}
+    b64 = snap.get("logo_b64")
+    if not b64:
+        raise HTTPException(status_code=404, detail="No logo")
+    try:
+        data = base64.b64decode(b64)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Bad logo")
+    return Response(content=data, media_type=snap.get("logo_mime") or "image/png",
+                   headers={"Cache-Control": "public, max-age=300"})
+
+
+# Logo base64 cap (~700KB b64 ≈ 512KB image) — keeps the snapshot JSON sane.
+_MAX_LOGO_B64 = 750_000
 
 
 @router.patch("/promoted/{page_id}")
 async def patch_promoted(page_id: str, body: PromotePatch, _admin: str = Depends(require_admin)):
+    if body.snapshot is not None:
+        b64 = body.snapshot.get("logo_b64")
+        if isinstance(b64, str) and len(b64) > _MAX_LOGO_B64:
+            raise HTTPException(status_code=413, detail="Logo quá lớn (tối đa ~512KB).")
     row = await promoted.update(page_id, **body.model_dump(exclude_none=True))
     if not row:
         raise HTTPException(status_code=404, detail="Page not found")

@@ -12,6 +12,7 @@ from .core import (
     fetch_ats_jobs,
     detect_ats,
     detect_ats_in_html,
+    is_known_ats_url,
     _is_basevn,      # used by audit/diagnostic scripts
     _FETCHERS,
     _ADAPTERS,
@@ -22,4 +23,5 @@ __all__ = [
     "fetch_ats_jobs",
     "detect_ats",
     "detect_ats_in_html",
+    "is_known_ats_url",
 ]

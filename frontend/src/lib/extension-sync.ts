@@ -105,6 +105,7 @@ export interface Mode1Result {
     source_ref: string;
     improved_cv: CVData;
     improvements: unknown[];
+    suggestions: unknown[];
     match: Record<string, unknown>;
     jd?: Record<string, unknown>;
     jobUrl?: string;     // real job URL — client-side only, for saving to history
@@ -124,6 +125,7 @@ export function onMode1Result(callback: (result: Mode1Result) => void): () => vo
             source_ref: event.data.source_ref,
             improved_cv: event.data.improved_cv,
             improvements: event.data.improvements ?? [],
+            suggestions: event.data.suggestions ?? [],
             match: event.data.match ?? {},
             jd: event.data.jd,   // extracted JD — gives the editor a real title + re-optimize context
             jobUrl: event.data.jobUrl,

@@ -109,7 +109,9 @@ async function req<T>(path: string, init?: RequestInit & { auth?: boolean }): Pr
     const res = await fetch(path, { ...init, headers });
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || `Request failed: ${res.status}`);
+        const e = new Error(err.detail || `Request failed: ${res.status}`) as Error & { status?: number };
+        e.status = res.status;   // let callers distinguish 403 (real) from 401/5xx (transient)
+        throw e;
     }
     return res.json();
 }
@@ -222,14 +224,53 @@ export const admin = {
         ),
     ingestStatus: () => req<IngestState>(`/api/admin/jobs/ingest/status`, { auth: true }),
 
-    // Publish a stored job as a public landing page ("trang truyền thông").
-    // Admin-gated on the backend; idempotent per job (reused=true on re-publish).
+    // Create a DRAFT landing page ("trang truyền thông") from a stored job. The
+    // backend enriches the JD (crawls if empty) and returns jd_chars. Draft =
+    // not public until published from the management tab. Idempotent per job.
     promoteJob: (jobId: string) =>
-        req<{ slug: string; status: string; reused: boolean }>(
+        req<{ id: string; slug: string; status: string; reused: boolean; jd_chars: number }>(
             `/api/store/promoted`,
             { method: 'POST', body: JSON.stringify({ job_id: jobId }), auth: true },
         ),
+
+    // ── Promoted-page management (audit / publish / delete) ──
+    listPromoted: () => req<PromotedPage[]>(`/api/store/promoted`, { auth: true }),
+    patchPromoted: (
+        id: string,
+        body: { status?: PromotedStatus; slug?: string; template?: string; snapshot?: Record<string, unknown> },
+    ) =>
+        req<PromotedPage>(`/api/store/promoted/${id}`, {
+            method: 'PATCH', body: JSON.stringify(body), auth: true,
+        }),
+    deletePromoted: (id: string) =>
+        req<{ deleted: boolean }>(`/api/store/promoted/${id}`, { method: 'DELETE', auth: true }),
 };
+
+export type PromotedStatus = 'draft' | 'published' | 'unpublished';
+
+export interface PromotedPage {
+    id: string;
+    slug: string;
+    job_id: string | null;
+    snapshot: {
+        title?: string;
+        company_name?: string;
+        location?: string;
+        description?: string;
+        industry?: string;
+        seniority?: string;
+        source_url?: string;
+        logo_mime?: string;
+        has_logo?: boolean;   // list endpoint strips raw logo_b64, exposes this
+    };
+    status: PromotedStatus;
+    template: string;
+    og_image_url: string | null;
+    view_count: number;
+    created_by: string | null;
+    created_at: string;
+    updated_at: string;
+}
 
 export interface IngestState {
     running: boolean;

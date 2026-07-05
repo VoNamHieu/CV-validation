@@ -160,7 +160,11 @@ _RULES: list[tuple[str, str]] = [
     # (so "Chuyên viên Xuất nhập khẩu" mis-matched strategy/consultant roles).
     # Regulatory-customs ("Customs Regulatory") still resolves to Legal/Risk first
     # (checked earlier); "Export Sales"/"Kinh doanh XNK" still resolve to Sales.
-    ("Operations", r"operation|van hanh|supply chain|chuoi cung ung|logistic|warehouse|kho|fulfil|category|seller|merchandis|procure|mua hang|thu mua|planning|planner|inventory|dieu phoi|giao nhan|vendor|optimization|xuat nhap khau|\bxnk\b|hai quan|customs|\bimport\b|\bexport\b|freight|forwarding|lay hang|xu ly tai buu cuc|picking|hanh chinh|van phong|thu ky|van thu|sourcing|supplier|buyer|purchasing|xay dung|giao thong|ket cau|kien truc su"),
+    ("Operations", r"operation|van hanh|supply chain|chuoi cung ung|logistic|warehouse|fulfil|category|seller|merchandis|procure|mua hang|thu mua|planning|planner|inventory|dieu phoi|giao nhan|vendor|optimization|xuat nhap khau|\bxnk\b|hai quan|customs|\bimport\b|\bexport\b|freight|forwarding|lay hang|xu ly tai buu cuc|picking|hanh chinh|van phong|thu ky|van thu|sourcing|supplier|buyer|purchasing|xay dung|giao thong|ket cau|kien truc su"
+     # \bkho\b (warehouse) not bare "kho" — _norm folds "khoa"/"khóa" → "khoa" ⊃
+     # "kho", which wrongly pulled bác sĩ đa khoa / trưởng khoa / khóa học into
+     # Operations. Word-bounded still matches "kho vận", "nhân viên kho".
+     r"|\bkho\b"),
     # General & management (catch-all-ish, check late)
     ("General & Management", r"management trainee|\bmt\b program|strategy|chien luoc|consultant|tu van|general manager|\bgm\b|director|head of|truong phong|truong bo phan|project manager|program manager|\bpmo\b|quan ly du an|giam doc|pho phong|chief|\bceo\b|\bcoo\b|\bcfo\b|\bcto\b"),
 ]
@@ -209,7 +213,10 @@ _LEVEL_INDEX = {lv: i for i, lv in enumerate(SENIORITY_LEVELS)}
 _SENIORITY_RULES: list[tuple[str, str]] = [
     ("Intern/Fresher", r"\bintern(ship)?\b|fresher|thuc tap|sinh vien|\btts\b"),
     ("Director/Head+", r"director|head of|\bhead\b|chief|\bc[efimot]o\b|\bvp\b|svp|evp|vice president|giam doc|truong phong|truong bo phan|pho phong"),
-    ("Lead/Manager",   r"\blead\b|principal|\bstaff\b"),
+    # Mid-management band: leader/supervisor/giám sát/trưởng nhóm/deputy are
+    # genuine Lead/Manager roles in the VN market. (Bare "manager" stays OFF —
+    # a "Product Manager" is a mid IC — but "Deputy Manager" carries the signal.)
+    ("Lead/Manager",   r"\blead\b|leader|principal|\bstaff\b|supervisor|giam sat|truong nhom|\bdeputy\b"),
     ("Senior",         r"\bsenior\b|\bsr\b|cao cap|chuyen gia|chuyen vien cao cap"),
     ("Junior",         r"\bjunior\b|\bjr\b|entry[ -]?level|moi ra truong|tap su"),
 ]

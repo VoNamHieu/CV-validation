@@ -11,6 +11,7 @@ import {
 import { useAppStore, type JDEntry } from '@/store/useAppStore';
 import { useAuthGate } from '@/lib/auth';
 import { useConsent } from '@/lib/consent-context';
+import ErrorBoundary from '@/components/ErrorBoundary';
 import GapReportSection from '@/components/GapReportSection';
 import BeforeAfterModal from '@/components/BeforeAfterModal';
 import EditableTemplateFrame from '@/components/EditableTemplateFrame';
@@ -896,7 +897,15 @@ export default function StepEditCv() {
                 <div style={{
                     marginBottom: 16, padding: '10px 14px', borderRadius: 10,
                     border: '1px solid rgba(234,179,8,0.35)', background: 'rgba(234,179,8,0.10)',
-                    color: '#fde68a', fontSize: '0.82rem', lineHeight: 1.5,
+                    // Body text needs to stay legible over this tint in BOTH
+                    // themes — #fde68a (a pale yellow tuned for dark mode) sat
+                    // at ~1.1:1 against the effective light-mode background
+                    // (a near-white amber tint), i.e. functionally invisible.
+                    // var(--accent-amber) alone still only clears ~2.8:1 here
+                    // (this bg is too pale for it); --text-secondary clears
+                    // 6.6:1+ in both themes while the tint/border/emoji still
+                    // carry the "this is a note" signal.
+                    color: 'var(--text-secondary)', fontSize: '0.82rem', lineHeight: 1.5,
                 }}>
                     💡 {searchPivotNote}
                 </div>
@@ -1791,6 +1800,10 @@ export default function StepEditCv() {
             </div>{/* ───────── /LEFT ───────── */}
 
             {/* ──────────────────── RIGHT: job match analysis ──────────────────── */}
+            {/* Boundary keyed by entry: one job's malformed match/improvements/
+                suggestions shows an inline fallback instead of blanking the whole
+                editor — the CV column + job switcher stay usable. */}
+            <ErrorBoundary resetKey={currentEntry.id} label="phần phân tích của job này">
             <aside className="analysis-sidebar">
                 <MatchAnalysisPanel
                     entryId={currentEntry.id}
@@ -1818,6 +1831,7 @@ export default function StepEditCv() {
                     onApply={(notes) => void handleReoptimize(notes)}
                 />
             </aside>
+            </ErrorBoundary>
 
             </div>
             )}{/* ───────── /editor-layout ───────── */}
@@ -1970,7 +1984,23 @@ function SuggestionsPanel({
     const [open, setOpen] = useState(false);
     const [answers, setAnswers] = useState<Record<number, string>>({});
 
-    if (!suggestions || suggestions.length === 0) return null;
+    // Empty state — the optimizer returned no prospective suggestions (CV already
+    // well-quantified, or none surfaced). Show a quiet, self-explaining line
+    // instead of vanishing the whole section (which read as a missing feature).
+    if (!suggestions || suggestions.length === 0) {
+        return (
+            <div style={{
+                marginBottom: 10, borderRadius: 8, padding: '10px 12px',
+                border: '1px solid var(--border-subtle)', background: 'var(--bg-card)',
+                display: 'flex', alignItems: 'center', gap: 8,
+            }}>
+                <Lightning size={15} weight="fill" style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>
+                    Không có gợi ý bổ sung — CV đã khá đầy đủ cho vị trí này.
+                </span>
+            </div>
+        );
+    }
 
     const filled = suggestions
         .map((s, i) => ({ s, v: (answers[i] ?? '').trim() }))

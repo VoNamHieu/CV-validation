@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
@@ -70,11 +71,60 @@ async def _spa_sniff(url: str) -> list[dict]:
     return jobs
 
 
+# Per-host job-detail URL patterns for capture-backed extraction. Some boards
+# are BOTH unreadable headless AND unreplayable server-side: Heineken (SF Career
+# Site Builder behind a 403 anti-bot challenge), DHL (Phenom "canvas", jobs via a
+# session-token XHR), Crossian (Sage HR API that 401s without a live session).
+# For these the user captures the RENDERED DOM in a real browser via the
+# extension → /debug/capture; we pull the job anchors straight from that
+# snapshot. Jobs are only as fresh as the last manual capture (7-day TTL) — this
+# is the "run capture periodically" path, not real-time.
+_CAPTURE_JOB_PATTERNS = {
+    "careers.theheinekencompany.com": r"/job/heineken-vietnam/",
+    "careers.dhl.com": r"/apac/vi/job/",
+}
+
+
+async def _from_capture(career_url: str) -> list[dict]:
+    """Last-resort: read the extension's DOM snapshot from the debug-capture
+    store and extract job anchors. Best-effort → [] when no capture exists."""
+    from app.services import cache
+    from app.services.ats_adapters.core import _finalize
+    host = (urlparse(career_url).netloc or "").lower()
+    host = host[4:] if host.startswith("www.") else host
+    try:
+        d = await cache.get_json(f"debug:cap:v1:{host}")
+    except Exception:
+        return []
+    if not d:
+        return []
+    pat = _CAPTURE_JOB_PATTERNS.get(host)
+    rx = re.compile(pat) if pat else re.compile(r"/job[s]?/|/position|/recruitment/detail", re.I)
+    out, seen = [], set()
+    for a in d.get("anchors", []):
+        href = (a.get("href") or "").strip()
+        if not href or href in seen or not rx.search(href):
+            continue
+        title = (a.get("text") or "").strip()
+        if not title:  # some anchors carry no text → derive from the URL slug
+            slug = urlparse(href).path.rstrip("/").rsplit("/", 1)[-1]
+            title = re.sub(r"[-_]+", " ", slug).strip().title()
+        if len(title) < 4:
+            continue
+        seen.add(href)
+        out.append({"title": title[:200], "url": href, "location": "",
+                    "description": "", "source": "capture"})
+    jobs = _finalize(out)
+    logger.info("ingest: capture-backed %s → %d jobs (captured ts=%s)",
+                host, len(jobs), d.get("_ts"))
+    return jobs
+
+
 async def ingest_featured_ats(*, render: bool = False, limit: int | None = None) -> dict:
     """Ingest ATS-backed featured companies into the store. `render=True` also
     renders bespoke pages to catch embedded ATS (slower, needs the browser)."""
     from app.data.featured_companies import FEATURED_COMPANIES
-    from app.services.ats_adapters.core import fetch_ats_jobs
+    from app.services.ats_adapters.core import fetch_ats_jobs, is_known_ats_url
     from app.search.taxonomy import classify_title, classify_seniority
     from app.search.company_industry import classify_company
     from app.search.facet import _required_years
@@ -82,10 +132,19 @@ async def ingest_featured_ats(*, render: bool = False, limit: int | None = None)
 
     comps = list(FEATURED_COMPANIES)[: limit or None]
     stats: dict = {"companies_with_feed": 0, "jobs_upserted": 0,
-                   "jobs_deactivated": 0, "by_source": {}}
+                   "jobs_deactivated": 0, "by_source": {}, "ats_feed_empty": []}
     sem = asyncio.Semaphore(8)  # bound concurrent ATS fetches / renders
 
-    async def one(c) -> tuple[str, int] | None:
+    def _empty(c) -> dict | None:
+        # Flag only companies a KNOWN adapter's URL pattern matches — that's a
+        # feed going quiet (regression, worth a compat probe), not just one of
+        # the majority of featured companies with no ATS adapter at all.
+        ats_name = is_known_ats_url(c.career_url)
+        if not ats_name:
+            return None
+        return {"name": c.name, "career_url": c.career_url, "ats": ats_name}
+
+    async def one(c) -> dict | None:
         async with sem:
             jobs_list = await asyncio.to_thread(fetch_ats_jobs, c.career_url, None)
             if not jobs_list and render:
@@ -96,8 +155,14 @@ async def ingest_featured_ats(*, render: bool = False, limit: int | None = None)
                     # SPA whose jobs load via XHR — the static ATS parser can't
                     # read them; watch the network instead.
                     jobs_list = await _spa_sniff(c.career_url)
+            if not jobs_list:
+                # Nothing worked headless — fall back to the last DOM snapshot
+                # the extension captured for this host (anti-bot/auth-gated
+                # boards). Cheap Redis read, so try it even without render.
+                jobs_list = await _from_capture(c.career_url)
         if not jobs_list:
-            return None
+            empty = _empty(c)
+            return {"ok": False, **empty} if empty else None
 
         industry = classify_company(c.name, c.career_url)
         try:
@@ -151,17 +216,20 @@ async def ingest_featured_ats(*, render: bool = False, limit: int | None = None)
         # the feed are dead → deactivate so search stops showing them. Safe: only
         # runs when the feed returned jobs (empty feed skipped above).
         dead = await jobs_repo.deactivate_missing(cid, live_ids)
-        return (jobs_list[0].get("source", "?"), n, dead)
+        return {"ok": True, "source": jobs_list[0].get("source", "?"), "n": n, "dead": dead}
 
     results = await asyncio.gather(*[one(c) for c in comps])
     for r in results:
         if not r:
             continue
-        src, n, dead = r
+        if not r["ok"]:
+            stats["ats_feed_empty"].append(
+                {"name": r["name"], "career_url": r["career_url"], "ats": r["ats"]})
+            continue
         stats["companies_with_feed"] += 1
-        stats["jobs_upserted"] += n
-        stats["jobs_deactivated"] += dead
-        stats["by_source"][src] = stats["by_source"].get(src, 0) + 1
+        stats["jobs_upserted"] += r["n"]
+        stats["jobs_deactivated"] += r["dead"]
+        stats["by_source"][r["source"]] = stats["by_source"].get(r["source"], 0) + 1
 
     logger.info("[ingest] featured ATS → %s", stats)
     return stats

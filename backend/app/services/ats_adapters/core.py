@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import os
 import re
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, parse_qsl
 
 import requests
 
@@ -368,14 +368,25 @@ def _successfactors(career_url: str, html: str | None) -> list[dict]:
     if v4:
         logger.info(f"[ats] successfactors(v4) → {len(v4)} VN jobs ({origin})")
         return v4[:_MAX_ATS_JOBS]
-    # No locationsearch: VN-domestic SF sites tag locations as "Hà Nội" etc., so
-    # locationsearch=Vietnam returns nothing. Return all tiles; the downstream
-    # role/city filter narrows. (Most SF sites in the featured list are VN banks.)
+    # Legacy HTML tiles. VN-domestic SF sites (banks) tag locations as "Hà Nội"
+    # and a locationsearch=Vietnam facet returns nothing, so their career_url is
+    # a bare /search/?q= and we return all tiles (downstream role/city filter
+    # narrows). Global boards (Adidas) instead carry an explicit
+    # locationsearch=Vietnam in career_url — honour it by fetching the career_url
+    # AS GIVEN rather than resetting to /search/?q=, else the VN filter is lost.
     try:
-        r = requests.get(f"{origin}/search/?q=", headers=_HTML_HEADERS, timeout=_TIMEOUT)
-        if r.status_code != 200:
-            return []
-        soup = BeautifulSoup(r.text, "html.parser")
+        is_search = "/search" in (p.path or "")
+        # Use the passed HTML only when career_url IS the search page (so its
+        # rendered tiles are what we parse). For a homepage career_url the passed
+        # HTML has no tiles, so fetch the search endpoint instead.
+        if html and is_search:
+            soup = BeautifulSoup(html, "html.parser")
+        else:
+            fetch_url = career_url if is_search else f"{origin}/search/?q="
+            r = requests.get(fetch_url, headers=_HTML_HEADERS, timeout=_TIMEOUT)
+            if r.status_code != 200:
+                return []
+            soup = BeautifulSoup(r.text, "html.parser")
     except Exception:
         return []
     out, seen = [], set()
@@ -385,7 +396,13 @@ def _successfactors(career_url: str, html: str | None) -> list[dict]:
         if not href or not title or len(title) < 4 or href in seen:
             continue
         seen.add(href)
-        out.append({"title": title[:200], "url": origin + href, "location": "", "description": ""})
+        # SF classic pairs each title link with a span.jobLocation in the same
+        # row (e.g. "Hanoi, 64, VN"); grab it so ingest/VN-filter has a location.
+        row = a.find_parent(["tr", "li", "div"])
+        loc_el = row.select_one("span.jobLocation") if row else None
+        loc = loc_el.get_text(" ", strip=True) if loc_el else ""
+        out.append({"title": title[:200], "url": origin + href,
+                    "location": loc[:120], "description": ""})
     logger.info(f"[ats] successfactors → {len(out)} jobs ({origin})")
     return out[:50]
 
@@ -463,11 +480,11 @@ def _eightfold(career_url: str) -> list[dict]:
     domain = _registrable_domain(p.netloc)
     country = os.getenv("DISCOVER_COUNTRY", "Vietnam")
     out, seen = [], set()
-    for start in (0, 10, 20):
+    for start in range(0, 200, 50):
         try:
             r = requests.get(f"{origin}/api/pcsx/search", headers=_JSON_POST, timeout=_TIMEOUT,
                              params={"domain": domain, "query": "", "location": country,
-                                     "start": start, "sort_by": "relevance", "num": 10})
+                                     "start": start, "sort_by": "relevance", "num": 50})
             if r.status_code != 200:
                 break
             data = (r.json() or {}).get("data", {}) or {}
@@ -479,18 +496,23 @@ def _eightfold(career_url: str) -> list[dict]:
                 title = (j.get("name") or "").strip()
                 if not title or jid in seen:
                     continue
-                seen.add(jid)
+                # Match per-location, not the whole joined string — a global
+                # posting tagged "Singapore, Vietnam, Thailand" would otherwise
+                # report a Vietnam-flavored location string that's just noise.
                 locs = j.get("locations") or []
-                loc = ", ".join(locs) if isinstance(locs, list) else str(locs)
-                if not _is_vn_loc(loc):
+                vn = next((l for l in locs if _is_vn_loc(l)), "") if isinstance(locs, list) else ""
+                if not vn:
                     continue
+                seen.add(jid)
                 # positionUrl is root-relative (e.g. "/careers/job/123") — make
                 # it absolute, else the JD URL is uncrawlable.
                 pos = j.get("positionUrl")
                 url = urljoin(origin + "/", pos) if pos else f"{origin}/careers?pid={jid}&domain={domain}"
                 out.append({"title": title[:200], "url": url,
-                            "location": loc[:120], "description": ""})
-            if len(positions) < 10 or len(out) >= 25:
+                            "location": str(vn)[:120], "description": ""})
+            # `count` is the API's own total — pace off it instead of a fixed
+            # page cap, so a company with >30 VN postings isn't truncated.
+            if start + 50 >= (data.get("count") or 0) or len(out) >= _MAX_ATS_JOBS:
                 break
         except Exception as e:
             logger.info(f"[ats] eightfold {domain} page {start} failed: {str(e)[:80]}")
@@ -1292,55 +1314,61 @@ def _avature(career_url: str, html: str | None) -> list[dict]:
     return out
 
 
-# ── Eightfold PCS (apply.careers.<company>.com — Microsoft, …) ───────────────
-# Eightfold's candidate site exposes a public search API:
-#   GET {origin}/api/pcsx/search?domain=<company.com>&location=Vietnam&start=N&num=50
-#   → {data:{positions:[{id, displayJobId, name, locations:[...]}], count}}
-# The site host is apply.careers.<company>.com and the `domain` param is the
-# company's registrable domain (microsoft.com). Detail = {origin}/careers?pid=<id>.
-# locations is an array of "Country, State, City" strings; keep only VN ones.
-def _is_pcsx(career_url: str) -> bool:
-    host = (urlparse(career_url or "").netloc or "").lower()
-    return host.startswith("apply.careers.") or "/api/pcsx/" in (career_url or "")
+# ── Radancy / TalentBrew (careers.se.com, many large-enterprise boards) ──────
+# TalentBrew sites live on bespoke domains but share a public JSON feed:
+#   GET {origin}/api/jobs?<same location facets as the career_url>&page=N
+#   → {jobs:[{data:{title, req_id, slug, full_location, country_code,
+#              apply_url, description, ...}}], totalCount}
+# Signature: the career_url carries Radancy's geo facets (woe= + regionCode=),
+# which no other adapter uses — safe to key on. The career_url should already
+# scope to Vietnam (regionCode=VN); we still re-filter on country_code/location
+# because the radius facet (stretch=) can pull in neighbouring-country roles.
+def _is_radancy(career_url: str) -> bool:
+    q = (urlparse(career_url or "").query or "").lower()
+    return "woe=" in q and "regioncode=" in q
 
 
-def _pcsx(career_url: str) -> list[dict]:
+def _radancy(career_url: str) -> list[dict]:
     p = urlparse(career_url)
     origin = f"{p.scheme}://{p.netloc}"
-    domain = _registrable_domain(p.netloc)
-    country = os.getenv("DISCOVER_COUNTRY", "Vietnam")
+    base = dict(parse_qsl(p.query))            # preserve location/woe/regionCode
     out, seen = [], set()
-    for start in range(0, 200, 50):
+    for page in range(1, 12):                  # 10/page, cap ~110
+        base["page"] = str(page)
         try:
-            r = requests.get(f"{origin}/api/pcsx/search",
-                             headers={**_HEADERS, "Accept": "application/json"}, timeout=_TIMEOUT,
-                             params={"domain": domain, "query": "", "location": country,
-                                     "start": start, "num": 50})
+            r = requests.get(f"{origin}/api/jobs", params=base,
+                             headers=_JSON_POST, timeout=_TIMEOUT)
             if r.status_code != 200 or "json" not in r.headers.get("content-type", ""):
                 break
-            data = (r.json() or {}).get("data", {}) or {}
+            jobs = (r.json() or {}).get("jobs", []) or []
         except Exception as e:
-            logger.info(f"[ats] pcsx failed: {str(e)[:80]}")
+            logger.info(f"[ats] radancy failed: {str(e)[:80]}")
             break
-        pos = data.get("positions", []) or []
-        if not pos:
+        if not jobs:
             break
-        for j in pos:
-            vn = next((l for l in (j.get("locations") or []) if _is_vn_loc(l)), "")
-            title, jid = (j.get("name") or "").strip(), j.get("id")
-            if not title or not vn or not jid or jid in seen:
+        for it in jobs:
+            d = it.get("data", it)
+            title = (d.get("title") or "").strip()
+            loc = d.get("full_location") or d.get("short_location") or d.get("location_name") or ""
+            if (d.get("country_code") or "").upper() != "VN" and not _is_vn_loc(loc):
                 continue
-            seen.add(jid)
-            out.append({"title": title[:200], "url": f"{origin}/careers?pid={jid}",
-                        "location": str(vn)[:120], "description": ""})
-        if start + 50 >= (data.get("count") or 0) or len(out) >= _MAX_ATS_JOBS:
+            url = (d.get("apply_url") or "").rstrip("/")
+            if url.endswith("/login"):
+                url = url[: -len("/login")]
+            url = url or f"{origin}/jobs/{d.get('slug') or d.get('req_id')}"
+            if not title or url in seen:
+                continue
+            seen.add(url)
+            out.append({"title": title[:200], "url": url, "location": str(loc)[:120],
+                        "description": _strip_html(d.get("description") or "")[:600]})
+        if len(jobs) < 10 or len(out) >= _MAX_ATS_JOBS:
             break
-    logger.info(f"[ats] pcsx → {len(out)} VN jobs ({origin})")
+    logger.info(f"[ats] radancy → {len(out)} VN jobs ({origin})")
     return out
 
 
 _ADAPTERS: list = [
-    ("pcsx",           lambda u, h: _is_pcsx(u),         lambda u, h: _pcsx(u)),
+    ("radancy",        lambda u, h: _is_radancy(u),      lambda u, h: _radancy(u)),
     ("avature",        _is_avature,                      lambda u, h: _avature(u, h)),
     ("amazon",         lambda u, h: _is_amazon(u),       lambda u, h: _amazon(u)),
     ("workday",        lambda u, h: _resolve_workday_url(u, h) is not None,
@@ -1362,6 +1390,24 @@ _ADAPTERS: list = [
     ("eightfold",      _is_eightfold,                    lambda u, h: _eightfold(u)),
     ("successfactors", _is_successfactors,               lambda u, h: _successfactors(u, h)),
 ]
+
+
+def is_known_ats_url(career_url: str) -> str | None:
+    """Name of the custom adapter whose URL pattern matches `career_url`, by
+    pattern alone — regardless of whether the feed currently returns jobs.
+
+    fetch_ats_jobs returning [] is ambiguous: "no adapter recognizes this URL"
+    and "the adapter matched but the feed is empty right now" look identical
+    from outside. This tells them apart, so callers can flag the second case
+    (a known feed going quiet) as a potential regression instead of the
+    expected, silent majority of featured companies with no ATS at all."""
+    for name, detect, _fetch in _ADAPTERS:
+        try:
+            if detect(career_url, None):
+                return name
+        except Exception:
+            continue
+    return None
 
 
 def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:

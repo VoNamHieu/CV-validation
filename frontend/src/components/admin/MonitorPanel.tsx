@@ -20,9 +20,9 @@ type LinkRecord = {
 };
 
 const STATUS_COLOR: Record<string, string> = {
-    broken: '#ef4444',
-    unknown: '#f59e0b',
-    ok: '#22c55e',
+    broken: 'var(--accent-red)',
+    unknown: 'var(--accent-amber)',
+    ok: 'var(--accent-green)',
 };
 
 function ago(ts: number): string {
@@ -148,13 +148,13 @@ export default function MonitorPanel() {
                     {scanning ? 'Scanning…' : 'Run health-check'}
                 </button>
                 <button onClick={load} disabled={loading} style={btn()}>Refresh</button>
-                <button onClick={clearAll} style={btn({ marginLeft: 'auto', color: '#ef4444' })}>Clear log</button>
+                <button onClick={clearAll} style={btn({ marginLeft: 'auto', color: 'var(--accent-red)' })}>Clear log</button>
             </div>
 
             <div style={{ display: 'flex', gap: 16, marginBottom: 16, fontSize: '0.85rem' }}>
                 <span><b>{links.length}</b> logged</span>
-                <span style={{ color: '#ef4444' }}><b>{broken}</b> broken</span>
-                <span style={{ color: '#f59e0b' }}><b>{unknown}</b> suspect</span>
+                <span style={{ color: 'var(--accent-red)' }}><b>{broken}</b> broken</span>
+                <span style={{ color: 'var(--accent-amber)' }}><b>{unknown}</b> suspect</span>
                 {msg && <span style={{ color: 'var(--text-muted)', marginLeft: 'auto' }}>{msg}</span>}
             </div>
 

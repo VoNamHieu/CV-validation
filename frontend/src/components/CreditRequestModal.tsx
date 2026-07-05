@@ -9,6 +9,7 @@ import { createPortal } from 'react-dom';
 import { X, Coins, CheckCircle, Copy, Coffee, Star, PaperPlaneTilt } from '@phosphor-icons/react';
 import { credits as creditsApi, account } from '@/lib/db';
 import { BANK_INFO, TOPUP_PACKS, FREE_TOPUP, TRANSFER_NOTE } from '@/lib/payment';
+import { useModalA11y } from '@/lib/useModalA11y';
 
 type View = 'intro' | 'support' | 'pay';
 
@@ -43,6 +44,8 @@ export default function CreditRequestModal({
         }
     };
 
+    const dialogRef = useModalA11y<HTMLDivElement>(busy ? () => {} : onClose);
+
     if (typeof document === 'undefined') return null;
 
     return createPortal(
@@ -55,6 +58,11 @@ export default function CreditRequestModal({
             }}
         >
             <div
+                ref={dialogRef}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="credit-modal-title"
+                tabIndex={-1}
                 onClick={(e) => e.stopPropagation()}
                 style={{
                     width: '100%', maxWidth: 440, maxHeight: '90vh', overflowY: 'auto',

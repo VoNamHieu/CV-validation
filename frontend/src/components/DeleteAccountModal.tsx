@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Warning } from '@phosphor-icons/react';
 import { account } from '@/lib/db';
+import { useModalA11y } from '@/lib/useModalA11y';
 
 export default function DeleteAccountModal({
     email, onClose, onDeleted,
@@ -32,6 +33,9 @@ export default function DeleteAccountModal({
         }
     };
 
+    // Escape must not close the modal mid-delete, same as the overlay click guard below.
+    const dialogRef = useModalA11y<HTMLDivElement>(busy ? () => {} : onClose);
+
     if (typeof document === 'undefined') return null;
 
     return createPortal(
@@ -44,6 +48,11 @@ export default function DeleteAccountModal({
             }}
         >
             <div
+                ref={dialogRef}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="delete-account-modal-title"
+                tabIndex={-1}
                 onClick={(e) => e.stopPropagation()}
                 style={{
                     width: '100%', maxWidth: 420, background: 'var(--bg-secondary)',
@@ -69,7 +78,7 @@ export default function DeleteAccountModal({
                     <Warning size={22} weight="fill" style={{ color: 'var(--accent-red, #ef4444)' }} />
                 </div>
 
-                <h2 style={{ fontSize: '1.05rem', fontWeight: 700, margin: '0 0 8px', color: 'var(--text-primary)' }}>
+                <h2 id="delete-account-modal-title" style={{ fontSize: '1.05rem', fontWeight: 700, margin: '0 0 8px', color: 'var(--text-primary)' }}>
                     Xoá tài khoản vĩnh viễn
                 </h2>
                 <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: '0 0 14px' }}>
@@ -87,7 +96,7 @@ export default function DeleteAccountModal({
                     style={{
                         width: '100%', padding: '10px 12px', borderRadius: 10,
                         border: '1px solid var(--border-default)', background: 'var(--bg-card)',
-                        color: 'var(--text-primary)', fontSize: '0.85rem', outline: 'none',
+                        color: 'var(--text-primary)', fontSize: '0.85rem',
                     }}
                 />
 

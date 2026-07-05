@@ -6,6 +6,7 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { MapPin, Buildings, Briefcase, ChartLineUp, Sparkle } from '@phosphor-icons/react/dist/ssr';
 import PromotedJobCta from '@/components/PromotedJobCta';
+import { renderJd } from '@/lib/renderJd';
 import styles from './promoted.module.css';
 
 type PublicJob = {
@@ -21,15 +22,25 @@ type PromotedPage = {
     slug: string;
     template: string;
     og_image_url: string | null;
+    has_logo?: boolean;
     job: PublicJob;
 };
 
-async function fetchPage(slug: string): Promise<PromotedPage | null> {
+// Public URL of the uploaded company logo (real HTTP URL → works as <img> + og:image).
+function logoUrl(slug: string, preview?: string): string {
+    const base = process.env.BACKEND_URL || '';
+    return `${base}/store/promoted/logo-by-slug/${encodeURIComponent(slug)}${preview ? `?preview=${encodeURIComponent(preview)}` : ''}`;
+}
+
+async function fetchPage(slug: string, preview?: string): Promise<PromotedPage | null> {
     const backendUrl = process.env.BACKEND_URL;
     if (!backendUrl) return null;
+    // Forward ?preview=<id> so admins can view a DRAFT via the real /j/ page —
+    // the backend only bypasses the published gate when it matches the row id.
+    const qs = preview ? `?preview=${encodeURIComponent(preview)}` : '';
     try {
         const res = await fetch(
-            `${backendUrl}/store/promoted/by-slug/${encodeURIComponent(slug)}`,
+            `${backendUrl}/store/promoted/by-slug/${encodeURIComponent(slug)}${qs}`,
             { cache: 'no-store' }, // count each view; snapshot is tiny
         );
         if (!res.ok) return null;
@@ -39,47 +50,15 @@ async function fetchPage(slug: string): Promise<PromotedPage | null> {
     }
 }
 
-// Split the plain-text JD into readable blocks: short lines ending in ":" (or
-// numbered "1. …" headers) become sub-headings, bullet lines become a list,
-// everything else is a paragraph. The JD arrives newline-separated from the
-// backend's HTML stripper.
-function renderJd(text: string): React.ReactNode {
-    const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
-    const blocks: React.ReactNode[] = [];
-    let bullets: string[] = [];
-    const flush = () => {
-        if (bullets.length) {
-            blocks.push(
-                <ul key={`ul-${blocks.length}`}>
-                    {bullets.map((b, i) => <li key={i}>{b}</li>)}
-                </ul>,
-            );
-            bullets = [];
-        }
-    };
-    for (const line of lines) {
-        const isBullet = /^[-•*·+]\s+/.test(line) || /^\d+[.)]\s+/.test(line);
-        const isHeading = !isBullet && line.length <= 64 &&
-            (/[:：]$/.test(line) || (line === line.toUpperCase() && /\p{L}/u.test(line)));
-        if (isBullet) {
-            bullets.push(line.replace(/^[-•*·+]\s+/, '').replace(/^\d+[.)]\s+/, ''));
-        } else if (isHeading) {
-            flush();
-            blocks.push(<div key={`h-${blocks.length}`} className={styles.jdBlockHeading}>{line.replace(/[:：]$/, '')}</div>);
-        } else {
-            flush();
-            blocks.push(<p key={`p-${blocks.length}`}>{line}</p>);
-        }
-    }
-    flush();
-    return blocks;
-}
-
 export async function generateMetadata(
-    { params }: { params: Promise<{ slug: string }> },
+    { params, searchParams }: {
+        params: Promise<{ slug: string }>;
+        searchParams: Promise<{ preview?: string }>;
+    },
 ): Promise<Metadata> {
     const { slug } = await params;
-    const page = await fetchPage(slug);
+    const { preview } = await searchParams;
+    const page = await fetchPage(slug, preview);
     if (!page) return { title: 'Không tìm thấy tin tuyển dụng — Copo' };
     const { title, company_name, description } = page.job;
     const heading = company_name ? `${title} — ${company_name}` : title;
@@ -91,16 +70,24 @@ export async function generateMetadata(
             title: heading,
             description: summary,
             type: 'website',
-            ...(page.og_image_url ? { images: [{ url: page.og_image_url }] } : {}),
+            // Prefer an explicit og_image_url; else the uploaded company logo
+            // (real URL from the logo endpoint) so social cards show the brand.
+            ...(page.og_image_url
+                ? { images: [{ url: page.og_image_url }] }
+                : page.has_logo ? { images: [{ url: logoUrl(slug) }] } : {}),
         },
     };
 }
 
 export default async function PromotedJobPage(
-    { params }: { params: Promise<{ slug: string }> },
+    { params, searchParams }: {
+        params: Promise<{ slug: string }>;
+        searchParams: Promise<{ preview?: string }>;
+    },
 ) {
     const { slug } = await params;
-    const page = await fetchPage(slug);
+    const { preview } = await searchParams;
+    const page = await fetchPage(slug, preview);
     if (!page) notFound();
     const { title, company_name, location, description, industry, role_family, seniority } = page.job;
 
@@ -132,7 +119,13 @@ export default async function PromotedJobPage(
             {/* Hero */}
             <div className={styles.hero}>
                 <div className={styles.heroInner}>
-                    <div className={styles.avatar}>{initial}</div>
+                    {page.has_logo ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img className={styles.avatar} src={logoUrl(slug, preview)} alt={company_name || title}
+                            style={{ objectFit: 'cover' }} />
+                    ) : (
+                        <div className={styles.avatar}>{initial}</div>
+                    )}
                     <div className={styles.heroText}>
                         {company_name && <p className={styles.company}>{company_name}</p>}
                         <h1 className={styles.title}>{title}</h1>

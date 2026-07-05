@@ -235,13 +235,21 @@ export default function StepUploadCV() {
                         <ArrowRight size={14} weight="bold" style={{ transform: 'rotate(180deg)' }} /> Dùng lại CV đã lưu
                     </button>
                 )}
-                <div
+                {/* A real <button> — not a <div onClick> — so the dropzone is
+                    reachable by Tab and activates on Enter/Space. The file
+                    input stays display:none (that part's fine; hidden inputs
+                    just can't be the thing a keyboard user interacts with). */}
+                <button
+                    type="button"
                     className={`upload-zone ${dragOver ? 'drag-over' : ''}`}
                     onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
                     onDragLeave={() => setDragOver(false)}
                     onDrop={onDrop}
                     onClick={() => fileInputRef.current?.click()}
-                    style={{ position: 'relative' }}
+                    style={{
+                        position: 'relative', display: 'block', width: '100%', font: 'inherit',
+                        appearance: 'none', WebkitAppearance: 'none', color: 'inherit',
+                    }}
                 >
                     <div style={{
                         width: 64, height: 64, borderRadius: 16,
@@ -254,7 +262,7 @@ export default function StepUploadCV() {
                     </div>
                     <p style={{
                         fontSize: '1rem', fontWeight: 600, marginBottom: 6,
-                        letterSpacing: '-0.01em', position: 'relative',
+                        letterSpacing: '-0.01em', position: 'relative', color: 'var(--text-primary)',
                     }}>
                         Kéo & thả CV vào đây
                     </p>
@@ -265,10 +273,12 @@ export default function StepUploadCV() {
                         ref={fileInputRef}
                         type="file"
                         accept=".pdf"
+                        tabIndex={-1}
+                        aria-hidden="true"
                         style={{ display: 'none' }}
                         onChange={onFileSelect}
                     />
-                </div>
+                </button>
                 </>
             )}
 
@@ -342,7 +352,7 @@ export default function StepUploadCV() {
                 can edit it or pick a city. No city = freestyle (any location). */}
             {ready && !processing && (
                 <div className="glass-card" style={{ padding: '20px 24px', marginTop: 16 }}>
-                    <label style={{
+                    <label htmlFor="target-job-title" style={{
                         display: 'flex', alignItems: 'center', gap: 6,
                         fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-muted)',
                         textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10,
@@ -358,6 +368,7 @@ export default function StepUploadCV() {
                             <Brain size={16} weight="duotone" />
                         </div>
                         <input
+                            id="target-job-title"
                             className="input-field"
                             type="text"
                             value={targetJobTitle}
@@ -370,15 +381,18 @@ export default function StepUploadCV() {
                         Chọn vị trí bạn muốn ứng tuyển — kể cả khác với CV. Chúng tôi tìm việc theo vị trí này, rồi dùng CV để ước lượng độ phù hợp.
                     </p>
 
-                    <label style={{
+                    {/* A <label> would misleadingly claim to describe a single
+                        control — this heads a group of toggle buttons, so it's
+                        a plain heading; the group itself carries the a11y name. */}
+                    <div style={{
                         display: 'flex', alignItems: 'center', gap: 6,
                         fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-muted)',
                         textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10,
                     }}>
                         <Stack size={14} weight="duotone" style={{ color: 'var(--accent-purple)' }} />
                         Cấp bậc <span style={{ textTransform: 'none', fontWeight: 400, letterSpacing: 0 }}>· không bắt buộc</span>
-                    </label>
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+                    </div>
+                    <div role="group" aria-label="Cấp bậc" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
                         {SENIORITY_OPTIONS.map((s) => {
                             const active = targetLevel === s.key;
                             return (
@@ -406,15 +420,15 @@ export default function StepUploadCV() {
                             : 'Chưa chọn cấp bậc — chúng tôi sẽ suy ra từ CV của bạn.'}
                     </p>
 
-                    <label style={{
+                    <div style={{
                         display: 'flex', alignItems: 'center', gap: 6,
                         fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-muted)',
                         textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10,
                     }}>
                         <MapPin size={14} weight="duotone" style={{ color: 'var(--accent-blue)' }} />
                         Địa điểm <span style={{ textTransform: 'none', fontWeight: 400, letterSpacing: 0 }}>· không bắt buộc</span>
-                    </label>
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    </div>
+                    <div role="group" aria-label="Địa điểm" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                         {CITY_OPTIONS.map((c) => {
                             const active = targetLocation === c.key;
                             return (

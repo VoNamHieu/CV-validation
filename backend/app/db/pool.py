@@ -46,6 +46,17 @@ async def get_pool() -> asyncpg.Pool:
         dsn = os.getenv("DATABASE_URL")
         if not dsn:
             raise RuntimeError("DATABASE_URL is not set — cannot open DB pool")
+        # Regression guard: the Supabase SESSION pooler (pooler host on :5432)
+        # caps the whole project at 15 client connections — web pool + Supabase
+        # internals tip over it → sporadic EMAXCONNSESSION 500s. We deliberately
+        # run on the TRANSACTION pooler (:6543). Warn loudly if someone reverts
+        # the DSN, so this doesn't silently regress.
+        if "pooler." in dsn and ":5432" in dsn:
+            logger.warning(
+                "DATABASE_URL uses the Supabase SESSION pooler (:5432) — this "
+                "caps clients at 15 and causes intermittent EMAXCONNSESSION 500s. "
+                "Switch to the TRANSACTION pooler (:6543)."
+            )
         _pool = await asyncpg.create_pool(
             dsn,
             min_size=1,

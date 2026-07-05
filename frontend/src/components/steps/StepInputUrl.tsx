@@ -1161,6 +1161,19 @@ export default function StepInputUrl() {
     const isProcessing = phase !== 'idle';
     const currentPhaseIdx = PHASE_ORDER.indexOf(phase as Exclude<Phase, 'idle'>);
 
+    // Cooperative cancel: every async stage across both handlers already checks
+    // `runRef.current === runId` before writing UI state or navigating (guards
+    // against a stale run when the user restarts search) — bumping the ref
+    // here piggybacks on that existing machinery instead of threading a new
+    // AbortController through the whole pipeline. In-flight requests finish in
+    // the background; their results are just discarded. What matters to the
+    // user — the wait ends and they get control back — happens immediately.
+    const cancelSearch = () => {
+        runRef.current++;
+        setPhase('idle');
+        setPhaseDetail('');
+    };
+
     // Fully-auto flow: kick off the featured pipeline as soon as we land
     // on this step with a CV in hand. The pipeline itself jumps to step 4
     // on success (or clears fullyAutoMode on failure), so this effect only
@@ -1258,7 +1271,10 @@ export default function StepInputUrl() {
                 AI tìm công ty phù hợp với CV và chấm điểm tin tuyển dụng của họ
             </div>
 
-            {/* Divider */}
+            {/* Divider + manual URL input — hidden once a search is running so
+                the processing pipeline below isn't competing with a still-usable
+                (but pointless-to-touch-mid-run) form for attention. */}
+            {!isProcessing && <>
             <div style={{
                 display: 'flex', alignItems: 'center', gap: 12,
                 margin: '20px 0',
@@ -1309,6 +1325,7 @@ export default function StepInputUrl() {
                 </button>
             </div>
             </>}
+            </>}
 
             {/* Inferred title badge */}
             {inferredTitle && isProcessing && (
@@ -1328,6 +1345,22 @@ export default function StepInputUrl() {
                     padding: '20px 24px', marginBottom: 16,
                     display: 'flex', flexDirection: 'column', gap: 14,
                 }}>
+                    {/* Screen-reader announcer — mirrors the active phase so the
+                        60–90s wait isn't silent for assistive tech. Visually
+                        hidden; the visible checklist below carries the same
+                        info for sighted users. */}
+                    <div
+                        role="status"
+                        aria-live="polite"
+                        style={{
+                            position: 'absolute', width: 1, height: 1, padding: 0,
+                            margin: -1, overflow: 'hidden', clip: 'rect(0,0,0,0)',
+                            whiteSpace: 'nowrap', border: 0,
+                        }}
+                    >
+                        {PHASE_CONFIG[phase as Exclude<Phase, 'idle'>]?.label}
+                        {phaseDetail ? ` — ${phaseDetail}` : ''}
+                    </div>
                     {PHASE_ORDER.map((p, i) => {
                         const config = PHASE_CONFIG[p];
                         const isDone = i < currentPhaseIdx;
@@ -1384,6 +1417,17 @@ export default function StepInputUrl() {
                             </div>
                         );
                     })}
+                    <button
+                        type="button"
+                        onClick={cancelSearch}
+                        style={{
+                            alignSelf: 'flex-start', marginTop: 2, padding: '6px 4px',
+                            background: 'none', border: 'none', cursor: 'pointer',
+                            fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-muted)',
+                        }}
+                    >
+                        Hủy tìm kiếm
+                    </button>
                     <style>{`@keyframes spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }`}</style>
                 </div>
             )}
