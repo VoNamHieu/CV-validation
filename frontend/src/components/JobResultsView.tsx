@@ -7,6 +7,7 @@ import {
 } from '@phosphor-icons/react';
 import type { CandidateJob } from '@/store/useAppStore';
 import { fetchPage } from '@/lib/api';
+import ConfirmModal from '@/components/ConfirmModal';
 
 // Results page shown between the search step and the editor. Lets the user
 // curate the discovered jobs — remove ones they don't want, reveal more from
@@ -275,6 +276,7 @@ export default function JobResultsView({
     candidates, poolRemaining, busy, onRemove, onFindMore, onOptimize, onApplyOriginal, onBack,
 }: Props) {
     const count = candidates.length;
+    const [confirmApply, setConfirmApply] = useState(false);
 
     return (
         <div>
@@ -358,11 +360,7 @@ export default function JobResultsView({
                 screen — so a plain-text confirm before firing is the only
                 safety net against an accidental click. */}
             <button
-                onClick={() => {
-                    if (window.confirm(
-                        `Ứng tuyển ngay ${count} việc bằng CV gốc (chưa tối ưu)? Extension sẽ mở và điền đơn ngay lập tức, không qua bước xem lại.`,
-                    )) onApplyOriginal();
-                }}
+                onClick={() => setConfirmApply(true)}
                 disabled={busy || count === 0}
                 style={{
                     width: '100%', marginTop: 10, padding: '11px 12px',
@@ -389,6 +387,27 @@ export default function JobResultsView({
                     <ArrowLeft size={16} weight="bold" /> Tìm kiếm lại
                 </button>
             </div>
+
+            {confirmApply && (
+                <ConfirmModal
+                    title="Ứng tuyển ngay với CV gốc?"
+                    tone="warning"
+                    icon={<PaperPlaneTilt size={20} weight="fill" />}
+                    confirmLabel={`Ứng tuyển ${count} việc`}
+                    cancelLabel="Quay lại"
+                    onConfirm={() => { setConfirmApply(false); onApplyOriginal(); }}
+                    onClose={() => setConfirmApply(false)}
+                >
+                    <p style={{ margin: '0 0 10px' }}>
+                        Bạn sắp ứng tuyển <strong>{count} việc</strong> bằng <strong>CV gốc — chưa được tối ưu</strong> cho từng vị trí.
+                    </p>
+                    <ul style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 5 }}>
+                        <li>Extension sẽ mở và điền đơn <strong>ngay lập tức</strong>.</li>
+                        <li>Bỏ qua bước xem lại — bạn sẽ không kịp kiểm tra trước khi gửi.</li>
+                        <li>Muốn CV khớp hơn với từng việc? Hãy chọn <em>“Tối ưu CV”</em> ở trên.</li>
+                    </ul>
+                </ConfirmModal>
+            )}
         </div>
     );
 }
