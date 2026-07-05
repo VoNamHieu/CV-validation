@@ -23,7 +23,7 @@ export default function Error({ error, reset }: { error: Error & { digest?: stri
                 <div style={{ fontSize: 40, marginBottom: 8 }}>⚠️</div>
                 <h2 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 8 }}>Đã xảy ra lỗi</h2>
                 <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: 20, lineHeight: 1.5 }}>
-                    Có lỗi khi hiển thị trang. Dữ liệu của bạn vẫn an toàn — thử lại hoặc tải lại trang.
+                    Có lỗi khi hiển thị trang. Dữ liệu của bạn vẫn an toàn, thử lại hoặc tải lại trang.
                 </p>
                 <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
                     <button className="btn-primary" onClick={() => reset()}>Thử lại</button>

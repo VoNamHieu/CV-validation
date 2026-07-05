@@ -141,7 +141,7 @@ function JobCard({ c, busy, onRemove }: { c: CandidateJob; busy: boolean; onRemo
             const r = await fetchPage(jdFetchUrl);
             if (r.success && r.text?.trim()) setJd(r.text.trim());
             else setError(r.blocked
-                ? 'Trang mô tả chặn truy cập tự động — mở ở tab mới để xem đầy đủ.'
+                ? 'Trang mô tả chặn truy cập tự động, mở ở tab mới để xem đầy đủ.'
                 : 'Chưa lấy được mô tả công việc.');
         } catch {
             setError('Chưa lấy được mô tả công việc.');
@@ -288,7 +288,7 @@ export default function JobResultsView({
                 }}>
                     <Sparkle size={14} weight="fill" style={{ color: 'var(--accent-purple)', flexShrink: 0, marginTop: 2 }} />
                     <span>
-                        Đã sắp xếp theo <strong style={{ color: 'var(--text-primary)' }}>độ phù hợp với CV của bạn</strong> — việc khớp nhất ở trên. Điểm khớp % chi tiết hiện sau khi chấm điểm.
+                        Đã sắp xếp theo <strong style={{ color: 'var(--text-primary)' }}>độ phù hợp với CV của bạn</strong>, việc khớp nhất ở trên. Điểm khớp % chi tiết hiện sau khi chấm điểm.
                     </span>
                 </div>
             )}

@@ -12,7 +12,7 @@ import { useModalA11y } from '@/lib/useModalA11y';
 const STEPS = [
     'Tải & cài extension Copo cho Chrome từ link bên dưới.',
     'Ghim extension, rồi quay lại đây và tải lại trang (F5).',
-    'Bấm "Ứng tuyển tự động" lại — agent sẽ tự điền form.',
+    'Bấm "Ứng tuyển tự động" lại, agent sẽ tự điền form.',
 ];
 
 export default function InstallExtensionModal() {

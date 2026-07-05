@@ -21,7 +21,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Copo | Trợ lý tìm việc & tối ưu CV",
-  description: "Tải CV lên, để AI tìm việc phù hợp, chấm điểm độ khớp và gợi ý tối ưu CV — cam kết không bịa nội dung.",
+  description: "Tải CV lên, để AI tìm việc phù hợp, chấm điểm độ khớp và gợi ý tối ưu CV. Cam kết không bịa nội dung.",
 };
 
 export default function RootLayout({

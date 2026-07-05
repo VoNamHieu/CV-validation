@@ -31,7 +31,7 @@ function postAndAwait(
             resolve({
                 ok: false,
                 error:
-                    "Extension không phản hồi — kiểm tra extension đã cài/bật và tải lại (F5) trang này.",
+                    "Extension không phản hồi, kiểm tra extension đã cài/bật và tải lại (F5) trang này.",
             });
         }, ACK_TIMEOUT_MS);
 

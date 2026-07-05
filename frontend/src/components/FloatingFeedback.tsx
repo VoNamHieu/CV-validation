@@ -114,7 +114,7 @@ export default function FloatingFeedback() {
     };
 
     const subtitle = ctx === 'apply'
-        ? 'Bạn vừa hoàn tất ứng tuyển — trải nghiệm thế nào?'
+        ? 'Bạn vừa hoàn tất ứng tuyển, trải nghiệm thế nào?'
         : ctx === 'session'
             ? 'Bạn dùng Copo có thấy ổn không? Góp ý giúp chúng tôi nhé!'
             : 'Bạn thấy Copo thế nào? Điều gì nên cải thiện?';

@@ -50,7 +50,7 @@ export const CV_TEMPLATES: CvTemplate[] = [
     {
         id: 'minimal-mono',
         name: 'Tối giản (không ảnh)',
-        description: 'Chỉ chữ, không ảnh đại diện — tối ưu cho hệ thống ATS.',
+        description: 'Chỉ chữ, không ảnh đại diện, tối ưu cho hệ thống ATS.',
         accentColor: '#111111',
         layout: 'single-col',
         hasPhoto: false,

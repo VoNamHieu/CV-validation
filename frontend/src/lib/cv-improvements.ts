@@ -78,7 +78,7 @@ export function diffCvChanges(original: CVData, optimized: CVData): string[] {
         }
     }
     if (rewordedCompanies.length > 0) {
-        changes.push(`Viết lại ${rewordedBullets} gạch đầu dòng ở ${listVi(rewordedCompanies)} — bổ sung từ khoá & định lượng theo JD.`);
+        changes.push(`Viết lại ${rewordedBullets} gạch đầu dòng ở ${listVi(rewordedCompanies)}, bổ sung từ khoá & định lượng theo JD.`);
         if (exampleBullet) changes.push(`Ví dụ: “${snippet(exampleBullet, 140)}”`);
     }
     if (reorderedCompanies.length > 0) {

@@ -82,7 +82,7 @@ export default function PrepList() {
                             <ChatCircleDots size={18} weight="duotone" style={{ color: 'var(--accent-purple)', flexShrink: 0 }} />
                             <span style={{ flex: 1, minWidth: 0 }}>
                                 <span style={{ display: 'block', fontSize: '0.9rem', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                    {title} — Chuẩn bị phỏng vấn
+                                    {title}: Chuẩn bị phỏng vấn
                                 </span>
                                 <span style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: 2 }}>
                                     {company && <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{company}</span>}

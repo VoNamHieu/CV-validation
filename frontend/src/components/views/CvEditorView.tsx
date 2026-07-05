@@ -43,7 +43,7 @@ export default function CvEditorView() {
                     Sửa CV
                 </h1>
                 <p style={{ fontSize: '0.84rem', color: 'var(--text-muted)', margin: 0 }}>
-                    Chỉnh sửa CV, chọn mẫu và xuất PDF — không cần qua luồng ứng tuyển.
+                    Chỉnh sửa CV, chọn mẫu và xuất PDF, không cần qua luồng ứng tuyển.
                 </p>
             </header>
 
@@ -162,7 +162,7 @@ function UploadGate() {
                         {processing ? 'Đang đọc CV bằng AI…' : 'Tải lên CV (PDF) để bắt đầu'}
                     </div>
                     <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                        Kéo thả file hoặc bấm để chọn — AI sẽ trích xuất nội dung để chỉnh sửa.
+                        Kéo thả file hoặc bấm để chọn, AI sẽ trích xuất nội dung để chỉnh sửa.
                     </div>
                     <input
                         type="file"
@@ -182,7 +182,7 @@ function UploadGate() {
                         value={pasted}
                         onChange={(e) => { setPasted(e.target.value); setError(''); }}
                         disabled={processing}
-                        placeholder={'Dán nội dung CV của bạn vào đây — họ tên, liên hệ, kinh nghiệm, kỹ năng, học vấn… ở bất kỳ định dạng nào. AI sẽ tự sắp xếp thành CV hoàn chỉnh.'}
+                        placeholder={'Dán nội dung CV của bạn vào đây: họ tên, liên hệ, kinh nghiệm, kỹ năng, học vấn… ở bất kỳ định dạng nào. AI sẽ tự sắp xếp thành CV hoàn chỉnh.'}
                         rows={12}
                         style={{
                             width: '100%', padding: '14px 16px', borderRadius: 14,
@@ -371,7 +371,7 @@ function CvEditorWorkspace({ cv }: { cv: CVData }) {
                 display: 'flex', alignItems: 'center', gap: 6,
             }}>
                 <Warning size={12} />
-                Bấm vào nội dung bất kỳ để sửa, di chuột vào mục để sắp xếp/xoá — nội dung do bạn kiểm soát.
+                Bấm vào nội dung bất kỳ để sửa, di chuột vào mục để sắp xếp/xoá. Nội dung do bạn kiểm soát.
             </div>
 
             {/* ══════ Template Picker + Avatar + Live Preview ══════ */}
@@ -448,7 +448,7 @@ function CvEditorWorkspace({ cv }: { cv: CVData }) {
                         }}>
                             <span>Mẫu CV</span>
                             <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: '0.72rem' }}>
-                                — chọn mẫu trước khi tải xuống
+                                : chọn mẫu trước khi tải xuống
                             </span>
                         </div>
                         <CvTemplatePicker
@@ -486,8 +486,8 @@ function CvEditorWorkspace({ cv }: { cv: CVData }) {
                     {livePreviewOpen ? 'Quay lại chỉnh sửa nội dung' : 'Xem trước mẫu đã chọn'}
                     <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: '0.72rem' }}>
                         {livePreviewOpen
-                            ? '— CV đang hiển thị đúng theo mẫu sẽ xuất PDF'
-                            : '— xem CV render theo mẫu trước khi tải xuống'}
+                            ? ': CV đang hiển thị đúng theo mẫu sẽ xuất PDF'
+                            : ': xem CV render theo mẫu trước khi tải xuống'}
                     </span>
                 </button>
 
@@ -519,7 +519,7 @@ function CvEditorWorkspace({ cv }: { cv: CVData }) {
                             </div>
                         )}
                         <div style={{ marginTop: 8, fontSize: '0.74rem', color: 'var(--text-muted)' }}>
-                            ✏️ Click vào nội dung trên CV để sửa trực tiếp — Enter để lưu, Esc để huỷ.
+                            ✏️ Click vào nội dung trên CV để sửa trực tiếp: Enter để lưu, Esc để huỷ.
                         </div>
                         <div style={{
                             marginTop: 8, border: '1px solid var(--border-subtle)',

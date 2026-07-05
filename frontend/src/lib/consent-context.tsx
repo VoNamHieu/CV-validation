@@ -143,7 +143,7 @@ function AgentConsentModal({
                 </h2>
                 <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: '0 0 14px' }}>
                     Copo sẽ thay bạn điền và có thể nộp đơn ứng tuyển trên trang tuyển dụng. Kết quả AI có
-                    thể sai sót — bạn nên rà soát trước khi nộp và{' '}
+                    thể sai sót, bạn nên rà soát trước khi nộp và{' '}
                     <strong style={{ color: 'var(--text-primary)' }}>chịu trách nhiệm về nội dung được gửi đi</strong>.
                     Xem mục 5 &amp; 8 trong{' '}
                     <a href="/terms" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-blue)' }}>

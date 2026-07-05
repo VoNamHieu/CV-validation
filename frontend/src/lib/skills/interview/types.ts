@@ -15,12 +15,12 @@ export type Section = 'expand' | 'probe' | 'gap' | 'translate' | 'case' | 'compa
 export const SECTION_ORDER: Section[] = ['probe', 'gap', 'translate', 'case', 'company', 'expand'];
 
 export const SECTION_LABEL_VI: Record<Section, string> = {
-    probe: 'Điểm chưa chắc — cần đào sâu',
+    probe: 'Điểm chưa chắc, cần đào sâu',
     gap: 'Điểm còn thiếu',
     translate: 'Nói lại bằng lời của bạn',
     case: 'Tình huống theo mô tả công việc',
     company: 'Về công ty & vị trí',
-    expand: 'Thế mạnh — hãy làm nổi bật',
+    expand: 'Thế mạnh, hãy làm nổi bật',
 };
 
 export interface Evidence {

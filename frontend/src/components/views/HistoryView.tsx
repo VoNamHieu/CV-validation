@@ -214,7 +214,7 @@ function EmptyState() {
                 Chưa có hồ sơ ứng tuyển nào
             </h3>
             <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem', maxWidth: 360, margin: '0 auto' }}>
-                Hãy tìm việc ở tab Ứng tuyển — các việc đã chấm điểm sẽ hiện ở đây để bạn theo dõi tiến trình.
+                Hãy tìm việc ở tab Ứng tuyển, các việc đã chấm điểm sẽ hiện ở đây để bạn theo dõi tiến trình.
             </p>
         </div>
     );
@@ -286,7 +286,7 @@ export default function HistoryView() {
                         Hồ sơ ứng tuyển
                     </h1>
                     <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-                        Theo dõi mọi việc bạn đã chấm điểm — trạng thái, ghi chú và mở lại chỉ với một cú bấm.
+                        Theo dõi mọi việc bạn đã chấm điểm: trạng thái, ghi chú và mở lại chỉ với một cú bấm.
                     </p>
                 </div>
                 {jobHistory.length > 0 && (

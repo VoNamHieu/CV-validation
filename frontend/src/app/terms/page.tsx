@@ -3,7 +3,7 @@ import LegalShell from '@/components/LegalShell';
 import { TermsContent } from '@/components/legal/LegalContent';
 
 export const metadata: Metadata = {
-    title: 'Điều khoản sử dụng — Copo',
+    title: 'Điều khoản sử dụng - Copo',
     description: 'Điều khoản và điều kiện khi sử dụng dịch vụ Copo.',
 };
 

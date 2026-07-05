@@ -55,13 +55,13 @@ function checkGroundedness(answer: string, evidence: string): ChecklistAxis {
 function checkSpecificity(answer: string, cvNumerals: Set<string>, cvText: string): ChecklistAxis {
     const nums = extractNumerals(answer);
     if (nums.size === 0) {
-        return { status: 'partial', detail_vi: 'Chưa có số liệu cụ thể — thêm con số định lượng nếu có.' };
+        return { status: 'partial', detail_vi: 'Chưa có số liệu cụ thể, thêm con số định lượng nếu có.' };
     }
     const stray = [...nums].filter(n => !cvNumerals.has(n));
     if (stray.length === 0) return { status: 'pass' };
     return {
         status: 'fail',
-        detail_vi: `Số liệu "${stray.join(', ')}" không có trong CV — chỉ dùng con số thật.`,
+        detail_vi: `Số liệu "${stray.join(', ')}" không có trong CV, chỉ dùng con số thật.`,
         cv_quote: firstBulletWithNumber(cvText),
     };
 }

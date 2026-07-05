@@ -59,9 +59,9 @@ export async function generateMetadata(
     const { slug } = await params;
     const { preview } = await searchParams;
     const page = await fetchPage(slug, preview);
-    if (!page) return { title: 'Không tìm thấy tin tuyển dụng — Copo' };
+    if (!page) return { title: 'Không tìm thấy tin tuyển dụng - Copo' };
     const { title, company_name, description } = page.job;
-    const heading = company_name ? `${title} — ${company_name}` : title;
+    const heading = company_name ? `${title} - ${company_name}` : title;
     const summary = (description || '').replace(/\s+/g, ' ').slice(0, 160);
     return {
         title: `${heading} | Copo`,

@@ -642,7 +642,7 @@ export default function StepEditCv() {
         const withFile = jobs.filter(j => j.cvFileBase64).length;
         if (withFile < jobs.length) {
             setAutoApplyMessage(
-                `${withFile}/${jobs.length} công việc có sẵn CV PDF. Các công việc thiếu file sẽ ứng tuyển chỉ với văn bản — dùng "Ứng tuyển tự động hoàn toàn" để tạo đủ PDF.`,
+                `${withFile}/${jobs.length} công việc có sẵn CV PDF. Các công việc thiếu file sẽ ứng tuyển chỉ với văn bản, dùng "Ứng tuyển tự động hoàn toàn" để tạo đủ PDF.`,
             );
         }
 
@@ -813,7 +813,7 @@ export default function StepEditCv() {
                         Đang tối ưu CV của bạn…
                     </h3>
                     <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: 24, lineHeight: 1.6 }}>
-                        Đã ghép việc xong — chúng tôi đang điều chỉnh CV cho từng công việc. Chúng sẽ hiện ra ở đây ngay khi hoàn tất.
+                        Đã ghép việc xong, chúng tôi đang điều chỉnh CV cho từng công việc. Chúng sẽ hiện ra ở đây ngay khi hoàn tất.
                     </p>
                 </div>
             );
@@ -831,7 +831,7 @@ export default function StepEditCv() {
                         {reportOnlyEntry.jobTitle || reportOnlyEntry.company || reportOnlyEntry.label}
                     </h3>
                     <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem', margin: '0 0 18px', lineHeight: 1.6 }}>
-                        Job đã lưu — đây là báo cáo độ phù hợp đã chấm. Tối ưu CV cho job này để chỉnh sửa và xuất PDF.
+                        Job đã lưu, đây là báo cáo độ phù hợp đã chấm. Tối ưu CV cho job này để chỉnh sửa và xuất PDF.
                     </p>
                     <button className="btn-primary" onClick={() => optimizeReopened(reportOnlyEntry)}
                         style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center', width: '100%', padding: '11px 16px', marginBottom: 18 }}>
@@ -863,8 +863,8 @@ export default function StepEditCv() {
                 </h3>
                 <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: droppedEntries.length ? 16 : 24, lineHeight: 1.6 }}>
                     {droppedEntries.length
-                        ? `Tìm được ${droppedEntries.length} việc nhưng chưa việc nào tối ưu được — lý do bên dưới. Thử tìm lại hoặc đổi vị trí/cấp bậc.`
-                        : 'Chưa có công việc nào được phân tích và tối ưu. Quay lại tìm việc — mỗi công việc được chấm điểm sẽ tự động tối ưu CV.'}
+                        ? `Tìm được ${droppedEntries.length} việc nhưng chưa việc nào tối ưu được, lý do bên dưới. Thử tìm lại hoặc đổi vị trí/cấp bậc.`
+                        : 'Chưa có công việc nào được phân tích và tối ưu. Quay lại tìm việc, mỗi công việc được chấm điểm sẽ tự động tối ưu CV.'}
                 </p>
                 {droppedEntries.length > 0 && (
                     <div style={{ textAlign: 'left', maxWidth: 460, margin: '0 auto 24px', display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -876,7 +876,7 @@ export default function StepEditCv() {
                                 <Warning size={13} weight="fill" style={{ color: 'var(--accent-amber)', marginTop: 2, flexShrink: 0 }} />
                                 <span style={{ fontSize: '0.78rem', lineHeight: 1.45 }}>
                                     <span style={{ fontWeight: 600 }}>{e.jobTitle || e.company || e.label}</span>
-                                    {e.error ? <span style={{ color: 'var(--text-secondary)' }}> — {e.error}</span> : null}
+                                    {e.error ? <span style={{ color: 'var(--text-secondary)' }}>: {e.error}</span> : null}
                                 </span>
                             </div>
                         ))}
@@ -925,7 +925,7 @@ export default function StepEditCv() {
                         CV đã tối ưu
                     </h2>
                     <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>
-                        Đã tối ưu {sortedEntries.length} CV — chuyển giữa các công việc để xem từng phiên bản
+                        Đã tối ưu {sortedEntries.length} CV, chuyển giữa các công việc để xem từng phiên bản
                     </p>
                 </div>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
@@ -975,7 +975,7 @@ export default function StepEditCv() {
                                         ? '\n✅ File CV PDF đã đồng bộ.'
                                         : `\n⚠️ Đồng bộ file CV PDF lỗi: ${fileRes.error}`;
                                 } else {
-                                    cvFileMsg = '\n⚠️ Không tạo được file CV PDF — thử lại hoặc bấm tối ưu.';
+                                    cvFileMsg = '\n⚠️ Không tạo được file CV PDF, thử lại hoặc bấm tối ưu.';
                                 }
                             }
                             setResyncMsg(profileRes.ok
@@ -1032,7 +1032,7 @@ export default function StepEditCv() {
                             <button
                                 onClick={triggerFullyAutoApply}
                                 disabled={isFullAutoBusy || sortedEntries.filter(e => e.optimizedCv && e.source).length === 0}
-                                title="Tự tạo PDF mới từ CV đã tối ưu rồi ứng tuyển tất cả — không cần PDF lưu sẵn"
+                                title="Tự tạo PDF mới từ CV đã tối ưu rồi ứng tuyển tất cả, không cần PDF lưu sẵn"
                                 style={{
                                     display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem',
                                     background: 'linear-gradient(135deg, #f59e0b, #dc2626)',
@@ -1056,7 +1056,7 @@ export default function StepEditCv() {
                             <button
                                 onClick={triggerAutoApplyAll}
                                 disabled={batchStarting || sortedEntries.filter(e => e.source).length === 0}
-                                title="Nhanh hơn — dùng lại CV PDF đã tạo sẵn (không render lại)"
+                                title="Nhanh hơn: dùng lại CV PDF đã tạo sẵn (không render lại)"
                                 style={{
                                     display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.78rem',
                                     background: 'rgba(0,0,0,0.25)',
@@ -1111,8 +1111,8 @@ export default function StepEditCv() {
                             }
                             <span style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--text-primary)' }}>
                                 {batchProgress.isProcessing
-                                    ? `⚡ Ứng tuyển hàng loạt — ${batchProgress.completed}/${batchProgress.total} công việc`
-                                    : `✅ Hoàn tất — ${batchSubmitted} đã nộp · ${batchFilled} đã điền (chờ bạn nộp)`
+                                    ? `⚡ Ứng tuyển hàng loạt: ${batchProgress.completed}/${batchProgress.total} công việc`
+                                    : `✅ Hoàn tất: ${batchSubmitted} đã nộp · ${batchFilled} đã điền (chờ bạn nộp)`
                                 }
                             </span>
                         </div>
@@ -1134,8 +1134,8 @@ export default function StepEditCv() {
                             fontSize: '0.75rem', color: '#fbbf24', margin: '0 0 10px',
                             lineHeight: 1.5,
                         }}>
-                            ⚠️ Agent không tự bấm Nộp. {batchFilled} tab đã điền form vẫn đang mở —
-                            hãy kiểm tra thông tin và bấm nộp thủ công ở từng tab.
+                            ⚠️ Agent không tự bấm Nộp. {batchFilled} tab đã điền form vẫn đang mở.
+                            Hãy kiểm tra thông tin và bấm nộp thủ công ở từng tab.
                         </p>
                     )}
 
@@ -1195,7 +1195,7 @@ export default function StepEditCv() {
                                 }}>
                                     {job.status === 'pending' && 'Chờ'}
                                     {job.status === 'processing' && 'Đang xử lý...'}
-                                    {job.status === 'done' && (job.result?.outcome === 'submitted' ? 'Đã nộp' : 'Đã điền — chờ nộp')}
+                                    {job.status === 'done' && (job.result?.outcome === 'submitted' ? 'Đã nộp' : 'Đã điền, chờ nộp')}
                                     {job.status === 'error' && (job.result?.detail || 'Lỗi')}
                                 </span>
                             </div>
@@ -1255,7 +1255,7 @@ export default function StepEditCv() {
                     <span>{autoApplyMessage}</span>
                     {autoApplyStatus === 'no-extension' && (
                         <span style={{ marginLeft: 'auto', fontSize: '0.75rem', opacity: 0.8 }}>
-                            Đã mở link trong tab mới — cài Extension để auto-fill.
+                            Đã mở link trong tab mới, cài Extension để auto-fill.
                         </span>
                     )}
                 </div>
@@ -1478,13 +1478,13 @@ export default function StepEditCv() {
                         </div>
                     </div>
                     <p style={{ fontSize: '0.76rem', color: 'var(--text-muted)', margin: '0 0 12px' }}>
-                        Chọn ngôn ngữ rồi bấm tạo — thư viết riêng cho job này từ CV thật của bạn (không bịa), tự động điền khi ứng tuyển. Có thể chỉnh sửa trực tiếp.
+                        Chọn ngôn ngữ rồi bấm tạo, thư viết riêng cho job này từ CV thật của bạn (không bịa), tự động điền khi ứng tuyển. Có thể chỉnh sửa trực tiếp.
                     </p>
                     {currentEntry.coverLetter ? (
                         <>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 8, flexWrap: 'wrap' }}>
                             <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
-                                Ngôn ngữ: <strong style={{ color: 'var(--text-secondary)' }}>{COVER_LETTER_LANGUAGES[currentEntry.coverLetterLang || ''] || currentEntry.coverLetterLang || '—'}</strong>
+                                Ngôn ngữ: <strong style={{ color: 'var(--text-secondary)' }}>{COVER_LETTER_LANGUAGES[currentEntry.coverLetterLang || ''] || currentEntry.coverLetterLang || 'chưa rõ'}</strong>
                             </span>
                             <button
                                 type="button" onClick={() => void handleDownloadCoverLetter()} disabled={coverPdfBusy}
@@ -1561,7 +1561,7 @@ export default function StepEditCv() {
                 <>
                 <p style={{ fontSize: '0.74rem', color: 'var(--text-muted)', margin: '0 0 8px', lineHeight: 1.5 }}>
                     Nhập những điểm bạn muốn nhấn mạnh hoặc bổ sung (dựa trên kinh nghiệm thật của bạn).
-                    AI sẽ viết lại CV cho công việc này theo các điểm đó — không bịa thêm thông tin không có trong CV.
+                    AI sẽ viết lại CV cho công việc này theo các điểm đó, không bịa thêm thông tin không có trong CV.
                 </p>
                 <textarea
                     value={reoptPoints}
@@ -1621,7 +1621,7 @@ export default function StepEditCv() {
                     <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary)', flex: 1, minWidth: 0 }}>
                         Mẫu CV
                         <span style={{ color: 'var(--text-muted)', fontWeight: 400, marginLeft: 6, fontSize: '0.72rem' }}>
-                            — {getTemplate(currentEntry.selectedTemplateId).name}
+                            : {getTemplate(currentEntry.selectedTemplateId).name}
                         </span>
                     </span>
                     <CaretRight size={12} style={{
@@ -1712,7 +1712,7 @@ export default function StepEditCv() {
                         }}>
                             <span>Mẫu CV</span>
                             <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: '0.72rem' }}>
-                                — chọn mẫu trước khi tải xuống
+                                : chọn mẫu trước khi tải xuống
                             </span>
                         </div>
                         <CvTemplatePicker
@@ -1778,7 +1778,7 @@ export default function StepEditCv() {
                 <div style={{
                     marginTop: 8, fontSize: '0.74rem', color: 'var(--text-muted)',
                 }}>
-                    ✏️ Click vào nội dung trên CV để sửa trực tiếp — Enter để lưu, Esc để huỷ.
+                    ✏️ Click vào nội dung trên CV để sửa trực tiếp: Enter để lưu, Esc để huỷ.
                 </div>
                 <div style={{
                     marginTop: 8, border: '1px solid var(--border-subtle)',
@@ -1915,7 +1915,7 @@ function ImprovementsPanel({
                     : <Sparkle size={15} weight="fill" style={{ color: 'var(--accent-blue)', flexShrink: 0 }} />}
                 <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)', flex: 1, minWidth: 0 }}>
                     {unchanged
-                        ? 'CV này chưa được tinh chỉnh theo công việc — nội dung giống hệt CV gốc'
+                        ? 'CV này chưa được tinh chỉnh theo công việc, nội dung giống hệt CV gốc'
                         : `Đã tối ưu cho ${jobTitle || 'công việc này'}`}
                     {!unchanged && (
                         <span style={{ color: 'var(--text-muted)', fontWeight: 400, marginLeft: 6, fontSize: '0.72rem' }}>
@@ -1934,7 +1934,7 @@ function ImprovementsPanel({
                     {unchanged ? (
                         <p style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', lineHeight: 1.55, margin: 0 }}>
                             Bản tối ưu tự động chưa tạo ra khác biệt nào so với CV gốc
-                            (hoặc đã bị chỉnh tay về như cũ) — nội dung đang giống CV gốc.
+                            (hoặc đã bị chỉnh tay về như cũ), nội dung đang giống CV gốc.
                         </p>
                     ) : hasLlmExplanation ? (
                         <ul style={{ margin: 0, paddingLeft: 16, display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -1943,7 +1943,7 @@ function ImprovementsPanel({
                                     <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{imp.section}: </span>
                                     {imp.change}
                                     {imp.reason && (
-                                        <span style={{ color: 'var(--text-muted)' }}> — {imp.reason}</span>
+                                        <span style={{ color: 'var(--text-muted)' }}>: {imp.reason}</span>
                                     )}
                                 </li>
                             ))}
@@ -1996,7 +1996,7 @@ function SuggestionsPanel({
             }}>
                 <Lightning size={15} weight="fill" style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
                 <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>
-                    Không có gợi ý bổ sung — CV đã khá đầy đủ cho vị trí này.
+                    Không có gợi ý bổ sung, CV đã khá đầy đủ cho vị trí này.
                 </span>
             </div>
         );
@@ -2045,7 +2045,7 @@ function SuggestionsPanel({
             {open && (
                 <div style={{ padding: '0 12px 12px' }}>
                     <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', margin: '0 0 10px', lineHeight: 1.5 }}>
-                        AI không tự điền số liệu — điền thông tin thật của bạn rồi tối ưu lại. Bỏ trống mục nào cũng được.
+                        AI không tự điền số liệu, điền thông tin thật của bạn rồi tối ưu lại. Bỏ trống mục nào cũng được.
                     </p>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                         {suggestions.map((s, i) => (
