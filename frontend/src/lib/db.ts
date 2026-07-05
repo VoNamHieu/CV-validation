@@ -382,7 +382,7 @@ export interface InterviewPrep {
     user_id: string;
     job_ref: string;
     cv_hash: string;
-    dossier: import('@/lib/interview/dossier').Dossier;
+    dossier: import('@/lib/skills/interview/types').Dossier;
     created_at: string;
     updated_at: string;
 }
