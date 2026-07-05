@@ -480,11 +480,11 @@ def _eightfold(career_url: str) -> list[dict]:
     domain = _registrable_domain(p.netloc)
     country = os.getenv("DISCOVER_COUNTRY", "Vietnam")
     out, seen = [], set()
-    for start in (0, 10, 20):
+    for start in range(0, 200, 50):
         try:
             r = requests.get(f"{origin}/api/pcsx/search", headers=_JSON_POST, timeout=_TIMEOUT,
                              params={"domain": domain, "query": "", "location": country,
-                                     "start": start, "sort_by": "relevance", "num": 10})
+                                     "start": start, "sort_by": "relevance", "num": 50})
             if r.status_code != 200:
                 break
             data = (r.json() or {}).get("data", {}) or {}
@@ -496,18 +496,23 @@ def _eightfold(career_url: str) -> list[dict]:
                 title = (j.get("name") or "").strip()
                 if not title or jid in seen:
                     continue
-                seen.add(jid)
+                # Match per-location, not the whole joined string — a global
+                # posting tagged "Singapore, Vietnam, Thailand" would otherwise
+                # report a Vietnam-flavored location string that's just noise.
                 locs = j.get("locations") or []
-                loc = ", ".join(locs) if isinstance(locs, list) else str(locs)
-                if not _is_vn_loc(loc):
+                vn = next((l for l in locs if _is_vn_loc(l)), "") if isinstance(locs, list) else ""
+                if not vn:
                     continue
+                seen.add(jid)
                 # positionUrl is root-relative (e.g. "/careers/job/123") — make
                 # it absolute, else the JD URL is uncrawlable.
                 pos = j.get("positionUrl")
                 url = urljoin(origin + "/", pos) if pos else f"{origin}/careers?pid={jid}&domain={domain}"
                 out.append({"title": title[:200], "url": url,
-                            "location": loc[:120], "description": ""})
-            if len(positions) < 10 or len(out) >= 25:
+                            "location": str(vn)[:120], "description": ""})
+            # `count` is the API's own total — pace off it instead of a fixed
+            # page cap, so a company with >30 VN postings isn't truncated.
+            if start + 50 >= (data.get("count") or 0) or len(out) >= _MAX_ATS_JOBS:
                 break
         except Exception as e:
             logger.info(f"[ats] eightfold {domain} page {start} failed: {str(e)[:80]}")
