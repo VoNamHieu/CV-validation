@@ -762,7 +762,9 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Marriott",
         homepage="https://marriott.com",
-        career_url="https://careers.marriott.com",
+        # careers.marriott.com is a JS shell; the real feed is its Oracle HCM CX
+        # tenant (same adapter as IHG). /sites/CX + keyword=Vietnam → VN jobs.
+        career_url="https://ejwl.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX/jobs",
     ),
     FeaturedCompany(
         name="Hilton",

@@ -1367,6 +1367,63 @@ def _radancy(career_url: str) -> list[dict]:
     return out
 
 
+# ── Trusting Social (trustingsocial.com) — Gatsby static site over Recruiterbox ──
+# Careers are a Gatsby page-data feed (pure JSON, no headless): the list is
+#   /page-data/careers/page-data.json → result.data.allRecruiterboxOpening.nodes[]
+#     (rawID, slug, title, state, position_type, team, location{city,state,country})
+# and each opening's JD is
+#   /page-data/careers/openings/<slug>/page-data.json → result.data.recruiterboxOpening
+#     (adds description + hosted_url). Apply flows to Trakstar.
+def _is_trustingsocial(career_url: str) -> bool:
+    return (urlparse(career_url or "").netloc or "").lower().removeprefix("www.") == "trustingsocial.com"
+
+
+def _trustingsocial(career_url: str) -> list[dict]:
+    base = "https://trustingsocial.com"
+    try:
+        r = requests.get(f"{base}/page-data/careers/page-data.json", headers=_JSON_POST, timeout=_TIMEOUT)
+        if r.status_code != 200 or "json" not in r.headers.get("content-type", ""):
+            return []
+        nodes = (((r.json() or {}).get("result") or {}).get("data") or {}) \
+            .get("allRecruiterboxOpening", {}).get("nodes", []) or []
+    except Exception as e:
+        logger.info(f"[ats] trustingsocial list failed: {str(e)[:80]}")
+        return []
+    out = []
+    for n in nodes:
+        if n.get("state") != "Published":
+            continue
+        loc = n.get("location") or {}
+        loc_str = ", ".join(x for x in (loc.get("city"), loc.get("country")) if x)
+        if not _is_vn_loc(loc_str):
+            continue
+        slug = (n.get("slug") or "").strip()
+        title = (n.get("title") or "").strip()
+        if not slug or not title:
+            continue
+        # Per-opening detail carries the full JD; a hiccup just leaves it blank.
+        desc = ""
+        try:
+            dr = requests.get(f"{base}/page-data/careers/openings/{slug}/page-data.json",
+                              headers=_JSON_POST, timeout=_TIMEOUT)
+            if dr.status_code == 200:
+                op = (((dr.json() or {}).get("result") or {}).get("data") or {}) \
+                    .get("recruiterboxOpening", {}) or {}
+                desc = _strip_html(op.get("description") or "")[:600]
+        except Exception:
+            pass
+        out.append({"title": title[:200],
+                    "url": f"{base}/careers/openings/{slug}",
+                    "location": loc_str[:120] or "Vietnam",
+                    "description": desc,
+                    "employment_type": (n.get("position_type") or "").strip(),
+                    "category": (n.get("team") or "").strip()})
+        if len(out) >= _MAX_ATS_JOBS:
+            break
+    logger.info(f"[ats] trustingsocial → {len(out)} VN jobs")
+    return out
+
+
 _ADAPTERS: list = [
     ("radancy",        lambda u, h: _is_radancy(u),      lambda u, h: _radancy(u)),
     ("avature",        _is_avature,                      lambda u, h: _avature(u, h)),
@@ -1382,6 +1439,7 @@ _ADAPTERS: list = [
     ("mbbank",         lambda u, h: _is_mbbank(u),       lambda u, h: _mbbank(u)),
     ("iviec",          lambda u, h: _is_iviec(u, h),     lambda u, h: _iviec(u)),
     ("ghn",            lambda u, h: _is_ghn(u),          lambda u, h: _ghn(u)),
+    ("trustingsocial", lambda u, h: _is_trustingsocial(u), lambda u, h: _trustingsocial(u)),
     ("ahamove",        _is_ahamove,                      lambda u, h: _ahamove(u)),
     ("fptsoft",        _is_fptsoft,                      lambda u, h: _fptsoft(u)),
     ("phenom-v2",      _is_phenom_v2,                    lambda u, h: _phenom_v2(u)),
