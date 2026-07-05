@@ -82,6 +82,9 @@ async def _spa_sniff(url: str) -> list[dict]:
 _CAPTURE_JOB_PATTERNS = {
     "careers.theheinekencompany.com": r"/job/heineken-vietnam/",
     "careers.dhl.com": r"/apac/vi/job/",
+    # VinaCapital: JS-rendered listing; render=True uses the _vinacapital adapter,
+    # the render=False cron replays the captured DOM's /careers/<slug>/ anchors.
+    "vinacapital.com": r"/careers/[a-z0-9_-]{6,}/",
 }
 
 

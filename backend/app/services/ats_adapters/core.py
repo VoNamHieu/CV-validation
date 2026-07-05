@@ -1944,6 +1944,44 @@ def _vnpay_tuyendung(career_url: str) -> list[dict]:
     return out
 
 
+# ── VinaCapital (vinacapital.com/careers) — JS-rendered listing (render path) ─
+# The /careers page is a JS shell (plain fetch = empty); a RENDERED fetch
+# (ingest render=True) or the extension capture exposes the cards:
+#   <div class="career_ti"><a href=".../careers/<slug>/">Title</a></div>
+#   <div class="career_lo">Location</div>
+# Needs `html` (post-JS) → returns [] without it. The render=False cron falls
+# back to the debug-capture snapshot (see _CAPTURE_JOB_PATTERNS in job_ingest).
+def _is_vinacapital(career_url: str) -> bool:
+    return (urlparse(career_url or "").netloc or "").lower().removeprefix("www.") == "vinacapital.com"
+
+
+def _vinacapital(career_url: str, html: str | None) -> list[dict]:
+    if not html:
+        return []
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(html, "html.parser")
+    out, seen = [], set()
+    for a in soup.select('.career_ti a[href*="/careers/"]'):
+        href = a.get("href") or ""
+        title = re.sub(r"\s+", " ", a.get_text(" ", strip=True)).strip()
+        if not href or not title or href.rstrip("/").endswith("/careers"):
+            continue
+        url = href if href.startswith("http") else "https://vinacapital.com" + href
+        if url in seen:
+            continue
+        seen.add(url)
+        block = a.find_parent(class_="flex02")
+        loc_el = block.select_one(".career_lo") if block else None
+        loc = re.sub(r"\s+", " ", loc_el.get_text(" ", strip=True)).strip() if loc_el else ""
+        if loc and not _is_vn_loc(loc):
+            continue
+        out.append({"title": title[:200], "url": url, "location": (loc or "Vietnam")[:120], "description": ""})
+        if len(out) >= _MAX_ATS_JOBS:
+            break
+    logger.info(f"[ats] vinacapital → {len(out)} jobs")
+    return out
+
+
 _ADAPTERS: list = [
     ("radancy",        lambda u, h: _is_radancy(u),      lambda u, h: _radancy(u)),
     ("avature",        _is_avature,                      lambda u, h: _avature(u, h)),
@@ -1973,6 +2011,7 @@ _ADAPTERS: list = [
     ("talentnet",      lambda u, h: _is_talentnet(u),      lambda u, h: _talentnet(u)),
     ("ssi",            lambda u, h: _is_ssi(u),            lambda u, h: _ssi(u)),
     ("appota",         lambda u, h: _is_appota(u),         lambda u, h: _appota(u)),
+    ("vinacapital",    lambda u, h: _is_vinacapital(u),    lambda u, h: _vinacapital(u, h)),
     ("ahamove",        _is_ahamove,                      lambda u, h: _ahamove(u)),
     ("fptsoft",        _is_fptsoft,                      lambda u, h: _fptsoft(u)),
     ("phenom-v2",      _is_phenom_v2,                    lambda u, h: _phenom_v2(u)),
