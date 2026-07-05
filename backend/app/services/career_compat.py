@@ -80,6 +80,8 @@ _JOB_HREF_RX = re.compile(
 #   needs_new_adapter  it IS a listing (careerish / job anchors / ATS signal)
 #                      but no rung extracted anything → write a custom adapter
 #   needs_capture      anti-bot wall → route through the browser extension
+#   no_vn_jobs         feed/render works, but every job is located outside VN
+#                      (e.g. a global tenant with 0 Vietnam openings right now)
 #   needs_login        listing is behind auth
 #   unsupported        unreachable, soft-404, or no career content at all
 _USABLE = {"supported", "supported_render"}
@@ -114,6 +116,21 @@ def _samples(jobs: list[dict]) -> list[str]:
         if len(out) >= _SAMPLE:
             break
     return out
+
+
+def _vn_only(jobs: list[dict], is_vn) -> tuple[list[dict], str]:
+    """Keep VN-located jobs (same rule the adapters use). Returns (jobs, tag):
+      "vn"      → at least one job is in Vietnam (returned)
+      "non_vn"  → jobs exist and carry locations, but none is Vietnam ([] returned)
+      "unknown" → no job carries a location, so VN can't be judged (all kept)
+    This stops a global tenant with 0 VN openings (locations tagged SG/JP/…)
+    from reading as "usable N jobs"."""
+    vn = [j for j in jobs if is_vn(j.get("location") or "")]
+    if vn:
+        return vn, "vn"
+    if any((j.get("location") or "").strip() for j in jobs):
+        return [], "non_vn"
+    return jobs, "unknown"
 
 
 async def probe(url: str) -> dict:
@@ -164,9 +181,18 @@ async def probe(url: str) -> dict:
         jobs = []
     if jobs:
         name = (jobs[0].get("source") or ats_sig or "ats")
+        vn_jobs, tag = _vn_only(jobs, ats._is_vn_loc)
+        if vn_jobs:
+            return _verdict("supported", strategy=f"ats:{name}", ats=name,
+                            job_count=len(vn_jobs), samples=_samples(vn_jobs),
+                            detail=f"{len(vn_jobs)} VN jobs via ATS feed (no render)")
+        if tag == "non_vn":
+            return _verdict("no_vn_jobs", strategy=f"ats:{name}", ats=name,
+                            samples=_samples(jobs), blockers=["no_vn"],
+                            detail=f"feed OK ({len(jobs)} jobs) but none located in Vietnam")
         return _verdict("supported", strategy=f"ats:{name}", ats=name,
                         job_count=len(jobs), samples=_samples(jobs),
-                        detail=f"{len(jobs)} jobs via ATS feed (no render)")
+                        detail=f"{len(jobs)} jobs via ATS feed (no render; location n/a)")
 
     # ── Rung 4: SPA sniff — only worth a render if the page looks careerish ──
     careerish = bool(html) and _is_careerish(html)
@@ -181,10 +207,18 @@ async def probe(url: str) -> dict:
             logger.info(f"[compat] sniff_jobs raised for {url}: {str(e)[:80]}")
             sniffed = []
         if sniffed:
-            return _verdict("supported_render", strategy="spa_sniff",
-                            ats=ats_sig, job_count=len(sniffed),
-                            samples=_samples(sniffed),
-                            detail=f"{len(sniffed)} jobs via SPA sniff (render)")
+            vn_jobs, tag = _vn_only(sniffed, ats._is_vn_loc)
+            if vn_jobs:
+                return _verdict("supported_render", strategy="spa_sniff", ats=ats_sig,
+                                job_count=len(vn_jobs), samples=_samples(vn_jobs),
+                                detail=f"{len(vn_jobs)} VN jobs via SPA sniff (render)")
+            if tag == "non_vn":
+                return _verdict("no_vn_jobs", strategy="spa_sniff", ats=ats_sig,
+                                samples=_samples(sniffed), blockers=["no_vn"],
+                                detail=f"render OK ({len(sniffed)} jobs) but none located in Vietnam")
+            return _verdict("supported_render", strategy="spa_sniff", ats=ats_sig,
+                            job_count=len(sniffed), samples=_samples(sniffed),
+                            detail=f"{len(sniffed)} jobs via SPA sniff (render; location n/a)")
 
     # ── Rung 5: nothing extracted — classify why ─────────────────────────
     if not http_ok:

@@ -1508,6 +1508,86 @@ def _timo(career_url: str) -> list[dict]:
     return out
 
 
+# ── TCBS (tcbs.com.vn) — WordPress careers listing, static SSR anchors ──
+# Jobs are <a href=".../ve-chung-toi-cate/tuyen-dung/<slug>">[City] Title</a>
+# in the page HTML (no WP REST). The [City] prefix on the title → location; the
+# same href also appears as a "Read more:" link, so dedupe on href.
+def _is_tcbs(career_url: str) -> bool:
+    return (urlparse(career_url or "").netloc or "").lower().removeprefix("www.") == "tcbs.com.vn"
+
+
+def _tcbs(career_url: str) -> list[dict]:
+    from bs4 import BeautifulSoup
+    try:
+        r = requests.get(career_url or "https://www.tcbs.com.vn/ve-chung-toi/tuyen-dung/",
+                         headers=_HTML_HEADERS, timeout=_TIMEOUT)
+        if r.status_code != 200:
+            return []
+        soup = BeautifulSoup(r.text, "html.parser")
+    except Exception as e:
+        logger.info(f"[ats] tcbs failed: {str(e)[:80]}")
+        return []
+    out, seen = [], set()
+    for a in soup.select('a[href*="/ve-chung-toi-cate/tuyen-dung/"]'):
+        href = a.get("href") or ""
+        title = re.sub(r"\s+", " ", a.get_text(" ", strip=True)).strip()
+        if not href or not title or href in seen or title.lower().startswith("read more"):
+            continue
+        seen.add(href)
+        m = re.match(r"\s*\[([^\]]+)\]\s*(.+)", title)
+        loc, clean = (m.group(1).strip(), m.group(2).strip()) if m else ("Vietnam", title)
+        out.append({"title": clean[:200],
+                    "url": href if href.startswith("http") else "https://www.tcbs.com.vn" + href,
+                    "location": (loc or "Vietnam")[:120], "description": ""})
+        if len(out) >= _MAX_ATS_JOBS:
+            break
+    logger.info(f"[ats] tcbs → {len(out)} jobs")
+    return out
+
+
+# ── Canon Vietnam (cvn.canon) — static SSR recruitment listing ──
+# Jobs are <a href="/vn/recruitment/<slug>.html"> whose sibling heading holds
+# the role/department (the anchor text itself is a date/"JOB DESCRIPTION:"
+# blurb). Page is UTF-8-SIG. Slug prefix tl_=Thang Long, ts_=Tien Son plant.
+def _is_canon(career_url: str) -> bool:
+    return (urlparse(career_url or "").netloc or "").lower().removeprefix("www.") == "cvn.canon"
+
+
+def _canon(career_url: str) -> list[dict]:
+    from bs4 import BeautifulSoup
+    try:
+        r = requests.get("https://cvn.canon/vn/latestjob.html", headers=_HTML_HEADERS, timeout=_TIMEOUT)
+        if r.status_code != 200:
+            return []
+        soup = BeautifulSoup(r.content.decode("utf-8-sig", "ignore"), "html.parser")
+    except Exception as e:
+        logger.info(f"[ats] canon failed: {str(e)[:80]}")
+        return []
+    out, seen = [], set()
+    for a in soup.select('a[href*="/vn/recruitment/"]'):
+        href = a.get("href") or ""
+        if not href or href in seen:
+            continue
+        seen.add(href)
+        row = a.find_parent(["tr", "li", "div"])
+        he = row.find(["h1", "h2", "h3", "h4", "h5", "strong", "b"]) if row else None
+        title = re.sub(r"\s+", " ", he.get_text(" ", strip=True)).strip() if he else ""
+        if not title:
+            t = re.sub(r"\s+", " ", a.get_text(" ", strip=True)).strip()
+            title = re.sub(r"^(JOB DESCRIPTION:\s*|Từ ngày.*?đến\s*\d{2}/\d{2}/\d{4}\s*)", "", t, flags=re.I)
+        if not title or len(title) < 3:
+            continue
+        slug = href.rsplit("/", 1)[-1].lower()
+        plant = "Thang Long" if slug.startswith("tl_") else "Tien Son" if slug.startswith("ts_") else ""
+        out.append({"title": title[:200],
+                    "url": href if href.startswith("http") else "https://cvn.canon" + href,
+                    "location": (f"{plant}, Vietnam" if plant else "Vietnam"), "description": ""})
+        if len(out) >= _MAX_ATS_JOBS:
+            break
+    logger.info(f"[ats] canon → {len(out)} jobs")
+    return out
+
+
 _ADAPTERS: list = [
     ("radancy",        lambda u, h: _is_radancy(u),      lambda u, h: _radancy(u)),
     ("avature",        _is_avature,                      lambda u, h: _avature(u, h)),
@@ -1521,6 +1601,8 @@ _ADAPTERS: list = [
     ("bytedance",      lambda u, h: bool(_bd_config(u)), lambda u, h: _bytedance_family(u)),
     ("vpbanks",        lambda u, h: _is_vpbanks(u),      lambda u, h: _vpbanks(u)),
     ("mbbank",         lambda u, h: _is_mbbank(u),       lambda u, h: _mbbank(u)),
+    ("tcbs",           lambda u, h: _is_tcbs(u),         lambda u, h: _tcbs(u)),
+    ("canon",          lambda u, h: _is_canon(u),        lambda u, h: _canon(u)),
     ("iviec",          lambda u, h: _is_iviec(u, h),     lambda u, h: _iviec(u)),
     ("ghn",            lambda u, h: _is_ghn(u),          lambda u, h: _ghn(u)),
     ("trustingsocial", lambda u, h: _is_trustingsocial(u), lambda u, h: _trustingsocial(u)),
