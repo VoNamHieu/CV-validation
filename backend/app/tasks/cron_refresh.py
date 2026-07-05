@@ -1,10 +1,15 @@
 """Periodic store refresh — meant to run as a Railway Cron service.
 
-Two jobs, in order:
+Three jobs, in order:
   1. ``ingest_featured_ats`` — re-pull every featured company's ATS feed into
      the store (upsert new, refresh existing, deactivate ones that vanished,
      embed the unindexed). This is what keeps search fresh + prunes dead rows.
-  2. a link-health scan over the featured cache — validate job URLs and log the
+  2. a compat probe over companies whose KNOWN ATS feed came back empty this
+     run — tells apart "the company genuinely has 0 matching postings right
+     now" from "our adapter/crawl for this company broke" (mirrors POST
+     /compat/scan, minus the admin HTTP hop). link_health (#3) only catches
+     dead JOB-DETAIL links; this catches the company/feed level going dark.
+  3. a link-health scan over the featured cache — validate job URLs and log the
      broken/suspect ones (mirrors POST /monitor/scan, minus the admin HTTP hop).
 
 Runs as a ONE-OFF process (starts, works, exits) — exactly Railway's cron model.
@@ -26,6 +31,34 @@ logger = logging.getLogger("cron_refresh")
 # How many featured job URLs to health-check per run (bounded — keep the cron short).
 _SCAN_LIMIT = int(os.getenv("CRON_SCAN_LIMIT", "300"))
 _SCAN_CONCURRENCY = 12
+_COMPAT_CONCURRENCY = 4  # compat probe renders (SPA sniff) — keep light
+
+
+async def _compat_check(empty_companies: list[dict]) -> dict:
+    """For featured companies whose known ATS adapter matched but returned no
+    jobs this run, escalate to the full compat probe (adds SPA-sniff) and log
+    the verdict. Distinguishes "empty feed" (fine — e.g. a company simply has
+    no VN openings right now) from "needs_new_adapter"/"unsupported" (the
+    site/API changed and our extractor broke)."""
+    if not empty_companies:
+        return {"checked": 0, "flagged": 0}
+
+    from app.services import career_compat
+
+    sem = asyncio.Semaphore(_COMPAT_CONCURRENCY)
+
+    async def check(c: dict) -> dict:
+        async with sem:
+            res = await career_compat.probe(c["career_url"])
+        await career_compat.record(c["career_url"], res, company=c["name"], source="cron")
+        return {**c, **res}
+
+    results = await asyncio.gather(*[check(c) for c in empty_companies], return_exceptions=True)
+    flagged = [r for r in results if isinstance(r, dict) and not r.get("usable")]
+    for r in flagged:
+        logger.warning("[cron] %s (%s) ATS feed empty — verdict=%s detail=%s",
+                        r["name"], r.get("ats"), r.get("verdict"), r.get("detail"))
+    return {"checked": len(empty_companies), "flagged": len(flagged)}
 
 
 async def _link_scan() -> dict:
@@ -85,6 +118,11 @@ async def main() -> None:
         logger.info("[cron] ingest_featured_ats starting…")
         ingest = await ingest_featured_ats(render=False)
         logger.info("[cron] ingest done: %s", ingest)
+
+        empty = ingest.get("ats_feed_empty") or []
+        logger.info("[cron] compat check starting (%d empty known-ATS feed(s))…", len(empty))
+        compat = await _compat_check(empty)
+        logger.info("[cron] compat check done: %s", compat)
 
         logger.info("[cron] link scan starting (limit=%s)…", _SCAN_LIMIT)
         scan = await _link_scan()
