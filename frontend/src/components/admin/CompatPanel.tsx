@@ -30,13 +30,16 @@ type CompatRecord = {
 };
 
 // Verdict → colour. Usable = xanh, cần adapter = hổ phách, bị chặn = tím, không hỗ trợ = đỏ.
+// Theme tokens, not hand-picked hex — these render on --bg-card and must clear
+// AA contrast in both themes (the raw hex this replaced, e.g. #22c55e/#ef4444
+// on white, sat at ~2.3–3.8:1 and didn't adapt for dark mode at all).
 const VERDICT_COLOR: Record<string, string> = {
-    supported: '#22c55e',
-    supported_render: '#22c55e',
-    needs_new_adapter: '#f59e0b',
-    needs_capture: '#8b5cf6',
-    needs_login: '#8b5cf6',
-    unsupported: '#ef4444',
+    supported: 'var(--accent-green)',
+    supported_render: 'var(--accent-green)',
+    needs_new_adapter: 'var(--accent-amber)',
+    needs_capture: 'var(--accent-purple)',
+    needs_login: 'var(--accent-purple)',
+    unsupported: 'var(--accent-red)',
 };
 
 // Verdict → nhãn tiếng Việt ngắn gọn cho cột trạng thái.
@@ -219,14 +222,14 @@ export default function CompatPanel() {
                     {scanning ? 'Đang quét…' : 'Quét công ty nổi bật'}
                 </button>
                 <button onClick={load} disabled={loading} style={btn()}>Làm mới</button>
-                <button onClick={clearAll} style={btn({ marginLeft: 'auto', color: '#ef4444' })}>Xoá nhật ký</button>
+                <button onClick={clearAll} style={btn({ marginLeft: 'auto', color: 'var(--accent-red)' })}>Xoá nhật ký</button>
             </div>
 
             <div style={{ display: 'flex', gap: 16, marginBottom: 16, fontSize: '0.85rem' }}>
                 <span><b>{rows.length}</b> đã probe</span>
-                <span style={{ color: '#22c55e' }}><b>{usable}</b> dùng được</span>
-                <span style={{ color: '#f59e0b' }}><b>{needsAdapter}</b> cần adapter</span>
-                <span style={{ color: '#8b5cf6' }}><b>{blocked}</b> bị chặn</span>
+                <span style={{ color: 'var(--accent-green)' }}><b>{usable}</b> dùng được</span>
+                <span style={{ color: 'var(--accent-amber)' }}><b>{needsAdapter}</b> cần adapter</span>
+                <span style={{ color: 'var(--accent-purple)' }}><b>{blocked}</b> bị chặn</span>
                 {msg && <span style={{ color: 'var(--text-muted)', marginLeft: 'auto' }}>{msg}</span>}
             </div>
 
