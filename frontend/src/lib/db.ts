@@ -358,6 +358,7 @@ export const account = {
         req<{ deleted: boolean }>(`/api/me/applications/${id}`, { method: 'DELETE', auth: true }),
 
     // ── Interview prep (user-scoped; dossier cached by job_ref + cv_hash) ──
+    listInterviewPreps: () => req<InterviewPrepSummary[]>(`/api/me/interview/preps`, { auth: true }),
     getInterviewPrep: (jobRef: string, cvHash: string) =>
         req<InterviewPrep>(
             `/api/me/interview/prep?job_ref=${encodeURIComponent(jobRef)}&cv_hash=${encodeURIComponent(cvHash)}`,
@@ -383,6 +384,16 @@ export interface InterviewPrep {
     job_ref: string;
     cv_hash: string;
     dossier: import('@/lib/skills/interview/types').Dossier;
+    created_at: string;
+    updated_at: string;
+}
+
+// Lightweight row for the interview-prep landing list (no dossier body).
+export interface InterviewPrepSummary {
+    id: string;
+    job_ref: string;
+    cv_hash: string;
+    question_count: number;
     created_at: string;
     updated_at: string;
 }
