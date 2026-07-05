@@ -160,7 +160,15 @@ def _recruitee(slug: str) -> list[dict]:
 
 
 def _smartrecruiters(slug: str) -> list[dict]:
-    data = _get_json(f"https://api.smartrecruiters.com/v1/companies/{slug}/postings?limit=100")
+    # Ask the API for VN postings first (server-side country facet). Big tenants
+    # (Grab: 300+ roles) bury their handful of VN jobs past the first page, so an
+    # unfiltered limit=100 misses them; country=vn returns exactly the VN set.
+    # Fall back to unfiltered when the country facet yields nothing (a company
+    # that tags VN roles without the country field), leaving the VN filter to the
+    # caller.
+    data = _get_json(f"https://api.smartrecruiters.com/v1/companies/{slug}/postings?limit=100&country=vn")
+    if not (data or {}).get("content"):
+        data = _get_json(f"https://api.smartrecruiters.com/v1/companies/{slug}/postings?limit=100")
     out = []
     for j in (data or {}).get("content", []):
         loc = j.get("location") or {}
@@ -1786,6 +1794,156 @@ def _appota(career_url: str) -> list[dict]:
     return out
 
 
+# ── Be (be.com.vn) — WordPress careers listing, static SSR anchors ──────────
+# Jobs are <a href=".../be_recruitment/<slug>">Title</a>; each repeats an
+# "Ứng tuyển ngay" apply link on the same href (+#form) → filter those. VN-only.
+def _is_be(career_url: str) -> bool:
+    return (urlparse(career_url or "").netloc or "").lower().removeprefix("www.") == "be.com.vn"
+
+
+def _be(career_url: str) -> list[dict]:
+    from bs4 import BeautifulSoup
+    try:
+        r = requests.get("https://be.com.vn/ve-be/tuyen-dung/", headers=_HTML_HEADERS, timeout=_TIMEOUT)
+        if r.status_code != 200:
+            return []
+        soup = BeautifulSoup(r.text, "html.parser")
+    except Exception as e:
+        logger.info(f"[ats] be failed: {str(e)[:80]}")
+        return []
+    out, seen = [], set()
+    for a in soup.select('a[href*="/be_recruitment/"]'):
+        href = (a.get("href") or "").split("#")[0]
+        title = re.sub(r"\s+", " ", a.get_text(" ", strip=True)).strip()
+        if not href or not title or href in seen:
+            continue
+        if title.lower().startswith("ứng tuyển"):
+            continue
+        seen.add(href)
+        out.append({"title": title[:200],
+                    "url": href if href.startswith("http") else "https://be.com.vn" + href,
+                    "location": "Vietnam", "description": ""})
+        if len(out) >= _MAX_ATS_JOBS:
+            break
+    logger.info(f"[ats] be → {len(out)} jobs")
+    return out
+
+
+# ── Zalo (zalo.careers) — public JSON API (paginated), VN (HCM) tenant ───────
+# GET /api/v2/jobs?page=N&option=getSliceJobs → {data:{total, values:[{name,
+# slug, locationName, desc, require}]}}. Detail page is /job/<slug>.
+def _is_zalo(career_url: str) -> bool:
+    return (urlparse(career_url or "").netloc or "").lower().removeprefix("www.") == "zalo.careers"
+
+
+def _zalo(career_url: str) -> list[dict]:
+    out = []
+    for page in range(1, 20):
+        try:
+            r = requests.get("https://zalo.careers/api/v2/jobs",
+                             params={"page": page, "option": "getSliceJobs"},
+                             headers=_JSON_POST, timeout=_TIMEOUT)
+            if r.status_code != 200:
+                break
+            vals = ((r.json() or {}).get("data", {}) or {}).get("values", []) or []
+        except Exception as e:
+            logger.info(f"[ats] zalo page {page} failed: {str(e)[:80]}")
+            break
+        if not vals:
+            break
+        for j in vals:
+            name = (j.get("name") or "").strip()
+            slug = (j.get("slug") or "").strip()
+            if not name or not slug:
+                continue
+            out.append({"title": name[:200],
+                        "url": f"https://zalo.careers/job/{slug}",
+                        "location": (j.get("locationName") or "Vietnam")[:120],
+                        "description": _strip_html(j.get("desc") or "")[:600]})
+        if len(out) >= _MAX_ATS_JOBS:
+            break
+    logger.info(f"[ats] zalo → {len(out)} jobs")
+    return out
+
+
+# ── MoMo (momo.careers) — static SSR job cards (Next.js prerendered) ─────────
+# Each card: <a alt="Title" href="/jobs/<slug>"> with a location chip and a
+# "Fulltime" type div inside. The `alt` attr is the clean title. Jobs live at
+# /jobs-opening (the bare homepage has none).
+def _is_momo(career_url: str) -> bool:
+    return (urlparse(career_url or "").netloc or "").lower().removeprefix("www.") == "momo.careers"
+
+
+def _momo(career_url: str) -> list[dict]:
+    from bs4 import BeautifulSoup
+    try:
+        r = requests.get("https://momo.careers/jobs-opening", headers=_HTML_HEADERS, timeout=_TIMEOUT)
+        if r.status_code != 200:
+            return []
+        soup = BeautifulSoup(r.text, "html.parser")
+    except Exception as e:
+        logger.info(f"[ats] momo failed: {str(e)[:80]}")
+        return []
+    out, seen = [], set()
+    for a in soup.select('a[href*="/jobs/"]'):
+        href = a.get("href") or ""
+        title = (a.get("alt") or a.get_text(" ", strip=True)).strip()
+        if not href or not title or href in seen:
+            continue
+        seen.add(href)
+        chip = a.select_one("div.flex.items-center")
+        loc = re.sub(r"\s+", " ", chip.get_text(" ", strip=True)).strip() if chip else ""
+        # The chip trails the employment type ("… Fulltime") — drop it.
+        loc = re.sub(r"\s*(Full[\s-]?time|Part[\s-]?time|Intern(?:ship)?|Contract|Freelance)\b.*$", "",
+                     loc, flags=re.I).strip()
+        out.append({"title": title[:200],
+                    "url": href if href.startswith("http") else "https://momo.careers" + href,
+                    "location": (loc or "Vietnam")[:120], "description": ""})
+        if len(out) >= _MAX_ATS_JOBS:
+            break
+    logger.info(f"[ats] momo → {len(out)} jobs")
+    return out
+
+
+# ── VNPAY (tuyendung.vnpay.vn) — static SSR listing, VN-only tenant ──────────
+# Jobs are <a href=".../tuyen-dung/<slug>">Title</a>; the same card repeats an
+# "Ứng tuyển"/"Chia sẻ" (facebook share) link on the same href → filter those.
+def _is_vnpay_tuyendung(career_url: str) -> bool:
+    return (urlparse(career_url or "").netloc or "").lower().removeprefix("www.") == "tuyendung.vnpay.vn"
+
+
+def _vnpay_tuyendung(career_url: str) -> list[dict]:
+    from bs4 import BeautifulSoup
+    try:
+        r = requests.get("https://tuyendung.vnpay.vn/co-hoi-nghe-nghiep", headers=_HTML_HEADERS, timeout=_TIMEOUT)
+        if r.status_code != 200:
+            return []
+        soup = BeautifulSoup(r.text, "html.parser")
+    except Exception as e:
+        logger.info(f"[ats] vnpay failed: {str(e)[:80]}")
+        return []
+    out, seen = [], set()
+    for a in soup.select('a[href*="/tuyen-dung/"]'):
+        href = a.get("href") or ""
+        title = re.sub(r"\s+", " ", a.get_text(" ", strip=True)).strip()
+        if not href or "facebook.com" in href or href in seen:
+            continue
+        if not title or title.upper() in ("ỨNG TUYỂN", "CHIA SẺ"):
+            continue
+        seen.add(href)
+        # City sometimes encoded in the slug as [da-nang]/[hcm]; else generic VN.
+        slug = href.lower()
+        loc = ("Đà Nẵng" if "da-nang" in slug else "Hồ Chí Minh" if "hcm" in slug
+               else "Hà Nội" if "ha-noi" in slug or "hanoi" in slug else "Vietnam")
+        out.append({"title": title[:200],
+                    "url": href if href.startswith("http") else "https://tuyendung.vnpay.vn" + href,
+                    "location": loc, "description": ""})
+        if len(out) >= _MAX_ATS_JOBS:
+            break
+    logger.info(f"[ats] vnpay → {len(out)} jobs")
+    return out
+
+
 _ADAPTERS: list = [
     ("radancy",        lambda u, h: _is_radancy(u),      lambda u, h: _radancy(u)),
     ("avature",        _is_avature,                      lambda u, h: _avature(u, h)),
@@ -1801,6 +1959,10 @@ _ADAPTERS: list = [
     ("mbbank",         lambda u, h: _is_mbbank(u),       lambda u, h: _mbbank(u)),
     ("tcbs",           lambda u, h: _is_tcbs(u),         lambda u, h: _tcbs(u)),
     ("canon",          lambda u, h: _is_canon(u),        lambda u, h: _canon(u)),
+    ("momo",           lambda u, h: _is_momo(u),         lambda u, h: _momo(u)),
+    ("vnpay",          lambda u, h: _is_vnpay_tuyendung(u), lambda u, h: _vnpay_tuyendung(u)),
+    ("be",             lambda u, h: _is_be(u),           lambda u, h: _be(u)),
+    ("zalo",           lambda u, h: _is_zalo(u),         lambda u, h: _zalo(u)),
     ("iviec",          lambda u, h: _is_iviec(u, h),     lambda u, h: _iviec(u)),
     ("ghn",            lambda u, h: _is_ghn(u),          lambda u, h: _ghn(u)),
     ("trustingsocial", lambda u, h: _is_trustingsocial(u), lambda u, h: _trustingsocial(u)),
