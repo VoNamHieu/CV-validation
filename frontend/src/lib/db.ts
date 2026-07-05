@@ -356,4 +356,45 @@ export const account = {
         req<Application>(`/api/me/applications/${id}/cv`, { method: 'PATCH', body: JSON.stringify({ tailored_cv }), auth: true }),
     deleteApplication: (id: string) =>
         req<{ deleted: boolean }>(`/api/me/applications/${id}`, { method: 'DELETE', auth: true }),
+
+    // ── Interview prep (user-scoped; dossier cached by job_ref + cv_hash) ──
+    getInterviewPrep: (jobRef: string, cvHash: string) =>
+        req<InterviewPrep>(
+            `/api/me/interview/prep?job_ref=${encodeURIComponent(jobRef)}&cv_hash=${encodeURIComponent(cvHash)}`,
+            { auth: true }),
+    putInterviewPrep: (jobRef: string, cvHash: string, dossier: unknown) =>
+        req<InterviewPrep>(`/api/me/interview/prep`, {
+            method: 'PUT', auth: true,
+            body: JSON.stringify({ job_ref: jobRef, cv_hash: cvHash, dossier }),
+        }),
+    addPracticeAttempt: (body: {
+        prep_id: string; question_id: string; attempt_no: number;
+        answer_text?: string; self_reflection?: string; checklist?: unknown;
+    }) => req<PracticeAttempt>(`/api/me/interview/attempts`, {
+        method: 'POST', auth: true, body: JSON.stringify(body),
+    }),
+    listPracticeAttempts: (prepId: string) =>
+        req<PracticeAttempt[]>(`/api/me/interview/attempts?prep_id=${encodeURIComponent(prepId)}`, { auth: true }),
 };
+
+export interface InterviewPrep {
+    id: string;
+    user_id: string;
+    job_ref: string;
+    cv_hash: string;
+    dossier: import('@/lib/interview/dossier').Dossier;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface PracticeAttempt {
+    id: string;
+    user_id: string;
+    prep_id: string;
+    question_id: string;
+    attempt_no: number;
+    answer_text: string | null;
+    self_reflection: string | null;
+    checklist: Record<string, unknown>;
+    created_at: string;
+}

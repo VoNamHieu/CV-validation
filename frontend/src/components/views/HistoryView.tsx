@@ -4,9 +4,10 @@ import { useEffect, useMemo, useState } from 'react';
 import {
     Briefcase, MagnifyingGlass, ArrowSquareOut, Trash, CaretDown, CaretUp,
     Trophy, Crosshair, TrendUp, Warning, Clock, Globe, Sparkle,
-    ArrowClockwise, NotePencil, FunnelSimple,
+    ArrowClockwise, NotePencil, FunnelSimple, ChatCircleDots,
 } from '@phosphor-icons/react';
 import { useAppStore, JobRecord, JobStatus, JOB_STATUS_ORDER } from '@/store/useAppStore';
+import InterviewPrepModal from '@/components/interview/InterviewPrepModal';
 
 // ── Status presentation ──
 const STATUS_META: Record<JobStatus, { label: string; color: string; bg: string; border: string }> = {
@@ -233,6 +234,7 @@ export default function HistoryView() {
     useEffect(() => { void loadJobHistory(); }, [loadJobHistory]);
 
     const [expandedId, setExpandedId] = useState<string | null>(null);
+    const [prepRecord, setPrepRecord] = useState<JobRecord | null>(null);
     const [query, setQuery] = useState('');
     const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
     const [sortKey, setSortKey] = useState<SortKey>('date-desc');
@@ -511,6 +513,15 @@ export default function HistoryView() {
                                                     >
                                                         <ArrowClockwise size={13} weight="bold" /> Mở lại
                                                     </button>
+                                                    {record.optimizedCv && (
+                                                        <button
+                                                            onClick={(e) => { e.stopPropagation(); setPrepRecord(record); }}
+                                                            className="btn-secondary"
+                                                            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', fontSize: '0.82rem', color: 'var(--accent-purple)' }}
+                                                        >
+                                                            <ChatCircleDots size={13} weight="bold" /> Chuẩn bị phỏng vấn
+                                                        </button>
+                                                    )}
                                                     <button
                                                         onClick={(e) => {
                                                             e.stopPropagation();
@@ -530,6 +541,10 @@ export default function HistoryView() {
                         </div>
                     )}
                 </>
+            )}
+
+            {prepRecord && (
+                <InterviewPrepModal record={prepRecord} onClose={() => setPrepRecord(null)} />
             )}
         </div>
     );

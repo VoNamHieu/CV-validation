@@ -34,6 +34,8 @@ COSTS: dict[str, int] = {
     "tailor": 5,     # × units
     "gap_report": 5,  # one deep reasoning report (Pro tier)
     "cover_letter": 3,  # per-job tailored cover letter (judge tier)
+    "practice": 2,  # interview practice-answer eval (judge tier); dossier gen is free
+
     # Flat per-job fee for extension auto-apply — covers ALL the agent-plan +
     # map-form LLM calls that job makes (charged once when the job starts, not
     # per step), so cost stays predictable for the user.
