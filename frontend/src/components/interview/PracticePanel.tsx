@@ -7,11 +7,16 @@ import { useState } from 'react';
 import { PaperPlaneRight, Lightbulb, PencilSimple, Sparkle } from '@phosphor-icons/react';
 import { useAppStore } from '@/store/useAppStore';
 import { getAuthHeaders } from '@/lib/auth-headers';
+import { useCredits } from '@/lib/credits-context';
 import type { CVData } from '@/lib/types';
 import type { Checklist, Question } from '@/lib/skills/interview/types';
 import type { Coaching } from '@/lib/skills/interview/evaluate/coaching';
 import ChecklistResult from '@/components/interview/ChecklistResult';
 import CompareAttempts from '@/components/interview/CompareAttempts';
+import OutOfCreditsNotice from '@/components/interview/OutOfCreditsNotice';
+
+// Mirrors COSTS["practice"] in backend/app/routers/credits.py.
+const PRACTICE_COST = 2;
 
 export interface AttemptRecord {
     question_id: string;
@@ -36,17 +41,19 @@ export default function PracticePanel({
     const setPracticeDraft = useAppStore((s) => s.setPracticeDraft);
     const setView = useAppStore((s) => s.setView);
     const setStep = useAppStore((s) => s.setStep);
+    const { refresh: refreshCredits } = useCredits();
 
     const [reflection, setReflection] = useState('');
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
+    const [creditMsg, setCreditMsg] = useState<string | null>(null);
     const [result, setResult] = useState<EvalResult | null>(null);
 
     const attemptNo = priorAttempts.length + 1;
 
     async function submit() {
         if (!draft.trim() || busy) return;
-        setBusy(true); setError('');
+        setBusy(true); setError(''); setCreditMsg(null);
         const previous = priorAttempts.at(-1)?.checklist;
         try {
             const res = await fetch('/api/ai/practice-eval', {
@@ -58,11 +65,20 @@ export default function PracticePanel({
                 }),
             });
             const data = await res.json().catch(() => ({}));
+            if (res.status === 402) {
+                setCreditMsg(data.detail || `Bạn đã hết credit. Mỗi lần đánh giá tốn ${PRACTICE_COST} credit.`);
+                return;
+            }
+            if (res.status === 401) {
+                setCreditMsg('Vui lòng đăng nhập để dùng tính năng đánh giá.');
+                return;
+            }
             if (!res.ok) {
                 throw new Error(data.detail || 'Không đánh giá được câu trả lời.');
             }
             setResult({ ...data, previous });
             onSaved({ question_id: question.id, attempt_no: attemptNo, checklist: data.checklist });
+            refreshCredits(); // reflect the debit in the balance widget
         } catch (e) {
             setError(e instanceof Error ? e.message : 'Đã xảy ra lỗi.');
         } finally {
@@ -103,8 +119,11 @@ export default function PracticePanel({
                 >
                     <PaperPlaneRight size={13} weight="bold" /> {busy ? 'Đang đánh giá…' : 'Đánh giá câu trả lời'}
                 </button>
+                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Tốn {PRACTICE_COST} credit</span>
                 {error && <span style={{ fontSize: '0.78rem', color: 'var(--accent-red)' }}>{error}</span>}
             </div>
+
+            {creditMsg && <OutOfCreditsNotice message={creditMsg} />}
 
             {result && (
                 <>

@@ -1271,8 +1271,9 @@ export default function StepInputUrl() {
                 AI tìm công ty phù hợp với CV và chấm điểm tin tuyển dụng của họ
             </div>
 
-            {/* Manual URL entry — hidden once a search is running so the
-                progress pipeline below is the only focus. */}
+            {/* Divider + manual URL input — hidden once a search is running so
+                the processing pipeline below isn't competing with a still-usable
+                (but pointless-to-touch-mid-run) form for attention. */}
             {!isProcessing && <>
             {/* Divider */}
             <div style={{

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
@@ -70,6 +71,55 @@ async def _spa_sniff(url: str) -> list[dict]:
     return jobs
 
 
+# Per-host job-detail URL patterns for capture-backed extraction. Some boards
+# are BOTH unreadable headless AND unreplayable server-side: Heineken (SF Career
+# Site Builder behind a 403 anti-bot challenge), DHL (Phenom "canvas", jobs via a
+# session-token XHR), Crossian (Sage HR API that 401s without a live session).
+# For these the user captures the RENDERED DOM in a real browser via the
+# extension → /debug/capture; we pull the job anchors straight from that
+# snapshot. Jobs are only as fresh as the last manual capture (7-day TTL) — this
+# is the "run capture periodically" path, not real-time.
+_CAPTURE_JOB_PATTERNS = {
+    "careers.theheinekencompany.com": r"/job/heineken-vietnam/",
+    "careers.dhl.com": r"/apac/vi/job/",
+}
+
+
+async def _from_capture(career_url: str) -> list[dict]:
+    """Last-resort: read the extension's DOM snapshot from the debug-capture
+    store and extract job anchors. Best-effort → [] when no capture exists."""
+    from app.services import cache
+    from app.services.ats_adapters.core import _finalize
+    host = (urlparse(career_url).netloc or "").lower()
+    host = host[4:] if host.startswith("www.") else host
+    try:
+        d = await cache.get_json(f"debug:cap:v1:{host}")
+    except Exception:
+        return []
+    if not d:
+        return []
+    pat = _CAPTURE_JOB_PATTERNS.get(host)
+    rx = re.compile(pat) if pat else re.compile(r"/job[s]?/|/position|/recruitment/detail", re.I)
+    out, seen = [], set()
+    for a in d.get("anchors", []):
+        href = (a.get("href") or "").strip()
+        if not href or href in seen or not rx.search(href):
+            continue
+        title = (a.get("text") or "").strip()
+        if not title:  # some anchors carry no text → derive from the URL slug
+            slug = urlparse(href).path.rstrip("/").rsplit("/", 1)[-1]
+            title = re.sub(r"[-_]+", " ", slug).strip().title()
+        if len(title) < 4:
+            continue
+        seen.add(href)
+        out.append({"title": title[:200], "url": href, "location": "",
+                    "description": "", "source": "capture"})
+    jobs = _finalize(out)
+    logger.info("ingest: capture-backed %s → %d jobs (captured ts=%s)",
+                host, len(jobs), d.get("_ts"))
+    return jobs
+
+
 async def ingest_featured_ats(*, render: bool = False, limit: int | None = None) -> dict:
     """Ingest ATS-backed featured companies into the store. `render=True` also
     renders bespoke pages to catch embedded ATS (slower, needs the browser)."""
@@ -105,6 +155,11 @@ async def ingest_featured_ats(*, render: bool = False, limit: int | None = None)
                     # SPA whose jobs load via XHR — the static ATS parser can't
                     # read them; watch the network instead.
                     jobs_list = await _spa_sniff(c.career_url)
+            if not jobs_list:
+                # Nothing worked headless — fall back to the last DOM snapshot
+                # the extension captured for this host (anti-bot/auth-gated
+                # boards). Cheap Redis read, so try it even without render.
+                jobs_list = await _from_capture(c.career_url)
         if not jobs_list:
             empty = _empty(c)
             return {"ok": False, **empty} if empty else None

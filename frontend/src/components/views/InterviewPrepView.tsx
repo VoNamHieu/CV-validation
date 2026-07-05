@@ -8,6 +8,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Sparkle, ChatCircleDots } from '@phosphor-icons/react';
 import { useAppStore } from '@/store/useAppStore';
 import { getAuthHeaders } from '@/lib/auth-headers';
+import { useCredits } from '@/lib/credits-context';
 import { account } from '@/lib/db';
 import {
     type Dossier, type Question, type Section, type Checklist,
@@ -18,11 +19,13 @@ import QuestionAccordion from '@/components/interview/QuestionAccordion';
 import type { AttemptRecord } from '@/components/interview/PracticePanel';
 import ReadinessBars from '@/components/interview/ReadinessBars';
 import PrepList from '@/components/interview/PrepList';
+import OutOfCreditsNotice from '@/components/interview/OutOfCreditsNotice';
 
 type State =
     | { phase: 'loading' }
     | { phase: 'no-job' }
     | { phase: 'no-cv' }
+    | { phase: 'no-credit'; message: string }
     | { phase: 'error'; error: string }
     | { phase: 'ready'; dossier: Dossier; prepId: string | null };
 
@@ -40,6 +43,7 @@ export default function InterviewPrepView() {
     const loadJobHistory = useAppStore((s) => s.loadJobHistory);
     const baseCv = useAppStore((s) => s.cvData);
     const openInterviewList = useAppStore((s) => s.openInterviewList);
+    const { refresh: refreshCredits } = useCredits();
 
     const record = useMemo(() => jobHistory.find((r) => r.id === prepJobId), [jobHistory, prepJobId]);
 
@@ -67,9 +71,14 @@ export default function InterviewPrepView() {
                     }),
                 });
                 const data = await res.json().catch(() => ({}));
+                if (res.status === 402) {
+                    if (!cancelled) setState({ phase: 'no-credit', message: data.detail || 'Bạn đã hết credit để tạo bộ chuẩn bị mới.' });
+                    return;
+                }
                 if (!res.ok) throw new Error(data.detail || 'Không tạo được bộ chuẩn bị phỏng vấn.');
                 if (cancelled) return;
                 setState({ phase: 'ready', dossier: data.dossier, prepId: data.prep_id ?? null });
+                refreshCredits(); // a 4th+ job may have been charged
 
                 // Load past attempts (best-effort; needs auth + a persisted prep).
                 if (data.prep_id) {
@@ -88,7 +97,7 @@ export default function InterviewPrepView() {
             }
         })();
         return () => { cancelled = true; };
-    }, [prepJobId, record, baseCv]);
+    }, [prepJobId, record, baseCv, refreshCredits]);
 
     const grouped = useMemo(() => {
         if (state.phase !== 'ready') return [] as Array<{ section: Section; items: Question[] }>;
@@ -135,6 +144,7 @@ export default function InterviewPrepView() {
             )}
             {state.phase === 'no-job' && <Centered>Hãy chọn một việc từ tab Lịch sử rồi bấm “Chuẩn bị phỏng vấn”.</Centered>}
             {state.phase === 'no-cv' && <Centered>Việc này chưa có CV đã tối ưu. Hãy mở lại và tối ưu CV trước.</Centered>}
+            {state.phase === 'no-credit' && <OutOfCreditsNotice message={state.message} />}
             {state.phase === 'error' && <Centered tone="error">{state.error}</Centered>}
 
             {state.phase === 'ready' && (
