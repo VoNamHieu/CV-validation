@@ -31,6 +31,12 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         career_url="https://career.vng.com.vn/vi/tim-kiem-viec-lam",
     ),
     FeaturedCompany(
+        name="Zalo",
+        homepage="https://zalo.ai",
+        # Public JSON API /api/v2/jobs?option=getSliceJobs (`zalo` adapter).
+        career_url="https://zalo.careers/job-list",
+    ),
+    FeaturedCompany(
         name="Tiki",
         homepage="https://tiki.vn",
         career_url="https://tuyendung.tiki.vn",
@@ -38,17 +44,21 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="MoMo",
         homepage="https://momo.vn",
-        career_url="https://momo.careers",
+        # momo.careers is a Next.js SSR site; jobs live at /jobs-opening (`momo` adapter).
+        career_url="https://momo.careers/jobs-opening",
     ),
     FeaturedCompany(
         name="VNPAY",
         homepage="https://vnpay.vn",
-        career_url="https://tuyendung.vnpay.vn",
+        # SSR listing at /co-hoi-nghe-nghiep (`vnpay` adapter).
+        career_url="https://tuyendung.vnpay.vn/co-hoi-nghe-nghiep",
     ),
     FeaturedCompany(
         name="Grab",
         homepage="https://grab.com",
-        career_url="https://www.grab.careers/en/jobs/?orderby=0&pagesize=20&page=1&location=HCMC&country=Vietnam",
+        # grab.careers is a JS shell; the real board is SmartRecruiters (company
+        # "Grab") → existing generic SmartRecruiters adapter, VN-facet filtered.
+        career_url="https://jobs.smartrecruiters.com/Grab",
     ),
     FeaturedCompany(
         name="Be",
