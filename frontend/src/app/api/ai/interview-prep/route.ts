@@ -35,7 +35,9 @@ export async function POST(request: NextRequest) {
                 );
                 if (res.ok) {
                     const row = await res.json();
-                    if (row?.dossier?.questions) return NextResponse.json({ dossier: row.dossier, cached: true });
+                    if (row?.dossier?.questions) {
+                        return NextResponse.json({ dossier: row.dossier, cached: true, prep_id: row.id ?? null });
+                    }
                 }
             } catch { /* cache is an optimization — fall through to generate */ }
         }
@@ -44,18 +46,21 @@ export async function POST(request: NextRequest) {
         const dossier = await generateDossier(cv, jd, match, tailoredCv, companyText);
 
         // 3. Persist (best-effort; awaited so serverless doesn't kill it mid-flight).
+        //    The PUT returns the row so the client learns prep_id for attempts.
+        let prepId: string | null = null;
         if (canCache) {
             try {
-                await fetch(`${backend}/me/interview/prep`, {
+                const put = await fetch(`${backend}/me/interview/prep`, {
                     method: "PUT",
                     headers: { ...auth, "Content-Type": "application/json" },
                     body: JSON.stringify({ job_ref: jobRef, cv_hash: hash, dossier }),
                     signal: AbortSignal.timeout(10_000),
                 });
+                if (put.ok) prepId = (await put.json())?.id ?? null;
             } catch { /* non-fatal: the dossier is still returned, just not cached */ }
         }
 
-        return NextResponse.json({ dossier, cached: false });
+        return NextResponse.json({ dossier, cached: false, prep_id: prepId });
     } catch (e: unknown) {
         const message = e instanceof Error ? e.message : "Failed to generate interview prep";
         const status = message.includes("JSON không hợp lệ") ? 502 : 500;

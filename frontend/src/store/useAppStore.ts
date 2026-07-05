@@ -172,7 +172,7 @@ export interface CandidateJob {
 }
 
 type Step = 1 | 2 | 3 | 4;
-export type AppView = 'apply' | 'editor' | 'history';
+export type AppView = 'apply' | 'editor' | 'history' | 'interview';
 
 interface AppState {
   // Has the visitor left the landing page and entered the app (persisted, so
@@ -183,6 +183,13 @@ interface AppState {
   // Top-level navigation (sidebar)
   view: AppView;
   setView: (view: AppView) => void;
+
+  // Interview prep — which job's dossier the interview view is showing, and a
+  // per-question draft cache so answers survive navigation within the session.
+  prepJobId: string | null;
+  openInterviewPrep: (jobId: string) => void;
+  practiceDrafts: Record<string, string>;
+  setPracticeDraft: (questionId: string, text: string) => void;
 
   // Wizard step
   currentStep: Step;
@@ -313,6 +320,8 @@ interface AppState {
 const initialState = {
   entered: false,
   view: 'apply' as AppView,
+  prepJobId: null as string | null,
+  practiceDrafts: {} as Record<string, string>,
   currentStep: 1 as Step,
   cvRawText: '',
   cvFileName: '',
@@ -347,6 +356,9 @@ export const useAppStore = create<AppState>()(
       enterApp: () => set({ entered: true }),
 
       setView: (view) => set({ view }),
+      openInterviewPrep: (jobId) => set({ view: 'interview', prepJobId: jobId }),
+      setPracticeDraft: (questionId, text) =>
+        set((s) => ({ practiceDrafts: { ...s.practiceDrafts, [questionId]: text } })),
       setStep: (step) => set({ currentStep: step }),
 
       setCvRawText: (text, fileName) => set({ cvRawText: text, cvFileName: fileName }),

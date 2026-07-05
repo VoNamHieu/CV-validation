@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useAppStore, AppView } from '@/store/useAppStore';
-import { Sparkle, MagicWand, Briefcase, FileText, List, X, Sun, Moon } from '@phosphor-icons/react';
+import { Sparkle, MagicWand, Briefcase, FileText, List, X, Sun, Moon, ChatCircleDots } from '@phosphor-icons/react';
 import type { Icon } from '@phosphor-icons/react';
 import AuthButton from './AuthButton';
 
@@ -17,6 +17,7 @@ const NAV_ITEMS: NavItem[] = [
     { id: 'apply', label: 'Ứng tuyển', icon: MagicWand, description: 'CV · So khớp · Tối ưu' },
     { id: 'editor', label: 'Sửa CV', icon: FileText, description: 'Tạo · Sửa · Xuất PDF' },
     { id: 'history', label: 'Lịch sử', icon: Briefcase, description: 'Hồ sơ đã lưu' },
+    { id: 'interview', label: 'Phỏng vấn', icon: ChatCircleDots, description: 'Luyện tập · Đánh giá' },
 ];
 
 export const SIDEBAR_WIDTH = 232;
