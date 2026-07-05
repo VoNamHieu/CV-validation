@@ -112,6 +112,10 @@ export interface JDEntry {
   label: string;  // display name (URL hostname or filename)
   status: JDEntryStatus;
   optimizing?: boolean; // background auto-optimize in flight
+  // Set when this entry was seeded by "apply without optimize" — optimizedCv
+  // is the base CV, not an AI rewrite. Lets AnalyticsTracker fire the correct
+  // funnel event instead of conflating this path with a real optimize run.
+  optimizeSkipped?: boolean;
   error?: string;
   jdData?: JDData;
   matchResult?: MatchResult;
