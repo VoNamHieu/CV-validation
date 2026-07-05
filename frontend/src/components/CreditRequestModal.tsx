@@ -114,7 +114,7 @@ export default function CreditRequestModal({
                         <h2 style={titleStyle}>Mua thêm token</h2>
                         <p style={descStyle}>
                             Bạn đã dùng hết lượt miễn phí. Chọn gói, chuyển khoản đúng số tiền + nội dung
-                            bên dưới — token sẽ được cộng sau khi xác nhận.
+                            bên dưới, token sẽ được cộng sau khi xác nhận.
                         </p>
                         <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
                             {TOPUP_PACKS.map((p) => (
@@ -133,8 +133,8 @@ export default function CreditRequestModal({
                         </div>
                         <BankTransfer note={`${TRANSFER_NOTE} ${email}`} />
                         <p style={{ ...descStyle, fontSize: '0.74rem', margin: '12px 0 14px' }}>
-                            Token sẽ được cộng tự động sau khi hệ thống nhận được chuyển khoản —
-                            quá trình có thể mất vài phút để hoàn tất.
+                            Token sẽ được cộng tự động sau khi hệ thống nhận được chuyển khoản.
+                            Quá trình có thể mất vài phút để hoàn tất.
                         </p>
                         <button onClick={onClose} style={primaryBtn(false)}>Đã hiểu</button>
                     </>
@@ -171,7 +171,7 @@ function SupportView({ granted, email, onClose }: { granted: number; email: stri
         <>
             <h2 style={titleStyle}>Đã cộng {granted} token! 🎉</h2>
             <p style={descStyle}>
-                Cảm ơn bạn đã dùng Copo. Nếu thấy hữu ích, bạn có thể ủng hộ mình một chút —
+                Cảm ơn bạn đã dùng Copo. Nếu thấy hữu ích, bạn có thể ủng hộ mình một chút,
                 hoàn toàn tuỳ tâm.
             </p>
 

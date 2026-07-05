@@ -114,7 +114,7 @@ export default function PromotedEditorModal({
                 snapshot: { ...updated.snapshot, has_logo: logoDraft ? true : s.has_logo },
             });
         } catch {
-            setError('Lưu thất bại (ảnh có thể quá lớn — tối đa ~512KB).');
+            setError('Lưu thất bại (ảnh có thể quá lớn, tối đa ~512KB).');
             setBusy(false);
         }
     };

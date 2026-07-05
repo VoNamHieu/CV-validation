@@ -3,7 +3,7 @@ import LegalShell from '@/components/LegalShell';
 import { PrivacyContent } from '@/components/legal/LegalContent';
 
 export const metadata: Metadata = {
-    title: 'Chính sách Quyền riêng tư — Copo',
+    title: 'Chính sách Quyền riêng tư - Copo',
     description: 'Cách Copo thu thập, sử dụng, chia sẻ và bảo vệ dữ liệu cá nhân của bạn.',
 };
 

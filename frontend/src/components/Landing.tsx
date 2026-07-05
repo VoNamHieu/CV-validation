@@ -19,14 +19,14 @@ import { useAuth } from '@/lib/auth';
 const STEPS = [
     { icon: FileText, title: 'Tải CV của bạn', desc: 'Kéo thả file PDF. AI đọc kỹ năng, kinh nghiệm, học vấn và suy ra vai trò mục tiêu.' },
     { icon: Brain, title: 'AI tìm công ty đang tuyển', desc: 'Quét các công ty trong mạng lưới và trang tuyển dụng chính thức của họ để tìm vị trí khớp.' },
-    { icon: Target, title: 'Chấm điểm độ khớp', desc: 'Mỗi tin được xếp hạng theo CV — biết ngay mình hợp bao nhiêu phần trăm và còn thiếu gì.' },
+    { icon: Target, title: 'Chấm điểm độ khớp', desc: 'Mỗi tin được xếp hạng theo CV, biết ngay mình hợp bao nhiêu phần trăm và còn thiếu gì.' },
     { icon: MagicWand, title: 'Tối ưu CV & ứng tuyển', desc: 'AI viết lại CV phù hợp từng vị trí (không bịa nội dung), xuất PDF, sẵn sàng nộp.' },
 ];
 
 const FEATURES = [
     { icon: Brain, title: 'Phân tích CV bằng AI', desc: 'Trích xuất kỹ năng, kinh nghiệm và suy ra vai trò chỉ từ file PDF.' },
     { icon: Target, title: 'Chấm điểm độ khớp', desc: 'Biết ngay mình hợp bao nhiêu phần trăm với từng vị trí, và vì sao.' },
-    { icon: MagicWand, title: 'Tối ưu CV theo job', desc: 'Gợi ý chỉnh CV cho từng vị trí — cam kết không bịa thêm nội dung.' },
+    { icon: MagicWand, title: 'Tối ưu CV theo job', desc: 'Gợi ý chỉnh CV cho từng vị trí, cam kết không bịa thêm nội dung.' },
     { icon: Briefcase, title: 'Việc từ nguồn thật', desc: 'Link tuyển dụng chính thức của công ty, không phải tin trung gian.' },
     { icon: Lightning, title: 'Hỗ trợ tự động điền', desc: 'Đồng bộ hồ sơ để điền form ứng tuyển nhanh hơn nhiều lần.' },
     { icon: FileText, title: 'Mẫu CV & xuất PDF', desc: 'Chọn mẫu, sửa trực tiếp và tải CV chuẩn PDF chỉ trong vài giây.' },
@@ -234,7 +234,7 @@ function DemoPlayer() {
                         </div>
                         <div className="lp-cv-side">
                             <span className="lp-chip lp-chip-green"><MagicWand size={11} weight="fill" /> Tối ưu cho Senior Frontend Engineer</span>
-                            <div className="lp-cv-note"><CheckCircle size={13} weight="fill" /> Viết lại theo JD — không bịa nội dung</div>
+                            <div className="lp-cv-note"><CheckCircle size={13} weight="fill" /> Viết lại theo JD, không bịa nội dung</div>
                             <div className="lp-cv-note"><CheckCircle size={13} weight="fill" /> Làm nổi bật kỹ năng khớp nhất</div>
                             <button className="lp-cv-export"><DownloadSimple size={14} weight="bold" /> Xuất PDF</button>
                         </div>
@@ -320,12 +320,12 @@ export default function Landing() {
                         <Sparkle size={13} weight="fill" /> Tự động tìm việc khắp nơi bằng AI · không bịa nội dung
                     </span>
                     <h1 className="lp-h1">
-                        Tải CV lên — AI tự động tìm kiếm job{' '}
+                        Tải CV lên, AI tự động tìm kiếm job{' '}
                         <span className="lp-grad-text">ở bất cứ đâu</span> cho bạn
                     </h1>
                     <p className="lp-sub">
                         Phân tích CV, tự động tìm job khớp ở mọi nơi, chấm điểm độ phù hợp và chỉnh CV
-                        theo từng vị trí. Từ một file PDF đến danh sách việc phù hợp — chỉ vài phút.
+                        theo từng vị trí. Từ một file PDF đến danh sách việc phù hợp, chỉ vài phút.
                     </p>
                     <div className="lp-cta-row">
                         <button className="lp-btn-primary lp-btn-lg lp-pulse" onClick={onStart}>
@@ -414,7 +414,7 @@ export default function Landing() {
             {/* How it works */}
             <section className="lp-section lp-how">
                 <h2 className="lp-h2">Cách hoạt động</h2>
-                <p className="lp-section-sub">Từ một file PDF đến danh sách việc phù hợp đã tối ưu CV — chỉ vài phút, không tin rác.</p>
+                <p className="lp-section-sub">Từ một file PDF đến danh sách việc phù hợp đã tối ưu CV, chỉ vài phút, không tin rác.</p>
                 <div className="lp-how-flow">
                     {STEPS.map((s, i) => {
                         const Icon = s.icon;
@@ -456,7 +456,7 @@ export default function Landing() {
             <section className="lp-cta-band">
                 <div className="lp-cta-inner">
                     <h2 className="lp-cta-title">Sẵn sàng để AI tự động tìm job khắp nơi?</h2>
-                    <p className="lp-cta-desc">Tải CV lên và xem AI làm việc — miễn phí để bắt đầu.</p>
+                    <p className="lp-cta-desc">Tải CV lên và xem AI làm việc, miễn phí để bắt đầu.</p>
                     <button className="lp-btn-primary lp-btn-lg" onClick={onStart}>
                         <RocketLaunch size={18} weight="fill" /> Bắt đầu ngay
                     </button>

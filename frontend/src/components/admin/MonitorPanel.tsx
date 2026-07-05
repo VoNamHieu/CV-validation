@@ -26,7 +26,7 @@ const STATUS_COLOR: Record<string, string> = {
 };
 
 function ago(ts: number): string {
-    if (!ts) return '—';
+    if (!ts) return '-';
     const s = Math.max(0, Math.floor(Date.now() / 1000 - ts));
     if (s < 60) return `${s}s ago`;
     if (s < 3600) return `${Math.floor(s / 60)}m ago`;
@@ -126,7 +126,7 @@ export default function MonitorPanel() {
         <div style={{ maxWidth: 1100, margin: '0 auto', padding: '32px 24px', color: 'var(--text-primary)' }}>
             <h1 style={{ fontSize: '1.5rem', fontWeight: 700, marginBottom: 4 }}>🔗 Link Health Monitor</h1>
             <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: 20 }}>
-                Broken / suspect job-detail links — from the live pipeline (passive) and active health-checks.
+                Broken / suspect job-detail links, from the live pipeline (passive) and active health-checks.
                 A link can return HTTP 200 yet still be dead (empty SPA shell), so status is content-based.
             </p>
 

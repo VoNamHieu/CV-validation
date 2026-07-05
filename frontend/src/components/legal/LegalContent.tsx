@@ -23,7 +23,7 @@ export function TermsContent() {
     return (
         <>
             <p className="lead">
-                Các điều khoản này điều chỉnh việc bạn sử dụng Copo (&quot;chúng tôi&quot;, &quot;Copo&quot;) —
+                Các điều khoản này điều chỉnh việc bạn sử dụng Copo (&quot;chúng tôi&quot;, &quot;Copo&quot;),
                 bao gồm ứng dụng web và tiện ích mở rộng trình duyệt Chrome. Bằng việc tạo tài khoản hoặc sử dụng
                 dịch vụ, bạn đồng ý với các điều khoản này. Nếu không đồng ý, vui lòng không sử dụng dịch vụ.
             </p>
@@ -31,7 +31,7 @@ export function TermsContent() {
             <h2>1. Mô tả dịch vụ</h2>
             <p>Copo là công cụ hỗ trợ tìm việc bằng AI: phân tích CV, gợi ý vị trí và công ty đang tuyển,
                 chấm điểm độ phù hợp, gợi ý tối ưu CV theo từng vị trí, và hỗ trợ điền đơn ứng tuyển qua tiện ích
-                trình duyệt. Copo là công cụ hỗ trợ — không phải đơn vị tuyển dụng, không phải đại diện của bất
+                trình duyệt. Copo là công cụ hỗ trợ. Đây không phải đơn vị tuyển dụng, không phải đại diện của bất
                 kỳ nhà tuyển dụng nào, và không đảm bảo bạn sẽ được phỏng vấn hay nhận việc.</p>
 
             <h2>2. Tài khoản</h2>
@@ -66,7 +66,7 @@ export function TermsContent() {
 
             <h2>7. Tính năng AI và giới hạn</h2>
             <p>Các tính năng AI có thể đưa ra kết quả không chính xác hoặc không đầy đủ. Chúng tôi áp dụng nguyên
-                tắc &quot;không bịa nội dung&quot; khi tối ưu CV — AI chỉ viết lại dựa trên thông tin bạn cung cấp,
+                tắc &quot;không bịa nội dung&quot; khi tối ưu CV. AI chỉ viết lại dựa trên thông tin bạn cung cấp,
                 không thêm dữ kiện không có thật. Tuy vậy, điểm phù hợp, gợi ý và nội dung do AI tạo ra chỉ mang
                 tính tham khảo. <strong>Bạn có trách nhiệm tự kiểm tra và xác nhận mọi nội dung trước khi gửi cho
                 nhà tuyển dụng.</strong></p>
@@ -125,22 +125,22 @@ export function PrivacyContent() {
             </p>
 
             <h2>1. Dữ liệu chúng tôi thu thập</h2>
-            <p><strong>1.1 Thông tin tài khoản</strong> — Email và thông tin xác thực khi bạn đăng ký/đăng nhập.
+            <p><strong>1.1 Thông tin tài khoản</strong>: Email và thông tin xác thực khi bạn đăng ký/đăng nhập.
                 Chúng tôi không lưu trữ mật khẩu của bạn dưới dạng văn bản thuần.</p>
-            <p><strong>1.2 Dữ liệu CV</strong> — Nội dung file CV bạn tải lên (PDF) và các trường thông tin được
+            <p><strong>1.2 Dữ liệu CV</strong>: Nội dung file CV bạn tải lên (PDF) và các trường thông tin được
                 trích xuất từ đó: họ tên, thông tin liên hệ, học vấn, kinh nghiệm làm việc, kỹ năng.</p>
-            <p><strong>1.3 Dữ liệu tin tuyển dụng</strong> — Link hoặc nội dung mô tả công việc (JD) bạn nhập vào
+            <p><strong>1.3 Dữ liệu tin tuyển dụng</strong>: Link hoặc nội dung mô tả công việc (JD) bạn nhập vào
                 hệ thống để phân tích và so khớp.</p>
-            <p><strong>1.4 Dữ liệu sử dụng dịch vụ</strong> — Lịch sử các hành động bạn thực hiện (trích xuất CV,
+            <p><strong>1.4 Dữ liệu sử dụng dịch vụ</strong>: Lịch sử các hành động bạn thực hiện (trích xuất CV,
                 chấm điểm phù hợp, tối ưu CV, tự động điền đơn) và số credit đã sử dụng. Hiện tại Copo chưa
                 tích hợp cổng thanh toán, nên chúng tôi không thu thập hoặc lưu trữ thông tin thẻ/tài khoản
                 ngân hàng của bạn.</p>
-            <p><strong>1.5 Dữ liệu theo dõi ứng tuyển</strong> — Trạng thái các đơn ứng tuyển bạn lưu lại trong
+            <p><strong>1.5 Dữ liệu theo dõi ứng tuyển</strong>: Trạng thái các đơn ứng tuyển bạn lưu lại trong
                 hệ thống (đã tối ưu, đã điền, đã nộp, có phản hồi, phỏng vấn, trúng tuyển, bị từ chối), tên công
                 ty, vị trí, điểm phù hợp.</p>
             <h3>1.6 Dữ liệu từ tiện ích mở rộng Chrome</h3>
             <p>Khi bạn chủ động kích hoạt agent tự động điền đơn trên một trang tuyển dụng, tiện ích sẽ đọc cấu
-                trúc trang (tên trường nhập liệu, nút bấm, nội dung lỗi hiển thị) để xác định cách điền — chỉ
+                trúc trang (tên trường nhập liệu, nút bấm, nội dung lỗi hiển thị) để xác định cách điền, chỉ
                 phục vụ mục đích điền form, không thu thập nội dung trang ngoài phạm vi đó.</p>
             <p>Tiện ích không thu thập dữ liệu duyệt web của bạn trên các trang không liên quan đến tìm việc/ứng
                 tuyển, và không tự động gửi dữ liệu lên máy chủ trừ khi bạn chủ động thực hiện một hành động
@@ -163,7 +163,7 @@ export function PrivacyContent() {
             <h2>4. Lưu trữ và bảo mật</h2>
             <p>Dữ liệu được truyền tải qua kết nối mã hoá (HTTPS) và xác thực bằng JWT. Quyền truy cập dữ liệu
                 được giới hạn theo từng tài khoản người dùng ở tầng ứng dụng. Tuy nhiên, không có hệ thống nào an
-                toàn tuyệt đối — chúng tôi không thể đảm bảo an toàn tuyệt đối cho mọi thông tin truyền qua
+                toàn tuyệt đối. Chúng tôi không thể đảm bảo an toàn tuyệt đối cho mọi thông tin truyền qua
                 internet.</p>
 
             <h2>5. Thời gian lưu trữ và quyền xoá dữ liệu</h2>

@@ -47,7 +47,7 @@ export default class ErrorBoundary extends Component<Props, State> {
                     <div style={{ fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4 }}>
                         Không hiển thị được {this.props.label || 'phần này'}
                     </div>
-                    Dữ liệu của mục này có vấn đề. Các mục khác vẫn dùng bình thường — thử chọn job khác hoặc tối ưu lại.
+                    Dữ liệu của mục này có vấn đề. Các mục khác vẫn dùng bình thường, thử chọn job khác hoặc tối ưu lại.
                 </div>
             );
         }

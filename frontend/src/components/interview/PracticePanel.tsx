@@ -98,7 +98,7 @@ export default function PracticePanel({
                 id={`ans-${question.id}`}
                 value={draft}
                 onChange={(e) => setPracticeDraft(question.id, e.target.value)}
-                placeholder="Trả lời bằng lời của bạn — nêu bối cảnh, việc bạn làm và kết quả cụ thể…"
+                placeholder="Trả lời bằng lời của bạn, nêu bối cảnh, việc bạn làm và kết quả cụ thể…"
                 rows={4}
                 className="input-field"
                 style={{ fontSize: '0.84rem', minHeight: 90 }}
@@ -146,7 +146,7 @@ export default function PracticePanel({
                             className="btn-secondary"
                             style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10, padding: '7px 14px', fontSize: '0.8rem', color: 'var(--accent-purple)' }}
                         >
-                            <PencilSimple size={13} weight="bold" /> Gạch đầu dòng này khó diễn đạt lại — sửa trong CV
+                            <PencilSimple size={13} weight="bold" /> Gạch đầu dòng này khó diễn đạt lại, sửa trong CV
                         </button>
                     )}
 

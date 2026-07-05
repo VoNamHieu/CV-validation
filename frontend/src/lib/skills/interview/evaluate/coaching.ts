@@ -54,7 +54,7 @@ export function buildCoaching(
         const failing = failedAxes(checklist);
         const calibrated = failing.some(axis => AXIS_KEYWORDS[axis].some(k => reflection.includes(k)));
         if (calibrated) {
-            coaching.praise_vi = 'Bạn đã tự nhận ra đúng điểm cần cải thiện — khả năng tự đánh giá là một thế mạnh khi phỏng vấn.';
+            coaching.praise_vi = 'Bạn đã tự nhận ra đúng điểm cần cải thiện, khả năng tự đánh giá là một thế mạnh khi phỏng vấn.';
         }
     }
 

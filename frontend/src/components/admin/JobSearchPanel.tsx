@@ -18,9 +18,9 @@ type Status = 'all' | 'active' | 'dead';
 type Mode = 'keyword' | 'semantic';
 
 function ago(iso: string | null): string {
-    if (!iso) return '—';
+    if (!iso) return '-';
     const t = new Date(iso).getTime();
-    if (!t) return '—';
+    if (!t) return '-';
     const s = Math.max(0, Math.floor((Date.now() - t) / 1000));
     if (s < 3600) return `${Math.floor(s / 60)}m trước`;
     if (s < 86400) return `${Math.floor(s / 3600)}h trước`;
@@ -213,7 +213,7 @@ export default function JobSearchPanel() {
                     {running && (
                         last?.phase === 'embedding'
                             ? 'Đang tạo embedding cho job mới…'
-                            : 'Đang quét ATS feed của các công ty featured — job mới sẽ được ghi vào store…'
+                            : 'Đang quét ATS feed của các công ty featured, job mới sẽ được ghi vào store…'
                     )}
                     {!running && last?.phase === 'done' && last.stats && (
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
@@ -248,7 +248,7 @@ export default function JobSearchPanel() {
                         onChange={(e) => setQ(e.target.value)}
                         onKeyDown={(e) => { if (e.key === 'Enter') search(0); }}
                         placeholder={mode === 'semantic'
-                            ? 'Mô tả công việc cần tìm (semantic — bắt buộc có từ khoá)…'
+                            ? 'Mô tả công việc cần tìm (semantic, bắt buộc có từ khoá)…'
                             : 'Từ khoá: chức danh, công ty, địa điểm, nội dung JD…'}
                         style={{
                             width: '100%', padding: '9px 12px 9px 34px', borderRadius: 10,
@@ -387,7 +387,7 @@ export default function JobSearchPanel() {
                                         )}
                                         <span>cập nhật {ago(j.last_seen_at)}</span>
                                         {typeof j.distance === 'number' && (
-                                            <span title="Cosine distance — càng thấp càng khớp">
+                                            <span title="Cosine distance, càng thấp càng khớp">
                                                 Δ {j.distance.toFixed(3)}
                                             </span>
                                         )}

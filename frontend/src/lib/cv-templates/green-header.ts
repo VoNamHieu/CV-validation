@@ -107,7 +107,7 @@ export function greenHeaderTemplate(cv: CVData, opts?: RenderOptions): string {
     `).join('')}
   ` : ''}
 
-  ${cv.languages?.length ? `<h2>Ngoại ngữ</h2><div class="skills">${cv.languages.map((l, i) => `<span class="skill" data-f="languages.${i}">${esc(l.language || '')}${l.level ? ` — ${esc(l.level)}` : ''}</span>`).join('')}</div>` : ''}
+  ${cv.languages?.length ? `<h2>Ngoại ngữ</h2><div class="skills">${cv.languages.map((l, i) => `<span class="skill" data-f="languages.${i}">${esc(l.language || '')}${l.level ? `: ${esc(l.level)}` : ''}</span>`).join('')}</div>` : ''}
 
   ${cv.awards?.length ? `
     <h2>Giải thưởng</h2>

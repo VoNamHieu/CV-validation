@@ -15,7 +15,7 @@ import PromotedEditorModal from './PromotedEditorModal';
 
 function ago(iso: string): string {
     const t = Date.parse(iso);
-    if (!t) return '—';
+    if (!t) return '-';
     const s = Math.floor((Date.now() - t) / 1000);
     if (s < 60) return 'vừa xong';
     if (s < 3600) return `${Math.floor(s / 60)}m trước`;
@@ -175,7 +175,7 @@ export default function PromotedPanel() {
                                         </p>
                                     ) : (
                                         <p style={{ fontSize: '0.78rem', color: 'var(--accent-red)', margin: '0 0 12px' }}>
-                                            ⚠ Không có JD — bấm “Sửa nội dung” để thêm, hoặc xóa.
+                                            ⚠ Không có JD, bấm “Sửa nội dung” để thêm, hoặc xóa.
                                         </p>
                                     )}
 

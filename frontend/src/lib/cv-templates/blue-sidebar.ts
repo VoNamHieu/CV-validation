@@ -98,7 +98,7 @@ export function blueSidebarTemplate(cv: CVData, opts?: RenderOptions): string {
       <div class="sb-section">
         <h3>Ngoại ngữ</h3>
         <ul class="sb-skills">
-          ${cv.languages.map((l, i) => `<li data-f="languages.${i}">${esc(l.language)}${l.level ? ` — ${esc(l.level)}` : ''}</li>`).join('')}
+          ${cv.languages.map((l, i) => `<li data-f="languages.${i}">${esc(l.language)}${l.level ? `: ${esc(l.level)}` : ''}</li>`).join('')}
         </ul>
       </div>
     ` : ''}

@@ -312,7 +312,7 @@ export default function StepUploadCV() {
                             color: 'var(--accent-green)', fontSize: '0.8rem',
                             display: 'flex', alignItems: 'center', gap: 4, marginTop: 2,
                         }}>
-                            <CheckCircle size={12} weight="fill" /> {cvFileName ? 'Đã đọc & cấu trúc xong' : 'Đang dùng CV đã lưu — không cần tải lại'}
+                            <CheckCircle size={12} weight="fill" /> {cvFileName ? 'Đã đọc & cấu trúc xong' : 'Đang dùng CV đã lưu, không cần tải lại'}
                         </p>
                         {extSynced !== null && (
                             <p
@@ -325,7 +325,7 @@ export default function StepUploadCV() {
                             >
                                 {extSynced
                                     ? <><CheckCircle size={12} weight="fill" /> Đã sync profile sang extension</>
-                                    : <><WarningCircle size={12} weight="fill" /> Extension chưa nhận data — {extSyncError}</>}
+                                    : <><WarningCircle size={12} weight="fill" /> Extension chưa nhận data: {extSyncError}</>}
                             </p>
                         )}
                     </div>
@@ -378,7 +378,7 @@ export default function StepUploadCV() {
                         />
                     </div>
                     <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: -12, marginBottom: 20 }}>
-                        Chọn vị trí bạn muốn ứng tuyển — kể cả khác với CV. Chúng tôi tìm việc theo vị trí này, rồi dùng CV để ước lượng độ phù hợp.
+                        Chọn vị trí bạn muốn ứng tuyển, kể cả khác với CV. Chúng tôi tìm việc theo vị trí này, rồi dùng CV để ước lượng độ phù hợp.
                     </p>
 
                     {/* A <label> would misleadingly claim to describe a single
@@ -417,7 +417,7 @@ export default function StepUploadCV() {
                     <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 20 }}>
                         {targetLevel
                             ? 'Các vị trí lệch xa cấp bậc này sẽ bị xếp hạng thấp hơn.'
-                            : 'Chưa chọn cấp bậc — chúng tôi sẽ suy ra từ CV của bạn.'}
+                            : 'Chưa chọn cấp bậc, chúng tôi sẽ suy ra từ CV của bạn.'}
                     </p>
 
                     <div style={{
@@ -453,7 +453,7 @@ export default function StepUploadCV() {
                     <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 10 }}>
                         {targetLocation
                             ? 'Việc được so khớp theo vị trí và thành phố này. Nếu không có đúng thành phố → vẫn hiển thị vị trí này ở nơi khác.'
-                            : 'Chưa chọn thành phố — việc được so khớp theo vị trí này ở mọi địa điểm.'}
+                            : 'Chưa chọn thành phố, việc được so khớp theo vị trí này ở mọi địa điểm.'}
                     </p>
                 </div>
             )}
@@ -488,7 +488,7 @@ export default function StepUploadCV() {
                     className="btn-primary"
                     disabled={!ready || processing}
                     onClick={() => { if (gate(GATE_MSG)) { setFullyAutoMode(true); setStep(2); } }}
-                    title="Tự động tìm việc, tối ưu CV và ứng tuyển — không cần thao tác thêm"
+                    title="Tự động tìm việc, tối ưu CV và ứng tuyển, không cần thao tác thêm"
                     style={{
                         display: 'flex', alignItems: 'center', gap: 8, padding: '13px 22px',
                         background: 'linear-gradient(135deg, #059669, #10b981)',

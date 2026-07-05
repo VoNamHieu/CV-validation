@@ -53,7 +53,7 @@ const VERDICT_LABEL: Record<string, string> = {
 };
 
 function ago(ts: number): string {
-    if (!ts) return '—';
+    if (!ts) return '-';
     const s = Math.max(0, Math.floor(Date.now() / 1000 - ts));
     if (s < 60) return `${s}s trước`;
     if (s < 3600) return `${Math.floor(s / 60)}m trước`;
@@ -86,7 +86,7 @@ export default function CompatPanel() {
 
     useEffect(() => { load(); }, [load]);
 
-    // Probe một career URL bất kỳ — đây là tính năng chính: kiểm tra một trang
+    // Probe một career URL bất kỳ, đây là tính năng chính: kiểm tra một trang
     // tuyển dụng đích có chạy được với cấu hình hiện tại không.
     const probeOne = async () => {
         const url = probeUrl.trim();
@@ -102,7 +102,7 @@ export default function CompatPanel() {
             const d = await r.json();
             if (!r.ok) throw new Error(d.detail || `Probe lỗi (${r.status})`);
             const v = d.record?.verdict as string;
-            setMsg(`${VERDICT_LABEL[v] || v} — ${d.record?.detail || ''}`);
+            setMsg(`${VERDICT_LABEL[v] || v}: ${d.record?.detail || ''}`);
             setProbeUrl('');
             await load();
         } catch (e) {
@@ -188,12 +188,12 @@ export default function CompatPanel() {
         <div style={{ maxWidth: 1100, margin: '0 auto', padding: '32px 24px', color: 'var(--text-primary)' }}>
             <h1 style={{ fontSize: '1.5rem', fontWeight: 700, marginBottom: 4 }}>🔌 Kiểm tra tương thích career page</h1>
             <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: 20 }}>
-                Một trang tuyển dụng đích có lấy được job với cấu hình hiện tại không — và nếu không thì
+                Một trang tuyển dụng đích có lấy được job với cấu hình hiện tại không, và nếu không thì
                 vì sao. Probe chạy lại đúng chuỗi acquisition (ATS feed → SPA sniff) ở chế độ thử, rồi trả
                 về kết luận thay vì job.
             </p>
 
-            {/* Probe một URL bất kỳ — tính năng chính */}
+            {/* Probe một URL bất kỳ, tính năng chính */}
             <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
                 <input
                     value={probeUrl}
@@ -266,11 +266,11 @@ export default function CompatPanel() {
                                         </a>
                                     </td>
                                     <td style={{ padding: '10px 12px', color: 'var(--text-muted)' }}>
-                                        {l.strategy || (l.ats ? `ats:${l.ats}` : '—')}
+                                        {l.strategy || (l.ats ? `ats:${l.ats}` : '-')}
                                     </td>
-                                    <td style={{ padding: '10px 12px' }}>{l.job_count || '—'}</td>
+                                    <td style={{ padding: '10px 12px' }}>{l.job_count || '-'}</td>
                                     <td style={{ padding: '10px 12px', color: 'var(--text-muted)' }}>
-                                        {l.blockers && l.blockers.length ? l.blockers.join(', ') : '—'}
+                                        {l.blockers && l.blockers.length ? l.blockers.join(', ') : '-'}
                                     </td>
                                     <td style={{ padding: '10px 12px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{ago(l.last_checked)}</td>
                                     <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>

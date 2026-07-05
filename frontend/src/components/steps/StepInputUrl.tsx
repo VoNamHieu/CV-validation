@@ -244,7 +244,7 @@ export default function StepInputUrl() {
                     console.warn('[ground-search] profile inference failed, using title only:', e);
                 }
                 if (roles.length === 0) {
-                    throw new Error('Tìm trên web cần một vai trò mục tiêu — hãy thiết lập ở bước tải CV.');
+                    throw new Error('Tìm trên web cần một vai trò mục tiêu, hãy thiết lập ở bước tải CV.');
                 }
                 setInferredTitle(roles[0]);
                 setPhase('searching');
@@ -265,7 +265,7 @@ export default function StepInputUrl() {
                 }
                 if (allJobs.length === 0) {
                     const why = discovered.warming
-                        ? 'vẫn đang chuẩn bị (hết thời gian chờ) — hãy thử lại sau giây lát'
+                        ? 'vẫn đang chuẩn bị (hết thời gian chờ), hãy thử lại sau giây lát'
                         : discovered.companies.length === 0
                             ? `tìm trên web không thấy công ty nào cho "${targetTitle}"`
                             : `tìm thấy ${discovered.companies.length} công ty nhưng hiện chưa có tin tuyển dụng nào`;
@@ -354,12 +354,12 @@ export default function StepInputUrl() {
                 const cvFams = prof?.cv_families ?? [];
                 const pivot = !!tFam && cvFams.length > 0 && !cvFams.includes(tFam);
                 setSearchPivotNote(pivot
-                    ? `Đây là vai trò khác hồ sơ của bạn — chúng tôi tìm theo vai trò bạn muốn, rồi xếp hạng theo độ phù hợp với CV. Một số job có thể là cơ hội "với tới".`
+                    ? `Đây là vai trò khác hồ sơ của bạn. Chúng tôi tìm theo vai trò bạn muốn, rồi xếp hạng theo độ phù hợp với CV. Một số job có thể là cơ hội "với tới".`
                     : '');
 
                 if (results.length === 0) {
                     const why = search.warming
-                        ? 'vẫn đang chuẩn bị (hết thời gian chờ) — hãy thử lại sau giây lát'
+                        ? 'vẫn đang chuẩn bị (hết thời gian chờ), hãy thử lại sau giây lát'
                         : 'hiện chưa có tin tuyển dụng nào khớp với vai trò của bạn';
                     throw new Error(`Không có tin tuyển dụng phù hợp: ${why}.`);
                 }
@@ -424,7 +424,7 @@ export default function StepInputUrl() {
             const topJobs = orderedJobs.slice(0, MAX_JOBS);
             const backfillJobs = orderedJobs.slice(MAX_JOBS);
             setPhaseDetail(offCity
-                ? `Không có "${targetTitle}" tại ${cityName} — đang hiển thị vai trò này ở các thành phố khác...`
+                ? `Không có "${targetTitle}" tại ${cityName}, đang hiển thị vai trò này ở các thành phố khác...`
                 : `Đã chọn ${topJobs.length} việc phù hợp nhất với CV`);
 
             // Build a JD entry from a featured job. Off-city listings get a label
@@ -574,7 +574,7 @@ export default function StepInputUrl() {
         } = opts;
 
         setPhase('crawling_job');
-        setPhaseDetail(`Đang xử lý ${queueLen} việc song song — sẽ mở kết quả ngay khi việc đầu tiên sẵn sàng...`);
+        setPhaseDetail(`Đang xử lý ${queueLen} việc song song, sẽ mở kết quả ngay khi việc đầu tiên sẵn sàng...`);
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const buildJdFromLd = (ld: any): string => [
@@ -634,7 +634,7 @@ export default function StepInputUrl() {
                         updateJdEntry(entryId, {
                             status: 'error',
                             error: company
-                                ? `${company} — không tìm thấy trang tuyển dụng`
+                                ? `${company}: không tìm thấy trang tuyển dụng`
                                 : 'Không xác định được công ty từ tin tuyển dụng',
                             company: company || undefined,
                         });
@@ -643,7 +643,7 @@ export default function StepInputUrl() {
                     if (!finder.jobs.length) {
                         updateJdEntry(entryId, {
                             status: 'error',
-                            error: `${company || 'Công ty'} — không có tin tuyển dụng trên trang tuyển dụng`,
+                            error: `${company || 'Công ty'}: không có tin tuyển dụng trên trang tuyển dụng`,
                             company: company || undefined,
                         });
                         return;
@@ -654,7 +654,7 @@ export default function StepInputUrl() {
                     if (!bestMatch) {
                         updateJdEntry(entryId, {
                             status: 'error',
-                            error: `${company} — không có vai trò phù hợp trên trang tuyển dụng`,
+                            error: `${company}: không có vai trò phù hợp trên trang tuyển dụng`,
                             company: company || undefined,
                         });
                         return;
@@ -870,7 +870,7 @@ export default function StepInputUrl() {
             } finally {
                 doneCount++;
                 if (!navigated && runRef.current === runId) {
-                    setPhaseDetail(`Đã chấm ${scoredCount}/${targetScored} — đã xử lý ${doneCount} việc...`);
+                    setPhaseDetail(`Đã chấm ${scoredCount}/${targetScored}, đã xử lý ${doneCount} việc...`);
                 }
             }
         };
@@ -1060,7 +1060,7 @@ export default function StepInputUrl() {
             // Guard: don't call AI with empty text
             if (!searchPage.text && !searchPage.textWithLinks) {
                 const tail = isExtensionAvailable()
-                    ? 'Ngay cả cách vượt qua bằng extension cũng thất bại — hãy thử lại sau hoặc cài extension.'
+                    ? 'Ngay cả cách vượt qua bằng extension cũng thất bại, hãy thử lại sau hoặc cài extension.'
                     : 'Hãy cài extension Copo cho Chrome để vượt qua bảo vệ chống bot.';
                 throw new Error(
                     isAuto
@@ -1360,7 +1360,7 @@ export default function StepInputUrl() {
                         }}
                     >
                         {PHASE_CONFIG[phase as Exclude<Phase, 'idle'>]?.label}
-                        {phaseDetail ? ` — ${phaseDetail}` : ''}
+                        {phaseDetail ? `: ${phaseDetail}` : ''}
                     </div>
                     {PHASE_ORDER.map((p, i) => {
                         const config = PHASE_CONFIG[p];

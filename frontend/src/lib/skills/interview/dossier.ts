@@ -60,7 +60,7 @@ function fallbackText(slot: QuestionSlot): string {
     const subject = slot.source.requirement ?? '';
     switch (slot.section) {
         case 'probe': return `Bạn có thể nói rõ hơn về kinh nghiệm thực tế với "${subject}"?`;
-        case 'gap': return `JD yêu cầu "${subject}" — bạn sẽ tiếp cận hoặc bù đắp điều này như thế nào?`;
+        case 'gap': return `JD yêu cầu "${subject}", bạn sẽ tiếp cận hoặc bù đắp điều này như thế nào?`;
         case 'expand': return `Hãy kể một ví dụ cụ thể thể hiện thế mạnh của bạn về "${subject}".`;
         case 'case': return `Nếu gặp tình huống liên quan đến "${subject}", bạn sẽ xử lý ra sao?`;
         case 'translate': return `Hãy mô tả bằng lời của bạn công việc này đã làm gì và tạo ra kết quả gì?`;
