@@ -1,11 +1,12 @@
 """ATS adapters package.
 
 Public surface (unchanged for callers): fetch_ats_jobs, detect_ats,
-detect_ats_in_html. `core` holds the adapter implementations + the _ADAPTERS
-registry; `schema` defines the normalized Job model used by the search layer.
+detect_ats_in_html. `core` is the dispatch entrypoint; `_shared` holds shared
+helpers, `generic` the hosted-ATS fetchers, `vendors` the per-company adapters
++ the `_ADAPTERS` registry; `schema` defines the normalized Job model.
 
-To add an ATS: write `_is_x` / `_x` in core.py and append one line to
-core._ADAPTERS — no other edits.
+To add an ATS: write `_is_x` / `_x` in vendors.py and append one line to
+vendors._ADAPTERS — no other edits.
 """
 from .schema import Job
 from .core import (
