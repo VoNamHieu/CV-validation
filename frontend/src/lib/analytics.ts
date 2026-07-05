@@ -4,7 +4,7 @@
 import { getAuthHeaders } from './auth-headers';
 
 // The product funnel, in order. Shared by the tracker (what to emit) and the
-// admin FunnelPanel (how to render + compute drop-off). Keep the `event` keys
+// admin AnalyticsPanel (how to render + compute drop-off). Keep the `event` keys
 // stable — they're the stored event names the backend aggregates by.
 export const FUNNEL_STEPS: { event: string; label: string }[] = [
     { event: 'entered', label: 'Vào app' },
