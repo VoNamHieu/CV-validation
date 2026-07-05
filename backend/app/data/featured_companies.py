@@ -166,6 +166,13 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         career_url="https://tuyendung.ssi.com.vn/tin-tuyen-dung",
     ),
     FeaturedCompany(
+        name="VinaCapital",
+        homepage="https://vinacapital.com",
+        # /careers is a JS shell; render=True uses `vinacapital` adapter, the
+        # render=False cron replays the captured DOM (_CAPTURE_JOB_PATTERNS).
+        career_url="https://vinacapital.com/careers/",
+    ),
+    FeaturedCompany(
         name="Cake",
         homepage="https://cake.vn",
         career_url="https://cake.vn/tuyen-dung/jobs",
