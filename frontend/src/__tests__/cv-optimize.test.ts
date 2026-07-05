@@ -123,6 +123,55 @@ describe('repairOptimizedCv', () => {
     });
 });
 
+// Regression probes proven by hand against the live optimizer. P1/P2 target the
+// two deterministic repair bugs; P3/P4 (verifier tiers) live in verify.test.ts.
+describe('repairOptimizedCv — verified probes', () => {
+    // P1 — the model REORDERED experience entries. Facts must be restored to the
+    // correct entry by content key, not spliced across roles by array index.
+    it('P1: matches reordered experience entries by key, not index', () => {
+        const orig = {
+            name: 'A', summary: 's', skills: ['Go'],
+            experience: [
+                { title: 'Senior Dev', company: 'ACME', duration_months: 24, start_date: '01/2022', end_date: 'Hiện tại', description: 'built billing\nled team of 3' },
+                { title: 'Junior Dev', company: 'Beta', duration_months: 12, start_date: '01/2020', end_date: '12/2020', description: 'fixed bugs\nwrote tests' },
+            ],
+            education: [], projects: [],
+        };
+        const optimized = {
+            name: 'A', summary: 's', skills: ['Go'],
+            experience: [
+                // Beta first now, with tampered duration the repair must overwrite.
+                { title: 'Junior Dev', company: 'Beta', duration_months: 99, description: 'squashed bugs\nauthored tests' },
+                { title: 'Senior Dev', company: 'ACME', duration_months: 99, description: 'rebuilt billing\nmentored team of 3' },
+            ],
+            education: [], projects: [],
+        };
+        const { cv } = repairOptimizedCv(orig, optimized);
+        const exp = cv.experience as Record<string, unknown>[];
+        // Beta (index 0) keeps Beta's facts — NOT ACME's, which index-matching gave.
+        expect(exp[0].company).toBe('Beta');
+        expect(exp[0].duration_months).toBe(12);
+        expect(exp[0].start_date).toBe('01/2020');
+        expect(exp[1].company).toBe('ACME');
+        expect(exp[1].duration_months).toBe(24);
+        expect(exp[1].end_date).toBe('Hiện tại');
+    });
+
+    // P2 — the model ADDED a skill the candidate never listed. Guardrail #2 says
+    // add no new skills, so it must be stripped (not merely reordered/appended).
+    it('P2: strips a fabricated skill and logs it', () => {
+        const optimized = {
+            name: 'A', summary: 's', skills: ['Go', 'Kubernetes', 'Postgres', 'Docker'],
+            experience: original.experience,
+            education: [], projects: original.projects,
+        };
+        const { cv, repairs } = repairOptimizedCv(original, optimized);
+        expect(cv.skills).not.toContain('Kubernetes');
+        expect(cv.skills).toEqual(['Go', 'Postgres', 'Docker']);
+        expect(repairs.some(r => r.includes('fabricated stripped (Kubernetes)'))).toBe(true);
+    });
+});
+
 describe('dateRangeLabel', () => {
     it('prefers verbatim start–end dates', () => {
         expect(dateRangeLabel({ start_date: '03/2021', end_date: '05/2023', duration_months: 26 }))

@@ -8,6 +8,7 @@ import { X, ArrowsLeftRight } from '@phosphor-icons/react';
 import { renderCvHtml } from '@/lib/cv-templates';
 import type { CvTemplateId } from '@/lib/cv-templates';
 import type { CVData } from '@/lib/types';
+import { useModalA11y } from '@/lib/useModalA11y';
 
 export default function BeforeAfterModal({
     original, optimized, templateId, avatarBase64, onClose,
@@ -18,6 +19,8 @@ export default function BeforeAfterModal({
     avatarBase64?: string;
     onClose: () => void;
 }) {
+    const dialogRef = useModalA11y<HTMLDivElement>(onClose);
+
     if (typeof document === 'undefined') return null;
 
     const frame = (cv: CVData) => renderCvHtml(cv, templateId, { avatarBase64 });
@@ -41,7 +44,8 @@ export default function BeforeAfterModal({
 
     return createPortal(
         <div
-            onClick={onClose}
+            role="presentation"
+            onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
             style={{
                 position: 'fixed', inset: 0, zIndex: 120, background: 'rgba(0,0,0,0.5)',
                 backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center',
@@ -49,7 +53,11 @@ export default function BeforeAfterModal({
             }}
         >
             <div
-                onClick={(e) => e.stopPropagation()}
+                ref={dialogRef}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="before-after-modal-title"
+                tabIndex={-1}
                 style={{
                     width: '100%', maxWidth: 1100, height: '90vh', background: 'var(--bg-secondary)',
                     border: '1px solid var(--border-subtle)', borderRadius: 16,
@@ -61,7 +69,7 @@ export default function BeforeAfterModal({
                     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                     padding: '14px 18px', borderBottom: '1px solid var(--border-subtle)',
                 }}>
-                    <h2 style={{ fontSize: '0.98rem', fontWeight: 700, margin: 0, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <h2 id="before-after-modal-title" style={{ fontSize: '0.98rem', fontWeight: 700, margin: 0, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 8 }}>
                         <ArrowsLeftRight size={17} weight="duotone" style={{ color: 'var(--accent-purple, #8b5cf6)' }} />
                         So sánh CV: gốc &harr; đã tối ưu
                     </h2>

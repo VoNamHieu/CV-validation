@@ -6,6 +6,7 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { MapPin, Buildings, Briefcase, ChartLineUp, Sparkle } from '@phosphor-icons/react/dist/ssr';
 import PromotedJobCta from '@/components/PromotedJobCta';
+import { renderJd } from '@/lib/renderJd';
 import styles from './promoted.module.css';
 
 type PublicJob = {
@@ -47,42 +48,6 @@ async function fetchPage(slug: string, preview?: string): Promise<PromotedPage |
     } catch {
         return null;
     }
-}
-
-// Split the plain-text JD into readable blocks: short lines ending in ":" (or
-// numbered "1. …" headers) become sub-headings, bullet lines become a list,
-// everything else is a paragraph. The JD arrives newline-separated from the
-// backend's HTML stripper.
-function renderJd(text: string): React.ReactNode {
-    const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
-    const blocks: React.ReactNode[] = [];
-    let bullets: string[] = [];
-    const flush = () => {
-        if (bullets.length) {
-            blocks.push(
-                <ul key={`ul-${blocks.length}`}>
-                    {bullets.map((b, i) => <li key={i}>{b}</li>)}
-                </ul>,
-            );
-            bullets = [];
-        }
-    };
-    for (const line of lines) {
-        const isBullet = /^[-•*·+]\s+/.test(line) || /^\d+[.)]\s+/.test(line);
-        const isHeading = !isBullet && line.length <= 64 &&
-            (/[:：]$/.test(line) || (line === line.toUpperCase() && /\p{L}/u.test(line)));
-        if (isBullet) {
-            bullets.push(line.replace(/^[-•*·+]\s+/, '').replace(/^\d+[.)]\s+/, ''));
-        } else if (isHeading) {
-            flush();
-            blocks.push(<div key={`h-${blocks.length}`} className={styles.jdBlockHeading}>{line.replace(/[:：]$/, '')}</div>);
-        } else {
-            flush();
-            blocks.push(<p key={`p-${blocks.length}`}>{line}</p>);
-        }
-    }
-    flush();
-    return blocks;
 }
 
 export async function generateMetadata(

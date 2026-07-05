@@ -897,7 +897,15 @@ export default function StepEditCv() {
                 <div style={{
                     marginBottom: 16, padding: '10px 14px', borderRadius: 10,
                     border: '1px solid rgba(234,179,8,0.35)', background: 'rgba(234,179,8,0.10)',
-                    color: '#fde68a', fontSize: '0.82rem', lineHeight: 1.5,
+                    // Body text needs to stay legible over this tint in BOTH
+                    // themes — #fde68a (a pale yellow tuned for dark mode) sat
+                    // at ~1.1:1 against the effective light-mode background
+                    // (a near-white amber tint), i.e. functionally invisible.
+                    // var(--accent-amber) alone still only clears ~2.8:1 here
+                    // (this bg is too pale for it); --text-secondary clears
+                    // 6.6:1+ in both themes while the tint/border/emoji still
+                    // carry the "this is a note" signal.
+                    color: 'var(--text-secondary)', fontSize: '0.82rem', lineHeight: 1.5,
                 }}>
                     💡 {searchPivotNote}
                 </div>

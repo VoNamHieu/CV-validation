@@ -7,6 +7,7 @@ import { useCallback, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, CaretDown, CheckCircle } from '@phosphor-icons/react';
 import { TermsContent, PrivacyContent, LEGAL_PROSE_CSS } from './legal/LegalContent';
+import { useModalA11y } from '@/lib/useModalA11y';
 
 export default function TermsAcceptModal({
     onAccept, onClose,
@@ -26,6 +27,8 @@ export default function TermsAcceptModal({
         if (el && el.scrollHeight <= el.clientHeight + 24) setReachedEnd(true);
     }, []);
 
+    const dialogRef = useModalA11y<HTMLDivElement>(onClose);
+
     if (typeof document === 'undefined') return null;
 
     return createPortal(
@@ -38,6 +41,11 @@ export default function TermsAcceptModal({
         >
             <style>{LEGAL_PROSE_CSS}</style>
             <div
+                ref={dialogRef}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="terms-modal-title"
+                tabIndex={-1}
                 style={{
                     width: '100%', maxWidth: 640, maxHeight: '88vh', background: 'var(--bg-secondary)',
                     border: '1px solid var(--border-subtle)', borderRadius: 16,
@@ -50,7 +58,7 @@ export default function TermsAcceptModal({
                     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                     padding: '16px 20px', borderBottom: '1px solid var(--border-subtle)',
                 }}>
-                    <h2 style={{ fontSize: '1rem', fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
+                    <h2 id="terms-modal-title" style={{ fontSize: '1rem', fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
                         Điều khoản Sử dụng &amp; Chính sách Quyền riêng tư
                     </h2>
                     <button

@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { X, CheckCircle, FileText } from '@phosphor-icons/react';
 import { useAuth } from '@/lib/auth';
 import { stashPendingTermsAcceptance } from '@/lib/consent';
+import { useModalA11y } from '@/lib/useModalA11y';
 import TermsAcceptModal from './TermsAcceptModal';
 
 type Mode = 'signin' | 'signup';
@@ -43,8 +44,12 @@ export default function AuthModal({ onClose, reason }: { onClose: () => void; re
     const inputStyle: React.CSSProperties = {
         width: '100%', padding: '10px 12px', borderRadius: 10,
         border: '1px solid var(--border-subtle)', background: 'var(--bg-card)',
-        color: 'var(--text-primary)', fontSize: '0.85rem', outline: 'none',
+        color: 'var(--text-primary)', fontSize: '0.85rem',
+        // No outline: 'none' here — the global :focus-visible ring (globals.css)
+        // is the only focus indicator keyboard users get on this form.
     };
+
+    const dialogRef = useModalA11y<HTMLDivElement>(onClose);
 
     // Portal to <body> so the overlay escapes the Sidebar's backdrop-filter,
     // which would otherwise act as the containing block for position:fixed.
@@ -53,7 +58,8 @@ export default function AuthModal({ onClose, reason }: { onClose: () => void; re
 
     return createPortal(
         <div
-            onClick={onClose}
+            role="presentation"
+            onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
             style={{
                 position: 'fixed', inset: 0, zIndex: 100,
                 background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)',
@@ -61,7 +67,11 @@ export default function AuthModal({ onClose, reason }: { onClose: () => void; re
             }}
         >
             <div
-                onClick={(e) => e.stopPropagation()}
+                ref={dialogRef}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="auth-modal-title"
+                tabIndex={-1}
                 style={{
                     width: '100%', maxWidth: 380, background: 'var(--bg-secondary)',
                     border: '1px solid var(--border-subtle)', borderRadius: 16,
@@ -80,7 +90,7 @@ export default function AuthModal({ onClose, reason }: { onClose: () => void; re
                     <X size={18} weight="bold" />
                 </button>
 
-                <h2 style={{ fontSize: '1.05rem', fontWeight: 700, marginBottom: 4, color: 'var(--text-primary)' }}>
+                <h2 id="auth-modal-title" style={{ fontSize: '1.05rem', fontWeight: 700, marginBottom: 4, color: 'var(--text-primary)' }}>
                     {mode === 'signin' ? 'Đăng nhập' : 'Tạo tài khoản'}
                 </h2>
                 {reason && (
