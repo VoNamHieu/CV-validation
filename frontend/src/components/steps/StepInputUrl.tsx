@@ -1275,6 +1275,7 @@ export default function StepInputUrl() {
                 the processing pipeline below isn't competing with a still-usable
                 (but pointless-to-touch-mid-run) form for attention. */}
             {!isProcessing && <>
+            {/* Divider */}
             <div style={{
                 display: 'flex', alignItems: 'center', gap: 12,
                 margin: '20px 0',
@@ -1426,7 +1427,7 @@ export default function StepInputUrl() {
                             fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-muted)',
                         }}
                     >
-                        Hủy tìm kiếm
+                        {wizardStage === 'results' ? 'Hủy tối ưu' : 'Hủy tìm kiếm'}
                     </button>
                     <style>{`@keyframes spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }`}</style>
                 </div>
