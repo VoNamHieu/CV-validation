@@ -18,6 +18,12 @@ from app.services.auth import get_current_user_id
 router = APIRouter(prefix="/me/interview", tags=["Interview"])
 
 
+@router.get("/preps")
+async def list_preps(user_id: str = Depends(get_current_user_id)):
+    """List the user's created preps (for the interview-prep landing list)."""
+    return await interview.list_preps(user_id)
+
+
 @router.get("/prep")
 async def get_prep(
     job_ref: str = Query(...),

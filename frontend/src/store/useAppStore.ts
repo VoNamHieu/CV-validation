@@ -188,6 +188,8 @@ interface AppState {
   // per-question draft cache so answers survive navigation within the session.
   prepJobId: string | null;
   openInterviewPrep: (jobId: string) => void;
+  // Land on the interview tab's list (no specific job selected).
+  openInterviewList: () => void;
   practiceDrafts: Record<string, string>;
   setPracticeDraft: (questionId: string, text: string) => void;
 
@@ -357,6 +359,7 @@ export const useAppStore = create<AppState>()(
 
       setView: (view) => set({ view }),
       openInterviewPrep: (jobId) => set({ view: 'interview', prepJobId: jobId }),
+      openInterviewList: () => set({ view: 'interview', prepJobId: null }),
       setPracticeDraft: (questionId, text) =>
         set((s) => ({ practiceDrafts: { ...s.practiceDrafts, [questionId]: text } })),
       setStep: (step) => set({ currentStep: step }),

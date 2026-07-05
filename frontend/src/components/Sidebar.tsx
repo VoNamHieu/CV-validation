@@ -25,6 +25,7 @@ export const SIDEBAR_WIDTH = 232;
 export default function Sidebar() {
     const view = useAppStore((s) => s.view);
     const setView = useAppStore((s) => s.setView);
+    const openInterviewList = useAppStore((s) => s.openInterviewList);
     const historyCount = useAppStore((s) => s.jobHistory.length);
     const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -116,7 +117,13 @@ export default function Sidebar() {
                     return (
                         <button
                             key={item.id}
-                            onClick={() => { setView(item.id); setMobileOpen(false); }}
+                            onClick={() => {
+                                // The interview tab lands on its prep LIST, not the
+                                // last-opened job's detail.
+                                if (item.id === 'interview') openInterviewList();
+                                else setView(item.id);
+                                setMobileOpen(false);
+                            }}
                             aria-current={isActive ? 'page' : undefined}
                             style={{
                                 display: 'flex',

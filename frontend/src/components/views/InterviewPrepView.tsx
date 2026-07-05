@@ -17,6 +17,7 @@ import type { AttemptLike } from '@/lib/skills/interview/evaluate/readiness';
 import QuestionAccordion from '@/components/interview/QuestionAccordion';
 import type { AttemptRecord } from '@/components/interview/PracticePanel';
 import ReadinessBars from '@/components/interview/ReadinessBars';
+import PrepList from '@/components/interview/PrepList';
 
 type State =
     | { phase: 'loading' }
@@ -38,7 +39,7 @@ export default function InterviewPrepView() {
     const jobHistory = useAppStore((s) => s.jobHistory);
     const loadJobHistory = useAppStore((s) => s.loadJobHistory);
     const baseCv = useAppStore((s) => s.cvData);
-    const setView = useAppStore((s) => s.setView);
+    const openInterviewList = useAppStore((s) => s.openInterviewList);
 
     const record = useMemo(() => jobHistory.find((r) => r.id === prepJobId), [jobHistory, prepJobId]);
 
@@ -103,14 +104,17 @@ export default function InterviewPrepView() {
     const attemptLikes: AttemptLike[] = attempts.map((a) => ({ question_id: a.question_id, checklist: a.checklist }));
     const onSaved = (a: AttemptRecord) => setAttempts((prev) => [...prev, a]);
 
+    // No job selected → show the landing list of created preps.
+    if (!prepJobId) return <PrepList />;
+
     return (
         <div className="animate-fade-in" style={{ maxWidth: 820, margin: '0 auto', padding: '40px 32px' }}>
             <button
-                onClick={() => setView('history')}
+                onClick={() => openInterviewList()}
                 className="btn-secondary"
                 style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.8rem', marginBottom: 18, padding: '6px 12px' }}
             >
-                <ArrowLeft size={13} weight="bold" /> Lịch sử
+                <ArrowLeft size={13} weight="bold" /> Tất cả buổi luyện
             </button>
 
             <h1 style={{ fontSize: '1.6rem', fontWeight: 800, letterSpacing: '-0.03em', display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>

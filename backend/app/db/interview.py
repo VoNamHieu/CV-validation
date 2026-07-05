@@ -28,6 +28,21 @@ async def get_prep(user_id: str, job_ref: str, cv_hash: str) -> Optional[dict]:
     )
 
 
+async def list_preps(user_id: str) -> list[dict]:
+    """All of a user's interview preps (lightweight — no dossier body), newest
+    first. `question_count` lets the UI show a bar per prep without shipping the
+    whole dossier."""
+    pool = await get_pool()
+    rows = await pool.fetch(
+        "SELECT id, job_ref, cv_hash, "
+        "coalesce(jsonb_array_length(dossier->'questions'), 0) AS question_count, "
+        "created_at, updated_at "
+        "FROM interview_preps WHERE user_id = $1 ORDER BY updated_at DESC",
+        user_id,
+    )
+    return rows_to_dicts(rows)
+
+
 async def upsert_prep(user_id: str, job_ref: str, cv_hash: str, dossier: dict) -> dict:
     """Cache (or refresh) the dossier for the (user, application, cv_hash) triple."""
     pool = await get_pool()
