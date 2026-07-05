@@ -7,7 +7,6 @@ import {
     ArrowClockwise, NotePencil, FunnelSimple, ChatCircleDots,
 } from '@phosphor-icons/react';
 import { useAppStore, JobRecord, JobStatus, JOB_STATUS_ORDER } from '@/store/useAppStore';
-import InterviewPrepModal from '@/components/interview/InterviewPrepModal';
 
 // ── Status presentation ──
 const STATUS_META: Record<JobStatus, { label: string; color: string; bg: string; border: string }> = {
@@ -228,13 +227,13 @@ export default function HistoryView() {
     const clearJobHistory = useAppStore((s) => s.clearJobHistory);
     const loadJobRecordIntoWizard = useAppStore((s) => s.loadJobRecordIntoWizard);
     const loadJobHistory = useAppStore((s) => s.loadJobHistory);
+    const openInterviewPrep = useAppStore((s) => s.openInterviewPrep);
 
     // Refresh from the server whenever the board is opened (the cache may be
     // stale after a save on another tab / device).
     useEffect(() => { void loadJobHistory(); }, [loadJobHistory]);
 
     const [expandedId, setExpandedId] = useState<string | null>(null);
-    const [prepRecord, setPrepRecord] = useState<JobRecord | null>(null);
     const [query, setQuery] = useState('');
     const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
     const [sortKey, setSortKey] = useState<SortKey>('date-desc');
@@ -515,7 +514,7 @@ export default function HistoryView() {
                                                     </button>
                                                     {record.optimizedCv && (
                                                         <button
-                                                            onClick={(e) => { e.stopPropagation(); setPrepRecord(record); }}
+                                                            onClick={(e) => { e.stopPropagation(); openInterviewPrep(record.id); }}
                                                             className="btn-secondary"
                                                             style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', fontSize: '0.82rem', color: 'var(--accent-purple)' }}
                                                         >
@@ -541,10 +540,6 @@ export default function HistoryView() {
                         </div>
                     )}
                 </>
-            )}
-
-            {prepRecord && (
-                <InterviewPrepModal record={prepRecord} onClose={() => setPrepRecord(null)} />
             )}
         </div>
     );
