@@ -125,8 +125,8 @@ export function PrivacyContent() {
             </p>
 
             <h2>1. Dữ liệu chúng tôi thu thập</h2>
-            <p><strong>1.1 Thông tin tài khoản</strong> — Email và thông tin xác thực khi bạn đăng ký/đăng nhập
-                (qua Supabase Auth). Chúng tôi không lưu trữ mật khẩu của bạn dưới dạng văn bản thuần.</p>
+            <p><strong>1.1 Thông tin tài khoản</strong> — Email và thông tin xác thực khi bạn đăng ký/đăng nhập.
+                Chúng tôi không lưu trữ mật khẩu của bạn dưới dạng văn bản thuần.</p>
             <p><strong>1.2 Dữ liệu CV</strong> — Nội dung file CV bạn tải lên (PDF) và các trường thông tin được
                 trích xuất từ đó: họ tên, thông tin liên hệ, học vấn, kinh nghiệm làm việc, kỹ năng.</p>
             <p><strong>1.3 Dữ liệu tin tuyển dụng</strong> — Link hoặc nội dung mô tả công việc (JD) bạn nhập vào
@@ -154,15 +154,9 @@ export function PrivacyContent() {
                 bạn cho mục đích quảng cáo nhắm mục tiêu.</p>
 
             <h2>3. Chia sẻ dữ liệu với bên thứ ba</h2>
-            <p>Chúng tôi không bán dữ liệu cá nhân của bạn. Dữ liệu được chia sẻ với một số bên xử lý kỹ thuật
-                cần thiết để vận hành dịch vụ:</p>
-            <ul>
-                <li><strong>Google Gemini API</strong> — Nội dung CV và JD được gửi đến Gemini để thực hiện trích
-                    xuất thông tin, chấm điểm phù hợp và viết lại nội dung CV. Việc xử lý tuân theo điều khoản sử
-                    dụng API thương mại hiện hành của Google.</li>
-                <li><strong>Supabase</strong> — Nền tảng lưu trữ tài khoản, dữ liệu CV và lịch sử ứng tuyển của bạn.</li>
-                <li><strong>Railway</strong> — Hạ tầng máy chủ backend xử lý các yêu cầu của ứng dụng.</li>
-            </ul>
+            <p>Chúng tôi không bán dữ liệu cá nhân của bạn. Dữ liệu chỉ được chia sẻ với một số bên xử lý kỹ thuật
+                cần thiết để vận hành dịch vụ (ví dụ: xử lý AI, lưu trữ dữ liệu, hạ tầng máy chủ), với quyền truy
+                cập giới hạn ở mức cần thiết và bị ràng buộc bởi các điều khoản bảo mật riêng của họ.</p>
             <p>Chúng tôi có thể tiết lộ dữ liệu nếu pháp luật yêu cầu, hoặc để bảo vệ quyền, tài sản, an toàn của
                 Copo, người dùng, hoặc bên thứ ba.</p>
 
