@@ -106,6 +106,18 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         career_url="https://trustingsocial.com/careers",
     ),
     FeaturedCompany(
+        name="Timo",
+        homepage="https://timo.vn",
+        # /tuyen-dung/ is a JS SPA; jobs come from the WP REST "career" CPT.
+        career_url="https://timo.vn/tuyen-dung/",
+    ),
+    FeaturedCompany(
+        name="Mekong Capital",
+        homepage="https://www.mekongcapital.com",
+        # Careers hosted on careers-page.com (server-rendered listing).
+        career_url="https://www.careers-page.com/mekongcapital",
+    ),
+    FeaturedCompany(
         name="Cake",
         homepage="https://cake.vn",
         career_url="https://cake.vn/tuyen-dung/jobs",
@@ -580,11 +592,9 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         homepage="https://www.gemadept.com.vn",
         career_url="https://www.gemadept.com.vn/tuyen-dung/",
     ),
-    FeaturedCompany(
-        name="Bee Logistics",
-        homepage="https://beelogistics.com",
-        career_url="https://recruit.beelogistics.com/Customer/Career",
-    ),
+    # Bee Logistics dropped: recruit.beelogistics.com/Customer/Career is a JS
+    # listing with no extractable feed (needs_new_adapter, even rendered) — not
+    # worth a bespoke adapter.
     FeaturedCompany(
         name="Maersk",
         homepage="https://www.maersk.com",
