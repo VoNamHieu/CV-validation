@@ -59,9 +59,14 @@ function AdminConsole() {
     // screen instead of the misleading "no access" (which made real admins think
     // they'd been locked out). This is why the page occasionally flashed denied.
     const [checkNonce, setCheckNonce] = useState(0);
+    // Key on the user's id, not the `user` object: Supabase hands out a brand
+    // new session/user object on every silent token refresh (autoRefreshToken),
+    // so depending on `user` re-ran this effect — and re-flashed the "checking"
+    // spinner — every refresh cycle even though nobody actually signed in/out.
+    const userId = user?.id ?? null;
     useEffect(() => {
         if (enabled && authLoading) return;
-        if (enabled && !user) { setAccess('denied'); return; }
+        if (enabled && !userId) { setAccess('denied'); return; }
         let cancelled = false;
         setAccess('checking');
         (async () => {
@@ -80,7 +85,7 @@ function AdminConsole() {
             if (!cancelled) setAccess('error');
         })();
         return () => { cancelled = true; };
-    }, [enabled, authLoading, user, checkNonce]);
+    }, [enabled, authLoading, userId, checkNonce]);
 
     const doLookup = useCallback(async () => {
         if (!email.trim()) return;
