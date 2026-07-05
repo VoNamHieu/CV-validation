@@ -83,7 +83,9 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Traveloka",
         homepage="https://www.traveloka.com",
-        career_url="https://careers.traveloka.com/jobs?location=VN",
+        # careers.traveloka.com is a JS SPA (cron can't render it); the real
+        # board is the mokahr tenant → handled by the existing `mokahr` adapter.
+        career_url="https://hire-r1.mokahr.com/social-recruitment/traveloka/100008526?locale=en-US",
     ),
     FeaturedCompany(
         name="Klook",
@@ -122,6 +124,36 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         homepage="https://geekup.vn",
         # Employer-brand site geekadventure.vn; /opportunity is SSR (Next.js).
         career_url="https://geekadventure.vn/opportunity",
+    ),
+    FeaturedCompany(
+        name="Garena",
+        homepage="https://www.garena.vn",
+        # Public job-search JSON API (POST /api/job/list), regional → VN-filtered.
+        career_url="https://careers.garena.vn/vn/careers",
+    ),
+    FeaturedCompany(
+        name="Appota",
+        homepage="https://appota.com",
+        # GraphQL careers API (POST /api/graphql/client).
+        career_url="https://appota.com/careers/jobs",
+    ),
+    FeaturedCompany(
+        name="VNDIRECT",
+        homepage="https://www.vndirect.com.vn",
+        # Talent-network SaaS; all-jobs page is SSR (shared `talentnet` adapter).
+        career_url="https://vndirectcareers.com/tim-viec-lam/tat-ca-viec-lam/vi",
+    ),
+    FeaturedCompany(
+        name="Viettel IDC",
+        homepage="https://viettelidc.com.vn",
+        # Same talent-network SaaS as VNDIRECT (shared `talentnet` adapter).
+        career_url="https://tuyendung.viettelidc.com.vn/tim-viec-lam/tat-ca-viec-lam/vi",
+    ),
+    FeaturedCompany(
+        name="SSI",
+        homepage="https://www.ssi.com.vn",
+        # /tin-tuyen-dung is server-rendered (SSR HTML listing).
+        career_url="https://tuyendung.ssi.com.vn/tin-tuyen-dung",
     ),
     FeaturedCompany(
         name="Cake",

@@ -1636,6 +1636,156 @@ def _geekadventure(career_url: str) -> list[dict]:
     return out
 
 
+# ── Garena (careers.garena.vn) — public job-search JSON API ──────────────────
+# POST /api/job/list → {jobs:[{id, title, tags:{location[],job_category[]},
+# description}]}. Regional board (SG/ID/VN/TW) → filter by tags.location. Detail
+# page /vn/careers/<id>.
+def _is_garena(career_url: str) -> bool:
+    return (urlparse(career_url or "").netloc or "").lower().removeprefix("www.") == "careers.garena.vn"
+
+
+def _garena(career_url: str) -> list[dict]:
+    out = []
+    try:
+        r = requests.post("https://careers.garena.vn/api/job/list", headers=_JSON_POST, timeout=_TIMEOUT, json={})
+        if r.status_code != 200 or "json" not in r.headers.get("content-type", ""):
+            return []
+        jobs = (r.json() or {}).get("jobs", []) or []
+    except Exception as e:
+        logger.info(f"[ats] garena failed: {str(e)[:80]}")
+        return []
+    for j in jobs:
+        title = (j.get("title") or "").strip()
+        jid = j.get("id")
+        tags = j.get("tags") or {}
+        loc = ", ".join(tags.get("location") or [])
+        if not title or not jid or not _is_vn_loc(loc):
+            continue
+        out.append({"title": title[:200], "url": f"https://careers.garena.vn/vn/careers/{jid}",
+                    "location": loc[:120], "description": _strip_html(j.get("description") or "")[:600],
+                    "category": ", ".join(tags.get("job_category") or [])[:120]})
+        if len(out) >= _MAX_ATS_JOBS:
+            break
+    logger.info(f"[ats] garena → {len(out)} VN jobs")
+    return out
+
+
+# ── Talent-network platform (VNDIRECT, Viettel IDC, …) — SSR listing ─────────
+# A white-label VN recruiting SaaS: the all-jobs page (…/tim-viec-lam/…) is
+# server-rendered with <a href="…/viec-lam/<slug>.<hex>.html">Title</a> cards.
+# Generic on the /tim-viec-lam/ URL so any tenant works. VN-only sites.
+def _is_talentnet(career_url: str) -> bool:
+    return "/tim-viec-lam/" in (urlparse(career_url or "").path or "")
+
+
+def _talentnet(career_url: str) -> list[dict]:
+    from bs4 import BeautifulSoup
+    p = urlparse(career_url)
+    origin = f"{p.scheme}://{p.netloc}"
+    try:
+        r = requests.get(career_url, headers=_HTML_HEADERS, timeout=_TIMEOUT)
+        if r.status_code != 200:
+            return []
+        soup = BeautifulSoup(r.text, "html.parser")
+    except Exception as e:
+        logger.info(f"[ats] talentnet failed: {str(e)[:80]}")
+        return []
+    out, seen = [], set()
+    for a in soup.select('a[href*="/viec-lam/"]'):
+        href = a.get("href") or ""
+        if not href.endswith(".html") or "tat-ca-viec-lam" in href:
+            continue
+        url = href if href.startswith("http") else origin + href
+        title = re.sub(r"\s+", " ", a.get_text(" ", strip=True)).strip()
+        if not title or url in seen:
+            continue
+        seen.add(url)
+        out.append({"title": title[:200], "url": url, "location": "Vietnam", "description": ""})
+        if len(out) >= _MAX_ATS_JOBS:
+            break
+    logger.info(f"[ats] talentnet → {len(out)} jobs ({p.netloc})")
+    return out
+
+
+# ── SSI Securities (tuyendung.ssi.com.vn) — SSR listing ──────────────────────
+# /tin-tuyen-dung lists <a href="/tin-tuyen-dung/<slug>">Title (City)</a>. The
+# trailing "(City)" in the title carries the location.
+def _is_ssi(career_url: str) -> bool:
+    return (urlparse(career_url or "").netloc or "").lower().removeprefix("www.") == "tuyendung.ssi.com.vn"
+
+
+def _ssi(career_url: str) -> list[dict]:
+    from bs4 import BeautifulSoup
+    base = "https://tuyendung.ssi.com.vn"
+    try:
+        r = requests.get(f"{base}/tin-tuyen-dung", headers=_HTML_HEADERS, timeout=_TIMEOUT)
+        if r.status_code != 200:
+            return []
+        soup = BeautifulSoup(r.text, "html.parser")
+    except Exception as e:
+        logger.info(f"[ats] ssi failed: {str(e)[:80]}")
+        return []
+    out, seen = [], set()
+    for a in soup.select('a[href*="/tin-tuyen-dung/"]'):
+        href = a.get("href") or ""
+        if href.rstrip("/").endswith("/tin-tuyen-dung"):
+            continue
+        title = re.sub(r"\s+", " ", a.get_text(" ", strip=True)).strip()
+        url = href if href.startswith("http") else base + href
+        if not title or url in seen:
+            continue
+        seen.add(url)
+        loc = "Vietnam"
+        m = re.search(r"\(([^)]+)\)\s*$", title)
+        if m and _is_vn_loc(m.group(1)):
+            loc = m.group(1).strip()
+        out.append({"title": title[:200], "url": url, "location": loc[:120], "description": ""})
+        if len(out) >= _MAX_ATS_JOBS:
+            break
+    logger.info(f"[ats] ssi → {len(out)} jobs")
+    return out
+
+
+# ── Appota (appota.com) — GraphQL careers API ────────────────────────────────
+# POST /api/graphql/client op "jobs" → data.query.data[]{id, contents{title,
+# workplace, description}}. Detail page /careers/jobs/<id>.
+_APPOTA_JOBS_QUERY = (
+    "query jobs($offset: Float, $limit: Float) { "
+    "query: jobs(offset: $offset, limit: $limit) { total "
+    "data { id contents { title workplace description } } } }"
+)
+
+
+def _is_appota(career_url: str) -> bool:
+    return (urlparse(career_url or "").netloc or "").lower().removeprefix("www.") == "appota.com"
+
+
+def _appota(career_url: str) -> list[dict]:
+    body = {"operationName": "jobs", "variables": {"offset": 0, "limit": 50}, "query": _APPOTA_JOBS_QUERY}
+    try:
+        r = requests.post("https://appota.com/api/graphql/client", headers=_JSON_POST, timeout=_TIMEOUT, json=body)
+        if r.status_code != 200:
+            return []
+        items = ((((r.json() or {}).get("data") or {}).get("query") or {}).get("data")) or []
+    except Exception as e:
+        logger.info(f"[ats] appota failed: {str(e)[:80]}")
+        return []
+    out = []
+    for it in items:
+        c = it.get("contents") or {}
+        title = re.sub(r"\s+", " ", _strip_html(c.get("title") or "")).strip()
+        jid = it.get("id")
+        if not title or not jid:
+            continue
+        wp = (c.get("workplace") or "").strip()
+        out.append({"title": title[:200], "url": f"https://appota.com/careers/jobs/{jid}",
+                    "location": (wp or "Vietnam")[:120], "description": _strip_html(c.get("description") or "")[:600]})
+        if len(out) >= _MAX_ATS_JOBS:
+            break
+    logger.info(f"[ats] appota → {len(out)} jobs")
+    return out
+
+
 _ADAPTERS: list = [
     ("radancy",        lambda u, h: _is_radancy(u),      lambda u, h: _radancy(u)),
     ("avature",        _is_avature,                      lambda u, h: _avature(u, h)),
@@ -1657,6 +1807,10 @@ _ADAPTERS: list = [
     ("careers-page",   lambda u, h: _is_careerspage(u),    lambda u, h: _careerspage(u)),
     ("timo",           lambda u, h: _is_timo(u),           lambda u, h: _timo(u)),
     ("geekadventure",  lambda u, h: _is_geekadventure(u),  lambda u, h: _geekadventure(u)),
+    ("garena",         lambda u, h: _is_garena(u),         lambda u, h: _garena(u)),
+    ("talentnet",      lambda u, h: _is_talentnet(u),      lambda u, h: _talentnet(u)),
+    ("ssi",            lambda u, h: _is_ssi(u),            lambda u, h: _ssi(u)),
+    ("appota",         lambda u, h: _is_appota(u),         lambda u, h: _appota(u)),
     ("ahamove",        _is_ahamove,                      lambda u, h: _ahamove(u)),
     ("fptsoft",        _is_fptsoft,                      lambda u, h: _fptsoft(u)),
     ("phenom-v2",      _is_phenom_v2,                    lambda u, h: _phenom_v2(u)),
