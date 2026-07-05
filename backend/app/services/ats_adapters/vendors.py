@@ -14,8 +14,6 @@ from app.services.ats_adapters._shared import *  # noqa: F401,F403
 
 import json as _json  # noqa: E402
 
-_HTML_HEADERS = {"User-Agent": _HEADERS["User-Agent"], "Accept": "text/html,*/*"}
-
 
 def _parse_openings(html: str) -> list:
     """Extract the `openings` JSON array embedded in a base.vn page."""
@@ -52,25 +50,6 @@ def _parse_openings(html: str) -> list:
 
 
 # ── Workday — dominant enterprise ATS (multinationals). Public cxs JSON API. ──
-# Workday's cxs WAF is picky: it 400s the full realistic UA + multi-type Accept.
-# A short UA + clean application/json gets through.
-_JSON_POST = {"User-Agent": "Mozilla/5.0 Chrome/120", "Accept": "application/json",
-              "Content-Type": "application/json"}
-_VN_MARKERS = ("vietnam", "viet nam", "việt nam", "hanoi", "ha noi", "hà nội",
-               "ho chi minh", "hồ chí minh", "hcmc", "tp.hcm", "tp hcm", "tphcm",
-               "saigon", "sài gòn", "sai gon", "da nang", "đà nẵng", "hai phong",
-               "hải phòng", "can tho", "cần thơ", "binh duong", "bình dương",
-               "bac ninh", "bắc ninh", "dong nai", "đồng nai", "vung tau",
-               "vũng tàu", "long an", "hung yen", "hưng yên", "thai nguyen",
-               "thái nguyên", "quang ninh", "bien hoa", ", vn")
-_WD_RX = re.compile(r"https?://([^.]+)\.(wd\d+)\.myworkdayjobs\.com(/[^?]*)?", re.I)
-
-
-def _is_vn_loc(loc: str) -> bool:
-    l = (loc or "").lower()
-    return any(m in l for m in _VN_MARKERS)
-
-
 def _is_workday(url: str) -> bool:
     return bool(_WD_RX.match(url or ""))
 
@@ -816,48 +795,6 @@ def _ghn(career_url: str) -> list[dict]:
     except Exception as e:
         logger.info(f"[ats] ghn failed: {str(e)[:80]}")
     logger.info(f"[ats] ghn → {len(out)} jobs")
-    return out
-
-
-# Normalized exact titles that are nav/section labels, never a real posting.
-_BAD_TITLES = {
-    "trang chu", "tuyen dung", "viec lam", "co hoi nghe nghiep", "co hoi viec lam",
-    "tuyen dung hot", "tuyen dung moi", "tat ca viec lam", "xem toan bo tin",
-    "opportunities", "job search", "search jobs", "all jobs", "view all jobs",
-    "apply", "ung tuyen",
-}
-
-
-def _norm_title(s: str) -> str:
-    import unicodedata
-    s = unicodedata.normalize("NFD", s or "")
-    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
-    return s.replace("đ", "d").replace("Đ", "D").lower().strip()
-
-
-def _finalize(jobs: list[dict]) -> list[dict]:
-    """Single exit gate for every adapter: keep title+url rows, drop nav/section
-    labels and date-range rows, dedup by url then by (title, location), cap per
-    company. Location is part of the title key because big employers (banks,
-    retail, logistics) legitimately post the SAME title per city — those are
-    distinct jobs, not duplicates."""
-    out, seen_url, seen_title = [], set(), set()
-    for j in jobs:
-        title = (j.get("title") or "").strip()
-        url = j.get("url") or ""
-        if not title or not url or len(title) < 4:
-            continue
-        nt = _norm_title(title)
-        if nt in _BAD_TITLES or nt.startswith(("tu ngay ", "from ")):  # date-range rows (Canon)
-            continue
-        tkey = (nt[:80], _norm_title(str(j.get("location") or ""))[:40])
-        if url in seen_url or tkey in seen_title:
-            continue
-        seen_url.add(url)
-        seen_title.add(tkey)
-        out.append(j)
-        if len(out) >= _MAX_ATS_JOBS:
-            break
     return out
 
 
