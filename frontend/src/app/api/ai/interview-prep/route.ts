@@ -3,13 +3,14 @@ import { withCredits, creditErrorResponse } from "@/lib/credits-guard";
 import { generateDossier } from "@/lib/skills/interview/dossier";
 import { cvHash } from "@/lib/interview/cv-hash";
 
-// Interview-prep dossier. The first FREE_JOB_QUOTA distinct jobs an account
-// generates a dossier for are free; generating one for a NEW job beyond that
-// costs "interview_dossier" credits. Re-generating for a job that already has a
-// prep (e.g. after a CV tweak) is always free, and a cache hit never charges.
-// Orchestrated server-side: cache-check → (charge?) → generate → persist.
-// Anonymous callers can't be metered/cached — they get a free, uncached dossier.
-const FREE_JOB_QUOTA = 3;
+// Interview-prep dossier. An account gets FREE_GEN_QUOTA free generations in
+// total; every generation after that costs "interview_dossier" credits —
+// including re-generating an existing job (a CV change → new hash → a real new
+// generation). A cache hit never generates and never charges. Each prep row is
+// one generation (the cache key is user+job+cv_hash), so the row count IS the
+// generation count. Orchestrated server-side: cache-check → (charge?) →
+// generate → persist. Anonymous callers can't be metered — free, uncached.
+const FREE_GEN_QUOTA = 3;
 
 function authHeaders(request: Request): Record<string, string> {
     const h: Record<string, string> = {};
@@ -20,16 +21,14 @@ function authHeaders(request: Request): Record<string, string> {
     return h;
 }
 
-// Whether THIS generation should be charged: only when the user is past the
-// free quota AND this is a job they haven't prepped before.
-async function shouldCharge(backend: string, auth: Record<string, string>, jobRef: string): Promise<boolean> {
+// Whether THIS generation should be charged: once the account has already had
+// FREE_GEN_QUOTA generations (= that many prep rows), every further one costs.
+async function shouldCharge(backend: string, auth: Record<string, string>): Promise<boolean> {
     try {
         const res = await fetch(`${backend}/me/interview/preps`, { headers: auth, signal: AbortSignal.timeout(10_000) });
         if (!res.ok) return false; // can't tell → fail open (don't charge)
-        const rows = (await res.json()) as Array<{ job_ref: string }>;
-        const jobs = new Set(rows.map(r => r.job_ref));
-        if (jobs.has(jobRef)) return false;      // re-gen of an existing job → free
-        return jobs.size >= FREE_JOB_QUOTA;       // new job beyond the free 3 → charge
+        const rows = await res.json();
+        return Array.isArray(rows) && rows.length >= FREE_GEN_QUOTA;
     } catch {
         return false; // fail open — never block a dossier on a metering hiccup
     }
@@ -65,7 +64,7 @@ export async function POST(request: NextRequest) {
         // 2. Generate — charged only for a new job past the free quota. withCredits
         //    refunds automatically if generation throws.
         const gen = () => generateDossier(cv, jd, match, tailoredCv, companyText);
-        const charge = canCache && (await shouldCharge(backend!, auth, jobRef));
+        const charge = canCache && (await shouldCharge(backend!, auth));
         const dossier = charge
             ? await withCredits(request, "interview_dossier", 1, gen)
             : await gen();
