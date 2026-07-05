@@ -973,6 +973,7 @@ export default function StepInputUrl() {
             addJdEntry({
                 ...entry,
                 status: 'done',
+                optimizeSkipped: true,
                 optimizedCv: cvData,
                 optimizedCvImprovements: [],
                 optimizedCvSuggestions: [],

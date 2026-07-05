@@ -33,8 +33,18 @@ export default function AnalyticsTracker() {
     useEffect(() => { if (active && entered && currentStep >= 2) once('search_viewed'); }, [active, entered, currentStep, once]);
     useEffect(() => { if (active && wizardStage === 'results') once('results_viewed'); }, [active, wizardStage, once]);
     useEffect(() => {
-        if (active && jdEntries.some((e) => e.status === 'scoring' || e.optimizing || e.status === 'done')) {
+        if (active && jdEntries.some((e) =>
+            !e.optimizeSkipped && (e.status === 'scoring' || e.optimizing || e.status === 'done'))) {
             once('optimize_started');
+        }
+    }, [active, jdEntries, once]);
+    // "Apply without optimize" — the results-page action that skips the AI
+    // scoring/rewrite call entirely. Tracked as its own step (not folded into
+    // optimize_started above) so the admin funnel can compare how many
+    // sessions take each path.
+    useEffect(() => {
+        if (active && jdEntries.some((e) => e.optimizeSkipped)) {
+            once('optimize_skipped');
         }
     }, [active, jdEntries, once]);
     useEffect(() => { if (active && currentStep >= 3) once('editor_reached'); }, [active, currentStep, once]);
