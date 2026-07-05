@@ -1588,6 +1588,54 @@ def _canon(career_url: str) -> list[dict]:
     return out
 
 
+# ── GEEKUP / Geek Adventure (geekadventure.vn) — Next.js SSR listing ─────────
+# geekadventure.vn is GEEKUP's employer-brand site; /opportunity is server-
+# rendered. Each card: <a href="opportunity/<slug>">…<div class="body-text
+# font-bold">[HCM] Title<!-- --></div>. The [City] title prefix → location.
+# Pure HTML parse, no headless.
+def _is_geekadventure(career_url: str) -> bool:
+    return (urlparse(career_url or "").netloc or "").lower().removeprefix("www.") == "geekadventure.vn"
+
+
+_GEEK_CARD_RE = re.compile(r'href="(opportunity/[a-z0-9-]+)"[^>]*>.*?body-text font-bold">(.*?)<!--', re.S)
+
+
+def _geekadventure(career_url: str) -> list[dict]:
+    try:
+        r = requests.get("https://geekadventure.vn/opportunity", headers=_HTML_HEADERS, timeout=_TIMEOUT)
+        if r.status_code != 200:
+            return []
+        html = r.text
+    except Exception as e:
+        logger.info(f"[ats] geekadventure failed: {str(e)[:80]}")
+        return []
+    out, seen = [], set()
+    for href, raw in _GEEK_CARD_RE.findall(html):
+        if href in seen:
+            continue
+        seen.add(href)
+        title = _html.unescape(re.sub(r"\s+", " ", _strip_html(raw))).strip()
+        loc = "Vietnam"
+        m = re.match(r"^\[([^\]]+)\]\s*(.*)$", title)
+        if m:
+            tag, title = m.group(1), m.group(2).strip()
+            tl = tag.lower()
+            parts = []
+            if "hcm" in tl or "ho chi minh" in tl:
+                parts.append("Ho Chi Minh City")
+            if re.search(r"\bhn\b|ha noi|hanoi", tl):
+                parts.append("Hanoi")
+            loc = ", ".join(parts + ["Vietnam"]) if parts else "Vietnam"
+        if not title:
+            continue
+        out.append({"title": title[:200], "url": f"https://geekadventure.vn/{href}",
+                    "location": loc[:120], "description": ""})
+        if len(out) >= _MAX_ATS_JOBS:
+            break
+    logger.info(f"[ats] geekadventure → {len(out)} VN jobs")
+    return out
+
+
 _ADAPTERS: list = [
     ("radancy",        lambda u, h: _is_radancy(u),      lambda u, h: _radancy(u)),
     ("avature",        _is_avature,                      lambda u, h: _avature(u, h)),
@@ -1608,6 +1656,7 @@ _ADAPTERS: list = [
     ("trustingsocial", lambda u, h: _is_trustingsocial(u), lambda u, h: _trustingsocial(u)),
     ("careers-page",   lambda u, h: _is_careerspage(u),    lambda u, h: _careerspage(u)),
     ("timo",           lambda u, h: _is_timo(u),           lambda u, h: _timo(u)),
+    ("geekadventure",  lambda u, h: _is_geekadventure(u),  lambda u, h: _geekadventure(u)),
     ("ahamove",        _is_ahamove,                      lambda u, h: _ahamove(u)),
     ("fptsoft",        _is_fptsoft,                      lambda u, h: _fptsoft(u)),
     ("phenom-v2",      _is_phenom_v2,                    lambda u, h: _phenom_v2(u)),

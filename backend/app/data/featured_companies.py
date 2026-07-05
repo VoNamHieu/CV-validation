@@ -118,6 +118,12 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         career_url="https://www.careers-page.com/mekongcapital",
     ),
     FeaturedCompany(
+        name="GEEKUP",
+        homepage="https://geekup.vn",
+        # Employer-brand site geekadventure.vn; /opportunity is SSR (Next.js).
+        career_url="https://geekadventure.vn/opportunity",
+    ),
+    FeaturedCompany(
         name="Cake",
         homepage="https://cake.vn",
         career_url="https://cake.vn/tuyen-dung/jobs",
