@@ -129,6 +129,7 @@ export default function StepInputUrl() {
         setStep, cvData, setJdData, setMatchResult,
         clearJdEntries, addJdEntry, updateJdEntry, setOptimizedCv, addJobRecord,
         setView, jobHistory, fullyAutoMode, setFullyAutoMode, setSelectedJdId,
+        setPendingBaseApplyIds,
         targetJobTitle, targetLocation, targetLevel, setSearchPivotNote,
         setDiscovery, candidates, candidatePool, removeCandidate,
         revealMoreCandidates, clearCandidates, wizardStage, setWizardStage,
@@ -954,6 +955,35 @@ export default function StepInputUrl() {
         }
     };
 
+    // Results-page "Apply without optimize" action: skip AI scoring/rewriting
+    // entirely and batch-apply the user's kept jobs with the base CV as-is.
+    // No crawl/score/optimize pipeline needed — the candidate list already has
+    // everything (title, company, apply URL) an apply-only flow requires.
+    // StepEditCv's pendingBaseApplyIds effect fires the actual batch send once
+    // it mounts with these entries in place.
+    const handleApplyOriginalSelected = () => {
+        if (!cvData) { setError('Vui lòng tải CV lên trước.'); return; }
+        const picked = useAppStore.getState().candidates;
+        if (!picked.length) { setError('Hãy giữ lại ít nhất một việc để ứng tuyển.'); return; }
+
+        setError('');
+        clearJdEntries();
+        const ids = picked.map((c) => {
+            const entry = candidateToEntry(c);
+            addJdEntry({
+                ...entry,
+                status: 'done',
+                optimizedCv: cvData,
+                optimizedCvImprovements: [],
+                optimizedCvSuggestions: [],
+            });
+            return entry.id;
+        });
+        setSelectedJdId(ids[0]);
+        setPendingBaseApplyIds(ids);
+        setStep(3);
+    };
+
     const handleSmartAnalyze = async (overrideUrl?: string) => {
         const trimmed = (overrideUrl ?? url).trim();
         // Auto mode = the URL is internal (user clicked "Find jobs from my CV").
@@ -1207,6 +1237,7 @@ export default function StepInputUrl() {
                     onRemove={removeCandidate}
                     onFindMore={() => revealMoreCandidates(3)}
                     onOptimize={handleOptimizeSelected}
+                    onApplyOriginal={handleApplyOriginalSelected}
                     onBack={() => { clearCandidates(); setWizardStage('search'); }}
                 />
             )}

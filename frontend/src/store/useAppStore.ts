@@ -286,6 +286,13 @@ interface AppState {
   fullyAutoMode: boolean;
   setFullyAutoMode: (v: boolean) => void;
 
+  // "Apply without optimize" — the results-page action that skips AI scoring/
+  // rewriting entirely and batch-applies the kept jobs with the base CV as-is.
+  // Set right before navigating to the editor; StepEditCv fires the batch
+  // apply once for exactly these entry ids, then clears it. Volatile.
+  pendingBaseApplyIds: string[] | null;
+  setPendingBaseApplyIds: (ids: string[] | null) => void;
+
   // User avatar — global (one photo applies to every template render).
   // Stored as a small JPEG data URL produced by lib/avatar.ts.
   userAvatarBase64: string | null;
@@ -345,6 +352,7 @@ const initialState = {
   isLoading: false,
   loadingMessage: '',
   fullyAutoMode: false,
+  pendingBaseApplyIds: null as string[] | null,
   userAvatarBase64: null as string | null,
   ownerUserId: null as string | null,
   pendingPromotedSlug: null as string | null,
@@ -568,6 +576,7 @@ export const useAppStore = create<AppState>()(
       setLoading: (loading, message = '') => set({ isLoading: loading, loadingMessage: message }),
 
       setFullyAutoMode: (v) => set({ fullyAutoMode: v }),
+      setPendingBaseApplyIds: (ids) => set({ pendingBaseApplyIds: ids }),
 
       setUserAvatar: (dataUrl) => set({ userAvatarBase64: dataUrl }),
 
@@ -596,11 +605,12 @@ export const useAppStore = create<AppState>()(
     {
       name: 'ai-job-fit-optimizer',
       version: 3,
-      // fullyAutoMode is intentionally excluded so a reload mid-pipeline
-      // doesn't resurrect auto-apply on a stale state.
+      // fullyAutoMode / pendingBaseApplyIds are intentionally excluded so a
+      // reload mid-pipeline doesn't resurrect auto-apply on a stale state.
       partialize: (state) => {
         const rest: Partial<AppState> = { ...state };
         delete (rest as { fullyAutoMode?: boolean }).fullyAutoMode;
+        delete (rest as { pendingBaseApplyIds?: string[] | null }).pendingBaseApplyIds;
         // jobHistory is server-backed now (public.applications) — never persist
         // it to localStorage. Persisting it is exactly what leaked one user's
         // saved jobs to the next person on the same browser. Rehydrated empty,

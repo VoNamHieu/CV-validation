@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import {
     X, MapPin, Buildings, Plus, ArrowRight, ArrowLeft, Sparkle,
-    ArrowSquareOut, CaretDown, CaretUp, CircleNotch,
+    ArrowSquareOut, CaretDown, CaretUp, CircleNotch, PaperPlaneTilt,
 } from '@phosphor-icons/react';
 import type { CandidateJob } from '@/store/useAppStore';
 import { fetchPage } from '@/lib/api';
@@ -18,6 +18,7 @@ interface Props {
     onRemove: (id: string) => void;
     onFindMore: () => void;
     onOptimize: () => void;
+    onApplyOriginal: () => void;
     onBack: () => void;
 }
 
@@ -271,7 +272,7 @@ function JobCard({ c, busy, onRemove }: { c: CandidateJob; busy: boolean; onRemo
 }
 
 export default function JobResultsView({
-    candidates, poolRemaining, busy, onRemove, onFindMore, onOptimize, onBack,
+    candidates, poolRemaining, busy, onRemove, onFindMore, onOptimize, onApplyOriginal, onBack,
 }: Props) {
     const count = candidates.length;
 
@@ -351,6 +352,31 @@ export default function JobResultsView({
             }}>
                 AI sẽ chấm điểm và viết lại CV phù hợp cho từng việc bạn giữ lại
             </div>
+
+            {/* Secondary path: skip AI entirely, apply with the base CV as-is.
+                Extension opens every kept job's tab immediately — no review
+                screen — so a plain-text confirm before firing is the only
+                safety net against an accidental click. */}
+            <button
+                onClick={() => {
+                    if (window.confirm(
+                        `Ứng tuyển ngay ${count} việc bằng CV gốc (chưa tối ưu)? Extension sẽ mở và điền đơn ngay lập tức, không qua bước xem lại.`,
+                    )) onApplyOriginal();
+                }}
+                disabled={busy || count === 0}
+                style={{
+                    width: '100%', marginTop: 10, padding: '11px 12px',
+                    borderRadius: 'var(--radius-lg)', border: '1px solid var(--border-subtle)',
+                    background: 'var(--bg-card)', color: 'var(--text-secondary)',
+                    fontSize: '0.85rem', fontWeight: 600,
+                    cursor: (busy || count === 0) ? 'default' : 'pointer',
+                    opacity: (busy || count === 0) ? 0.5 : 1,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                }}
+            >
+                <PaperPlaneTilt size={16} weight="bold" />
+                Ứng tuyển với CV gốc (bỏ qua tối ưu)
+            </button>
 
             {/* Back to search */}
             <div style={{ marginTop: 24 }}>

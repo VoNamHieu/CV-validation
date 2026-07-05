@@ -100,11 +100,13 @@ export default function StepEditCv() {
     const {
         cvData, jdEntries, setStep, updateJdEntry,
         fullyAutoMode, setFullyAutoMode,
+        pendingBaseApplyIds, setPendingBaseApplyIds,
         userAvatarBase64, setUserAvatar, selectedJdId, searchPivotNote,
     } = useAppStore();
     const gate = useAuthGate();
     const { ensureAgentConsent } = useConsent();
     const fullAutoFiredRef = useRef(false);
+    const baseApplyFiredRef = useRef(false);
 
     // All entries that have optimized CVs, sorted by score
     const sortedEntries = useMemo(() => {
@@ -667,7 +669,10 @@ export default function StepEditCv() {
        3. Trigger AUTO_APPLY_ALL — extension opens each tab, writes the
           matching CV + profile into chrome.storage before agent runs.
        ═══════════════════════════════════════════════════════════════ */
-    const triggerFullyAutoApply = useCallback(async () => {
+    // `onlyIds`, when set, scopes the batch to exactly those entries instead of
+    // every optimized entry — used by the "apply without optimize" flow so it
+    // doesn't sweep up unrelated jobs already sitting in the list.
+    const triggerFullyAutoApply = useCallback(async (onlyIds?: Set<string>) => {
         if (!(await ensureAgentConsent())) return;
         if (!isExtensionAvailable()) {
             setAutoApplyStatus('no-extension');
@@ -677,7 +682,7 @@ export default function StepEditCv() {
             return;
         }
 
-        const candidates = sortedEntries.filter(e => e.optimizedCv && e.source);
+        const candidates = sortedEntries.filter(e => e.optimizedCv && e.source && (!onlyIds || onlyIds.has(e.id)));
         if (candidates.length === 0) {
             setFullAutoError('Không có công việc nào có CV đã tối ưu kèm URL.');
             setTimeout(() => setFullAutoError(null), 4000);
@@ -763,6 +768,18 @@ export default function StepEditCv() {
         triggerFullyAutoApply();
         setFullyAutoMode(false);
     }, [fullyAutoMode, sortedEntries, triggerFullyAutoApply, setFullyAutoMode]);
+
+    // ── "Apply without optimize" handoff: StepInputUrl seeds the picked jobs'
+    //    optimizedCv with the base CV as-is (no AI call) and hands over their
+    //    ids here so exactly those jobs — not the whole list — get batch-applied
+    //    immediately. Same double-mount guard as the fully-auto effect above. ──
+    useEffect(() => {
+        if (!pendingBaseApplyIds?.length || baseApplyFiredRef.current) return;
+        if (sortedEntries.length === 0) return;
+        baseApplyFiredRef.current = true;
+        triggerFullyAutoApply(new Set(pendingBaseApplyIds));
+        setPendingBaseApplyIds(null);
+    }, [pendingBaseApplyIds, sortedEntries, triggerFullyAutoApply, setPendingBaseApplyIds]);
 
     const goPrev = () => setSelectedIdx(i => Math.max(0, i - 1));
     const goNext = () => setSelectedIdx(i => Math.min(sortedEntries.length - 1, i + 1));
@@ -1030,7 +1047,7 @@ export default function StepEditCv() {
                         }}>
                             {/* Primary: renders fresh PDFs then applies to all (no manual upload) */}
                             <button
-                                onClick={triggerFullyAutoApply}
+                                onClick={() => triggerFullyAutoApply()}
                                 disabled={isFullAutoBusy || sortedEntries.filter(e => e.optimizedCv && e.source).length === 0}
                                 title="Tự tạo PDF mới từ CV đã tối ưu rồi ứng tuyển tất cả, không cần PDF lưu sẵn"
                                 style={{
