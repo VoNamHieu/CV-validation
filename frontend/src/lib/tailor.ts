@@ -11,6 +11,7 @@ import { safeJsonParse } from "@/lib/safe-json";
 import { MAX_INPUT_TEXT_LENGTH } from "@/lib/validation";
 import { JD_EXTRACTION_RESPONSE_SCHEMA } from "@/lib/cv-extraction-schema";
 import { OPTIMIZE_RESPONSE_SCHEMA, repairOptimizedCv } from "@/lib/cv-optimize";
+import { verifyOptimizedCv, enforceVerdicts, type BulletVerdict } from "@/lib/verify/backtrack";
 
 // ─────────────────────────── Step 1: extract JD ───────────────────────────
 
@@ -380,6 +381,10 @@ export interface OptimizedVariant {
     cv: Record<string, unknown>;
     improvements: unknown[];
     suggestions: unknown[];
+    // Bullets the optimizer REPHRASED (no new facts) — carried to the editor as
+    // "be ready to defend this" chips and used to seed interview-prep dossiers.
+    // Fact-fabricating bullets are reverted before this point, not flagged.
+    flags: BulletVerdict[];
 }
 
 export async function optimizeForJd(
@@ -406,14 +411,23 @@ export async function optimizeForJd(
             if (repairs.length) {
                 console.warn(`[optimize] Variant "${cfg.label}" dropped content, repaired:`, repairs);
             }
+            // Backtrack verifier: revert any bullet that fabricated a fact (never
+            // tier) to the candidate's original text; keep rephrased bullets as
+            // flags for the editor + interview prep.
+            const verdicts = verifyOptimizedCv(cv, repairedCv);
+            const { cv: verifiedCv, reverted, flags } = enforceVerdicts(cv, repairedCv, verdicts);
+            if (reverted.length) {
+                console.warn(`[verify] Variant "${cfg.label}" fabricated facts, reverted:`, reverted);
+            }
             return {
                 label: cfg.label,
                 style: cfg.style,
                 focus: cfg.focus,
                 length: cfg.length,
-                cv: repairedCv,
+                cv: verifiedCv,
                 improvements: Array.isArray(improvements) ? improvements : [],
                 suggestions: Array.isArray(suggestions) ? suggestions : [],
+                flags,
             };
         })
     );

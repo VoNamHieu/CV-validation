@@ -6,6 +6,8 @@
 // passes a constrained-decoding schema to Gemini and then REPAIRS any drift
 // deterministically against the original CV instead of trusting the output.
 
+import { experienceKey, norm, projectKey } from "@/lib/verify/facts";
+
 // Gemini responseSchema (OpenAPI subset) for the six rewriteable fields.
 // Intentionally excludes contact/personal/employment/preferences and the
 // factual sections (certifications/languages/awards/activities) — those are
@@ -123,23 +125,32 @@ export function repairOptimizedCv(original: unknown, optimized: unknown): Repair
         repairs.push("summary: empty in output, restored original");
     }
 
-    // ── Skills: superset check — keep the model's ordering, append dropped ones ──
+    // ── Skills: exact set — the model may reorder, but must neither drop nor
+    // add. Keep the model's order for the skills that are genuinely in the
+    // source, STRIP any it fabricated (guardrail #2 in the optimize prompt),
+    // then append back any it dropped. Both directions are logged. ──
     const origSkills = (Array.isArray(orig.skills) ? orig.skills : []).filter(
         (s): s is string => typeof s === "string" && !!s.trim());
     const optSkills = (Array.isArray(opt.skills) ? opt.skills : []).filter(
         (s): s is string => typeof s === "string" && !!s.trim());
-    const have = new Set(optSkills.map(s => s.trim().toLowerCase()));
-    const dropped = origSkills.filter(s => !have.has(s.trim().toLowerCase()));
+    const origHave = new Set(origSkills.map(norm));
+    const outHave = new Set(optSkills.map(norm));
+    const kept = optSkills.filter(s => origHave.has(norm(s)));
+    const fabricated = optSkills.filter(s => !origHave.has(norm(s)));
+    const dropped = origSkills.filter(s => !outHave.has(norm(s)));
+    if (fabricated.length) {
+        repairs.push(`skills: ${fabricated.length} fabricated stripped (${fabricated.join(", ")})`);
+    }
     if (dropped.length) {
         repairs.push(`skills: ${dropped.length} dropped (${dropped.join(", ")}), appended back`);
     }
-    out.skills = [...optSkills, ...dropped];
+    out.skills = [...kept, ...dropped];
 
     // ── Experience / projects: entry count + per-description bullet count ──
     out.experience = repairEntryArray(
-        orig.experience, opt.experience, "experience", EXPERIENCE_FACT_KEYS, repairs);
+        orig.experience, opt.experience, "experience", EXPERIENCE_FACT_KEYS, experienceKey, repairs);
     out.projects = repairEntryArray(
-        orig.projects, opt.projects, "projects", ["name"], repairs);
+        orig.projects, opt.projects, "projects", ["name"], projectKey, repairs);
 
     return { cv: out, repairs };
 }
@@ -149,6 +160,7 @@ function repairEntryArray(
     optRaw: unknown,
     label: string,
     factKeys: readonly string[],
+    keyOf: (e: Rec) => string,
     repairs: string[],
 ): unknown {
     const orig = asRecArray(origRaw);
@@ -160,13 +172,24 @@ function repairEntryArray(
         return origRaw;
     }
 
-    return orig.map((origEntry, i) => {
-        const merged: Rec = { ...opt[i] };
-        for (const key of factKeys) {
-            if (origEntry[key] !== undefined) merged[key] = origEntry[key];
+    // Match each optimized entry to its original by CONTENT key (title|company /
+    // name), not array position: the model may reorder, and restoring facts by
+    // index would splice one role's title/dates onto another. Fall back to the
+    // positional entry only when a key is absent or duplicated.
+    const origByKey = new Map<string, Rec>();
+    orig.forEach(e => { const k = keyOf(e); if (!origByKey.has(k)) origByKey.set(k, e); });
+    const usedKeys = new Set<string>();
+
+    return opt.map((optEntry, i) => {
+        const key = keyOf(optEntry);
+        const matched = origByKey.get(key);
+        const origEntry = matched && !usedKeys.has(key) ? (usedKeys.add(key), matched) : orig[i];
+        const merged: Rec = { ...optEntry };
+        for (const k of factKeys) {
+            if (origEntry[k] !== undefined) merged[k] = origEntry[k];
         }
         const origBullets = bulletLines(origEntry.description).length;
-        const optBullets = bulletLines(opt[i].description).length;
+        const optBullets = bulletLines(optEntry.description).length;
         // detailed mode may legitimately split one bullet into two — only a
         // SHRINKING bullet count means content was merged or dropped.
         if (optBullets < origBullets) {
