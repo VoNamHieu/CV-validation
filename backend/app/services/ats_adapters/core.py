@@ -10,6 +10,7 @@ Returns plain dicts: {"title", "url", "location", "description"}.
 """
 from __future__ import annotations
 
+import html as _html
 import logging
 import os
 import re
@@ -1367,6 +1368,146 @@ def _radancy(career_url: str) -> list[dict]:
     return out
 
 
+# ── Trusting Social (trustingsocial.com) — Gatsby static site over Recruiterbox ──
+# Careers are a Gatsby page-data feed (pure JSON, no headless): the list is
+#   /page-data/careers/page-data.json → result.data.allRecruiterboxOpening.nodes[]
+#     (rawID, slug, title, state, position_type, team, location{city,state,country})
+# and each opening's JD is
+#   /page-data/careers/openings/<slug>/page-data.json → result.data.recruiterboxOpening
+#     (adds description + hosted_url). Apply flows to Trakstar.
+def _is_trustingsocial(career_url: str) -> bool:
+    return (urlparse(career_url or "").netloc or "").lower().removeprefix("www.") == "trustingsocial.com"
+
+
+def _trustingsocial(career_url: str) -> list[dict]:
+    base = "https://trustingsocial.com"
+    try:
+        r = requests.get(f"{base}/page-data/careers/page-data.json", headers=_JSON_POST, timeout=_TIMEOUT)
+        if r.status_code != 200 or "json" not in r.headers.get("content-type", ""):
+            return []
+        nodes = (((r.json() or {}).get("result") or {}).get("data") or {}) \
+            .get("allRecruiterboxOpening", {}).get("nodes", []) or []
+    except Exception as e:
+        logger.info(f"[ats] trustingsocial list failed: {str(e)[:80]}")
+        return []
+    out = []
+    for n in nodes:
+        if n.get("state") != "Published":
+            continue
+        loc = n.get("location") or {}
+        loc_str = ", ".join(x for x in (loc.get("city"), loc.get("country")) if x)
+        if not _is_vn_loc(loc_str):
+            continue
+        slug = (n.get("slug") or "").strip()
+        title = (n.get("title") or "").strip()
+        if not slug or not title:
+            continue
+        # Per-opening detail carries the full JD; a hiccup just leaves it blank.
+        desc = ""
+        try:
+            dr = requests.get(f"{base}/page-data/careers/openings/{slug}/page-data.json",
+                              headers=_JSON_POST, timeout=_TIMEOUT)
+            if dr.status_code == 200:
+                op = (((dr.json() or {}).get("result") or {}).get("data") or {}) \
+                    .get("recruiterboxOpening", {}) or {}
+                desc = _strip_html(op.get("description") or "")[:600]
+        except Exception:
+            pass
+        out.append({"title": title[:200],
+                    "url": f"{base}/careers/openings/{slug}",
+                    "location": loc_str[:120] or "Vietnam",
+                    "description": desc,
+                    "employment_type": (n.get("position_type") or "").strip(),
+                    "category": (n.get("team") or "").strip()})
+        if len(out) >= _MAX_ATS_JOBS:
+            break
+    logger.info(f"[ats] trustingsocial → {len(out)} VN jobs")
+    return out
+
+
+# ── careers-page.com (hosted careers pages, e.g. Mekong Capital) ─────────────
+# Generic. Server-rendered listing at careers-page.com/<company>; each job card:
+#   <a href="/<company>/job/<CODE>"><h5>TITLE</h5></a>
+#   <span>…<i class="fa-map-marker-alt"></i> City, …, Country</span>
+# Title + location parse straight out of the HTML; VN-filtered by the card loc.
+def _is_careerspage(career_url: str) -> bool:
+    return (urlparse(career_url or "").netloc or "").lower().removeprefix("www.") == "careers-page.com"
+
+
+def _careerspage(career_url: str) -> list[dict]:
+    p = urlparse(career_url or "")
+    slug = next((s for s in (p.path or "").split("/") if s), "")
+    if not slug:
+        return []
+    try:
+        r = requests.get(f"https://www.careers-page.com/{slug}", headers=_HTML_HEADERS, timeout=_TIMEOUT)
+        if r.status_code != 200:
+            return []
+        html = r.text
+    except Exception as e:
+        logger.info(f"[ats] careers-page {slug} failed: {str(e)[:80]}")
+        return []
+    out, seen = [], set()
+    anchor_re = re.compile(
+        r'href="(/' + re.escape(slug) + r'/job/[A-Za-z0-9]+)"[^>]*>\s*<h5[^>]*>(.*?)</h5>', re.S | re.I)
+    for m in anchor_re.finditer(html):
+        href = m.group(1)
+        title = _html.unescape(re.sub(r"\s+", " ", _strip_html(m.group(2)))).strip()
+        if not title or href in seen:
+            continue
+        seen.add(href)
+        # location = nearest map-marker within the card that follows the title
+        lm = re.search(r'fa-map-marker-alt[^>]*></i>\s*([^<]+)', html[m.end():m.end() + 400])
+        loc = re.sub(r"\s+", " ", lm.group(1)).strip() if lm else ""
+        if loc and not _is_vn_loc(loc):
+            continue
+        out.append({"title": title[:200], "url": f"https://www.careers-page.com{href}",
+                    "location": (loc or "Vietnam")[:120], "description": ""})
+        if len(out) >= _MAX_ATS_JOBS:
+            break
+    logger.info(f"[ats] careers-page:{slug} → {len(out)} VN jobs")
+    return out
+
+
+# ── Timo (timo.vn) — WordPress "career" custom post type via WP REST ─────────
+# /tuyen-dung/ is a JS SPA, but the CPT is exposed at wp-json/wp/v2/career
+# (title, link=/career/<slug>/, content=JD, career-location taxonomy ids). The
+# location taxonomy id→name map comes from wp/v2/career-location; default VN.
+def _is_timo(career_url: str) -> bool:
+    return (urlparse(career_url or "").netloc or "").lower().removeprefix("www.") == "timo.vn"
+
+
+def _timo(career_url: str) -> list[dict]:
+    base = "https://timo.vn"
+    locmap = {}
+    try:
+        lr = requests.get(f"{base}/wp-json/wp/v2/career-location", headers=_JSON_POST,
+                          timeout=_TIMEOUT, params={"per_page": 100})
+        if lr.status_code == 200:
+            locmap = {t.get("id"): (t.get("name") or "") for t in (lr.json() or [])}
+    except Exception:
+        pass
+    out = []
+    try:
+        r = requests.get(f"{base}/wp-json/wp/v2/career", headers=_JSON_POST,
+                         timeout=_TIMEOUT, params={"per_page": 50})
+        if r.status_code != 200 or "json" not in r.headers.get("content-type", ""):
+            return []
+        for j in (r.json() or []):
+            title = _html.unescape(re.sub(r"\s+", " ", _strip_html((j.get("title") or {}).get("rendered", "")))).strip()
+            link = j.get("link") or ""
+            if not title or not link:
+                continue
+            locs = [locmap.get(i, "") for i in (j.get("career-location") or [])]
+            loc = ", ".join(x for x in locs if x) or "Vietnam"
+            desc = _strip_html((j.get("content") or {}).get("rendered", ""))[:600]
+            out.append({"title": title[:200], "url": link, "location": loc[:120], "description": desc})
+    except Exception as e:
+        logger.info(f"[ats] timo failed: {str(e)[:80]}")
+    logger.info(f"[ats] timo → {len(out)} jobs")
+    return out
+
+
 _ADAPTERS: list = [
     ("radancy",        lambda u, h: _is_radancy(u),      lambda u, h: _radancy(u)),
     ("avature",        _is_avature,                      lambda u, h: _avature(u, h)),
@@ -1382,6 +1523,9 @@ _ADAPTERS: list = [
     ("mbbank",         lambda u, h: _is_mbbank(u),       lambda u, h: _mbbank(u)),
     ("iviec",          lambda u, h: _is_iviec(u, h),     lambda u, h: _iviec(u)),
     ("ghn",            lambda u, h: _is_ghn(u),          lambda u, h: _ghn(u)),
+    ("trustingsocial", lambda u, h: _is_trustingsocial(u), lambda u, h: _trustingsocial(u)),
+    ("careers-page",   lambda u, h: _is_careerspage(u),    lambda u, h: _careerspage(u)),
+    ("timo",           lambda u, h: _is_timo(u),           lambda u, h: _timo(u)),
     ("ahamove",        _is_ahamove,                      lambda u, h: _ahamove(u)),
     ("fptsoft",        _is_fptsoft,                      lambda u, h: _fptsoft(u)),
     ("phenom-v2",      _is_phenom_v2,                    lambda u, h: _phenom_v2(u)),
