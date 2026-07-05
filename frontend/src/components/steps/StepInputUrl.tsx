@@ -1271,6 +1271,9 @@ export default function StepInputUrl() {
                 AI tìm công ty phù hợp với CV và chấm điểm tin tuyển dụng của họ
             </div>
 
+            {/* Manual URL entry — hidden once a search is running so the
+                progress pipeline below is the only focus. */}
+            {!isProcessing && <>
             {/* Divider */}
             <div style={{
                 display: 'flex', alignItems: 'center', gap: 12,
@@ -1321,6 +1324,7 @@ export default function StepInputUrl() {
                     Tìm trên URL này
                 </button>
             </div>
+            </>}
             </>}
 
             {/* Inferred title badge */}
@@ -1422,7 +1426,7 @@ export default function StepInputUrl() {
                             fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-muted)',
                         }}
                     >
-                        Hủy tìm kiếm
+                        {wizardStage === 'results' ? 'Hủy tối ưu' : 'Hủy tìm kiếm'}
                     </button>
                     <style>{`@keyframes spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }`}</style>
                 </div>
