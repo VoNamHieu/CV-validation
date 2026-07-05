@@ -6,7 +6,7 @@
 //   afterwards   → a manual bank-transfer paywall (fixed pack price).
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Coins, CheckCircle, Copy, Coffee, Star, PaperPlaneTilt } from '@phosphor-icons/react';
+import { X, Coins, CheckCircle, Copy, Coffee, Star } from '@phosphor-icons/react';
 import { credits as creditsApi, account } from '@/lib/db';
 import { BANK_INFO, TOPUP_PACKS, FREE_TOPUP, TRANSFER_NOTE } from '@/lib/payment';
 import { useModalA11y } from '@/lib/useModalA11y';
@@ -24,11 +24,21 @@ export default function CreditRequestModal({
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
     const [granted, setGranted] = useState(0);
+    const [msg, setMsg] = useState('');
+    const [rating, setRating] = useState(0);
 
-    const request = async () => {
+    // Grant the free top-up. When `submitComment`, first fire the (optional)
+    // feedback the user left on the intro screen — best-effort, never blocks the
+    // grant. Returning users past their free grant fall through to the pay view.
+    const request = async (submitComment: boolean) => {
         setBusy(true);
         setError('');
         try {
+            if (submitComment && msg.trim()) {
+                try {
+                    await account.submitFeedback({ message: msg.trim(), rating: rating || undefined, source: 'topup' });
+                } catch { /* best-effort — feedback must not block the grant */ }
+            }
             const r = await creditsApi.requestTopup();
             if (r.requires_payment) {
                 setView('pay');
@@ -96,12 +106,50 @@ export default function CreditRequestModal({
                         <h2 style={titleStyle}>Nhận thêm token</h2>
                         <p style={descStyle}>
                             Lần đầu bạn được tặng thêm <strong style={{ color: 'var(--text-primary)' }}>{FREE_TOPUP} token</strong> miễn phí.
-                            Sau đó, để dùng tiếp bạn cần mua thêm qua chuyển khoản.
+                            Để lại một góp ý giúp Copo tốt hơn trước khi nhận nhé — hoặc bỏ qua cũng được.
                         </p>
+
+                        {/* Optional feedback, collected BEFORE the grant. */}
+                        <div style={{
+                            border: '1px solid var(--border-subtle)', borderRadius: 12,
+                            padding: 14, marginBottom: 14, background: 'var(--bg-card)',
+                        }}>
+                            <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>
+                                Góp ý để Copo tốt hơn <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>(không bắt buộc)</span>
+                            </div>
+                            <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+                                {[1, 2, 3, 4, 5].map((n) => (
+                                    <button key={n} type="button" onClick={() => setRating(n)} aria-label={`${n} sao`}
+                                        style={{ border: 'none', background: 'none', cursor: 'pointer', padding: 0, lineHeight: 0 }}>
+                                        <Star size={20} weight={n <= rating ? 'fill' : 'regular'}
+                                            style={{ color: n <= rating ? 'var(--accent-amber, #f59e0b)' : 'var(--text-muted)' }} />
+                                    </button>
+                                ))}
+                            </div>
+                            <textarea
+                                value={msg} onChange={(e) => setMsg(e.target.value)} rows={3} maxLength={4000}
+                                placeholder="Bạn thích/chưa thích gì? Muốn có thêm tính năng nào?"
+                                style={{
+                                    width: '100%', resize: 'vertical', padding: '8px 10px', borderRadius: 8,
+                                    background: 'var(--bg-secondary)', border: '1px solid var(--border-subtle)',
+                                    color: 'var(--text-primary)', fontSize: '0.82rem', fontFamily: 'inherit', lineHeight: 1.5,
+                                }}
+                            />
+                        </div>
+
                         {error && <div style={errStyle}>{error}</div>}
-                        <button onClick={request} disabled={busy} style={primaryBtn(busy)}>
-                            {busy ? 'Đang xử lý…' : `Nhận thêm ${FREE_TOPUP} token`}
+                        <button onClick={() => request(true)} disabled={busy} style={primaryBtn(busy)}>
+                            {busy
+                                ? 'Đang xử lý…'
+                                : msg.trim()
+                                    ? `Gửi góp ý & nhận ${FREE_TOPUP} token`
+                                    : `Nhận ${FREE_TOPUP} token`}
                         </button>
+                        {msg.trim() && (
+                            <button onClick={() => request(false)} disabled={busy} style={skipBtn(busy)}>
+                                Bỏ qua, nhận token luôn
+                            </button>
+                        )}
                     </>
                 )}
 
@@ -145,27 +193,10 @@ export default function CreditRequestModal({
     );
 }
 
-// First-request success + optional support (feedback / coffee).
+// First-request success + optional support (coffee). Feedback is now collected
+// on the intro screen, before the grant.
 function SupportView({ granted, email, onClose }: { granted: number; email: string; onClose: () => void }) {
-    const [msg, setMsg] = useState('');
-    const [rating, setRating] = useState(0);
-    const [sending, setSending] = useState(false);
-    const [sent, setSent] = useState(false);
     const [showCoffee, setShowCoffee] = useState(false);
-
-    const send = async () => {
-        if (!msg.trim() || sending) return;
-        setSending(true);
-        try {
-            await account.submitFeedback({ message: msg.trim(), rating: rating || undefined, source: 'topup' });
-            setSent(true);
-        } catch {
-            // best-effort — don't block the user on feedback
-            setSent(true);
-        } finally {
-            setSending(false);
-        }
-    };
 
     return (
         <>
@@ -174,55 +205,6 @@ function SupportView({ granted, email, onClose }: { granted: number; email: stri
                 Cảm ơn bạn đã dùng Copo. Nếu thấy hữu ích, bạn có thể ủng hộ mình một chút,
                 hoàn toàn tuỳ tâm.
             </p>
-
-            {/* Feedback */}
-            {sent ? (
-                <div style={{
-                    display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.82rem', fontWeight: 600,
-                    color: 'var(--accent-green)', padding: '12px 14px', borderRadius: 10,
-                    background: 'color-mix(in srgb, var(--accent-green) 12%, transparent)', marginBottom: 12,
-                }}>
-                    <CheckCircle size={16} weight="fill" /> Cảm ơn góp ý của bạn!
-                </div>
-            ) : (
-                <div style={{
-                    border: '1px solid var(--border-subtle)', borderRadius: 12,
-                    padding: 14, marginBottom: 12, background: 'var(--bg-card)',
-                }}>
-                    <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>
-                        Góp ý để Copo tốt hơn
-                    </div>
-                    <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
-                        {[1, 2, 3, 4, 5].map((n) => (
-                            <button key={n} type="button" onClick={() => setRating(n)} aria-label={`${n} sao`}
-                                style={{ border: 'none', background: 'none', cursor: 'pointer', padding: 0, lineHeight: 0 }}>
-                                <Star size={20} weight={n <= rating ? 'fill' : 'regular'}
-                                    style={{ color: n <= rating ? 'var(--accent-amber, #f59e0b)' : 'var(--text-muted)' }} />
-                            </button>
-                        ))}
-                    </div>
-                    <textarea
-                        value={msg} onChange={(e) => setMsg(e.target.value)} rows={3} maxLength={4000}
-                        placeholder="Bạn thích/chưa thích gì? Muốn có thêm tính năng nào?"
-                        style={{
-                            width: '100%', resize: 'vertical', padding: '8px 10px', borderRadius: 8,
-                            background: 'var(--bg-secondary)', border: '1px solid var(--border-subtle)',
-                            color: 'var(--text-primary)', fontSize: '0.82rem', fontFamily: 'inherit', lineHeight: 1.5,
-                        }}
-                    />
-                    <button
-                        onClick={send} disabled={!msg.trim() || sending}
-                        style={{
-                            marginTop: 8, display: 'flex', alignItems: 'center', gap: 6,
-                            padding: '8px 14px', borderRadius: 8, border: 'none', background: 'var(--gradient-hero)',
-                            color: '#fff', fontSize: '0.8rem', fontWeight: 600,
-                            cursor: (!msg.trim() || sending) ? 'default' : 'pointer', opacity: (!msg.trim() || sending) ? 0.55 : 1,
-                        }}
-                    >
-                        <PaperPlaneTilt size={14} weight="fill" /> {sending ? 'Đang gửi…' : 'Gửi góp ý'}
-                    </button>
-                </div>
-            )}
 
             {/* Buy me a coffee */}
             {showCoffee ? (
@@ -313,5 +295,13 @@ function primaryBtn(busy: boolean): React.CSSProperties {
         width: '100%', padding: '11px 12px', borderRadius: 10, border: 'none',
         background: 'var(--gradient-hero)', color: '#fff', fontSize: '0.85rem',
         fontWeight: 700, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.7 : 1,
+    };
+}
+
+function skipBtn(busy: boolean): React.CSSProperties {
+    return {
+        width: '100%', padding: '9px 12px', borderRadius: 10, marginTop: 8, border: 'none',
+        background: 'transparent', color: 'var(--text-muted)', fontSize: '0.8rem',
+        fontWeight: 600, cursor: busy ? 'default' : 'pointer',
     };
 }
