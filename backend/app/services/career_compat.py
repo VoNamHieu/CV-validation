@@ -155,7 +155,8 @@ async def probe(url: str) -> dict:
     # ── Rung 2+3: ATS detection + feed fetch (covers custom + generic) ────
     ats_url = ats.detect_ats(url)
     ats_html = ats.detect_ats_in_html(html) if html else None
-    ats_sig = (ats_url or ats_html or (None,))[0]
+    custom_ats = ats.is_known_ats_url(url)
+    ats_sig = (ats_url or ats_html or ((custom_ats,) if custom_ats else (None,)))[0]
     try:
         jobs = await asyncio.to_thread(ats.fetch_ats_jobs, url, html or None)
     except Exception as e:

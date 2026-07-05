@@ -1316,6 +1316,24 @@ _ADAPTERS: list = [
 ]
 
 
+def is_known_ats_url(career_url: str) -> str | None:
+    """Name of the custom adapter whose URL pattern matches `career_url`, by
+    pattern alone — regardless of whether the feed currently returns jobs.
+
+    fetch_ats_jobs returning [] is ambiguous: "no adapter recognizes this URL"
+    and "the adapter matched but the feed is empty right now" look identical
+    from outside. This tells them apart, so callers can flag the second case
+    (a known feed going quiet) as a potential regression instead of the
+    expected, silent majority of featured companies with no ATS at all."""
+    for name, detect, _fetch in _ADAPTERS:
+        try:
+            if detect(career_url, None):
+                return name
+        except Exception:
+            continue
+    return None
+
+
 def fetch_ats_jobs(career_url: str, html: str | None = None) -> list[dict]:
     """Detect the ATS (from URL, then embedded in HTML) and fetch its jobs.
     Returns [] when no ATS is detected or the API yields nothing. Every
