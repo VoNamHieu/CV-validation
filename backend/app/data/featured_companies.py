@@ -343,7 +343,10 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="MB Bank",
         homepage="https://www.mbbank.com.vn",
-        career_url="https://tuyendung.mbbank.com.vn",
+        # tuyendung.mbbank.com.vn 404s outright; the _mbbank adapter already
+        # fetches from careers.mbbank.com.vn's API regardless of this URL, but
+        # this is still the human-facing link, so point it at a page that loads.
+        career_url="https://careers.mbbank.com.vn/careers",
     ),
     FeaturedCompany(
         name="VPBank",
