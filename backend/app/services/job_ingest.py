@@ -128,6 +128,7 @@ async def ingest_featured_ats(*, render: bool = False, limit: int | None = None)
     renders bespoke pages to catch embedded ATS (slower, needs the browser)."""
     from app.data.featured_companies import FEATURED_COMPANIES
     from app.services.ats_adapters.core import fetch_ats_jobs, is_known_ats_url
+    from app.services.crawler import try_http_fetch
     from app.search.taxonomy import classify_title, classify_seniority
     from app.search.company_industry import classify_company
     from app.search.facet import _required_years
@@ -150,6 +151,21 @@ async def ingest_featured_ats(*, render: bool = False, limit: int | None = None)
     async def one(c) -> dict | None:
         async with sem:
             jobs_list = await asyncio.to_thread(fetch_ats_jobs, c.career_url, None)
+            if not jobs_list:
+                # Cheap non-JS GET before giving up — some adapters (Workday)
+                # only resolve from a tenant link embedded in the page's raw
+                # HTML (_resolve_workday_url), which the html=None call above
+                # can never see. This is a plain requests.get, not a render —
+                # "fast and free" per try_http_fetch's own docstring — so it's
+                # worth trying unconditionally, not just when render=True.
+                # Without it, a company whose career_url coincidentally also
+                # matches a DIFFERENT adapter's URL-only pattern (e.g. ABB/
+                # Mastercard's `/search-results` path looking like Phenom)
+                # gets misreported as "feed empty" every run even though it
+                # has real, live postings.
+                ok, html = await asyncio.to_thread(try_http_fetch, c.career_url)
+                if ok:
+                    jobs_list = await asyncio.to_thread(fetch_ats_jobs, c.career_url, html)
             if not jobs_list and render:
                 html = await _render(c.career_url)
                 if html:
