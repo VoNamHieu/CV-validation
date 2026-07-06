@@ -943,7 +943,11 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="VPBank Securities",
         homepage="https://www.vpbanks.com.vn",
-        career_url="https://www.vpbanks.com.vn/co-hoi-nghe-nghiep",
+        # /co-hoi-nghe-nghiep is a generic careers-culture page, not the job
+        # listing (0 postings render there even client-side); /tin-tuyen-dung
+        # is the real list. The _vpbanks adapter itself only matches on domain,
+        # so this only matters for the compat probe fetching this URL directly.
+        career_url="https://www.vpbanks.com.vn/tin-tuyen-dung",
     ),
     FeaturedCompany(
         name="NAB Vietnam",

@@ -3,8 +3,9 @@
 Public surface (unchanged for callers): fetch_ats_jobs, detect_ats,
 detect_ats_in_html. Modules: `core` dispatch entrypoint; `_shared` helpers;
 `generic` hosted-ATS fetchers; `platforms` global/multi-tenant ATS adapters;
-`vn` single-company Vietnam adapters; `vendors` the `_ADAPTERS` registry;
-`schema` the normalized Job model.
+`vn` single-company Vietnam adapters; one-off single-company modules (e.g.
+`vpbanks`) for adapters that outgrew a drive-by vn.py addition; `vendors` the
+`_ADAPTERS` registry; `schema` the normalized Job model.
 
 To add an ATS: write `_is_x` / `_x` in platforms.py or vn.py and append one line
 to vendors._ADAPTERS — no other edits.
