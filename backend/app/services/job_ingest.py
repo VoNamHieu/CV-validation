@@ -140,13 +140,14 @@ async def ingest_featured_ats(*, render: bool = False, limit: int | None = None)
     sem = asyncio.Semaphore(8)  # bound concurrent ATS fetches / renders
 
     def _empty(c) -> dict | None:
-        # Flag only companies a KNOWN adapter's URL pattern matches — that's a
-        # feed going quiet (regression, worth a compat probe), not just one of
-        # the majority of featured companies with no ATS adapter at all.
-        ats_name = is_known_ats_url(c.career_url)
-        if not ats_name:
-            return None
-        return {"name": c.name, "career_url": c.career_url, "ats": ats_name}
+        # Flag EVERY company this run found 0 jobs for — not just ones a known
+        # adapter matches. A known-adapter match going quiet is a regression;
+        # a company with no adapter at all might still have a real, live
+        # career page reachable via render/spa-sniff/capture (e.g. bespoke
+        # SPAs like OutSystems) that nothing has tried yet. Both cases get the
+        # same compat probe below; `ats` is empty for the latter so callers can
+        # still tell them apart if they want to.
+        return {"name": c.name, "career_url": c.career_url, "ats": is_known_ats_url(c.career_url) or ""}
 
     async def one(c) -> dict | None:
         async with sem:
