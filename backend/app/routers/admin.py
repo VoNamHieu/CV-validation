@@ -197,41 +197,17 @@ _ingest_task: Optional[asyncio.Task] = None
 _ingest_last: dict = {}
 
 
-async def _embed_backfill(limit: int = 1000) -> int:
-    """Vectorize active jobs still missing an embedding so they show up in
-    semantic search. Returns rows embedded."""
-    from app.search.embed import build_job_doc, embed_jobs
-
-    todo = await jobs_repo.list_unembedded(limit=limit)
-    if not todo:
-        return 0
-    docs = [
-        build_job_doc(j["title"], jd=j.get("description") or "", must_have=j.get("must_have"))
-        for j in todo
-    ]
-    vectors = await asyncio.to_thread(embed_jobs, docs)
-    n = 0
-    for j, vec in zip(todo, vectors):
-        if not vec:
-            continue
-        try:
-            await jobs_repo.set_embedding(j["id"], vec)
-            n += 1
-        except Exception as e:  # noqa: BLE001
-            logger.info("embed backfill: job %s failed: %s", j["id"], str(e)[:80])
-    return n
-
-
 async def _run_ingest(render: bool) -> None:
     global _ingest_last
     t0 = time.time()
     _ingest_last = {"at": t0, "phase": "crawling", "stats": None, "error": None}
     try:
+        from app.services.embed_backfill import embed_backfill
         from app.services.job_ingest import ingest_featured_ats
 
         stats = await ingest_featured_ats(render=render)
         _ingest_last["phase"] = "embedding"
-        stats["jobs_embedded"] = await _embed_backfill()
+        stats["jobs_embedded"] = await embed_backfill()
         _ingest_last.update(phase="done", stats=stats)
     except Exception as e:  # noqa: BLE001
         logger.exception("admin ingest failed")

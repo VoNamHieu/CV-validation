@@ -1,18 +1,22 @@
 """Periodic store refresh — meant to run as a Railway Cron service.
 
-Three jobs, in order:
+Four jobs, in order:
   1. ``ingest_featured_ats`` — re-pull every featured company's ATS feed into
-     the store (upsert new, refresh existing, deactivate ones that vanished,
-     embed the unindexed). This is what keeps search fresh + prunes dead rows.
-  2. a compat probe over every featured company that came back with 0 jobs
+     the store (upsert new, refresh existing, deactivate ones that vanished).
+     This is what keeps search fresh + prunes dead rows.
+  2. ``embed_backfill`` — vectorize any job upserted above (or from a prior
+     run) that's still missing its embedding, so it's reachable by semantic
+     search (same helper the admin ingest trigger uses — see
+     app/services/embed_backfill.py).
+  3. a compat probe over every featured company that came back with 0 jobs
      this run (known-ATS feed gone quiet, OR no adapter at all yet) — tells
      apart "the company genuinely has 0 matching postings right now" from
      "our adapter/crawl for this company broke" from "nobody's built an
      adapter for this bespoke site yet, but it does render real jobs"
-     (mirrors POST /compat/scan, minus the admin HTTP hop). link_health (#3)
+     (mirrors POST /compat/scan, minus the admin HTTP hop). link_health (#4)
      only catches dead JOB-DETAIL links; this catches the company/feed level
      going dark — for ALL featured companies, not just already-ATS ones.
-  3. a link-health scan over the featured cache — validate job URLs and log the
+  4. a link-health scan over the featured cache — validate job URLs and log the
      broken/suspect ones (mirrors POST /monitor/scan, minus the admin HTTP hop).
 
 Runs as a ONE-OFF process (starts, works, exits) — exactly Railway's cron model.
@@ -124,8 +128,13 @@ async def main() -> None:
         ingest = await ingest_featured_ats(render=False)
         logger.info("[cron] ingest done: %s", ingest)
 
+        from app.services.embed_backfill import embed_backfill
+        logger.info("[cron] embedding backfill starting…")
+        embedded = await embed_backfill()
+        logger.info("[cron] embedding backfill done: %d job(s) embedded", embedded)
+
         empty = ingest.get("ats_feed_empty") or []
-        logger.info("[cron] compat check starting (%d empty known-ATS feed(s))…", len(empty))
+        logger.info("[cron] compat check starting (%d empty feed(s))…", len(empty))
         compat = await _compat_check(empty)
         logger.info("[cron] compat check done: %s", compat)
 

@@ -10,8 +10,13 @@ here. Resolution paths, in order:
      No secret needed — the verifying key is public. Just set ``SUPABASE_URL``.
   2. **Legacy HS256** — older projects use a shared ``SUPABASE_JWT_SECRET``.
      Supported as a fallback when that env var is set.
-  3. **Dev / pre-auth** — when neither is configured, fall back to an
-     ``X-User-Id`` header so the FE can be wired before Supabase Auth lands.
+  3. **Dev / pre-auth** — when neither is configured AND ``ALLOW_DEV_AUTH=1``
+     is explicitly set, fall back to an ``X-User-Id`` header so the FE can be
+     wired before Supabase Auth lands. The explicit flag matters: without it,
+     an accidental misconfiguration (``SUPABASE_URL``/``SUPABASE_JWT_SECRET``
+     both unset in prod) would silently accept ANY caller-supplied
+     ``X-User-Id`` as the authenticated user — since the service-role DSN
+     bypasses RLS, that header would then be the entire security boundary.
 
 Raises 401 when no user id can be resolved.
 """
@@ -87,6 +92,14 @@ def _auth_configured() -> bool:
     return bool(os.getenv("SUPABASE_URL") or os.getenv("SUPABASE_JWT_SECRET"))
 
 
+def _dev_auth_allowed() -> bool:
+    """The X-User-Id header fallback is live only when no real auth method is
+    configured AND the operator explicitly opted in via ALLOW_DEV_AUTH=1.
+    Without the explicit flag, a prod misconfiguration (both env vars unset)
+    fails closed (401) instead of accepting any caller's X-User-Id as fact."""
+    return not _auth_configured() and os.getenv("ALLOW_DEV_AUTH") == "1"
+
+
 async def get_current_user_id(
     authorization: str | None = Header(default=None),
     x_user_id: str | None = Header(default=None),
@@ -97,8 +110,8 @@ async def get_current_user_id(
         if uid:
             return uid
 
-    # Dev fallback only when no real auth is configured.
-    if not _auth_configured() and x_user_id:
+    # Dev fallback only when no real auth is configured AND explicitly opted in.
+    if _dev_auth_allowed() and x_user_id:
         return x_user_id
 
     raise HTTPException(status_code=401, detail="Authentication required")
@@ -178,6 +191,6 @@ async def get_optional_user_id(
         uid = _verify_jwt(authorization[7:].strip())
         if uid:
             return uid
-    if not _auth_configured() and x_user_id:
+    if _dev_auth_allowed() and x_user_id:
         return x_user_id
     return None
