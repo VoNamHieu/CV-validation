@@ -4,11 +4,14 @@ Three jobs, in order:
   1. ``ingest_featured_ats`` — re-pull every featured company's ATS feed into
      the store (upsert new, refresh existing, deactivate ones that vanished,
      embed the unindexed). This is what keeps search fresh + prunes dead rows.
-  2. a compat probe over companies whose KNOWN ATS feed came back empty this
-     run — tells apart "the company genuinely has 0 matching postings right
-     now" from "our adapter/crawl for this company broke" (mirrors POST
-     /compat/scan, minus the admin HTTP hop). link_health (#3) only catches
-     dead JOB-DETAIL links; this catches the company/feed level going dark.
+  2. a compat probe over every featured company that came back with 0 jobs
+     this run (known-ATS feed gone quiet, OR no adapter at all yet) — tells
+     apart "the company genuinely has 0 matching postings right now" from
+     "our adapter/crawl for this company broke" from "nobody's built an
+     adapter for this bespoke site yet, but it does render real jobs"
+     (mirrors POST /compat/scan, minus the admin HTTP hop). link_health (#3)
+     only catches dead JOB-DETAIL links; this catches the company/feed level
+     going dark — for ALL featured companies, not just already-ATS ones.
   3. a link-health scan over the featured cache — validate job URLs and log the
      broken/suspect ones (mirrors POST /monitor/scan, minus the admin HTTP hop).
 
@@ -35,11 +38,13 @@ _COMPAT_CONCURRENCY = 4  # compat probe renders (SPA sniff) — keep light
 
 
 async def _compat_check(empty_companies: list[dict]) -> dict:
-    """For featured companies whose known ATS adapter matched but returned no
-    jobs this run, escalate to the full compat probe (adds SPA-sniff) and log
-    the verdict. Distinguishes "empty feed" (fine — e.g. a company simply has
-    no VN openings right now) from "needs_new_adapter"/"unsupported" (the
-    site/API changed and our extractor broke)."""
+    """For every featured company this run's ingest found 0 jobs for —
+    known-ATS feed gone quiet, or no adapter at all — escalate to the full
+    compat probe (adds render + SPA-sniff + capture-check) and log the
+    verdict. Distinguishes "empty feed" (fine — e.g. a company simply has no
+    VN openings right now) from "needs_new_adapter"/"unsupported" (broken or
+    never-built extractor) from "supported_render" (a real adapter would
+    work, nobody's written one yet)."""
     if not empty_companies:
         return {"checked": 0, "flagged": 0}
 
