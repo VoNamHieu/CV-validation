@@ -61,7 +61,20 @@ async def _link_scan() -> dict:
     from app.routers.career import _read_featured_entry
     from app.services import link_health
 
+    # cache.get_json swallows its own errors and returns None either way, so
+    # an empty read here is ambiguous: "no cache yet" (fine) vs. "Redis had a
+    # transient timeout" (should retry, not silently report a 0-job scan as
+    # if it were a clean, complete run — this has been observed live: a
+    # single Upstash read timeout zeroed out the whole scan for a cycle).
+    # One short retry is cheap and fixes the common transient case; if the
+    # cache is genuinely empty it just costs an extra ~cheap read.
     entry = await _read_featured_entry()
+    if not entry:
+        await asyncio.sleep(2)
+        entry = await _read_featured_entry()
+        if not entry:
+            logger.warning("[cron] link scan: featured cache read empty after retry — "
+                           "either genuinely no cache yet, or Redis is unreachable")
     companies = (entry or {}).get("companies") or []
     jobs: list[dict] = []
     for c in companies:
