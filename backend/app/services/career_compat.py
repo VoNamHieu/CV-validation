@@ -133,6 +133,60 @@ def _vn_only(jobs: list[dict], is_vn) -> tuple[list[dict], str]:
     return jobs, "unknown"
 
 
+def verdict_from_signals(url: str, *, http_ok: bool, html: str, jobs: list[dict],
+                         rendered: bool, ats_sig: str | None = None,
+                         fetch_error: str = "") -> dict:
+    """Classify a verdict from signals the CALLER already gathered (e.g. the
+    ingest pipeline's own render/adapter-fetch/spa-sniff pass) instead of
+    fetching/rendering again like probe() does — same vocabulary/shape, no
+    duplicate network work. `jobs` is [] when nothing was found; `rendered`
+    marks whether a render/spa-sniff pass was attempted (vs. cheap-only)."""
+    from app.services.ats_adapters import core as ats
+
+    html_low = (html or "").lower()
+    if _has(html_low, _ANTIBOT_MARKERS) or (not http_ok and "403" in fetch_error):
+        return _verdict("needs_capture", blockers=["anti_bot"], http_code=403,
+                        detail="anti-bot interstitial — route via extension capture")
+    if _has(html_low, _LOGIN_MARKERS):
+        return _verdict("needs_login", blockers=["login"],
+                        detail="listing appears to be behind authentication")
+
+    if jobs:
+        name = jobs[0].get("source") or ats_sig or "ats"
+        strategy = "spa_sniff" if rendered else f"ats:{name}"
+        verdict = "supported_render" if rendered else "supported"
+        via = "SPA sniff (render)" if rendered else "ATS feed (no render)"
+        vn_jobs, tag = _vn_only(jobs, ats._is_vn_loc)
+        if vn_jobs:
+            return _verdict(verdict, strategy=strategy, ats=name,
+                            job_count=len(vn_jobs), samples=_samples(vn_jobs),
+                            detail=f"{len(vn_jobs)} VN jobs via {via}")
+        if tag == "non_vn":
+            return _verdict("no_vn_jobs", strategy=strategy, ats=name,
+                            samples=_samples(jobs), blockers=["no_vn"],
+                            detail=f"feed OK ({len(jobs)} jobs) but none located in Vietnam")
+        return _verdict(verdict, strategy=strategy, ats=name,
+                        job_count=len(jobs), samples=_samples(jobs),
+                        detail=f"{len(jobs)} jobs via {via}; location n/a")
+
+    if not http_ok:
+        return _verdict("unsupported", blockers=["unreachable"],
+                        detail=f"fetch failed: {fetch_error[:120]}")
+    if _has(html_low, _GONE_MARKERS):
+        return _verdict("unsupported", blockers=["soft_404"],
+                        detail="page resolves but reads as not-found / empty")
+    careerish = bool(html) and _is_careerish(html)
+    job_anchors = bool(html) and bool(_JOB_HREF_RX.search(html))
+    if ats_sig or careerish or job_anchors:
+        reason = ("ATS signal but empty feed" if ats_sig
+                  else "career listing with no working extractor")
+        return _verdict("needs_new_adapter", ats=ats_sig,
+                        blockers=["no_extractor"],
+                        detail=f"{reason} (rendered={rendered}) — needs a custom adapter")
+    return _verdict("unsupported", blockers=["not_careerish"],
+                    detail="no career-page content detected")
+
+
 async def probe(url: str) -> dict:
     """Run the acquisition ladder in dry-run mode and return a verdict dict:
 
@@ -141,6 +195,8 @@ async def probe(url: str) -> dict:
     Cheap rungs first (httpx + ATS feeds, both sync → run in threads); only
     escalates to the Playwright SPA-sniff when the cheap rungs find nothing,
     and only renders at all when the page looks like a career page worth it.
+    Classification itself is delegated to verdict_from_signals() — this
+    function's only job is gathering the signals fresh.
     """
     from app.services import crawler
     from app.services.ats_adapters import core as ats
@@ -158,16 +214,13 @@ async def probe(url: str) -> dict:
     except Exception as e:
         http_ok, payload = False, str(e)[:200]
     html = payload if http_ok else ""
-    html_low = html.lower()
 
     # Anti-bot / login walls are visible in the raw shell — catch them before
     # we waste an ATS round-trip or a render on a page we can't read anyway.
-    if _has(html_low, _ANTIBOT_MARKERS) or (not http_ok and "403" in payload):
-        return _verdict("needs_capture", blockers=["anti_bot"], http_code=403,
-                        detail="anti-bot interstitial — route via extension capture")
-    if _has(html_low, _LOGIN_MARKERS):
-        return _verdict("needs_login", blockers=["login"],
-                        detail="listing appears to be behind authentication")
+    early = verdict_from_signals(url, http_ok=http_ok, html=html, jobs=[],
+                                 rendered=False, fetch_error=payload if not http_ok else "")
+    if early["verdict"] in ("needs_capture", "needs_login"):
+        return early
 
     # ── Rung 2+3: ATS detection + feed fetch (covers custom + generic) ────
     ats_url = ats.detect_ats(url)
@@ -180,24 +233,14 @@ async def probe(url: str) -> dict:
         logger.info(f"[compat] fetch_ats_jobs raised for {url}: {str(e)[:80]}")
         jobs = []
     if jobs:
-        name = (jobs[0].get("source") or ats_sig or "ats")
-        vn_jobs, tag = _vn_only(jobs, ats._is_vn_loc)
-        if vn_jobs:
-            return _verdict("supported", strategy=f"ats:{name}", ats=name,
-                            job_count=len(vn_jobs), samples=_samples(vn_jobs),
-                            detail=f"{len(vn_jobs)} VN jobs via ATS feed (no render)")
-        if tag == "non_vn":
-            return _verdict("no_vn_jobs", strategy=f"ats:{name}", ats=name,
-                            samples=_samples(jobs), blockers=["no_vn"],
-                            detail=f"feed OK ({len(jobs)} jobs) but none located in Vietnam")
-        return _verdict("supported", strategy=f"ats:{name}", ats=name,
-                        job_count=len(jobs), samples=_samples(jobs),
-                        detail=f"{len(jobs)} jobs via ATS feed (no render; location n/a)")
+        return verdict_from_signals(url, http_ok=http_ok, html=html, jobs=jobs,
+                                    rendered=False, ats_sig=ats_sig)
 
     # ── Rung 4: SPA sniff — only worth a render if the page looks careerish ──
     careerish = bool(html) and _is_careerish(html)
     job_anchors = bool(_JOB_HREF_RX.search(html))
     rendered = False
+    sniffed: list[dict] = []
     if http_ok and (careerish or job_anchors or ats_sig):
         rendered = True
         try:
@@ -206,35 +249,11 @@ async def probe(url: str) -> dict:
         except Exception as e:
             logger.info(f"[compat] sniff_jobs raised for {url}: {str(e)[:80]}")
             sniffed = []
-        if sniffed:
-            vn_jobs, tag = _vn_only(sniffed, ats._is_vn_loc)
-            if vn_jobs:
-                return _verdict("supported_render", strategy="spa_sniff", ats=ats_sig,
-                                job_count=len(vn_jobs), samples=_samples(vn_jobs),
-                                detail=f"{len(vn_jobs)} VN jobs via SPA sniff (render)")
-            if tag == "non_vn":
-                return _verdict("no_vn_jobs", strategy="spa_sniff", ats=ats_sig,
-                                samples=_samples(sniffed), blockers=["no_vn"],
-                                detail=f"render OK ({len(sniffed)} jobs) but none located in Vietnam")
-            return _verdict("supported_render", strategy="spa_sniff", ats=ats_sig,
-                            job_count=len(sniffed), samples=_samples(sniffed),
-                            detail=f"{len(sniffed)} jobs via SPA sniff (render; location n/a)")
 
-    # ── Rung 5: nothing extracted — classify why ─────────────────────────
-    if not http_ok:
-        return _verdict("unsupported", blockers=["unreachable"],
-                        detail=f"fetch failed: {payload[:120]}")
-    if _has(html_low, _GONE_MARKERS):
-        return _verdict("unsupported", blockers=["soft_404"],
-                        detail="page resolves but reads as not-found / empty")
-    if ats_sig or careerish or job_anchors:
-        reason = ("ATS signal but empty feed" if ats_sig
-                  else "career listing with no working extractor")
-        return _verdict("needs_new_adapter", ats=ats_sig,
-                        blockers=["no_extractor"],
-                        detail=f"{reason} (rendered={rendered}) — needs a custom adapter")
-    return _verdict("unsupported", blockers=["not_careerish"],
-                    detail="no career-page content detected")
+    # ── Rung 5 (inside verdict_from_signals): classify why, if still nothing ──
+    return verdict_from_signals(url, http_ok=http_ok, html=html, jobs=sniffed,
+                                rendered=rendered, ats_sig=ats_sig,
+                                fetch_error=payload if not http_ok else "")
 
 
 def _verdict(verdict: str, *, strategy: str = "", ats: str | None = None,
