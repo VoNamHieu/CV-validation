@@ -388,6 +388,19 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         homepage="https://gpbank.com.vn",
         career_url="https://tuyendung.gpbank.com.vn",
     ),
+    FeaturedCompany(
+        name="Home Credit Vietnam",
+        homepage="https://www.homecredit.vn",
+        # TLS chain issue on their side (missing intermediate CA, verify code 21)
+        # — the _homecredit adapter itself is correct but currently can't
+        # connect from a strict client until they fix their cert bundle.
+        career_url="https://career.homecredit.vn/vn/jobs/",
+    ),
+    FeaturedCompany(
+        name="Chailease Vietnam",
+        homepage="https://www.chailease.com.vn",
+        career_url="https://www.chailease.com.vn/vn/tuyen-dung/-vi-tri-tuyen-dung/8",
+    ),
 
     # ── Retail / Consumer ─────────────────────────────────────────────
     FeaturedCompany(
@@ -577,6 +590,26 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         name="Vinpearl",
         homepage="https://vinpearl.com",
         career_url="https://vinpearl.talent.vn",
+    ),
+    FeaturedCompany(
+        name="AEON Việt Nam",
+        homepage="https://aeon.com.vn",
+        career_url="https://tuyendung.aeon.com.vn/result-search",
+    ),
+    FeaturedCompany(
+        name="Maison RMI",
+        homepage="https://maisonrmi.com",
+        career_url="https://maisonrmi.com/vi/career-vn/",
+    ),
+    FeaturedCompany(
+        name="Con Cưng",
+        homepage="https://concung.com",
+        career_url="https://careers.concung.com/danh-sach-ung-tuyen.html",
+    ),
+    FeaturedCompany(
+        name="DOJI",
+        homepage="https://doji.vn",
+        career_url="https://tuyendung.doji.vn/tuyen-dung.html",
     ),
 
     # ── Logistics ─────────────────────────────────────────────────────

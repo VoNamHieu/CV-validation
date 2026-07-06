@@ -24,6 +24,12 @@ from app.services.ats_adapters.vnpt import *  # noqa: F401,F403
 from app.services.ats_adapters.thegioididong import *  # noqa: F401,F403
 from app.services.ats_adapters.cellphones import *  # noqa: F401,F403
 from app.services.ats_adapters.vnptai import *  # noqa: F401,F403
+from app.services.ats_adapters.aeon import *  # noqa: F401,F403
+from app.services.ats_adapters.maisonrmi import *  # noqa: F401,F403
+from app.services.ats_adapters.concung import *  # noqa: F401,F403
+from app.services.ats_adapters.homecredit import *  # noqa: F401,F403
+from app.services.ats_adapters.doji import *  # noqa: F401,F403
+from app.services.ats_adapters.chailease import *  # noqa: F401,F403
 
 
 _ADAPTERS: list = [
@@ -68,4 +74,10 @@ _ADAPTERS: list = [
     ("thegioididong",   lambda u, h: _is_thegioididong(u),   lambda u, h: _thegioididong(u)),
     ("cellphones",      lambda u, h: _is_cellphones(u),      lambda u, h: _cellphones(u)),
     ("vnptai",          lambda u, h: _is_vnptai(u),          lambda u, h: _vnptai(u)),
+    ("aeon",            lambda u, h: _is_aeon(u),            lambda u, h: _aeon(u)),
+    ("maisonrmi",       lambda u, h: _is_maisonrmi(u),       lambda u, h: _maisonrmi(u)),
+    ("concung",         lambda u, h: _is_concung(u),         lambda u, h: _concung(u)),
+    ("homecredit",      lambda u, h: _is_homecredit(u),      lambda u, h: _homecredit(u)),
+    ("doji",            lambda u, h: _is_doji(u),            lambda u, h: _doji(u)),
+    ("chailease",       lambda u, h: _is_chailease(u),       lambda u, h: _chailease(u)),
 ]
