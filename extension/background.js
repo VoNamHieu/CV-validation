@@ -126,7 +126,7 @@ function injectAgentOnLoad(tabId) {
 async function extSpend(action, units = 1) {
     const { jobfitAppUrl, jobfitToken } = await chrome.storage.local.get(['jobfitAppUrl', 'jobfitToken']);
     if (!jobfitToken) return { ok: false, auth: true };
-    const appUrl = jobfitAppUrl || 'https://cv-validation.vercel.app';
+    const appUrl = jobfitAppUrl || 'https://copoai.net';
     try {
         const res = await fetch(`${appUrl}/api/credits/spend`, {
             method: 'POST',
@@ -273,7 +273,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     if (message.type === 'GET_APP_URL') {
         chrome.storage.local.get('jobfitAppUrl', (data) => {
-            sendResponse({ url: data.jobfitAppUrl || 'https://cv-validation.vercel.app' });
+            sendResponse({ url: data.jobfitAppUrl || 'https://copoai.net' });
         });
         return true;
     }
@@ -286,7 +286,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         (async () => {
             try {
                 const data = await chrome.storage.local.get(['jobfitAppUrl', 'jobfitToken']);
-                const appUrl = data.jobfitAppUrl || 'https://cv-validation.vercel.app';
+                const appUrl = data.jobfitAppUrl || 'https://copoai.net';
                 // The AI routes require a login (the synced JWT) server-side.
                 const authHeaders = data.jobfitToken
                     ? { Authorization: `Bearer ${data.jobfitToken}` } : {};
@@ -335,7 +335,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         (async () => {
             try {
                 const data = await chrome.storage.local.get(['jobfitAppUrl', 'jobfitToken']);
-                const appUrl = data.jobfitAppUrl || 'https://cv-validation.vercel.app';
+                const appUrl = data.jobfitAppUrl || 'https://copoai.net';
                 // The AI routes require a login (the synced JWT) server-side.
                 const authHeaders = data.jobfitToken
                     ? { Authorization: `Bearer ${data.jobfitToken}` } : {};
@@ -412,7 +412,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     return;
                 }
                 const data = await chrome.storage.local.get(['jobfitAppUrl', 'jobfitToken']);
-                const appUrl = data.jobfitAppUrl || 'https://cv-validation.vercel.app';
+                const appUrl = data.jobfitAppUrl || 'https://copoai.net';
                 // The AI routes require a login (the synced JWT) server-side.
                 const authHeaders = data.jobfitToken
                     ? { Authorization: `Bearer ${data.jobfitToken}` } : {};
@@ -808,7 +808,7 @@ function pushToWebApp(message) {
         let firstAppTab = null;
         for (const tab of tabs) {
             if (tab.id == null) continue;
-            if (/cv-validation\.vercel\.app|localhost:3000/.test(tab.url || '')) {
+            if (/copoai\.net|cv-validation\.vercel\.app|localhost:3000/.test(tab.url || '')) {
                 appTabs++;
                 if (firstAppTab == null) firstAppTab = tab;
             }
@@ -842,7 +842,7 @@ function pushToWebApp(message) {
                 if (Date.now() - mode1ColdTabOpenAt > 15000) {
                     mode1ColdTabOpenAt = Date.now();
                     chrome.storage.local.get('jobfitAppUrl', (d) => {
-                        const appUrl = d.jobfitAppUrl || 'https://cv-validation.vercel.app';
+                        const appUrl = d.jobfitAppUrl || 'https://copoai.net';
                         chrome.tabs.create({ url: appUrl, active: true });
                         console.log(`[Copo Mode1/bg] no app tab — stashed tailored CV + opened ${appUrl}`);
                     });

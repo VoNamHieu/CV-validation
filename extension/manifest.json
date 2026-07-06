@@ -31,7 +31,8 @@
     "https://*.workable.com/*",
     "https://*.recruitee.com/*",
     "https://*.teamtailor.com/*",
-    "https://cv-validation.vercel.app/*"
+    "https://cv-validation.vercel.app/*",
+    "https://copoai.net/*"
   ],
   "optional_host_permissions": [
     "https://*/*"
@@ -39,7 +40,8 @@
   "content_scripts": [
     {
       "matches": [
-        "https://cv-validation.vercel.app/*"
+        "https://cv-validation.vercel.app/*",
+        "https://copoai.net/*"
       ],
       "js": [
         "content-webapp.js"

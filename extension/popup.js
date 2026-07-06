@@ -197,7 +197,7 @@ function updateStatus(profile) {
 
 // ─── Import from Copo App ───
 async function importFromApp() {
-    const appUrl = document.getElementById('appUrl')?.value || 'https://cv-validation.vercel.app';
+    const appUrl = document.getElementById('appUrl')?.value || 'https://copoai.net';
     const btn = document.getElementById('importFromApp');
     btn.textContent = '⏳ Loading...';
     btn.disabled = true;
