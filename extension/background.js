@@ -1116,4 +1116,32 @@ chrome.runtime.onInstalled.addListener(() => {
         'applyQueue', 'isProcessing', 'currentJobIndex', 'currentTabId', 'jobStartedAt',
         'pendingAutoApply', 'autoApplyJobUrl', 'batchMode',
     ]);
+
+    // MV3 content scripts only inject into pages that load AFTER install. A user
+    // who already has a CV in the web app and installs the extension with the
+    // app tab open would otherwise see "Extension chưa nhận data" (the relay
+    // isn't present, so the app's profile push times out) and be forced to F5.
+    // Inject the relay into those already-open app tabs now; once live it
+    // re-announces JOBFIT_EXTENSION_READY, and the app retries its push → data
+    // flows without a manual refresh. Restricted to origins we hold host
+    // permission for (localhost isn't in host_permissions, so skip it).
+    // Narrow the query to our own app origins (host_permissions) so we never
+    // read URLs of unrelated tabs — keeps the injection least-privilege.
+    chrome.tabs.query({
+        url: ['https://copoai.net/*', 'https://cv-validation.vercel.app/*'],
+    }, (tabs) => {
+        for (const tab of tabs) {
+            if (tab.id == null) continue;
+            chrome.scripting.executeScript({
+                target: { tabId: tab.id },
+                files: ['content-webapp.js'],
+            }).then(() => {
+                console.log(`[Copo] Injected relay into open app tab ${tab.id}`);
+            }).catch((e) => {
+                // Discarded tab, chrome:// interstitial, or a duplicate-injection
+                // race — the in-page guard makes a double-inject a no-op anyway.
+                console.warn(`[Copo] onInstalled inject skipped for tab ${tab.id}:`, e?.message);
+            });
+        }
+    });
 });

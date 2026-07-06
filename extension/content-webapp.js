@@ -9,6 +9,15 @@
  */
 
 (function () {
+    // ── Idempotency guard ──
+    // This file can be injected twice: once by the manifest (normal page load)
+    // and once programmatically by background.js onInstalled (into tabs that
+    // were already open when the extension was installed). Running the IIFE
+    // twice would register duplicate message listeners → double relay + double
+    // ACK. Bail if we've already set up in this document.
+    if (window.__copoWebappRelayLoaded) return;
+    window.__copoWebappRelayLoaded = true;
+
     // ── Announce extension to web app ──
     // Re-announce a few times: the React app registers its listener only
     // after hydration, which can happen AFTER document_idle — a single

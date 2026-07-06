@@ -44,19 +44,43 @@ export default function StepUploadCV() {
         || '';
 
     // A CV restored from the account (no fresh upload this session, so no
-    // cvFileName) hasn't been pushed to the extension yet — sync it once so the
-    // popup is pre-filled and auto-apply works without re-uploading.
-    const reusedSyncedRef = useRef(false);
-    useEffect(() => {
-        if (!cvData || cvFileName || reusedSyncedRef.current) return;
-        reusedSyncedRef.current = true;
+    // cvFileName) hasn't been pushed to the extension yet — sync it so the popup
+    // is pre-filled and auto-apply works without re-uploading.
+    const reusedSyncedRef = useRef(false);   // a push has successfully landed
+    const syncingRef = useRef(false);        // a push is currently in flight
+    const pushReusedCv = useCallback(() => {
+        if (!cvData || cvFileName) return;   // nothing to reuse-sync
+        if (reusedSyncedRef.current || syncingRef.current) return;
+        syncingRef.current = true;
         const profile = cvToExtensionProfile(cvData);
         syncProfileToExtension(profile, cvData).then((res) => {
+            syncingRef.current = false;
             setExtSynced(res.ok);
             setExtSyncError(res.error ?? '');
-        }).catch(() => { });
+            // Only latch on success so a first-attempt timeout (extension not
+            // yet injected) stays retryable when it announces itself later.
+            if (res.ok) reusedSyncedRef.current = true;
+        }).catch(() => { syncingRef.current = false; });
         syncCvDataToExtension(cvData).catch(() => { });
     }, [cvData, cvFileName]);
+
+    // First attempt when a restored CV appears.
+    useEffect(() => { pushReusedCv(); }, [pushReusedCv]);
+
+    // The extension can be installed AFTER this tab is already open. Then the
+    // first push above times out ("Extension chưa nhận data") because the relay
+    // content script wasn't injected yet. background.js re-injects the relay
+    // into open app tabs on install, which re-announces JOBFIT_EXTENSION_READY —
+    // retry the push on that signal so data flows without a manual F5.
+    useEffect(() => {
+        const handler = (event: MessageEvent) => {
+            if (event.source !== window) return;
+            if (event.data?.type !== 'JOBFIT_EXTENSION_READY') return;
+            pushReusedCv();
+        };
+        window.addEventListener('message', handler);
+        return () => window.removeEventListener('message', handler);
+    }, [pushReusedCv]);
 
     const handleFile = useCallback(async (file: File) => {
         if (!file.name.toLowerCase().endsWith('.pdf')) {
