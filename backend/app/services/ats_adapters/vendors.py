@@ -4,8 +4,9 @@ Adapter implementations live in sibling modules (imported via * below):
   - platforms.py : multi-tenant / global ATS engines (Workday, SuccessFactors,
     Eightfold, Phenom, Oracle HCM, Radancy, mokahr, base.vn, …)
   - vn.py        : single Vietnam-company adapters (TCBS, MoMo, VNPAY, Be, Zalo, …)
-  - one-off modules (e.g. vpbanks.py) : a single-company adapter that outgrew a
-    drive-by addition to vn.py — give it its own file instead of growing vn.py further.
+  - one-off modules (e.g. vpbanks.py, viettelhightech.py) : a single-company
+    adapter that outgrew a drive-by addition to vn.py — give it its own file
+    instead of growing vn.py further.
 
 To add an adapter: write `_is_x` / `_x` in platforms.py, vn.py, or its own module,
 then append one line to `_ADAPTERS` here (the only shared edit point) and import
@@ -18,6 +19,7 @@ from app.services.ats_adapters._shared import *  # noqa: F401,F403
 from app.services.ats_adapters.platforms import *  # noqa: F401,F403
 from app.services.ats_adapters.vn import *  # noqa: F401,F403
 from app.services.ats_adapters.vpbanks import *  # noqa: F401,F403
+from app.services.ats_adapters.viettelhightech import *  # noqa: F401,F403
 
 
 _ADAPTERS: list = [
@@ -57,4 +59,5 @@ _ADAPTERS: list = [
     ("phenom",         lambda u, h: _is_phenom_services(u), lambda u, h: _phenom_services(u)),
     ("eightfold",      _is_eightfold,                    lambda u, h: _eightfold(u)),
     ("successfactors", _is_successfactors,               lambda u, h: _successfactors(u, h)),
+    ("viettelhightech", lambda u, h: _is_viettelhightech(u), lambda u, h: _viettelhightech(u)),
 ]
