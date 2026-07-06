@@ -251,6 +251,11 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         homepage="https://vnpt.com.vn",
         career_url="https://tuyendung.vnpt.vn/viec-lam/tat-ca-viec-lam.html",
     ),
+    FeaturedCompany(
+        name="VNPT AI",
+        homepage="https://vnptai.io",
+        career_url="https://vnptai.io/vi/recruitment",
+    ),
 
     # ── IT Services / Outsourcing ─────────────────────────────────────
     FeaturedCompany(
@@ -522,6 +527,11 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         name="Thế Giới Di Động",
         homepage="https://thegioididong.com",
         career_url="https://vieclam.thegioididong.com/tuyen-dung-tat-ca-dia-diem",
+    ),
+    FeaturedCompany(
+        name="CellphoneS",
+        homepage="https://cellphones.com.vn",
+        career_url="https://tuyendung.cellphones.com.vn/viec-lam/2",
     ),
     FeaturedCompany(
         name="PNJ",
