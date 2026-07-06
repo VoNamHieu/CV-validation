@@ -791,21 +791,28 @@ def _vnpay_tuyendung(career_url: str) -> list[dict]:
     return out
 
 
-# ── VinaCapital (vinacapital.com/careers) — JS-rendered listing (render path) ─
-# The /careers page is a JS shell (plain fetch = empty); a RENDERED fetch
-# (ingest render=True) or the extension capture exposes the cards:
+# ── VinaCapital (vinacapital.com/careers) — WordPress careers, static SSR ────
+# The /careers page server-renders the job cards (no JS needed):
 #   <div class="career_ti"><a href=".../careers/<slug>/">Title</a></div>
 #   <div class="career_lo">Location</div>
-# Needs `html` (post-JS) → returns [] without it. The render=False cron falls
-# back to the debug-capture snapshot (see _CAPTURE_JOB_PATTERNS in job_ingest).
+# Fetch it directly when no html is supplied; a passed (rendered/captured) html
+# is used as-is. VN-filtered by the .career_lo location.
 def _is_vinacapital(career_url: str) -> bool:
     return (urlparse(career_url or "").netloc or "").lower().removeprefix("www.") == "vinacapital.com"
 
 
 def _vinacapital(career_url: str, html: str | None) -> list[dict]:
-    if not html:
-        return []
     from bs4 import BeautifulSoup
+    if not html:
+        try:
+            r = requests.get(career_url or "https://vinacapital.com/careers/",
+                             headers=_HTML_HEADERS, timeout=_TIMEOUT)
+            if r.status_code != 200:
+                return []
+            html = r.text
+        except Exception as e:
+            logger.info(f"[ats] vinacapital failed: {str(e)[:80]}")
+            return []
     soup = BeautifulSoup(html, "html.parser")
     out, seen = [], set()
     for a in soup.select('.career_ti a[href*="/careers/"]'):
