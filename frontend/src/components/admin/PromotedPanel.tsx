@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
     Megaphone, ArrowSquareOut, Eye, EyeSlash, Trash, Copy, Check,
-    ArrowsClockwise, SpinnerGap, CaretDown, PencilSimple,
+    ArrowsClockwise, SpinnerGap, CaretDown, PencilSimple, DownloadSimple,
 } from '@phosphor-icons/react';
 import { admin, type PromotedPage, type PromotedStatus } from '@/lib/db';
 import PromotedEditorModal from './PromotedEditorModal';
@@ -95,6 +95,31 @@ export default function PromotedPanel() {
         }).catch(() => { });
     };
 
+    // Export the current list to CSV: vị trí, công ty, level, link. RFC-4180
+    // quoting + a UTF-8 BOM so Excel renders Vietnamese correctly.
+    const exportCsv = useCallback(() => {
+        if (pages.length === 0) return;
+        const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+        const header = ['Vị trí', 'Công ty', 'Level', 'Link bài truyền thông'];
+        const rows = pages.map((p) => [
+            p.snapshot.title || p.slug,
+            p.snapshot.company_name || '',
+            p.snapshot.seniority || '',
+            `${window.location.origin}/j/${p.slug}`,
+        ].map(esc).join(','));
+        const BOM = String.fromCharCode(0xFEFF);  // Excel reads the file as UTF-8 (Vietnamese)
+        const csv = [header.map(esc).join(','), ...rows].join('\r\n');
+        const blob = new Blob([BOM + csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `trang-truyen-thong-${new Date().toISOString().slice(0, 10)}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+    }, [pages]);
+
     return (
         <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
@@ -105,6 +130,11 @@ export default function PromotedPanel() {
                         Tạo ở tab “Tìm job” → xem lại tại đây → công bố hoặc xóa. Job đóng sẽ tự xóa khi cron chạy.
                     </div>
                 </div>
+                <button className="btn-secondary" onClick={exportCsv} disabled={loading || pages.length === 0}
+                    title="Xuất CSV: vị trí, công ty, level, link"
+                    style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <DownloadSimple size={15} /> Xuất CSV
+                </button>
                 <button className="btn-secondary" onClick={load} disabled={loading}
                     style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     {loading ? <SpinnerGap size={15} style={{ animation: 'spin 0.8s linear infinite' }} /> : <ArrowsClockwise size={15} />}
