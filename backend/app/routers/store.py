@@ -10,6 +10,7 @@ either a raw ``query`` (embedded server-side) or a precomputed ``embedding``.
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -18,6 +19,8 @@ from pydantic import BaseModel, Field
 from app.db import companies, jobs, promoted
 from app.services.auth import get_current_user_id, require_admin
 from app.services.url_validator import is_allowed_url
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/store", tags=["Store"])
 
@@ -192,9 +195,13 @@ async def promote_job(body: PromoteCreate, admin: str = Depends(require_admin)):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     company_name = ""
+    company_logo: Optional[dict] = None
     if job.get("company_id"):
         company = await companies.get(job["company_id"])
         company_name = (company or {}).get("name") or ""
+        # Reuse this company's stored logo (uploaded on an earlier promoted page)
+        # so a new page auto-shows the brand without re-uploading.
+        company_logo = await companies.get_logo(job["company_id"])
 
     # Materialize the JD now — a public landing page renders server-side, but
     # many stored jobs keep an empty description (SPA/Phenom/Workday expose the
@@ -204,6 +211,11 @@ async def promote_job(body: PromoteCreate, admin: str = Depends(require_admin)):
     if full_jd and len(full_jd) > len(job.get("description") or ""):
         job = {**job, "description": full_jd}
     snapshot = promoted.build_snapshot(job, company_name=company_name)
+    # Seed the logo from the company (if it has one) so the page shows the brand
+    # out of the box. An explicit upload via PATCH still overrides it later.
+    if company_logo and company_logo.get("logo_b64"):
+        snapshot["logo_b64"] = company_logo["logo_b64"]
+        snapshot["logo_mime"] = company_logo.get("logo_mime") or "image/png"
     jd_chars = len(snapshot.get("description") or "")
 
     # Idempotent re-create: refresh the snapshot on the existing page instead of
@@ -284,16 +296,59 @@ async def get_promoted_logo(slug: str, preview: Optional[str] = None):
 _MAX_LOGO_B64 = 750_000
 
 
+async def _mirror_logo_to_company(page_row: dict, logo_b64: str, logo_mime: Optional[str]) -> None:
+    """Save a promoted page's uploaded logo as the linked company's source logo
+    (page.job_id → jobs.company_id → companies). Best-effort: a failure here must
+    never break saving the page, so it's swallowed with a log line."""
+    try:
+        job_id = page_row.get("job_id")
+        if not job_id:
+            return
+        job = await jobs.get(job_id)
+        company_id = (job or {}).get("company_id")
+        if not company_id:
+            return
+        await companies.set_logo(company_id, logo_b64=logo_b64, logo_mime=logo_mime)
+    except Exception:  # noqa: BLE001
+        logger.info("mirror promoted logo → company failed", exc_info=True)
+
+
 @router.patch("/promoted/{page_id}")
 async def patch_promoted(page_id: str, body: PromotePatch, _admin: str = Depends(require_admin)):
+    logo_b64 = None
     if body.snapshot is not None:
         b64 = body.snapshot.get("logo_b64")
         if isinstance(b64, str) and len(b64) > _MAX_LOGO_B64:
             raise HTTPException(status_code=413, detail="Logo quá lớn (tối đa ~512KB).")
+        if isinstance(b64, str) and b64:
+            logo_b64 = b64
     row = await promoted.update(page_id, **body.model_dump(exclude_none=True))
     if not row:
         raise HTTPException(status_code=404, detail="Page not found")
+    # A fresh logo upload becomes the company's source logo (reused on other
+    # pages + surfaces). Only when the PATCH actually carried logo bytes.
+    if logo_b64:
+        await _mirror_logo_to_company(row, logo_b64, body.snapshot.get("logo_mime"))
     return row
+
+
+@router.get("/companies/{company_id}/logo")
+async def get_company_logo(company_id: str):
+    """PUBLIC — serve a company's stored logo as image bytes (real URL, usable as
+    <img src>). 404 when the company has no uploaded logo (callers fall back to
+    the Clearbit-from-domain guess or a letter avatar)."""
+    import base64
+    from fastapi import Response
+    logo = await companies.get_logo(company_id)
+    b64 = (logo or {}).get("logo_b64")
+    if not b64:
+        raise HTTPException(status_code=404, detail="No logo")
+    try:
+        data = base64.b64decode(b64)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Bad logo")
+    return Response(content=data, media_type=(logo or {}).get("logo_mime") or "image/png",
+                    headers={"Cache-Control": "public, max-age=300"})
 
 
 @router.delete("/promoted/{page_id}")
