@@ -95,3 +95,27 @@ async def touch_swept(company_id: str) -> None:
     await pool.execute(
         "UPDATE companies SET last_swept_at = now() WHERE id = $1", company_id
     )
+
+
+# ── Logo (deliberately excluded from _COLS so listings don't drag the bytes) ──
+
+async def set_logo(company_id: str, *, logo_b64: str, logo_mime: Optional[str] = None) -> None:
+    """Store an uploaded logo (base64) as the company's source logo. Overwrite —
+    the latest deliberate upload wins. Mirrored here from a promoted page so the
+    brand image is reused everywhere instead of the Clearbit-from-domain guess."""
+    pool = await get_pool()
+    await pool.execute(
+        "UPDATE companies SET logo_b64 = $2, logo_mime = $3 WHERE id = $1",
+        company_id, logo_b64, logo_mime or "image/png",
+    )
+
+
+async def get_logo(company_id: str) -> Optional[dict]:
+    """Return ``{logo_b64, logo_mime}`` for a company, or None. Read via the
+    dedicated logo endpoint / promoted-seed path only — never in list views."""
+    pool = await get_pool()
+    return row_to_dict(
+        await pool.fetchrow(
+            "SELECT logo_b64, logo_mime FROM companies WHERE id = $1", company_id
+        )
+    )

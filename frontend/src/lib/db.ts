@@ -142,6 +142,12 @@ export const catalog = {
     },
     getJob: (id: string) => req<Job>(`/api/store/jobs/${id}`),
 
+    // Real HTTP URL of a company's stored (uploaded) logo. 404s when the company
+    // has none — use it as an <img src> with an onError fallback to a
+    // domain/Clearbit guess or a letter avatar, e.g.:
+    //   <img src={catalog.companyLogoUrl(id)} onError={() => setFailed(true)} />
+    companyLogoUrl: (companyId: string) => `/api/store/companies/${encodeURIComponent(companyId)}/logo`,
+
     searchJobs: (body: {
         query?: string; embedding?: number[];
         roleFamily?: string; industry?: string; limit?: number;
