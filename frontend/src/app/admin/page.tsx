@@ -10,19 +10,20 @@ import { Suspense, useCallback, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
     ShieldCheck, MagnifyingGlass, Coins, ArrowLeft, SpinnerGap, CheckCircle, WarningCircle,
-    Heartbeat, PlugsConnected, ChatCircleDots, FunnelSimple, Briefcase, Megaphone,
+    Heartbeat, PlugsConnected, ChatCircleDots, FunnelSimple, Briefcase, Megaphone, UsersThree,
 } from '@phosphor-icons/react';
 import { useAuth } from '@/lib/auth';
-import { admin } from '@/lib/db';
+import { admin, type AdminRole } from '@/lib/db';
 import MonitorPanel from '@/components/admin/MonitorPanel';
 import CompatPanel from '@/components/admin/CompatPanel';
 import FeedbackPanel from '@/components/admin/FeedbackPanel';
 import AnalyticsPanel from '@/components/admin/AnalyticsPanel';
 import JobSearchPanel from '@/components/admin/JobSearchPanel';
 import PromotedPanel from '@/components/admin/PromotedPanel';
+import MembersPanel from '@/components/admin/MembersPanel';
 
 type Access = 'checking' | 'granted' | 'denied' | 'error';
-type Tab = 'credits' | 'jobs' | 'promoted' | 'analytics' | 'monitor' | 'compat' | 'feedback';
+type Tab = 'credits' | 'jobs' | 'promoted' | 'analytics' | 'monitor' | 'compat' | 'feedback' | 'members';
 
 const QUICK_AMOUNTS = [50, 100, 250, 500];
 const TABS: { id: Tab; label: string; icon: typeof Coins }[] = [
@@ -33,6 +34,7 @@ const TABS: { id: Tab; label: string; icon: typeof Coins }[] = [
     { id: 'monitor', label: 'Link monitor', icon: Heartbeat },
     { id: 'compat', label: 'Compatibility', icon: PlugsConnected },
     { id: 'feedback', label: 'Feedback', icon: ChatCircleDots },
+    { id: 'members', label: 'Phân quyền', icon: UsersThree },
 ];
 
 function AdminConsole() {
@@ -40,6 +42,7 @@ function AdminConsole() {
     const params = useSearchParams();
     const { user, enabled, loading: authLoading } = useAuth();
     const [access, setAccess] = useState<Access>('checking');
+    const [role, setRole] = useState<AdminRole>('member');
     const [tab, setTab] = useState<Tab>(() => {
         const t = params.get('tab');
         return (TABS.some((x) => x.id === t) ? t : 'credits') as Tab;
@@ -72,8 +75,8 @@ function AdminConsole() {
         (async () => {
             for (let attempt = 0; attempt < 4; attempt++) {
                 try {
-                    await admin.check();
-                    if (!cancelled) setAccess('granted');
+                    const r = await admin.check();
+                    if (!cancelled) { setRole(r.role); setAccess('granted'); }
                     return;
                 } catch (e) {
                     const status = (e as { status?: number })?.status;
@@ -279,6 +282,7 @@ function AdminConsole() {
                 {tab === 'monitor' && <MonitorPanel />}
                 {tab === 'compat' && <CompatPanel />}
                 {tab === 'feedback' && <FeedbackPanel />}
+                {tab === 'members' && <MembersPanel role={role} />}
             </div>
             <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
         </div>

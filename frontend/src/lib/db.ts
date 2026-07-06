@@ -208,9 +208,31 @@ export interface AnalyticsTimeseries {
     spend: number[];
 }
 
+export type AdminRole = 'super' | 'member';
+
+export interface AdminMember {
+    email: string;
+    added_by: string | null;
+    created_at: string;
+}
+
 export const admin = {
-    // 200 when the caller is an admin; throws (403) otherwise. Used to gate the page.
-    check: () => req<{ ok: boolean }>(`/api/admin/check`, { auth: true }),
+    // 200 when the caller is an admin; throws (403) otherwise. Used to gate the
+    // page. `role` distinguishes env SUPER admins from UI-granted members so the
+    // UI can hide member-only-forbidden actions (e.g. removing members).
+    check: () => req<{ ok: boolean; role: AdminRole; email: string }>(`/api/admin/check`, { auth: true }),
+
+    // ── Admin members (phân quyền) ──
+    listMembers: () =>
+        req<{ super_admins: string[]; members: AdminMember[] }>(`/api/admin/members`, { auth: true }),
+    addMember: (email: string) =>
+        req<AdminMember>(`/api/admin/members`, {
+            method: 'POST', body: JSON.stringify({ email }), auth: true,
+        }),
+    removeMember: (email: string) =>
+        req<{ ok: boolean; email: string }>(
+            `/api/admin/members/${encodeURIComponent(email)}`, { method: 'DELETE', auth: true },
+        ),
     lookupUser: (email: string) =>
         req<{ user_id: string; email: string; balance: number }>(
             `/api/admin/users/lookup?email=${encodeURIComponent(email)}`, { auth: true },

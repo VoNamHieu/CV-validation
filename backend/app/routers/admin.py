@@ -15,13 +15,19 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from app.db import admin_members as admin_members_repo
 from app.db import analytics as analytics_repo
 from app.db import credits as credits_repo
 from app.db import events as events_repo
 from app.db import feedback as feedback_repo
 from app.db import jobs as jobs_repo
 from app.db import profiles as profiles_repo
-from app.services.auth import require_admin
+from app.services.auth import (
+    get_admin_identity,
+    require_admin,
+    require_super_admin,
+    super_admin_emails,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +38,62 @@ MAX_GRANT = 100_000
 
 
 @router.get("/check")
-async def check(_admin: str = Depends(require_admin)):
-    """Cheap probe the frontend uses to gate the admin page (200 = admin)."""
-    return {"ok": True}
+async def check(admin: dict = Depends(get_admin_identity)):
+    """Cheap probe the frontend uses to gate the admin page (200 = admin).
+    Returns the caller's role so the UI can hide member-only-forbidden actions
+    (``super`` = env ADMIN_EMAILS, ``member`` = UI-granted)."""
+    return {"ok": True, "role": admin["role"], "email": admin["email"]}
+
+
+# ── Admin members (UI-granted admins) ─────────────────────────────────────────
+# SUPER admins come from the ADMIN_EMAILS env and are shown read-only. MEMBER
+# admins are rows only a SUPER admin can add or remove; members get full admin
+# rights but can't touch the roster — so a grant can't escalate or lock out the
+# env-configured operators. Any admin may VIEW the roster.
+
+
+@router.get("/members")
+async def list_members(_admin: str = Depends(require_admin)):
+    """The full admin roster: env SUPER admins (read-only) + UI-granted members."""
+    return {
+        "super_admins": sorted(super_admin_emails()),
+        "members": await admin_members_repo.list_all(),
+    }
+
+
+class MemberBody(BaseModel):
+    email: str = Field(..., min_length=3, max_length=200)
+
+
+@router.post("/members")
+async def add_member(body: MemberBody, admin: dict = Depends(get_admin_identity)):
+    """Grant member admin to an email (full rights except removing members).
+    SUPER-admin only — members can view the roster but not change it, so admin
+    grants can't escalate past the env-configured operators. Idempotent."""
+    if admin["role"] != "super":
+        raise HTTPException(
+            status_code=403,
+            detail="Chỉ super admin (cấu hình ở backend) mới được cấp quyền",
+        )
+    email = body.email.strip().lower()
+    if "@" not in email:
+        raise HTTPException(status_code=400, detail="Email không hợp lệ")
+    if email in super_admin_emails():
+        raise HTTPException(
+            status_code=400,
+            detail="Email này đã là super admin (cấu hình ở backend)",
+        )
+    row = await admin_members_repo.add(email, added_by=admin["email"])
+    return row
+
+
+@router.delete("/members/{email}")
+async def remove_member(email: str, _admin: str = Depends(require_super_admin)):
+    """Revoke member admin. SUPER-admin only — members can't remove anyone."""
+    removed = await admin_members_repo.remove(email.strip().lower())
+    if not removed:
+        raise HTTPException(status_code=404, detail="Không tìm thấy thành viên này")
+    return {"ok": True, "email": email.strip().lower()}
 
 
 @router.get("/users/lookup")
