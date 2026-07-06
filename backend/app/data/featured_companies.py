@@ -364,11 +364,6 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         career_url="https://www.acbjobs.com.vn/alljobs",
     ),
     FeaturedCompany(
-        name="Sacombank",
-        homepage="https://www.sacombank.com.vn",
-        career_url="https://sacombankcareer.com/viewalljobs/",
-    ),
-    FeaturedCompany(
         name="MSB",
         homepage="https://msb.com.vn",
         career_url="https://jobs.msb.com.vn",
@@ -641,11 +636,6 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         career_url="https://www.hellmann.com/en/career",
     ),
     FeaturedCompany(
-        name="Viettel Post",
-        homepage="https://viettelpost.com.vn",
-        career_url="https://viettelpost.com.vn/tuyen-dung/",
-    ),
-    FeaturedCompany(
         name="Gemadept",
         homepage="https://www.gemadept.com.vn",
         career_url="https://www.gemadept.com.vn/tuyen-dung/",
@@ -729,11 +719,6 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         name="Vinschool",
         homepage="https://vinschool.edu.vn",
         career_url="https://tuyendung.vinschool.edu.vn/jobs?location=&type=&dept=684,430,431,432,433&return=1",
-    ),
-    FeaturedCompany(
-        name="Vinmec",
-        homepage="https://vinmec.com",
-        career_url="https://vinmec.com/vie/tuyen-dung",
     ),
 
     # ── Electronics ───────────────────────────────────────────────────
