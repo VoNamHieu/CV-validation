@@ -135,6 +135,7 @@ async def test_spend_without_request_id_keeps_legacy_behavior(db):
 def _dev_auth(monkeypatch):
     monkeypatch.delenv("SUPABASE_URL", raising=False)
     monkeypatch.delenv("SUPABASE_JWT_SECRET", raising=False)
+    monkeypatch.setenv("ALLOW_DEV_AUTH", "1")
 
 
 def test_refund_route_disabled_without_key(client, monkeypatch):
