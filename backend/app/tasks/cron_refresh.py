@@ -1,27 +1,36 @@
 """Periodic store refresh — meant to run as a Railway Cron service.
 
-Four jobs, in order:
-  1. ``ingest_featured_ats`` — re-pull every featured company's ATS feed into
-     the store (upsert new, refresh existing, deactivate ones that vanished).
-     This is what keeps search fresh + prunes dead rows.
-  2. ``embed_backfill`` — vectorize any job upserted above (or from a prior
-     run) that's still missing its embedding, so it's reachable by semantic
-     search (same helper the admin ingest trigger uses — see
-     app/services/embed_backfill.py).
-  3. a compat probe over every featured company that came back with 0 jobs
-     this run (known-ATS feed gone quiet, OR no adapter at all yet) — tells
-     apart "the company genuinely has 0 matching postings right now" from
-     "our adapter/crawl for this company broke" from "nobody's built an
-     adapter for this bespoke site yet, but it does render real jobs"
-     (mirrors POST /compat/scan, minus the admin HTTP hop). link_health (#4)
-     only catches dead JOB-DETAIL links; this catches the company/feed level
-     going dark — for ALL featured companies, not just already-ATS ones.
-  4. a link-health scan over the featured cache — validate job URLs and log the
-     broken/suspect ones (mirrors POST /monitor/scan, minus the admin HTTP hop).
+Four steps, in order — each wrapped in its own try/except (one step failing
+logs and moves on; it does NOT abort the rest, since with restartPolicyType =
+"NEVER" a hard-abort just means the whole refresh waits 8 hours):
+
+  1. ``ingest_featured_ats`` — two-phase pull of every featured company's ATS
+     feed into the store (see job_ingest.py's docstring for the phase split).
+     Phase 2 (render + SPA-sniff) only runs when CRON_RENDER=1, and records a
+     compat verdict straight from its own render result for every company it
+     touches — there's no separate compat-probe step anymore, since that
+     would just redo the same render/sniff work a moment later.
+  2. ``embed_backfill`` — vectorize any job still missing its embedding, so
+     it's reachable by semantic search (shared with the admin ingest trigger
+     — see app/services/embed_backfill.py).
+  3. a link-health scan over a RANDOM sample of the featured cache — validate
+     job URLs and log the broken/suspect ones (mirrors POST /monitor/scan,
+     minus the admin HTTP hop). Random, not a fixed prefix slice, so every
+     job gets a turn across enough runs instead of only ever checking the
+     same first 300.
+  4. prune promoted landing pages whose backing job just went inactive.
+
+The whole run is capped by an overall timeout (_TOTAL_TIMEOUT) — a stuck
+render/DB call fails the run instead of blocking the next 8h cycle forever.
 
 Runs as a ONE-OFF process (starts, works, exits) — exactly Railway's cron model.
 No HTTP, no admin token: it calls the service layer directly. Needs the same
-env as the web service (DATABASE_URL, GEMINI_API_KEY, …).
+env as the web service (DATABASE_URL, GEMINI_API_KEY, …), plus:
+  CRON_RENDER=1        — enable phase 2 (render + SPA-sniff) for companies
+                         phase 1 left empty. Off by default (cheap-pass only).
+  CRON_RENDER_LIMIT     — cap how many phase-1-empty companies phase 2
+                         renders this run (unset = all of them). Meant for a
+                         controlled first rollout, not steady-state use.
 
 Invoke (Railway cron "Custom Start Command", WORKDIR /app):
     python -m app.tasks.cron_refresh
@@ -31,6 +40,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import random
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("cron_refresh")
@@ -38,41 +48,16 @@ logger = logging.getLogger("cron_refresh")
 # How many featured job URLs to health-check per run (bounded — keep the cron short).
 _SCAN_LIMIT = int(os.getenv("CRON_SCAN_LIMIT", "300"))
 _SCAN_CONCURRENCY = 12
-_COMPAT_CONCURRENCY = 4  # compat probe renders (SPA sniff) — keep light
-
-
-async def _compat_check(empty_companies: list[dict]) -> dict:
-    """For every featured company this run's ingest found 0 jobs for —
-    known-ATS feed gone quiet, or no adapter at all — escalate to the full
-    compat probe (adds render + SPA-sniff + capture-check) and log the
-    verdict. Distinguishes "empty feed" (fine — e.g. a company simply has no
-    VN openings right now) from "needs_new_adapter"/"unsupported" (broken or
-    never-built extractor) from "supported_render" (a real adapter would
-    work, nobody's written one yet)."""
-    if not empty_companies:
-        return {"checked": 0, "flagged": 0}
-
-    from app.services import career_compat
-
-    sem = asyncio.Semaphore(_COMPAT_CONCURRENCY)
-
-    async def check(c: dict) -> dict:
-        async with sem:
-            res = await career_compat.probe(c["career_url"])
-        await career_compat.record(c["career_url"], res, company=c["name"], source="cron")
-        return {**c, **res}
-
-    results = await asyncio.gather(*[check(c) for c in empty_companies], return_exceptions=True)
-    flagged = [r for r in results if isinstance(r, dict) and not r.get("usable")]
-    for r in flagged:
-        logger.warning("[cron] %s (%s) ATS feed empty — verdict=%s detail=%s",
-                        r["name"], r.get("ats"), r.get("verdict"), r.get("detail"))
-    return {"checked": len(empty_companies), "flagged": len(flagged)}
+_TOTAL_TIMEOUT = 90 * 60  # hard ceiling for the whole run; cadence is 8h
 
 
 async def _link_scan() -> dict:
-    """Validate featured job URLs and log broken/suspect ones. Self-contained
-    mirror of the /monitor/scan route (no admin dependency)."""
+    """Validate a random sample of featured job URLs and log broken/suspect
+    ones. Self-contained mirror of the /monitor/scan route (no admin dep).
+
+    Random sample, not jobs[:_SCAN_LIMIT] — a fixed prefix slice would only
+    ever re-check the same first N URLs every run (stably ordered cache),
+    leaving everything past that index never health-checked."""
     from app.routers.career import _read_featured_entry
     from app.services import link_health
 
@@ -85,7 +70,7 @@ async def _link_scan() -> dict:
             url = (j.get("url") or "").strip()
             if url:
                 jobs.append({"url": url, "title": j.get("title", ""), "company": cname})
-    jobs = jobs[:_SCAN_LIMIT]
+    jobs = random.sample(jobs, min(len(jobs), _SCAN_LIMIT))
 
     sem = asyncio.Semaphore(_SCAN_CONCURRENCY)
 
@@ -97,9 +82,12 @@ async def _link_scan() -> dict:
     results = await asyncio.gather(*[check(j) for j in jobs], return_exceptions=True)
     logged = {e.get("url") for e in await link_health.list_links()}
 
-    broken = unknown = ok = 0
+    broken = unknown = ok = failed = 0
     for r in results:
-        if isinstance(r, Exception) or not isinstance(r, dict):
+        if isinstance(r, BaseException):
+            # A systemic failure (Redis down, DNS broken in the container)
+            # must NOT look like a clean small run — count it, don't drop it.
+            failed += 1
             continue
         st = r.get("status")
         if st == "ok":
@@ -115,7 +103,52 @@ async def _link_scan() -> dict:
             source="cron", status=st, reason=r.get("reason", ""),
             http_code=r.get("http_code"), detail=r.get("detail", ""),
         )
-    return {"scanned": len(jobs), "broken": broken, "unknown": unknown, "ok": ok}
+    if failed:
+        sample = next((r for r in results if isinstance(r, BaseException)), None)
+        logger.warning("[cron] link scan: %d/%d check(s) raised an exception (sample: %s)",
+                       failed, len(jobs), str(sample)[:200])
+    return {"scanned": len(jobs), "broken": broken, "unknown": unknown, "ok": ok, "failed": failed}
+
+
+async def _run() -> None:
+    render = os.getenv("CRON_RENDER") == "1"
+    render_limit_env = os.getenv("CRON_RENDER_LIMIT")
+    render_limit = int(render_limit_env) if render_limit_env else None
+
+    try:
+        from app.services.job_ingest import ingest_featured_ats
+        logger.info("[cron] ingest_featured_ats starting… (render=%s, render_limit=%s)",
+                   render, render_limit)
+        ingest = await ingest_featured_ats(render=render, render_limit=render_limit)
+        logger.info("[cron] ingest done: %s", ingest)
+    except Exception:
+        logger.exception("[cron] ingest_featured_ats failed — continuing with remaining steps")
+
+    try:
+        from app.services.embed_backfill import embed_backfill
+        logger.info("[cron] embedding backfill starting…")
+        embedded = await embed_backfill()
+        logger.info("[cron] embedding backfill done: %d job(s) embedded", embedded)
+    except Exception:
+        logger.exception("[cron] embedding backfill failed — continuing with remaining steps")
+
+    try:
+        logger.info("[cron] link scan starting (limit=%s)…", _SCAN_LIMIT)
+        scan = await _link_scan()
+        logger.info("[cron] link scan done: %s", scan)
+    except Exception:
+        logger.exception("[cron] link scan failed — continuing with remaining steps")
+
+    try:
+        # Prune promoted landing pages whose backing job just went inactive
+        # (deactivate_missing ran during ingest above) — a closed posting
+        # shouldn't keep a public "apply" page.
+        from app.db import promoted
+        dead = await promoted.delete_dead()
+        logger.info("[cron] promoted cleanup: deleted %d dead page(s)%s",
+                   len(dead), (" — " + ", ".join(dead[:20])) if dead else "")
+    except Exception:
+        logger.exception("[cron] promoted cleanup failed")
 
 
 async def main() -> None:
@@ -123,35 +156,9 @@ async def main() -> None:
     from app.services.browser_pool import close_browser
 
     try:
-        from app.services.job_ingest import ingest_featured_ats
-        logger.info("[cron] ingest_featured_ats starting…")
-        ingest = await ingest_featured_ats(render=False)
-        logger.info("[cron] ingest done: %s", ingest)
-
-        from app.services.embed_backfill import embed_backfill
-        logger.info("[cron] embedding backfill starting…")
-        embedded = await embed_backfill()
-        logger.info("[cron] embedding backfill done: %d job(s) embedded", embedded)
-
-        empty = ingest.get("ats_feed_empty") or []
-        logger.info("[cron] compat check starting (%d empty feed(s))…", len(empty))
-        compat = await _compat_check(empty)
-        logger.info("[cron] compat check done: %s", compat)
-
-        logger.info("[cron] link scan starting (limit=%s)…", _SCAN_LIMIT)
-        scan = await _link_scan()
-        logger.info("[cron] link scan done: %s", scan)
-
-        # Prune promoted landing pages whose backing job just went inactive
-        # (deactivate_missing ran during ingest above) — a closed posting
-        # shouldn't keep a public "apply" page.
-        from app.db import promoted
-        dead = await promoted.delete_dead()
-        logger.info("[cron] promoted cleanup: deleted %d dead page(s)%s",
-                    len(dead), (" — " + ", ".join(dead[:20])) if dead else "")
-    except Exception:
-        logger.exception("[cron] refresh failed")
-        raise
+        await asyncio.wait_for(_run(), timeout=_TOTAL_TIMEOUT)
+    except asyncio.TimeoutError:
+        logger.error("[cron] refresh exceeded %ds hard timeout — aborting this run", _TOTAL_TIMEOUT)
     finally:
         await close_browser()
         await close_pool()

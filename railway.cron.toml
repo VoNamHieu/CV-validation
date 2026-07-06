@@ -23,9 +23,24 @@
 #   REDIS_URL        — reference the web service's value. The link-scan step reads
 #                      the featured-jobs cache from Redis; without it the scan
 #                      finds 0 URLs (ingest still works — it hits ATS directly).
+#   CRON_RENDER=1    — turns on phase 2 of the ingest (render + SPA-sniff for
+#                      whatever phase 1's cheap pass left empty, ~100+
+#                      companies). Without it the cron only does the cheap
+#                      pass — fast, but misses every company that needs a
+#                      render to find its jobs. This is a real browser
+#                      (Playwright/Chromium) at concurrency 5 — set the
+#                      service's RAM limit to ~4GB in Railway (Settings →
+#                      Resources); measured peak is ~2.5–3GB.
 #
 # Optional:
-#   CRON_SCAN_LIMIT  — how many featured job URLs the link scan checks (default 300).
+#   CRON_SCAN_LIMIT   — how many featured job URLs the link scan checks (default 300).
+#   CRON_RENDER_LIMIT — caps how many phase-1-empty companies phase 2 renders
+#                      per run. Unset = all of them (~25-30 min total runtime
+#                      with CRON_RENDER=1). Use a small value (e.g. 20) only
+#                      for a controlled first rollout — leave unset in
+#                      steady state, since a permanent cap would keep
+#                      re-rendering the same first N companies every cycle
+#                      and never reach the rest.
 
 [build]
 builder = "DOCKERFILE"
