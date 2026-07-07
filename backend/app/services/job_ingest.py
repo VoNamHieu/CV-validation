@@ -45,20 +45,33 @@ async def _render(url: str) -> str:
         return ""
 
 
-async def _spa_sniff(url: str) -> list[dict]:
+async def _spa_sniff(url: str, html: str | None = None) -> list[dict]:
     """Last-resort acquisition: render the page and watch its XHR for the job
     feed. Many career SPAs (Grab, Siemens, EY, DHL, Renesas, KiotViet, Sea…)
     render jobs the static ATS parser can't see; this is the same path
     career_compat.probe uses. Best-effort → [] on failure.
+
+    OutSystems career portals (One Mount, …) get the dedicated ``outsystems_jobs``
+    path instead of the generic sniff: the generic ``_items_to_jobs`` fallback
+    builds ``/job/{id}`` (singular) for records that carry no href, but the real
+    detail route is ``/jobs/{JobRequestId}`` (plural) — a one-char mismatch that
+    404s every link. ``outsystems_jobs`` knows the right prefix and replays the
+    screenservices feed with full paging. Detected from the rendered (or raw)
+    shell's OutSystems bootstrap markers.
 
     VN guard: if some results are VN-tagged, keep only those; if all are tagged
     but none VN, it's a global page with no VN roles → drop (don't flood the
     store with foreign jobs); if none are location-tagged (VN-domestic sites
     often aren't), keep them all."""
     try:
-        from app.services.spa_sniff import sniff_jobs
+        from app.services.spa_sniff import sniff_jobs, outsystems_jobs, is_outsystems
         from app.services.ats_adapters.core import _is_vn_loc, _finalize
-        jobs = await asyncio.wait_for(sniff_jobs(url), timeout=50)
+        if is_outsystems(html or ""):
+            jobs = await asyncio.wait_for(outsystems_jobs(url), timeout=70)
+            for j in (jobs or []):
+                j.setdefault("source", "outsystems")
+        else:
+            jobs = await asyncio.wait_for(sniff_jobs(url), timeout=50)
     except Exception as e:  # noqa: BLE001
         logger.info("ingest: spa_sniff failed for %s: %s", url, str(e)[:80])
         return []
@@ -260,8 +273,9 @@ async def _one_heavy(c, sem: asyncio.Semaphore) -> dict:
                 jobs_list = await asyncio.to_thread(fetch_ats_jobs, c.career_url, html)
             if not jobs_list:
                 # SPA whose jobs load via XHR — the static ATS parser can't
-                # read them; watch the network instead.
-                jobs_list = await _spa_sniff(c.career_url)
+                # read them; watch the network instead. Pass the rendered HTML
+                # so OutSystems portals route to their dedicated adapter.
+                jobs_list = await _spa_sniff(c.career_url, html)
 
         verdict = career_compat.verdict_from_signals(
             c.career_url, http_ok=bool(html), html=html or "",
