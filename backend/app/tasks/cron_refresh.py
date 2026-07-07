@@ -1,6 +1,6 @@
 """Periodic store refresh — meant to run as a Railway Cron service.
 
-Four steps, in order — each wrapped in its own try/except (one step failing
+Five steps, in order — each wrapped in its own try/except (one step failing
 logs and moves on; it does NOT abort the rest, since with restartPolicyType =
 "NEVER" a hard-abort just means the whole refresh waits 8 hours):
 
@@ -19,6 +19,12 @@ logs and moves on; it does NOT abort the rest, since with restartPolicyType =
      job gets a turn across enough runs instead of only ever checking the
      same first 300.
   4. prune promoted landing pages whose backing job just went inactive.
+  5. ``purge_dead`` — hard-DELETE jobs that have stayed dead past a grace
+     window (~3 cycles). Live jobs are never touched; a job only ages out once
+     it's been gone from every feed long enough that a transient miss is ruled
+     out (see app/db/jobs.py::purge_dead). This is the "if the link dies, delete
+     it — don't keep churning status" model: search hides a dead job the moment
+     it leaves the feed (step 1's liveness diff), then this step removes the row.
 
 The whole run is capped by an overall timeout (_TOTAL_TIMEOUT) — a stuck
 render/DB call fails the run instead of blocking the next 8h cycle forever.
@@ -31,6 +37,9 @@ env as the web service (DATABASE_URL, GEMINI_API_KEY, …), plus:
   CRON_RENDER_LIMIT     — cap how many phase-1-empty companies phase 2
                          renders this run (unset = all of them). Meant for a
                          controlled first rollout, not steady-state use.
+  CRON_DEAD_GRACE_HOURS — how long a job stays gone before it's hard-deleted
+                         (default 20 ≈ 3 cycles). Larger = more forgiving of
+                         transient outages, slower to shed dead rows.
 
 Invoke (Railway cron "Custom Start Command", WORKDIR /app):
     python -m app.tasks.cron_refresh
@@ -49,6 +58,10 @@ logger = logging.getLogger("cron_refresh")
 _SCAN_LIMIT = int(os.getenv("CRON_SCAN_LIMIT", "300"))
 _SCAN_CONCURRENCY = 12
 _TOTAL_TIMEOUT = 90 * 60  # hard ceiling for the whole run; cadence is 8h
+# A dead job (left its feed / apply-gate found it dead) is hard-DELETED once it
+# has stayed gone this long — ~3 cron cycles at 8h, so a 1-cycle transient miss
+# reactivates instead of being deleted. See jobs.purge_dead.
+_DEAD_GRACE_HOURS = int(os.getenv("CRON_DEAD_GRACE_HOURS", "20"))
 
 
 async def _link_scan() -> dict:
@@ -162,6 +175,17 @@ async def _run() -> None:
                    len(dead), (" — " + ", ".join(dead[:20])) if dead else "")
     except Exception:
         logger.exception("[cron] promoted cleanup failed")
+
+    try:
+        # Hard-delete jobs that have been dead (gone from feed / apply-gate dead)
+        # past the grace window. Runs AFTER promoted cleanup so a job's landing
+        # page is already gone by the time its row is purged. Live jobs are
+        # never touched — last_seen_at is bumped every cycle they're in a feed.
+        from app.db import jobs as jobs_repo
+        purged = await jobs_repo.purge_dead(_DEAD_GRACE_HOURS)
+        logger.info("[cron] purged %d job(s) dead > %dh", purged, _DEAD_GRACE_HOURS)
+    except Exception:
+        logger.exception("[cron] dead-job purge failed")
 
 
 async def main() -> None:

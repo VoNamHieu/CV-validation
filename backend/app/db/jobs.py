@@ -290,6 +290,34 @@ async def deactivate_missing(company_id: str, live_external_ids: Sequence[str]) 
     return len(rows)
 
 
+async def purge_dead(grace_hours: int = 20) -> int:
+    """Hard-DELETE jobs that have stayed dead past the grace window.
+
+    A job is purged only when it's both inactive AND hasn't been seen alive in
+    any feed for ``grace_hours``. ``last_seen_at`` is bumped by ``upsert`` every
+    time a live posting is re-ingested, so a job still present in ANY feed can
+    never be older than one cron cycle — only genuinely-gone postings age out.
+    The grace window (~3 cycles at the 8h cadence) is the safety net the soft-
+    deactivate model gave us for free: a single transient bad fetch that drops a
+    job for one cycle won't delete it — the next good ingest re-upserts it
+    (``is_active=true``, ``last_seen_at=now()``) and it's protected again.
+
+    ``promoted_jobs.job_id`` is a soft ref (no FK) and ``saved_jobs`` snapshots
+    its own copy, so this never orphans a live landing page or a user's saved
+    job. ``promoted.delete_dead`` runs earlier each cycle and clears a landing
+    page the moment its job first goes inactive — long before this purge fires.
+    Returns rows deleted."""
+    pool = await get_pool()
+    rows = await pool.fetch(
+        "DELETE FROM jobs WHERE NOT is_active "
+        "AND last_seen_at IS NOT NULL "
+        "AND last_seen_at < now() - make_interval(hours => $1) "
+        "RETURNING id",
+        grace_hours,
+    )
+    return len(rows)
+
+
 async def mark_dead_by_url(source_url: str, reason: str) -> int:
     """Deactivate any active job with this source_url (apply-time gate found it
     dead). Returns rows affected (0 if the url isn't in the store)."""

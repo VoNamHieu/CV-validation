@@ -34,6 +34,12 @@
 #
 # Optional:
 #   CRON_SCAN_LIMIT   — how many featured job URLs the link scan checks (default 300).
+#   CRON_DEAD_GRACE_HOURS — how long a job may stay gone from its feed before the
+#                      run HARD-DELETES it (default 20h ≈ 3 cycles). A job still
+#                      in any feed is re-seen every cycle and never ages out;
+#                      only genuinely-gone postings are purged. Raise it to be
+#                      more forgiving of a flaky ATS, lower it to shed dead rows
+#                      faster.
 #   CRON_RENDER_LIMIT — caps how many phase-1-empty companies phase 2 renders
 #                      per run. Unset = all of them (~25-30 min total runtime
 #                      with CRON_RENDER=1). Use a small value (e.g. 20) only
