@@ -21,4 +21,4 @@ export const TOPUP_PACKS = [
 // Bank-transfer memo. The user's email is appended so transfers can be matched.
 export const TRANSFER_NOTE = 'top-up tokens Copo';
 
-export const SUPPORT_EMAIL = 'vonamhieu.work@gmail.com';
+export const SUPPORT_EMAIL = 'charles@copoai.net';

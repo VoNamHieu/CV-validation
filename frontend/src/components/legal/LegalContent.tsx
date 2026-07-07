@@ -109,7 +109,7 @@ export function TermsContent() {
 
             <h2>15. Liên hệ</h2>
             <p>Mọi câu hỏi về các điều khoản này, vui lòng liên hệ:{' '}
-                <a href="mailto:vonamhieu.work@gmail.com">vonamhieu.work@gmail.com</a>.</p>
+                <a href="mailto:charles@copoai.net">charles@copoai.net</a>.</p>
         </>
     );
 }
@@ -169,7 +169,7 @@ export function PrivacyContent() {
             <h2>5. Thời gian lưu trữ và quyền xoá dữ liệu</h2>
             <p>Dữ liệu của bạn được lưu trữ trong thời gian tài khoản còn hoạt động. Bạn có thể yêu cầu xoá tài
                 khoản và dữ liệu liên quan bất kỳ lúc nào bằng cách liên hệ{' '}
-                <a href="mailto:vonamhieu.work@gmail.com">vonamhieu.work@gmail.com</a>. Một số dữ liệu ứng tuyển
+                <a href="mailto:charles@copoai.net">charles@copoai.net</a>. Một số dữ liệu ứng tuyển
                 đã hoàn tất (ví dụ: kết quả phỏng vấn, trúng tuyển) có thể được ẩn danh hoá thay vì xoá hoàn toàn
                 nhằm phục vụ thống kê tổng hợp, không định danh cá nhân.</p>
 
@@ -178,7 +178,7 @@ export function PrivacyContent() {
                 quyền cơ bản: được biết về việc xử lý dữ liệu của mình; đồng ý hoặc rút lại đồng ý; truy cập dữ
                 liệu; yêu cầu chỉnh sửa hoặc xoá dữ liệu; hạn chế xử lý; phản đối xử lý; và khiếu nại nếu quyền
                 của bạn bị vi phạm. Để thực hiện các quyền này, vui lòng liên hệ{' '}
-                <a href="mailto:vonamhieu.work@gmail.com">vonamhieu.work@gmail.com</a>.</p>
+                <a href="mailto:charles@copoai.net">charles@copoai.net</a>.</p>
 
             <h2>7. Tiện ích mở rộng Chrome</h2>
             <p>Tiện ích Copo yêu cầu một số quyền truy cập trình duyệt (đọc/tương tác với nội dung trang,
@@ -207,7 +207,7 @@ export function PrivacyContent() {
 
             <h2>11. Liên hệ</h2>
             <p>Nếu có câu hỏi về chính sách này hoặc về cách dữ liệu của bạn được xử lý, vui lòng liên hệ:{' '}
-                <a href="mailto:vonamhieu.work@gmail.com">vonamhieu.work@gmail.com</a>.</p>
+                <a href="mailto:charles@copoai.net">charles@copoai.net</a>.</p>
         </>
     );
 }

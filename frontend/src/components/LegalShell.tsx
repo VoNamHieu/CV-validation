@@ -38,7 +38,7 @@ export default function LegalShell({
                     <Link href="/" className="legal-footer-link">Trang chủ</Link>
                     <Link href="/privacy" className="legal-footer-link">Quyền riêng tư</Link>
                     <Link href="/terms" className="legal-footer-link">Điều khoản sử dụng</Link>
-                    <a href="mailto:vonamhieu.work@gmail.com" className="legal-footer-link">Liên hệ</a>
+                    <a href="mailto:charles@copoai.net" className="legal-footer-link">Liên hệ</a>
                 </div>
                 <div style={{ marginTop: 10, opacity: 0.7 }}>
                     © 2026 Copo · Vận hành bởi AI · Cam kết không bịa nội dung

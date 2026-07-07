@@ -473,7 +473,7 @@ export default function Landing() {
                     <span>·</span>
                     <a href="/terms">Điều khoản sử dụng</a>
                     <span>·</span>
-                    <a href="mailto:vonamhieu.work@gmail.com">Liên hệ</a>
+                    <a href="mailto:charles@copoai.net">Liên hệ</a>
                 </div>
             </footer>
         </div>
