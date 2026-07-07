@@ -39,6 +39,11 @@ def _get_json(url: str):
 def _strip_html(s: str) -> str:
     if not s:
         return ""
+    # Some ATS APIs (e.g. Greenhouse) return HTML with its angle brackets
+    # entity-encoded (&lt;div&gt;…); unescape first so the tags parse into text
+    # instead of surviving as literal "&lt;" noise in the JD.
+    if "&lt;" in s and "&gt;" in s:
+        s = _html.unescape(s)
     if "<" in s and ">" in s:
         from bs4 import BeautifulSoup
         return BeautifulSoup(s, "html.parser").get_text(separator="\n", strip=True)
