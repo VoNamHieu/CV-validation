@@ -385,7 +385,12 @@ export default function JobSearchPanel() {
                                                 <MapPin size={11} /> {j.location}
                                             </span>
                                         )}
-                                        <span>cập nhật {ago(j.last_seen_at)}</span>
+                                        {/* created_at = first time we saw the posting (≈ posting age);
+                                            last_seen_at is bumped every cron for every live job, so it
+                                            would show "just now" for everything — not what we want here. */}
+                                        <span title={`còn sống, cron kiểm tra lần cuối ${ago(j.last_seen_at)}`}>
+                                            đăng {ago(j.created_at)}
+                                        </span>
                                         {typeof j.distance === 'number' && (
                                             <span title="Cosine distance, càng thấp càng khớp">
                                                 Δ {j.distance.toFixed(3)}

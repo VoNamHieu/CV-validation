@@ -183,10 +183,16 @@ async def _upsert_company_jobs(c, jobs_list: list[dict]) -> dict | None:
         if not title or not url:
             continue
         fam, _conf = classify_title(title)
+        # Identity is the adapter-supplied stable id when present, else the URL.
+        # Some sources (e.g. Zalo) noise a fresh token into the URL every
+        # request, so keying on the URL would re-insert the same posting each
+        # run — resetting created_at and deactivating the prior row. Both the
+        # upsert key and the liveness diff must use the SAME id.
+        ext = j.get("external_id") or url
         try:
             await jobs_repo.upsert(
                 company_id=cid,
-                external_id=url,                       # stable per posting → refresh on re-ingest
+                external_id=ext,
                 title=title,
                 location=j.get("location") or None,
                 description=j.get("description") or None,
@@ -197,7 +203,7 @@ async def _upsert_company_jobs(c, jobs_list: list[dict]) -> dict | None:
                 source_url=url,
             )
             n += 1
-            live_ids.append(url)
+            live_ids.append(ext)
         except Exception as e:  # noqa: BLE001
             logger.info("ingest: job upsert failed (%s): %s", url, str(e)[:80])
     if not n:

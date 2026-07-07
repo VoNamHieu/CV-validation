@@ -668,8 +668,15 @@ def _zalo(career_url: str) -> list[dict]:
             slug = (j.get("slug") or "").strip()
             if not name or not slug:
                 continue
+            # Zalo re-noises every id field (slug/masterJobId/noisedId) on each
+            # request — the slug carries a fresh 16-char token per call, so the
+            # full URL is NOT a stable posting identity. Strip that trailing
+            # token to get a stable external_id, else every cron re-inserts the
+            # job as new (resetting created_at, deactivating the old row).
+            stable = re.sub(r"-[A-Za-z0-9_-]{16}$", "", slug)
             out.append({"title": name[:200],
                         "url": f"https://zalo.careers/job/{slug}",
+                        "external_id": f"zalo:{stable}",
                         "location": (j.get("locationName") or "Vietnam")[:120],
                         "description": _strip_html(j.get("desc") or "")[:600]})
         if len(out) >= _MAX_ATS_JOBS:
