@@ -283,10 +283,24 @@ async def _save_index(index: list[dict]) -> None:
     await cache.set_json(_INDEX_KEY, index[:_MAX_INDEX], _TTL)
 
 
+# The index is one Redis key updated read-modify-write. The cron ingest records
+# a verdict per company at concurrency 8, so unsynchronised writes lose updates
+# (two coroutines load the same list, each drops the other's new row). Serialize
+# the mutate within the process — cron and the admin scan are each single-process
+# so this is sufficient; cross-process races (admin scanning mid-cron) are rare
+# and self-heal next cycle.
+_write_lock = asyncio.Lock()
+
+
 async def record(url: str, res: dict, *, company: str = "",
                  source: str = "probe") -> dict:
     """Upsert a probe record by URL, preserving first_seen, bumping last_checked."""
     now = int(time.time())
+    async with _write_lock:
+        return await _record_locked(url, res, company=company, source=source, now=now)
+
+
+async def _record_locked(url: str, res: dict, *, company: str, source: str, now: int) -> dict:
     index = await _load_index()
     existing = next((e for e in index if e.get("url") == url), None)
     rec = {

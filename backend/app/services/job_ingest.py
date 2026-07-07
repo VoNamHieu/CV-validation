@@ -225,8 +225,17 @@ async def _one_cheap(c, sem: asyncio.Semaphore) -> dict:
     """Phase 1 (all 182 companies, cheap + fast): known-adapter fetch → cheap
     non-JS GET fallback → last-resort extension-capture snapshot. No render.
     Returns an upsert-result dict on success, or {"ok": False, ...} — the
-    caller routes "ok": False rows into phase 2."""
+    caller routes "ok": False rows into phase 2.
+
+    On success it also records a compat verdict from THIS run's real result, so
+    the monitor is a view over the actual ingest (single source of truth, fresh
+    every cycle) instead of a separate dry-run probe that drifts. Empty rows are
+    left for phase 2 to record — its render pass produces the accurate verdict
+    (anti-bot / careerish / no-extractor) that a cheap-only pass can't tell
+    apart."""
     from app.services.ats_adapters.core import fetch_ats_jobs
+    from app.services.ats_adapters import is_known_ats_url
+    from app.services import career_compat
 
     try:
         async with sem:
@@ -253,7 +262,16 @@ async def _one_cheap(c, sem: asyncio.Semaphore) -> dict:
         if not jobs_list:
             return {"ok": False, **_empty(c)}
         result = await _upsert_company_jobs(c, jobs_list)
-        return result or {"ok": False, **_empty(c)}
+        if result:
+            verdict = career_compat.verdict_from_signals(
+                c.career_url, http_ok=True, html="", jobs=jobs_list,
+                rendered=False, ats_sig=is_known_ats_url(c.career_url) or None)
+            # Report the actual count upserted into the pool, not the verdict's
+            # VN-only subset — the monitor should mirror the pool exactly.
+            verdict["job_count"] = result["n"]
+            await career_compat.record(c.career_url, verdict, company=c.name, source="cron")
+            return result
+        return {"ok": False, **_empty(c)}
     except Exception as e:  # noqa: BLE001
         logger.warning("ingest: one_cheap failed for %s: %s", c.name, str(e)[:120])
         return {"ok": False, **_empty(c)}
