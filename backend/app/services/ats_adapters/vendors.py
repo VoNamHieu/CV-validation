@@ -30,12 +30,26 @@ from app.services.ats_adapters.concung import *  # noqa: F401,F403
 from app.services.ats_adapters.homecredit import *  # noqa: F401,F403
 from app.services.ats_adapters.doji import *  # noqa: F401,F403
 from app.services.ats_adapters.chailease import *  # noqa: F401,F403
+from app.services.ats_adapters.mitek import *  # noqa: F401,F403
+from app.services.ats_adapters.everfit import *  # noqa: F401,F403
+from app.services.ats_adapters.bitis import *  # noqa: F401,F403
+from app.services.ats_adapters.vng import *  # noqa: F401,F403
+from app.services.ats_adapters.honda import *  # noqa: F401,F403
+from app.services.ats_adapters.mmvietnam import *  # noqa: F401,F403
+from app.services.ats_adapters.fecredit import *  # noqa: F401,F403
+from app.services.ats_adapters.cmctelecom import *  # noqa: F401,F403
+from app.services.ats_adapters.deheus import *  # noqa: F401,F403
+from app.services.ats_adapters.viettelidc import *  # noqa: F401,F403
+from app.services.ats_adapters.guardian import *  # noqa: F401,F403
 
 
 _ADAPTERS: list = [
     ("radancy",        lambda u, h: _is_radancy(u),      lambda u, h: _radancy(u)),
     ("avature",        _is_avature,                      lambda u, h: _avature(u, h)),
     ("amazon",         lambda u, h: _is_amazon(u),       lambda u, h: _amazon(u)),
+    # MiTek's VN-dedicated Workday tenant — must precede the generic `workday`
+    # adapter, whose searchText="Vietnam" filter under-counts this all-VN board.
+    ("mitek",          lambda u, h: _is_mitek(u),        lambda u, h: _mitek(u)),
     ("workday",        lambda u, h: _resolve_workday_url(u, h) is not None,
                        lambda u, h: _workday(_resolve_workday_url(u, h))),
     ("base.vn",        _is_basevn,                       lambda u, h: _basevn(u, h)),
@@ -80,4 +94,14 @@ _ADAPTERS: list = [
     ("homecredit",      lambda u, h: _is_homecredit(u),      lambda u, h: _homecredit(u)),
     ("doji",            lambda u, h: _is_doji(u),            lambda u, h: _doji(u)),
     ("chailease",       lambda u, h: _is_chailease(u),       lambda u, h: _chailease(u)),
+    ("everfit",         lambda u, h: _is_everfit(u),         lambda u, h: _everfit(u)),
+    ("bitis",           lambda u, h: _is_bitis(u),           lambda u, h: _bitis(u)),
+    ("vng",             lambda u, h: _is_vng(u),             lambda u, h: _vng(u)),
+    ("honda",           lambda u, h: _is_honda(u),           lambda u, h: _honda(u)),
+    ("mmvietnam",       lambda u, h: _is_mmvietnam(u),       lambda u, h: _mmvietnam(u)),
+    ("fecredit",        lambda u, h: _is_fecredit(u),        lambda u, h: _fecredit(u)),
+    ("cmctelecom",      lambda u, h: _is_cmctelecom(u),      lambda u, h: _cmctelecom(u)),
+    ("deheus",          lambda u, h: _is_deheus(u),          lambda u, h: _deheus(u)),
+    ("viettelidc",      lambda u, h: _is_viettelidc(u),      lambda u, h: _viettelidc(u)),
+    ("guardian",        lambda u, h: _is_guardian(u),        lambda u, h: _guardian(u)),
 ]

@@ -86,6 +86,19 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         career_url="https://jobs.bytedance.com/en/position?keyword=Vietnam",
     ),
     FeaturedCompany(
+        name="Everfit",
+        homepage="https://everfit.io",
+        # JS SPA over a public JSON API (hr-api.everfit.io) → `everfit` adapter.
+        career_url="https://jobs.everfit.vn/jobs",
+    ),
+    FeaturedCompany(
+        name="Naver Vietnam",
+        homepage="https://navercorp.com",
+        # Naver's VN game/tech studio; board is the Greenhouse tenant
+        # `navervietnam` (all postings are HCMC) → generic `greenhouse` fetcher.
+        career_url="https://job-boards.greenhouse.io/navervietnam",
+    ),
+    FeaturedCompany(
         name="Agoda",
         homepage="https://www.agoda.com",
         career_url="https://careersatagoda.com/vacancies/?keyword=&country=vietnam",
@@ -259,6 +272,20 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
 
     # ── IT Services / Outsourcing ─────────────────────────────────────
     FeaturedCompany(
+        name="CMC Telecom",
+        homepage="https://cmctelecom.vn",
+        # Server-rendered job table (/recruit/{slug}) → `cmctelecom` adapter.
+        career_url="https://cmctelecom.vn/danh-sach-tuyen-dung/",
+    ),
+    FeaturedCompany(
+        name="MiTek Vietnam",
+        homepage="https://www.mitek-us.com",
+        # Building-tech company's HCMC software + CAD delivery centre. All-VN
+        # Workday tenant → dedicated `mitek` adapter (fetches the whole board,
+        # not the searchText-filtered subset the generic workday adapter gets).
+        career_url="https://mii.wd5.myworkdayjobs.com/MiTekVietnam",
+    ),
+    FeaturedCompany(
         name="NashTech",
         homepage="https://nashtechglobal.com",
         career_url="https://careers.nashtechglobal.com",
@@ -403,6 +430,19 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     ),
 
     # ── Retail / Consumer ─────────────────────────────────────────────
+    FeaturedCompany(
+        name="Biti's",
+        homepage="https://www.bitis.com.vn",
+        # JS SPA over a same-origin JSON API (/api/job/paging, per business
+        # unit) → `bitis` adapter.
+        career_url="https://tuyendung.bitis.com.vn/viec-lam/2",
+    ),
+    FeaturedCompany(
+        name="MM Mega Market",
+        homepage="https://mmvietnam.com",
+        # WordPress "Awesome Job Board" listing (/jobs/{slug}) → `mmvietnam` adapter.
+        career_url="https://mmvietnam.com/tuyen-dung/van-phong/",
+    ),
     FeaturedCompany(
         name="Central Retail",
         homepage="https://centralretail.com.vn",
@@ -791,7 +831,9 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Hitachi",
         homepage="https://hitachi.com",
-        career_url="https://careers.hitachi.com",
+        # careers.hitachi.com is a marketing shell (0 jobs to the adapter); the
+        # real board is the Workday tenant `hitachi/hitachi` (`workday` adapter).
+        career_url="https://hitachi.wd1.myworkdayjobs.com/hitachi",
     ),
     FeaturedCompany(
         name="Sony",
@@ -822,6 +864,18 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     ),
 
     # ── Industrial / Manufacturing ────────────────────────────────────
+    FeaturedCompany(
+        name="Honda Vietnam",
+        homepage="https://www.honda.com.vn",
+        # Server-rendered job cards (/tuyen-dung/cv/{slug}) → `honda` adapter.
+        career_url="https://www.honda.com.vn/tuyen-dung/co-hoi-nghe-nghiep",
+    ),
+    FeaturedCompany(
+        name="De Heus Vietnam",
+        homepage="https://www.deheus.com.vn",
+        # Server-rendered listing (/co-hoi-nghe-nghiep/{slug}) → `deheus` adapter.
+        career_url="https://www.deheus.com.vn/lam-viec-tai-de-heus/co-hoi-nghe-nghiep/",
+    ),
     FeaturedCompany(
         name="Air Liquide",
         homepage="https://airliquide.com",
