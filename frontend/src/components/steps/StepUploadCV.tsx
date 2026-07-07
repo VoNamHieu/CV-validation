@@ -4,13 +4,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
     UploadSimple, FileText, SpinnerGap, Brain,
     CheckCircle, Sparkle, ArrowRight, WarningCircle, Lightning,
-    Target, MapPin, Stack,
+    Target, MapPin, Stack, PuzzlePiece, ArrowSquareOut,
 } from '@phosphor-icons/react';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthGate } from '@/lib/auth';
 import { parsePdfWithAI } from '@/lib/api';
 import { cvToExtensionProfile } from '@/lib/extension-profile';
 import { syncProfileToExtension, syncCvDataToExtension } from '@/lib/extension-sync';
+import { EXTENSION_INSTALL_URL } from '@/lib/extension-install';
 import { CITY_OPTIONS, SENIORITY_OPTIONS, canonSeniority } from '@/lib/job-targeting';
 
 export default function StepUploadCV() {
@@ -32,6 +33,26 @@ export default function StepUploadCV() {
     // installed / wrong URL / needs tab refresh after extension reload).
     const [extSynced, setExtSynced] = useState<boolean | null>(null);
     const [extSyncError, setExtSyncError] = useState('');
+    // Is the Copo extension installed & responding on this tab? null = still
+    // checking (don't show the install CTA yet), true = detected, false = gave
+    // it a grace period and it never announced itself → surface the install
+    // section. page.tsx latches window.__jobfitExtensionId from the extension's
+    // JOBFIT_EXTENSION_READY broadcast; we mirror that + listen for late arrivals
+    // (extension installed after this tab opened) so the CTA self-dismisses.
+    const [extDetected, setExtDetected] = useState<boolean | null>(null);
+    useEffect(() => {
+        const w = window as Window & { __jobfitExtensionId?: string };
+        if (w.__jobfitExtensionId) { setExtDetected(true); return; }
+        const timer = setTimeout(() => setExtDetected(!!w.__jobfitExtensionId), 1500);
+        const handler = (event: MessageEvent) => {
+            if (event.source !== window) return;
+            if (event.data?.type !== 'JOBFIT_EXTENSION_READY') return;
+            setExtDetected(true);
+            clearTimeout(timer);
+        };
+        window.addEventListener('message', handler);
+        return () => { clearTimeout(timer); window.removeEventListener('message', handler); };
+    }, []);
 
     // A CV already exists (freshly parsed this session OR restored from the
     // account on login via syncActiveCvProfile). "ready" = we can proceed
@@ -368,6 +389,45 @@ export default function StepUploadCV() {
                     >
                         <UploadSimple size={14} weight="bold" /> Tải CV mới
                     </button>
+                </div>
+            )}
+
+            {/* Install nudge — only when the Copo extension isn't detected on
+                this tab. Self-dismisses once JOBFIT_EXTENSION_READY arrives.
+                Not a blocker: job matching works without it; the extension is
+                what enables one-click auto-apply on the listing pages. */}
+            {extDetected === false && !processing && (
+                <div className="glass-card" style={{
+                    padding: '18px 20px', marginTop: 16,
+                    display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap',
+                    background: 'rgba(124, 58, 237, 0.05)',
+                    borderColor: 'rgba(124, 58, 237, 0.18)',
+                }}>
+                    <div style={{
+                        width: 44, height: 44, borderRadius: 12, flexShrink: 0,
+                        background: 'var(--gradient-hero)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}>
+                        <PuzzlePiece size={22} weight="fill" color="#fff" />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 180 }}>
+                        <p style={{ fontWeight: 600, fontSize: '0.9rem', letterSpacing: '-0.01em' }}>
+                            Cài extension Copo để tự ứng tuyển
+                        </p>
+                        <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 3, lineHeight: 1.5 }}>
+                            Extension tự điền hồ sơ vào form trên trang tuyển dụng — nộp hàng loạt chỉ với 1 lần bấm. Miễn phí, cài một lần.
+                        </p>
+                    </div>
+                    <a
+                        href={EXTENSION_INSTALL_URL} target="_blank" rel="noopener noreferrer"
+                        className="btn-primary"
+                        style={{
+                            flexShrink: 0, height: 42, padding: '0 18px', fontSize: '0.85rem', fontWeight: 600,
+                            textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 8,
+                        }}
+                    >
+                        <ArrowSquareOut size={16} weight="bold" /> Cài extension
+                    </a>
                 </div>
             )}
 
