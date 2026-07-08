@@ -8,6 +8,7 @@ import { createPortal } from 'react-dom';
 import { X, PuzzlePiece, ArrowSquareOut, CheckCircle } from '@phosphor-icons/react';
 import { EXTENSION_INSTALL_URL, NEED_EXTENSION_EVENT } from '@/lib/extension-install';
 import { useModalA11y } from '@/lib/useModalA11y';
+import { track } from '@/lib/analytics';
 
 const STEPS = [
     'Tải & cài extension Copo cho Chrome từ link bên dưới.',
@@ -101,7 +102,7 @@ function InstallExtensionDialog({ onClose }: { onClose: () => void }) {
 
                 <a
                     href={EXTENSION_INSTALL_URL} target="_blank" rel="noopener noreferrer"
-                    onClick={() => setTimeout(onClose, 300)}
+                    onClick={() => { track('extension_install_clicked', { source: 'modal' }); setTimeout(onClose, 300); }}
                     className="btn-primary"
                     style={{
                         width: '100%', height: 46, fontSize: '0.9rem', fontWeight: 600, textDecoration: 'none',

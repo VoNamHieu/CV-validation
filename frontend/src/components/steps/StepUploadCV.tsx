@@ -12,6 +12,7 @@ import { parsePdfWithAI } from '@/lib/api';
 import { cvToExtensionProfile } from '@/lib/extension-profile';
 import { syncProfileToExtension, syncCvDataToExtension } from '@/lib/extension-sync';
 import { EXTENSION_INSTALL_URL } from '@/lib/extension-install';
+import { track } from '@/lib/analytics';
 import { CITY_OPTIONS, SENIORITY_OPTIONS, canonSeniority } from '@/lib/job-targeting';
 
 export default function StepUploadCV() {
@@ -420,6 +421,7 @@ export default function StepUploadCV() {
                     </div>
                     <a
                         href={EXTENSION_INSTALL_URL} target="_blank" rel="noopener noreferrer"
+                        onClick={() => track('extension_install_clicked', { source: 'upload_banner' })}
                         className="btn-primary"
                         style={{
                             flexShrink: 0, height: 42, padding: '0 18px', fontSize: '0.85rem', fontWeight: 600,
