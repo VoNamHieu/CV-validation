@@ -4,7 +4,7 @@
 // optimize) is a client island.
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
-import { MapPin, Buildings, ChartLineUp, Sparkle } from '@phosphor-icons/react/dist/ssr';
+import { MapPin, Buildings, ChartLineUp } from '@phosphor-icons/react/dist/ssr';
 import PromotedJobCta from '@/components/PromotedJobCta';
 import { renderJd } from '@/lib/renderJd';
 import styles from './promoted.module.css';
@@ -168,7 +168,10 @@ export default async function PromotedJobPage(
             {/* Top bar */}
             <div className={styles.topbar}>
                 <a href="/" className={styles.brand}>
-                    <span className={styles.brandMark}><Sparkle size={17} weight="fill" /></span>
+                    <span className={styles.brandMark}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src="/copo-mark-white.png" alt="Copo" width={17} height={17} style={{ display: 'block' }} />
+                    </span>
                     Copo
                 </a>
                 <span className={styles.topbarHint}>Việc làm được tuyển chọn</span>
