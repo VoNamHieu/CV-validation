@@ -13,6 +13,13 @@ import { admin, type AdminJob, type FacetValue, type IngestState } from '@/lib/d
 
 const PAGE_SIZE = 25;
 
+// Label + colour for a job's promoted-page status, shown on the search row.
+const PROMOTED_STATUS_META: Record<string, { label: string; color: string }> = {
+    published: { label: '✓ Đã công bố', color: 'var(--accent-green, #22c55e)' },
+    draft: { label: '✓ Đã tạo nháp', color: 'var(--accent-amber, #f59e0b)' },
+    unpublished: { label: '✓ Đã gỡ', color: 'var(--text-muted)' },
+};
+
 type Facets = { role_family: FacetValue[]; industry: FacetValue[]; seniority: FacetValue[] };
 type Status = 'all' | 'active' | 'dead';
 type Mode = 'keyword' | 'semantic';
@@ -85,6 +92,21 @@ export default function JobSearchPanel() {
             setPromoting(null);
         }
     }, []);
+
+    // Whether a job already has a promoted page — from THIS session's creation OR
+    // an existing one the search joined in (promoted_slug). Session state wins so
+    // a just-created draft shows immediately with its jdChars.
+    const promotedInfo = useCallback((j: AdminJob): {
+        slug: string; id: string; status: string; jdChars: number | null;
+    } | null => {
+        const sess = promoted[j.id];
+        if (sess) return { slug: sess.slug, id: sess.id, status: 'draft', jdChars: sess.jdChars };
+        if (j.promoted_slug) return {
+            slug: j.promoted_slug, id: j.promoted_id ?? '',
+            status: j.promoted_status ?? 'draft', jdChars: null,
+        };
+        return null;
+    }, [promoted]);
     // Drops out-of-order responses (fast page-2 answer landing after page 3's).
     const seq = useRef(0);
 
@@ -353,6 +375,8 @@ export default function JobSearchPanel() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {results.map((j) => {
                     const open = expanded === j.id;
+                    const p = promotedInfo(j);
+                    const pMeta = p ? (PROMOTED_STATUS_META[p.status] ?? PROMOTED_STATUS_META.draft) : null;
                     return (
                         <div key={j.id} className="glass-card" style={{ padding: 0, overflow: 'hidden' }}>
                             <button
@@ -458,7 +482,7 @@ export default function JobSearchPanel() {
                                             {promoting === j.id
                                                 ? <SpinnerGap size={14} style={{ animation: 'spin 0.8s linear infinite' }} />
                                                 : <Megaphone size={14} weight="fill" />}
-                                            {promoted[j.id] ? 'Tạo lại trang truyền thông' : 'Tạo trang truyền thông'}
+                                            {p ? 'Tạo lại trang truyền thông' : 'Tạo trang truyền thông'}
                                         </button>
                                         {j.source_url && (
                                             <a href={j.source_url} target="_blank" rel="noreferrer" style={{
@@ -478,21 +502,24 @@ export default function JobSearchPanel() {
                                         )}
                                     </div>
 
-                                    {promoted[j.id] && (
+                                    {p && pMeta && (
                                         <div style={{
                                             display: 'flex', alignItems: 'center', gap: 10, marginTop: 10, flexWrap: 'wrap',
                                             padding: '8px 10px', borderRadius: 8, background: 'var(--bg-elevated)',
                                             border: '1px solid var(--border-subtle)', fontSize: '0.74rem',
                                         }}>
-                                            <span style={{ color: 'var(--accent-amber)', fontWeight: 700 }}>✓ Đã tạo nháp</span>
-                                            <span style={{ color: 'var(--text-muted)' }}>
-                                                JD {promoted[j.id].jdChars.toLocaleString()} ký tự
-                                            </span>
-                                            <a href={`/j/${promoted[j.id].slug}?preview=${promoted[j.id].id}`} target="_blank" rel="noreferrer" style={{
-                                                display: 'flex', alignItems: 'center', gap: 4,
-                                                color: 'var(--accent-blue)', textDecoration: 'none', fontWeight: 600,
-                                            }}>
-                                                <ArrowSquareOut size={13} /> Xem thử
+                                            <span style={{ color: pMeta.color, fontWeight: 700 }}>{pMeta.label}</span>
+                                            {p.jdChars != null && (
+                                                <span style={{ color: 'var(--text-muted)' }}>
+                                                    JD {p.jdChars.toLocaleString()} ký tự
+                                                </span>
+                                            )}
+                                            <a href={p.status === 'published' ? `/j/${p.slug}` : `/j/${p.slug}?preview=${p.id}`}
+                                                target="_blank" rel="noreferrer" style={{
+                                                    display: 'flex', alignItems: 'center', gap: 4,
+                                                    color: 'var(--accent-blue)', textDecoration: 'none', fontWeight: 600,
+                                                }}>
+                                                <ArrowSquareOut size={13} /> {p.status === 'published' ? 'Xem trang' : 'Xem thử'}
                                             </a>
                                             <span style={{ color: 'var(--text-muted)', marginLeft: 'auto' }}>
                                                 Vào tab <b>Trang truyền thông</b> để công bố / xóa

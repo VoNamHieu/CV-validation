@@ -182,6 +182,10 @@ export const credits = {
 export type AdminJob = Job & {
     company_name: string | null;
     career_url: string | null;
+    // Latest promoted landing page for this job, if one exists (any session).
+    promoted_slug?: string | null;
+    promoted_status?: PromotedStatus | null;
+    promoted_id?: string | null;
 };
 
 export interface AdminJobSearchParams {

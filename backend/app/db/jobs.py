@@ -193,8 +193,13 @@ async def search_admin(
     args.extend([limit, offset])
     sql = (
         f"SELECT {cols}, c.name AS company_name, c.career_url, "
+        # Latest promoted landing page for this job (if any) → the panel shows
+        # "đã có trang truyền thông" + its status/link, not just session-created ones.
+        f"pr.slug AS promoted_slug, pr.status AS promoted_status, pr.id AS promoted_id, "
         f"COUNT(*) OVER() AS total{dist_col} "
         f"FROM jobs j LEFT JOIN companies c ON c.id = j.company_id "
+        f"LEFT JOIN LATERAL (SELECT p.id, p.slug, p.status FROM promoted_jobs p "
+        f"WHERE p.job_id = j.id ORDER BY p.created_at DESC LIMIT 1) pr ON true "
         f"{where} ORDER BY {order} LIMIT ${len(args)-1} OFFSET ${len(args)}"
     )
     rows = rows_to_dicts(await pool.fetch(sql, *args))
