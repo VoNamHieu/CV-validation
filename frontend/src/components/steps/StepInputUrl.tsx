@@ -209,7 +209,7 @@ export default function StepInputUrl() {
             type FeaturedJob = {
                 url: string; applyUrl: string; title: string; company: string;
                 careerUrl: string; location: string; description: string;
-                roleFamily?: string;
+                roleFamily?: string; logoDomain?: string;
             };
 
             // City pairing: keep in-city matches; if none, keep the (still
@@ -375,6 +375,10 @@ export default function StepInputUrl() {
                     // JD text the ATS API already returned (scores without re-crawl).
                     description: j.description || '',
                     roleFamily: j._facet?.role_family,
+                    // Only carry a logo domain when the company actually has an
+                    // uploaded logo, so the results card renders the brand (not a
+                    // wasted 404 / broken-image flash) for the rest.
+                    logoDomain: j.has_logo ? (j.company_domain || undefined) : undefined,
                 }));
                 // Already relevance-ranked by the facet engine — just pair the city.
                 const paired = pairCity(ranked);
@@ -399,6 +403,7 @@ export default function StepInputUrl() {
                         description: job.description || '',
                         roleFamily: job.roleFamily,
                         locationNote: off ? `Khác ${cityName}` : undefined,
+                        logoDomain: job.logoDomain,
                     };
                 };
                 const allCands = orderedJobs.map(toCandidate);

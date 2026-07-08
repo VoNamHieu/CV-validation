@@ -173,6 +173,7 @@ export interface CandidateJob {
   description: string;    // JD text the search layer already fetched (prefetch)
   roleFamily?: string;
   locationNote?: string;  // "Khác <city>" when off the chosen city
+  logoDomain?: string;    // company domain WITH an uploaded logo → results card shows the brand
 }
 
 type Step = 1 | 2 | 3 | 4;

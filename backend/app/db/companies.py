@@ -9,10 +9,14 @@ from typing import Optional
 
 from app.db.pool import get_pool, row_to_dict, rows_to_dicts
 
-# No vector column on companies — safe to select *.
+# No vector column on companies — safe to select *. The raw logo bytes
+# (logo_b64) are deliberately NOT listed: they'd bloat every list/get. We expose
+# only a cheap ``has_logo`` boolean so the admin UI can show which companies
+# already have a brand image without shipping the base64.
 _COLS = (
     "id, name, domain, industry, career_url, ats_type, in_universe, "
-    "segment, demand_score, last_swept_at, created_at"
+    "segment, demand_score, last_swept_at, created_at, "
+    "(logo_b64 IS NOT NULL) AS has_logo"
 )
 
 
@@ -74,19 +78,26 @@ async def get_by_domain(domain: str) -> Optional[dict]:
 
 
 async def list_companies(
-    *, in_universe: Optional[bool] = None, limit: int = 100, offset: int = 0
+    *, in_universe: Optional[bool] = None, q: Optional[str] = None,
+    limit: int = 100, offset: int = 0,
 ) -> list[dict]:
+    """List companies (newest-demand first). ``q`` filters by name/domain
+    (case-insensitive substring) for the admin logo picker; ``in_universe``
+    narrows to the featured universe. Logo bytes are never included — see
+    ``_COLS``' ``has_logo`` flag."""
+    where, args = [], []
+    if in_universe is not None:
+        args.append(in_universe)
+        where.append(f"in_universe = ${len(args)}")
+    if q:
+        args.append(f"%{q.strip()}%")
+        where.append(f"(name ILIKE ${len(args)} OR domain ILIKE ${len(args)})")
+    clause = f"WHERE {' AND '.join(where)}" if where else ""
+    args.extend([limit, offset])
+    sql = (f"SELECT {_COLS} FROM companies {clause} "
+           f"ORDER BY demand_score DESC, name ASC LIMIT ${len(args)-1} OFFSET ${len(args)}")
     pool = await get_pool()
-    if in_universe is None:
-        sql = f"SELECT {_COLS} FROM companies ORDER BY demand_score DESC LIMIT $1 OFFSET $2"
-        rows = await pool.fetch(sql, limit, offset)
-    else:
-        sql = (
-            f"SELECT {_COLS} FROM companies WHERE in_universe = $1 "
-            f"ORDER BY demand_score DESC LIMIT $2 OFFSET $3"
-        )
-        rows = await pool.fetch(sql, in_universe, limit, offset)
-    return rows_to_dicts(rows)
+    return rows_to_dicts(await pool.fetch(sql, *args))
 
 
 async def touch_swept(company_id: str) -> None:
@@ -119,3 +130,33 @@ async def get_logo(company_id: str) -> Optional[dict]:
             "SELECT logo_b64, logo_mime FROM companies WHERE id = $1", company_id
         )
     )
+
+
+async def get_logo_by_domain(domain: str) -> Optional[dict]:
+    """Return ``{logo_b64, logo_mime}`` for a company by its domain, or None.
+    Powers the domain-keyed logo endpoint so surfaces that only know a company's
+    domain (the landing marquee, featured-jobs groups) can render the uploaded
+    brand instead of a Clearbit guess / letter. ``www.`` is stripped to match how
+    domains are stored (see job_ingest._domain)."""
+    d = (domain or "").strip().lower()
+    d = d[4:] if d.startswith("www.") else d
+    if not d:
+        return None
+    pool = await get_pool()
+    return row_to_dict(
+        await pool.fetchrow(
+            "SELECT logo_b64, logo_mime FROM companies "
+            "WHERE domain = $1 AND logo_b64 IS NOT NULL LIMIT 1", d,
+        )
+    )
+
+
+async def clear_logo(company_id: str) -> bool:
+    """Drop a company's stored logo (admin removed it). Returns whether a row
+    was updated."""
+    pool = await get_pool()
+    result = await pool.execute(
+        "UPDATE companies SET logo_b64 = NULL, logo_mime = NULL WHERE id = $1",
+        company_id,
+    )
+    return result.endswith("1")

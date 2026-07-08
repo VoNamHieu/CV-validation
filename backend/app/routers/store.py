@@ -40,10 +40,12 @@ class CompanyUpsert(BaseModel):
 @router.get("/companies")
 async def list_companies(
     in_universe: Optional[bool] = None,
+    q: Optional[str] = None,
     limit: int = Query(100, le=500),
     offset: int = 0,
 ):
-    return await companies.list_companies(in_universe=in_universe, limit=limit, offset=offset)
+    return await companies.list_companies(
+        in_universe=in_universe, q=q, limit=limit, offset=offset)
 
 
 @router.post("/companies")
@@ -349,6 +351,59 @@ async def get_company_logo(company_id: str):
         raise HTTPException(status_code=404, detail="Bad logo")
     return Response(content=data, media_type=(logo or {}).get("logo_mime") or "image/png",
                     headers={"Cache-Control": "public, max-age=300"})
+
+
+class CompanyLogoUpload(BaseModel):
+    logo_b64: str                          # base64 payload (no data: prefix)
+    logo_mime: Optional[str] = None        # e.g. image/png, image/jpeg
+
+
+@router.post("/companies/{company_id}/logo")
+async def set_company_logo(
+    company_id: str, body: CompanyLogoUpload, _admin: str = Depends(require_admin),
+):
+    """Admin: attach a source logo to a company. Stored inline (base64) exactly
+    like the promoted-page upload, then reused everywhere the company shows up
+    (promoted pages seed from it, surfaces render it via the GET logo endpoint)
+    instead of falling back to a letter avatar. Client downscales to ≤256px."""
+    if not await companies.get(company_id):
+        raise HTTPException(status_code=404, detail="Company not found")
+    b64 = (body.logo_b64 or "").strip()
+    if not b64:
+        raise HTTPException(status_code=400, detail="Thiếu ảnh logo.")
+    if len(b64) > _MAX_LOGO_B64:
+        raise HTTPException(status_code=413, detail="Logo quá lớn (tối đa ~512KB).")
+    await companies.set_logo(company_id, logo_b64=b64, logo_mime=body.logo_mime)
+    return {"id": company_id, "has_logo": True}
+
+
+@router.get("/companies/logo-by-domain/{domain}")
+async def get_company_logo_by_domain(domain: str):
+    """PUBLIC — serve a company's uploaded logo by DOMAIN (real URL, usable as an
+    <img src>). Lets surfaces that only know a domain (landing marquee, featured
+    groups) prefer the uploaded brand; 404 when none, so callers fall back to a
+    Clearbit-from-domain guess or a letter avatar."""
+    import base64
+    from fastapi import Response
+    logo = await companies.get_logo_by_domain(domain)
+    b64 = (logo or {}).get("logo_b64")
+    if not b64:
+        raise HTTPException(status_code=404, detail="No logo")
+    try:
+        data = base64.b64decode(b64)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Bad logo")
+    return Response(content=data, media_type=(logo or {}).get("logo_mime") or "image/png",
+                    headers={"Cache-Control": "public, max-age=300"})
+
+
+@router.delete("/companies/{company_id}/logo")
+async def delete_company_logo(company_id: str, _admin: str = Depends(require_admin)):
+    """Admin: remove a company's stored logo (falls back to the letter avatar)."""
+    ok = await companies.clear_logo(company_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Company not found")
+    return {"id": company_id, "has_logo": False}
 
 
 @router.delete("/promoted/{page_id}")

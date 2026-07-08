@@ -16,6 +16,7 @@ export interface Company {
     demand_score: number;
     last_swept_at: string | null;
     created_at: string;
+    has_logo?: boolean;   // true when the company has an uploaded source logo
 }
 
 export interface Job {
@@ -118,9 +119,10 @@ async function req<T>(path: string, init?: RequestInit & { auth?: boolean }): Pr
 
 // ── Catalog (public) ─────────────────────────────────────────────────────────
 export const catalog = {
-    listCompanies: (opts: { inUniverse?: boolean; limit?: number; offset?: number } = {}) => {
+    listCompanies: (opts: { inUniverse?: boolean; q?: string; limit?: number; offset?: number } = {}) => {
         const q = new URLSearchParams();
         if (opts.inUniverse !== undefined) q.set('in_universe', String(opts.inUniverse));
+        if (opts.q) q.set('q', opts.q);
         if (opts.limit !== undefined) q.set('limit', String(opts.limit));
         if (opts.offset !== undefined) q.set('offset', String(opts.offset));
         return req<Company[]>(`/api/store/companies?${q}`);
@@ -147,6 +149,12 @@ export const catalog = {
     // domain/Clearbit guess or a letter avatar, e.g.:
     //   <img src={catalog.companyLogoUrl(id)} onError={() => setFailed(true)} />
     companyLogoUrl: (companyId: string) => `/api/store/companies/${encodeURIComponent(companyId)}/logo`,
+
+    // Real HTTP URL of a company's stored logo keyed by DOMAIN — for surfaces
+    // that only know a domain (landing marquee, featured groups). 404s when the
+    // company has no uploaded logo; fall back to Clearbit/letter via onError.
+    companyLogoUrlByDomain: (domain: string) =>
+        `/api/store/companies/logo-by-domain/${encodeURIComponent(domain)}`,
 
     searchJobs: (body: {
         query?: string; embedding?: number[];
@@ -297,6 +305,22 @@ export const admin = {
         }),
     deletePromoted: (id: string) =>
         req<{ deleted: boolean }>(`/api/store/promoted/${id}`, { method: 'DELETE', auth: true }),
+
+    // ── Company logos ──
+    // List companies for the logo manager (name/domain filter, has_logo flag).
+    listCompanies: (opts: { q?: string; limit?: number; offset?: number } = {}) =>
+        catalog.listCompanies(opts),
+    // Attach a source logo (base64, no data: prefix) to a company. Reused
+    // everywhere the company shows up (promoted pages + surfaces) instead of a
+    // letter avatar.
+    setCompanyLogo: (companyId: string, body: { logo_b64: string; logo_mime: string }) =>
+        req<{ id: string; has_logo: boolean }>(`/api/store/companies/${companyId}/logo`, {
+            method: 'POST', body: JSON.stringify(body), auth: true,
+        }),
+    deleteCompanyLogo: (companyId: string) =>
+        req<{ id: string; has_logo: boolean }>(`/api/store/companies/${companyId}/logo`, {
+            method: 'DELETE', auth: true,
+        }),
 
     // ── Analytics dashboard ──
     analyticsSummary: (days: number) =>

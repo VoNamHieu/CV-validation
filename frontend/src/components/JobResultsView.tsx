@@ -7,7 +7,23 @@ import {
 } from '@phosphor-icons/react';
 import type { CandidateJob } from '@/store/useAppStore';
 import { fetchPage } from '@/lib/api';
+import { catalog } from '@/lib/db';
 import ConfirmModal from '@/components/ConfirmModal';
+
+// Company brand thumbnail on a result card. Only rendered when the candidate
+// carries a `logoDomain` (a company that has an admin-uploaded logo); a load
+// error hides it so the card falls back to the text + building icon.
+function CardLogo({ domain, name }: { domain?: string; name: string }) {
+    const [ok, setOk] = useState(!!domain);
+    if (!domain || !ok) return null;
+    return (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+            alt={name} src={catalog.companyLogoUrlByDomain(domain)} onError={() => setOk(false)}
+            style={{ width: 38, height: 38, borderRadius: 8, objectFit: 'cover', flexShrink: 0, background: '#fff', border: '1px solid var(--border-subtle)' }}
+        />
+    );
+}
 
 // Results page shown between the search step and the editor. Lets the user
 // curate the discovered jobs — remove ones they don't want, reveal more from
@@ -155,6 +171,7 @@ function JobCard({ c, busy, onRemove }: { c: CandidateJob; busy: boolean; onRemo
     return (
         <div className="glass-card" style={{ padding: '14px 16px', borderRadius: 'var(--radius-lg)', opacity: busy ? 0.6 : 1 }}>
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                <CardLogo domain={c.logoDomain} name={c.company || c.title} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                     {jdLink ? (
                         <a

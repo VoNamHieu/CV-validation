@@ -463,6 +463,8 @@ export interface FacetSearchJob {
     title: string;
     company?: string;
     career_url?: string;
+    company_domain?: string;   // company's own domain → uploaded-logo lookup
+    has_logo?: boolean;        // true when the company has an uploaded logo
     location?: string;
     description?: string;
     industry?: string;

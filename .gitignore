@@ -23,3 +23,6 @@ extension.zip
 # branch (force-added there). Ignored everywhere else so it never gets swept into
 # a product commit or the user-facing extension build.
 tools/research-extension/
+
+# Local scratch doc — not part of the product
+copo-manifesto.html

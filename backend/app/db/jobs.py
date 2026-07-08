@@ -251,13 +251,16 @@ async def list_for_facet(*, limit: int = 500) -> list[dict]:
 
     Joins the company so each dict carries the keys ``score_job`` expects:
     ``title, location, company, career_url, description, industry, url`` plus
-    ``role_family`` / ``seniority`` for display. No embedding."""
+    ``role_family`` / ``seniority`` for display, and ``company_domain`` /
+    ``has_logo`` so surfaces can render the company's uploaded logo. No
+    embedding, no logo bytes."""
     pool = await get_pool()
     rows = await pool.fetch(
         """
         SELECT j.title, j.location, j.source_url AS url, j.description,
                j.role_family, j.industry, j.seniority, j.required_years_min,
-               j.must_have, c.name AS company, c.career_url
+               j.must_have, c.name AS company, c.career_url,
+               c.domain AS company_domain, (c.logo_b64 IS NOT NULL) AS has_logo
         FROM jobs j
         LEFT JOIN companies c ON c.id = j.company_id
         WHERE j.is_active
