@@ -3,6 +3,9 @@ the `_ADAPTERS` registry that wires these lives in vendors.py."""
 from __future__ import annotations
 
 import json as _json  # noqa: F401,E402
+import hashlib as _hashlib  # noqa: E402
+import base64 as _b64  # noqa: E402
+import datetime as _dt  # noqa: E402
 from app.services.ats_adapters._shared import *  # noqa: F401,F403
 
 # ── workatsea (Sea group: Shopee, SPX, Garena, SeaMoney) ────────────────────
@@ -685,24 +688,95 @@ def _zalo(career_url: str) -> list[dict]:
     return out
 
 
-# ── MoMo (momo.careers) — static SSR job cards (Next.js prerendered) ─────────
-# Each card: <a alt="Title" href="/jobs/<slug>"> with a location chip and a
-# "Fulltime" type div inside. The `alt` attr is the clean title. Jobs live at
-# /jobs-opening (the bare homepage has none).
+# ── MoMo (momo.careers) — Next.js SSR shell over a request-signed JSON API ────
+# The listing page prerenders only page 1 (12 of ~98). The full list is served
+# by GET aws.momo.vn/momovn-api/public/v2/hr/get-list-job-with-filter, gated by
+# an X-Client-Token header: base64(AES-256-CBC("<METHOD>§<HH:MM:SS>§<path?qs>§
+# <bodyMD5>")). Both key and IV are hardcoded constants in the site's JS bundle
+# (_app-*.js: `AES.encrypt(u, SHA256("Una34%^&xMpajd"), {mode:CBC, iv:
+# Utf8.parse("da3iks0ndfm@#335")})`), so the signature is fully reproducible
+# server-side — no browser/capture needed. Body MD5 is empty for GET requests.
+_MOMO_API = "https://aws.momo.vn/momovn-api/public/v2/hr/get-list-job-with-filter"
+_MOMO_KEY = _hashlib.sha256(b"Una34%^&xMpajd").digest()  # 32 bytes → AES-256
+_MOMO_IV = b"da3iks0ndfm@#335"                            # 16-byte CBC IV
+_MOMO_SEP = "§"                                      # § field separator
+
+
 def _is_momo(career_url: str) -> bool:
     return (urlparse(career_url or "").netloc or "").lower().removeprefix("www.") == "momo.careers"
 
 
-def _momo(career_url: str) -> list[dict]:
+def _momo_sign(method: str, signed_url: str) -> tuple[str, str]:
+    """Return (timestamp, X-Client-Token) for a MoMo API request. Timestamp is
+    Vietnam-local HH:MM:SS (the API's own timezone); it must appear both in the
+    header and inside the signed plaintext."""
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    ts = (_dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(hours=7)).strftime("%H:%M:%S")
+    plain = f"{method}{_MOMO_SEP}{ts}{_MOMO_SEP}{signed_url}{_MOMO_SEP}".encode("utf-8")
+    pad = 16 - (len(plain) % 16)          # PKCS7
+    plain += bytes([pad]) * pad
+    enc = Cipher(algorithms.AES(_MOMO_KEY), modes.CBC(_MOMO_IV)).encryptor()
+    return ts, _b64.b64encode(enc.update(plain) + enc.finalize()).decode()
+
+
+def _momo_api() -> list[dict]:
+    """Fetch the full opening list via the signed JSON API. Paginates by lastIdx
+    until TotalItems is reached. Returns [] on any failure so the caller can fall
+    back to the SSR/captured DOM."""
+    out, last = [], 0
+    for _ in range(12):  # safety cap; ~98 jobs at count=100 = one page today
+        qs = f"sortType=1&sortDir=1&count=100&lastIdx={last}"
+        ts, token = _momo_sign("GET", f"/v2/hr/get-list-job-with-filter?{qs}")
+        try:
+            r = requests.get(f"{_MOMO_API}?{qs}", timeout=_TIMEOUT, headers={
+                **_HTML_HEADERS, "Accept": "application/json, text/plain, */*",
+                "Origin": "https://momo.careers", "Referer": "https://momo.careers/",
+                "X-Client-Device": "5", "X-Client-Id": "", "X-Client-Token": token,
+                "X-Timestamp": ts, "X-Project": "careers"})
+            if r.status_code != 200:
+                logger.info(f"[ats] momo api HTTP {r.status_code}")
+                break
+            data = (r.json() or {}).get("Data") or {}
+        except Exception as e:
+            logger.info(f"[ats] momo api failed: {str(e)[:80]}")
+            break
+        items = data.get("Items") or []
+        for it in items:
+            slug = (it.get("subdirectory") or "").strip()
+            title = (it.get("jobTitle") or "").strip()
+            if not slug or not title:
+                continue
+            out.append({"title": title[:200],
+                        "url": f"https://momo.careers/jobs/{slug}",
+                        "location": (it.get("location") or "Hồ Chí Minh").strip()[:120],
+                        "description": ""})
+        total = data.get("TotalItems") or 0
+        last += len(items)
+        if not items or last >= total or len(out) >= _MAX_ATS_JOBS:
+            break
+    return out
+
+
+def _momo(career_url: str, html: str | None = None) -> list[dict]:
     from bs4 import BeautifulSoup
-    try:
-        r = requests.get("https://momo.careers/jobs-opening", headers=_HTML_HEADERS, timeout=_TIMEOUT)
-        if r.status_code != 200:
+    # Primary: the signed JSON API — full list, always fresh, no browser needed.
+    if html is None:
+        api = _momo_api()
+        if api:
+            logger.info(f"[ats] momo → {len(api)} jobs (signed api)")
+            return api
+        # API unreachable (key rotated / network) → the 12 live SSR cards.
+        try:
+            r = requests.get("https://momo.careers/jobs-opening", headers=_HTML_HEADERS, timeout=_TIMEOUT)
+            if r.status_code != 200:
+                return []
+            html = r.text
+        except Exception as e:
+            logger.info(f"[ats] momo failed: {str(e)[:80]}")
             return []
-        soup = BeautifulSoup(r.text, "html.parser")
-    except Exception as e:
-        logger.info(f"[ats] momo failed: {str(e)[:80]}")
-        return []
+    # DOM path: parses SSR fallback OR a captured/expanded snapshot (<a alt=Title
+    # href=/jobs/slug> with a location chip). Kept as the API's safety net.
+    soup = BeautifulSoup(html, "html.parser")
     out, seen = [], set()
     for a in soup.select('a[href*="/jobs/"]'):
         href = a.get("href") or ""

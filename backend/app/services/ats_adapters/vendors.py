@@ -66,7 +66,7 @@ _ADAPTERS: list = [
     ("mbbank",         lambda u, h: _is_mbbank(u),       lambda u, h: _mbbank(u)),
     ("tcbs",           lambda u, h: _is_tcbs(u),         lambda u, h: _tcbs(u)),
     ("canon",          lambda u, h: _is_canon(u),        lambda u, h: _canon(u)),
-    ("momo",           lambda u, h: _is_momo(u),         lambda u, h: _momo(u)),
+    ("momo",           lambda u, h: _is_momo(u),         lambda u, h: _momo(u, h)),
     ("vnpay",          lambda u, h: _is_vnpay_tuyendung(u), lambda u, h: _vnpay_tuyendung(u)),
     ("be",             lambda u, h: _is_be(u),           lambda u, h: _be(u)),
     ("zalo",           lambda u, h: _is_zalo(u),         lambda u, h: _zalo(u)),
