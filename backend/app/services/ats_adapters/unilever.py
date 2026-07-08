@@ -25,6 +25,28 @@ def _is_unilever(career_url: str) -> bool:
         "uniquelyuvn.com", "www.uniquelyuvn.com")
 
 
+def _editorjs_text(jd) -> str:
+    """``jobDescription`` is Editor.js JSON ({time, blocks, version}), NOT an
+    HTML string — feeding the dict straight into the store's text column blows
+    up the upsert (every job dropped → 0 ingested). Flatten the blocks to an
+    HTML string that ``_strip_html`` can then clean."""
+    if isinstance(jd, str):
+        return jd
+    if not isinstance(jd, dict):
+        return ""
+    parts = []
+    for b in jd.get("blocks") or []:
+        if not isinstance(b, dict):
+            continue
+        d = b.get("data") or {}
+        if b.get("type") == "list":
+            for it in d.get("items") or []:
+                parts.append(it if isinstance(it, str) else (it.get("content") if isinstance(it, dict) else "") or "")
+        else:
+            parts.append(d.get("text") or d.get("caption") or "")
+    return "\n".join(p for p in parts if p)
+
+
 def _unilever(career_url: str) -> list[dict]:
     try:
         r = requests.post(_GQL, timeout=_TIMEOUT,
@@ -51,7 +73,7 @@ def _unilever(career_url: str) -> list[dict]:
             "title": title[:200],
             "url": redirect or f"{_SITE}/job/{alias}",
             "location": "Vietnam",
-            "description": _strip_html(n.get("jobDescription") or ""),
+            "description": _strip_html(_editorjs_text(n.get("jobDescription"))),
         })
     logger.info(f"[ats] unilever → {len(out)} jobs")
     return out
