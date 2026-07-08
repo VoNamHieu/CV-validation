@@ -70,15 +70,26 @@ def _is_mbbank(career_url: str) -> bool:
 
 
 def _mbbank(career_url: str) -> list[dict]:
+    # Spring-Data paged API (content + totalPages). It's a big board (~2790
+    # recruitment-news rows), so loop pages until totalPages or the global cap —
+    # a single page=0 fetch silently truncated to 100.
     api = "https://careers.mbbank.com.vn/libra-job-management/public/recruitment-news"
     out = []
-    try:
-        r = requests.get(api, headers=_JSON_POST, timeout=_TIMEOUT,
-                         params={"workGroupId": "", "name": "", "skillTags": "",
-                                 "city": "", "size": 100, "page": 0})
-        if r.status_code != 200:
-            return []
-        for it in (r.json() or {}).get("content", []) or []:
+    for page in range(0, 40):  # 100/page; _MAX_ATS_JOBS bounds the total
+        try:
+            r = requests.get(api, headers=_JSON_POST, timeout=_TIMEOUT,
+                             params={"workGroupId": "", "name": "", "skillTags": "",
+                                     "city": "", "size": 100, "page": page})
+            if r.status_code != 200:
+                break
+            body = r.json() or {}
+        except Exception as e:
+            logger.info(f"[ats] mbbank page {page} failed: {str(e)[:80]}")
+            break
+        content = body.get("content", []) or []
+        if not content:
+            break
+        for it in content:
             name = (it.get("name") or "").strip()
             jid = it.get("id")
             if not name or not jid:
@@ -86,8 +97,8 @@ def _mbbank(career_url: str) -> list[dict]:
             out.append({"title": name[:200],
                         "url": f"https://tuyendung.mbbank.com.vn/job/{jid}",
                         "location": str(it.get("province") or "")[:120], "description": ""})
-    except Exception as e:
-        logger.info(f"[ats] mbbank failed: {str(e)[:80]}")
+        if page + 1 >= body.get("totalPages", page + 1) or len(out) >= _MAX_ATS_JOBS:
+            break
     logger.info(f"[ats] mbbank → {len(out)} jobs")
     return out
 

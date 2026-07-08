@@ -17,7 +17,10 @@ import requests
 logger = logging.getLogger("app.services.ats_adapters")
 
 _TIMEOUT = 12
-_MAX_ATS_JOBS = 100   # per-company cap across all adapters
+_MAX_ATS_JOBS = 300   # per-company cap across all adapters. Raised 100→300 after
+# a pagination audit found big VN boards (zalo 113, vnpt 145, f88 109, mbbank
+# 2790) silently capped at 100. 300 covers today's real boards while bounding a
+# mega-board (mbbank) so one employer can't flood the pool / embedding budget.
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                   "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",

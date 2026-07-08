@@ -12,7 +12,7 @@ from __future__ import annotations
 from app.services.ats_adapters._shared import *  # noqa: F401,F403
 
 _BASE = "https://tuyendung.vnpt.vn/viec-lam/tat-ca-viec-lam"
-_MAX_PAGES = 10  # ~10/page; caps at _MAX_ATS_JOBS via _finalize anyway
+_MAX_PAGES = 30  # ~10/page; source has ~145 jobs, so 30 pages reaches the 300 cap
 
 
 def _is_vnpt(career_url: str) -> bool:

@@ -562,14 +562,25 @@ def _bytedance_family(career_url: str) -> list[dict]:
     if not cfg:
         return []
     headers = {**_JSON_POST, "website-path": cfg["website_path"], "accept-language": "en-US"}
-    body = {"recruitment_id_list": [], "job_category_id_list": [], "subject_id_list": [],
-            "location_code_list": [], "keyword": "Vietnam", "limit": 50, "offset": 0}
+    # The search returns `count` total matches for keyword=Vietnam but only
+    # `limit` per page — a single offset=0 fetch capped results at 50 (TikTok has
+    # 67). Page by offset until we've seen `count` or hit the global cap.
     out = []
-    try:
-        r = requests.post(cfg["api"], headers=headers, timeout=_TIMEOUT, json=body)
-        if r.status_code != 200:
-            return []
-        for j in ((r.json() or {}).get("data", {}) or {}).get("job_post_list", []):
+    for offset in range(0, 600, 50):
+        body = {"recruitment_id_list": [], "job_category_id_list": [], "subject_id_list": [],
+                "location_code_list": [], "keyword": "Vietnam", "limit": 50, "offset": offset}
+        try:
+            r = requests.post(cfg["api"], headers=headers, timeout=_TIMEOUT, json=body)
+            if r.status_code != 200:
+                break
+            data = (r.json() or {}).get("data", {}) or {}
+        except Exception as e:
+            logger.info(f"[ats] bytedance-family failed: {str(e)[:80]}")
+            break
+        posts = data.get("job_post_list", []) or []
+        if not posts:
+            break
+        for j in posts:
             title = (j.get("title") or "").strip()
             loc = _bd_loc(j.get("city_info"))
             if not title or "vietnam" not in loc.lower():
@@ -578,8 +589,8 @@ def _bytedance_family(career_url: str) -> list[dict]:
             url = cfg["detail"].format(id=jid) if jid else cfg["api"]
             out.append({"title": title[:200], "url": url, "location": loc[:120],
                         "description": _strip_html(j.get("description", ""))})
-    except Exception as e:
-        logger.info(f"[ats] bytedance-family failed: {str(e)[:80]}")
+        if offset + 50 >= (data.get("count") or 0) or len(out) >= _MAX_ATS_JOBS:
+            break
     logger.info(f"[ats] bytedance-family → {len(out)} VN jobs ({cfg['website_path']})")
     return out
 
@@ -876,26 +887,34 @@ def _talentnet(career_url: str) -> list[dict]:
     from bs4 import BeautifulSoup
     p = urlparse(career_url)
     origin = f"{p.scheme}://{p.netloc}"
-    try:
-        r = requests.get(career_url, headers=_HTML_HEADERS, timeout=_TIMEOUT)
-        if r.status_code != 200:
-            return []
-        soup = BeautifulSoup(r.text, "html.parser")
-    except Exception as e:
-        logger.info(f"[ats] talentnet failed: {str(e)[:80]}")
-        return []
+    # The listing paginates via ?page=N (e.g. VNDIRECT has 3+ pages of 20); a
+    # single fetch of page 1 truncated to 20. Walk pages until one adds nothing.
     out, seen = [], set()
-    for a in soup.select('a[href*="/viec-lam/"]'):
-        href = a.get("href") or ""
-        if not href.endswith(".html") or "tat-ca-viec-lam" in href:
-            continue
-        url = href if href.startswith("http") else origin + href
-        title = re.sub(r"\s+", " ", a.get_text(" ", strip=True)).strip()
-        if not title or url in seen:
-            continue
-        seen.add(url)
-        out.append({"title": title[:200], "url": url, "location": "Vietnam", "description": ""})
-        if len(out) >= _MAX_ATS_JOBS:
+    for page in range(1, 21):
+        page_url = career_url if page == 1 else (
+            f"{career_url}{'&' if '?' in career_url else '?'}page={page}")
+        try:
+            r = requests.get(page_url, headers=_HTML_HEADERS, timeout=_TIMEOUT)
+            if r.status_code != 200:
+                break
+            soup = BeautifulSoup(r.text, "html.parser")
+        except Exception as e:
+            logger.info(f"[ats] talentnet page {page} failed: {str(e)[:80]}")
+            break
+        added = 0
+        for a in soup.select('a[href*="/viec-lam/"]'):
+            href = a.get("href") or ""
+            if not href.endswith(".html") or "tat-ca-viec-lam" in href:
+                continue
+            url = href if href.startswith("http") else origin + href
+            title = re.sub(r"\s+", " ", a.get_text(" ", strip=True)).strip()
+            if not title or url in seen:
+                continue
+            seen.add(url)
+            added += 1
+            out.append({"title": title[:200], "url": url, "location": "Vietnam", "description": ""})
+        # No new jobs on this page → past the last page (server may echo page 1).
+        if added == 0 or len(out) >= _MAX_ATS_JOBS:
             break
     logger.info(f"[ats] talentnet → {len(out)} jobs ({p.netloc})")
     return out
