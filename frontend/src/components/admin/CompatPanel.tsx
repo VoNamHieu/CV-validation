@@ -27,6 +27,12 @@ type CompatRecord = {
     first_seen: number;
     last_checked: number;
     hits: number;
+    // Regression guard (backend career_compat): a company whose job count
+    // collapsed to <40% of its high-water baseline — an adapter breaking to a
+    // partial count the plain verdict still calls "supported".
+    regressed?: boolean;
+    prev_job_count?: number;
+    baseline_job_count?: number;
 };
 
 // Verdict → colour. Usable = xanh, cần adapter = hổ phách, bị chặn = tím, không hỗ trợ = đỏ.
@@ -81,10 +87,13 @@ const isFallbackStrategy = (s: string): boolean => /spa_sniff|capture/i.test(s |
 // so triage runs top-down. `stale` = a supported feed the last cron missed (has
 // jobs but degrading, worth a look before it empties); `ok` = supported & fresh.
 const ISSUE_RANK: Record<string, number> = {
-    unsupported: 0, needs_new_adapter: 1, needs_capture: 2, needs_login: 3,
+    regressed: -1, unsupported: 0, needs_new_adapter: 1, needs_capture: 2, needs_login: 3,
     no_vn_jobs: 4, stale: 5, ok: 6,
 };
 function issueOf(l: CompatRecord): string {
+    // A steep drop off baseline outranks everything — the feed still "works" but
+    // is quietly returning a fraction of its jobs (e.g. a broken signature).
+    if (l.regressed) return 'regressed';
     if (!l.usable) return l.verdict;
     if ((l.blockers || []).includes('stale_feed')) return 'stale';
     return 'ok';
@@ -199,6 +208,7 @@ export default function CompatPanel() {
     };
 
     const usable = rows.filter((l) => l.usable).length;
+    const regressed = rows.filter((l) => l.regressed).length;
     const needsAdapter = rows.filter((l) => l.verdict === 'needs_new_adapter').length;
     const blocked = rows.filter((l) => l.verdict === 'needs_capture' || l.verdict === 'needs_login').length;
     // Trust signals: how many rows reflect the real ingest (source=cron) vs
@@ -284,6 +294,11 @@ export default function CompatPanel() {
             <div style={{ display: 'flex', gap: 16, marginBottom: 16, fontSize: '0.85rem' }}>
                 <span><b>{rows.length}</b> đã probe</span>
                 <span style={{ color: 'var(--accent-green)' }}><b>{usable}</b> dùng được</span>
+                {regressed > 0 && (
+                    <span style={{ color: 'var(--accent-red)' }} title="Số job tụt mạnh so với mức nền — adapter có thể đã gãy (vẫn còn ít job nên verdict vẫn 'hỗ trợ')">
+                        <b>{regressed}</b> ↓ tụt job
+                    </span>
+                )}
                 <span style={{ color: 'var(--accent-amber)' }}><b>{needsAdapter}</b> cần adapter</span>
                 <span style={{ color: 'var(--accent-purple)' }}><b>{blocked}</b> bị chặn</span>
                 <span title="Số dòng đến từ lần ingest thật (cron) — khớp pool; phần còn lại là scan/probe dry-run cũ">
@@ -321,6 +336,13 @@ export default function CompatPanel() {
                                         <span style={{ color: VERDICT_COLOR[l.verdict] || 'var(--text-muted)', fontWeight: 600 }}>
                                             ● {VERDICT_LABEL[l.verdict] || l.verdict}
                                         </span>
+                                        {l.regressed && (
+                                            <span title={`Job tụt còn ${l.job_count}/${l.baseline_job_count} so với mức nền — kiểm tra adapter`}
+                                                style={{
+                                                    marginLeft: 6, padding: '1px 6px', borderRadius: 6, fontSize: '0.7rem', fontWeight: 700,
+                                                    color: '#fff', background: 'var(--accent-red)', whiteSpace: 'nowrap',
+                                                }}>↓ tụt</span>
+                                        )}
                                     </td>
                                     <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>{l.company || l.host}</td>
                                     <td style={{ padding: '10px 12px', maxWidth: 300 }}>
@@ -336,7 +358,13 @@ export default function CompatPanel() {
                                         )}
                                         {l.strategy || (l.ats ? `ats:${l.ats}` : '-')}
                                     </td>
-                                    <td style={{ padding: '10px 12px' }}>{l.job_count || '-'}</td>
+                                    <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
+                                        {l.job_count || '-'}
+                                        {l.regressed && !!l.baseline_job_count && (
+                                            <span style={{ color: 'var(--accent-red)', fontSize: '0.72rem', marginLeft: 4 }}
+                                                title="mức nền (high-water) trước khi tụt">↓{l.baseline_job_count}</span>
+                                        )}
+                                    </td>
                                     <td style={{ padding: '10px 12px' }}>
                                         {(() => {
                                             const s = SOURCE_STYLE[l.source] || { label: l.source || '-', color: 'var(--text-muted)', title: '' };

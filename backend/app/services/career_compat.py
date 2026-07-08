@@ -35,6 +35,13 @@ _MAX_INDEX = 1000              # cap stored records
 
 _SAMPLE = 5                    # how many sample titles to keep as evidence
 
+# Regression guard thresholds (see _record_locked). Flag a company whose job
+# count collapses to < (1 - ratio) of its high-water baseline — catches an
+# adapter breaking to a partial count that the plain verdict still calls
+# "supported". Min baseline ignores noise from tiny boards.
+_REGRESS_MIN_BASELINE = 5
+_REGRESS_DROP_RATIO = 0.6      # ≥60% fewer jobs than the baseline → regressed
+
 # Anti-bot interstitials — the page is fine, we just can't read it server-side.
 # These ARE visible in raw HTML (Cloudflare/PerimeterX shells), so no render
 # needed to spot them.
@@ -316,6 +323,21 @@ async def _record_locked(url: str, res: dict, *, company: str, source: str, now:
     else:
         existing = next((e for e in index if e.get("url") == url), None)
         index = [e for e in index if e.get("url") != url]
+
+    # ── Regression guard ──────────────────────────────────────────────────
+    # The plain verdict can't see a PARTIAL collapse: an adapter that breaks and
+    # returns 12 of its usual 94 jobs still reads "supported" (green). We track a
+    # high-water baseline per company and flag when the current count falls far
+    # below it — catching e.g. momo's signed-API key rotating (94 → 12) or any
+    # feed silently shrinking. Baseline is a max (sticky), so the flag persists
+    # every run while degraded, not just the run the drop happened. A genuine,
+    # permanent shrink needs a manual re-baseline (clear) — rare and acceptable.
+    prev_count = int((existing or {}).get("job_count", 0) or 0)
+    cur_count = int(res.get("job_count", 0) or 0)
+    baseline = max(int((existing or {}).get("baseline_job_count", 0) or 0),
+                   prev_count, cur_count)
+    # Ignore noise from tiny boards; flag a ≥60% drop off the baseline.
+    regressed = baseline >= _REGRESS_MIN_BASELINE and cur_count < baseline * (1 - _REGRESS_DROP_RATIO)
     rec = {
         "url": url,
         "host": _host(url),
@@ -333,6 +355,9 @@ async def _record_locked(url: str, res: dict, *, company: str, source: str, now:
         "first_seen": (existing or {}).get("first_seen", now),
         "last_checked": now,
         "hits": (existing or {}).get("hits", 0) + 1,
+        "prev_job_count": prev_count,
+        "baseline_job_count": baseline,
+        "regressed": regressed,
     }
     index.insert(0, rec)
     await _save_index(index)
