@@ -150,6 +150,7 @@ async def search_admin(
     seniority: Optional[str] = None,
     is_active: Optional[bool] = None,
     embedding: Optional[Sequence[float]] = None,
+    sort: str = "hotness",
     limit: int = 50,
     offset: int = 0,
 ) -> tuple[list[dict], int]:
@@ -180,7 +181,16 @@ async def search_admin(
             args.append(val)
             conds.append(f"j.{col} = ${len(args)}")
 
-    order = "j.hotness DESC, j.created_at DESC"
+    # Operator-selectable sort (keyword mode only — semantic forces distance
+    # below). Whitelisted → the value never reaches SQL as raw text.
+    _SORT_MAP = {
+        "hotness": "j.hotness DESC, j.created_at DESC",
+        "created_at": "j.created_at DESC",
+        "title": "j.title ASC",
+        "company_name": "c.name ASC NULLS LAST, j.created_at DESC",
+        "location": "j.location ASC NULLS LAST, j.created_at DESC",
+    }
+    order = _SORT_MAP.get(sort, _SORT_MAP["hotness"])
     dist_col = ""
     if embedding is not None:
         args.append(list(embedding))

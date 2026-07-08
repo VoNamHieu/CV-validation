@@ -151,6 +151,7 @@ async def search_jobs(
     industry: Optional[str] = Query(None, max_length=64),
     seniority: Optional[str] = Query(None, max_length=32),
     status: str = Query("all", pattern="^(all|active|dead)$"),
+    sort: str = Query("hotness", pattern="^(hotness|created_at|title|company_name|location)$"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     _admin: str = Depends(require_admin),
@@ -175,6 +176,7 @@ async def search_jobs(
         seniority=seniority,
         is_active=is_active,
         embedding=embedding,
+        sort=sort,
         limit=limit,
         offset=offset,
     )

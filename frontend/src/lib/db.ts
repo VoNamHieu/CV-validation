@@ -195,6 +195,7 @@ export interface AdminJobSearchParams {
     industry?: string;
     seniority?: string;
     status?: 'all' | 'active' | 'dead';
+    sort?: 'hotness' | 'created_at' | 'title' | 'company_name' | 'location';
     limit?: number;
     offset?: number;
 }
@@ -270,6 +271,7 @@ export const admin = {
         if (p.industry) qs.set('industry', p.industry);
         if (p.seniority) qs.set('seniority', p.seniority);
         if (p.status) qs.set('status', p.status);
+        if (p.sort) qs.set('sort', p.sort);
         if (p.limit !== undefined) qs.set('limit', String(p.limit));
         if (p.offset !== undefined) qs.set('offset', String(p.offset));
         return req<{ total: number; results: AdminJob[] }>(
