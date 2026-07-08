@@ -68,19 +68,34 @@ def _smartrecruiters(slug: str) -> list[dict]:
     # Fall back to unfiltered when the country facet yields nothing (a company
     # that tags VN roles without the country field), leaving the VN filter to the
     # caller.
-    data = _get_json(f"https://api.smartrecruiters.com/v1/companies/{slug}/postings?limit=100&country=vn")
-    if not (data or {}).get("content"):
-        data = _get_json(f"https://api.smartrecruiters.com/v1/companies/{slug}/postings?limit=100")
+    base = f"https://api.smartrecruiters.com/v1/companies/{slug}/postings"
     out = []
-    for j in (data or {}).get("content", []):
-        loc = j.get("location") or {}
-        jid = j.get("id", "")
-        out.append({
-            "title": j.get("name", ""),
-            "url": f"https://jobs.smartrecruiters.com/{slug}/{jid}" if jid else "",
-            "location": loc.get("city", "") if isinstance(loc, dict) else "",
-            "description": "",  # SmartRecruiters JD needs a per-posting call; skip for now
-        })
+    # Try the VN country facet first, else unfiltered. Whichever returns content,
+    # paginate it by offset — the API caps at limit=100/page and returns
+    # `totalFound`, so a single page silently truncated big tenants (Bosch: 164
+    # VN jobs → 100). Loop until we've pulled totalFound or hit the global cap.
+    for q in (f"{base}?limit=100&country=vn", f"{base}?limit=100"):
+        first = _get_json(f"{q}&offset=0")
+        content = (first or {}).get("content") or []
+        if not content:
+            continue
+        total = (first or {}).get("totalFound") or len(content)
+        offset = 0
+        while content:
+            for j in content:
+                loc = j.get("location") or {}
+                jid = j.get("id", "")
+                out.append({
+                    "title": j.get("name", ""),
+                    "url": f"https://jobs.smartrecruiters.com/{slug}/{jid}" if jid else "",
+                    "location": loc.get("city", "") if isinstance(loc, dict) else "",
+                    "description": "",  # JD needs a per-posting call; skip for now
+                })
+            offset += 100
+            if offset >= total or len(out) >= _MAX_ATS_JOBS:
+                break
+            content = (_get_json(f"{q}&offset={offset}") or {}).get("content") or []
+        break  # used whichever query first returned content
     return out
 
 
