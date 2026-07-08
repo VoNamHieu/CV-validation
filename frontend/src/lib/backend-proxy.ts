@@ -6,7 +6,10 @@ import { NextRequest, NextResponse } from "next/server";
  * routes, which forward to `BACKEND_URL`.
  *
  * Forwards method, trailing path, query string, JSON body, and the auth
- * headers (`Authorization` bearer + dev `X-User-Id`) unchanged.
+ * headers (`Authorization` bearer + dev `X-User-Id`) unchanged. JSON responses
+ * are re-serialized; NON-JSON responses (e.g. logo image bytes from
+ * /store/companies/{id}/logo) are streamed through untouched — parsing those as
+ * JSON returns `{}` and breaks every <img> that points at a proxied endpoint.
  */
 const AUTH_HEADERS = ["authorization", "x-user-id"];
 const METHODS_WITH_BODY = new Set(["POST", "PUT", "PATCH"]);
@@ -43,6 +46,16 @@ export async function proxyToBackend(
             body,
             signal: AbortSignal.timeout(timeoutMs),
         });
+        const contentType = response.headers.get("content-type") || "";
+        // Binary / non-JSON (image logos, files) → pass the raw bytes through
+        // with the original content-type + cache-control, don't JSON-parse.
+        if (!contentType.includes("application/json")) {
+            const out = new NextResponse(await response.arrayBuffer(), { status: response.status });
+            if (contentType) out.headers.set("Content-Type", contentType);
+            const cache = response.headers.get("cache-control");
+            if (cache) out.headers.set("Cache-Control", cache);
+            return out;
+        }
         const data = await response.json().catch(() => ({}));
         return NextResponse.json(data, { status: response.status });
     } catch (e: unknown) {
