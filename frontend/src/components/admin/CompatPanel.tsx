@@ -77,6 +77,19 @@ const SOURCE_STYLE: Record<string, { label: string; color: string; title: string
 // regressions.
 const isFallbackStrategy = (s: string): boolean => /spa_sniff|capture/i.test(s || '');
 
+// Issue-type ordering for the "sort by issue type" view — most actionable first
+// so triage runs top-down. `stale` = a supported feed the last cron missed (has
+// jobs but degrading, worth a look before it empties); `ok` = supported & fresh.
+const ISSUE_RANK: Record<string, number> = {
+    unsupported: 0, needs_new_adapter: 1, needs_capture: 2, needs_login: 3,
+    no_vn_jobs: 4, stale: 5, ok: 6,
+};
+function issueOf(l: CompatRecord): string {
+    if (!l.usable) return l.verdict;
+    if ((l.blockers || []).includes('stale_feed')) return 'stale';
+    return 'ok';
+}
+
 export default function CompatPanel() {
     const [rows, setRows] = useState<CompatRecord[]>([]);
     const [loading, setLoading] = useState(false);
@@ -86,6 +99,7 @@ export default function CompatPanel() {
     const [probeUrl, setProbeUrl] = useState('');
     const [companyFilter, setCompanyFilter] = useState('');
     const [busyUrl, setBusyUrl] = useState('');
+    const [sortBy, setSortBy] = useState<'recency' | 'issue'>('recency');
 
     const load = useCallback(async () => {
         setLoading(true);
@@ -192,6 +206,18 @@ export default function CompatPanel() {
     const fromCron = rows.filter((l) => l.source === 'cron').length;
     const fallback = rows.filter((l) => l.usable && isFallbackStrategy(l.strategy)).length;
 
+    // "Theo loại vấn đề" groups rows by issue (broken → needs-adapter → …→ stale
+    // → ok), most actionable first, then by company; default is recency.
+    const sorted = [...rows].sort((a, b) => {
+        if (sortBy === 'issue') {
+            const ra = ISSUE_RANK[issueOf(a)] ?? 9;
+            const rb = ISSUE_RANK[issueOf(b)] ?? 9;
+            if (ra !== rb) return ra - rb;
+            return (a.company || a.host).localeCompare(b.company || b.host);
+        }
+        return (b.last_checked || 0) - (a.last_checked || 0);
+    });
+
     const btn = (extra: React.CSSProperties = {}): React.CSSProperties => ({
         padding: '8px 16px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-default)',
         background: 'var(--bg-card)', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '0.85rem',
@@ -242,6 +268,15 @@ export default function CompatPanel() {
                 <button onClick={runScan} disabled={scanning} style={btn({ opacity: scanning ? 0.6 : 1 })}>
                     {scanning ? 'Đang quét…' : 'Quét công ty nổi bật'}
                 </button>
+                <select
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value as 'recency' | 'issue')}
+                    title="Sắp xếp bảng"
+                    style={input({ cursor: 'pointer' })}
+                >
+                    <option value="recency">Sắp xếp: Mới nhất</option>
+                    <option value="issue">Sắp xếp: Theo loại vấn đề</option>
+                </select>
                 <button onClick={load} disabled={loading} style={btn()}>Làm mới</button>
                 <button onClick={clearAll} style={btn({ marginLeft: 'auto', color: 'var(--accent-red)' })}>Xoá nhật ký</button>
             </div>
@@ -280,7 +315,7 @@ export default function CompatPanel() {
                             </tr>
                         </thead>
                         <tbody>
-                            {rows.map((l) => (
+                            {sorted.map((l) => (
                                 <tr key={l.url} style={{ borderTop: '1px solid var(--border-subtle)' }}>
                                     <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }} title={l.detail}>
                                         <span style={{ color: VERDICT_COLOR[l.verdict] || 'var(--text-muted)', fontWeight: 600 }}>
