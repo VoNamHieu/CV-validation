@@ -294,7 +294,8 @@ _write_lock = asyncio.Lock()
 
 async def record(url: str, res: dict, *, company: str = "",
                  source: str = "probe") -> dict:
-    """Upsert a probe record by URL, preserving first_seen, bumping last_checked."""
+    """Upsert a probe record, keyed by company (fallback URL), preserving
+    first_seen and bumping last_checked."""
     now = int(time.time())
     async with _write_lock:
         return await _record_locked(url, res, company=company, source=source, now=now)
@@ -302,7 +303,19 @@ async def record(url: str, res: dict, *, company: str = "",
 
 async def _record_locked(url: str, res: dict, *, company: str, source: str, now: int) -> dict:
     index = await _load_index()
-    existing = next((e for e in index if e.get("url") == url), None)
+    # Identity is the COMPANY, not the URL: the same employer surfaces under
+    # several career_url variants across runs (marketing shell vs ATS tenant, a
+    # detail page captured once, a manual probe of a different path). Keying on
+    # URL kept a stale duplicate row per variant — the cron would add a fresh
+    # "supported" while the old scan's "needs_adapter" lingered. Dedupe by
+    # company so there's exactly one row per employer; fall back to URL only for
+    # ad-hoc probes with no company attached.
+    if company:
+        existing = next((e for e in index if e.get("company") == company), None)
+        index = [e for e in index if e.get("company") != company]
+    else:
+        existing = next((e for e in index if e.get("url") == url), None)
+        index = [e for e in index if e.get("url") != url]
     rec = {
         "url": url,
         "host": _host(url),
@@ -321,7 +334,6 @@ async def _record_locked(url: str, res: dict, *, company: str, source: str, now:
         "last_checked": now,
         "hits": (existing or {}).get("hits", 0) + 1,
     }
-    index = [e for e in index if e.get("url") != url]
     index.insert(0, rec)
     await _save_index(index)
     return rec
