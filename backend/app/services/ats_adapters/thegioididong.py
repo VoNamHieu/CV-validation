@@ -21,33 +21,77 @@ def _is_thegioididong(career_url: str) -> bool:
         "vieclam.thegioididong.com", "www.vieclam.thegioididong.com")
 
 
-def _thegioididong(career_url: str) -> list[dict]:
+# The site intermittently serves a stripped page (no job_box, ~38 KB vs ~64 KB) —
+# a flaky server variant, NOT a UA/cookie/selector issue (confirmed: an identical
+# request alternates full/empty, and a warmed session doesn't help). A single
+# fetch per cron run therefore missed the feed and TGDĐ went "stale". Retrying an
+# empty page recovers it during "mixed" periods; during a full-bad streak even
+# retries fail, so this is a mitigation, not a cure — the durable fix is to let
+# the adapter consume the phase-2 rendered HTML (real browsers get the full page).
+_EMPTY_RETRIES = 6
+_RETRY_SLEEP = 0.4
+
+
+def _fetch_boxes(page: int):
+    import time
     from bs4 import BeautifulSoup
-    out = []
-    for page in range(1, _MAX_PAGES + 1):
-        params = {} if page == 1 else {"key": "", "page": page}
+    params = {} if page == 1 else {"key": "", "page": page}
+    for attempt in range(_EMPTY_RETRIES):
         try:
             r = requests.get(_LIST_URL, headers=_HTML_HEADERS, params=params, timeout=_TIMEOUT)
-            if r.status_code != 200:
-                break
-            soup = BeautifulSoup(r.text, "html.parser")
         except Exception as e:
-            logger.info(f"[ats] thegioididong page {page} failed: {str(e)[:80]}")
+            logger.info(f"[ats] thegioididong page {page} attempt {attempt} failed: {str(e)[:80]}")
+            time.sleep(_RETRY_SLEEP)
+            continue
+        if r.status_code != 200:
+            return None  # hard failure → stop paginating
+        boxes = BeautifulSoup(r.text, "html.parser").select("div.job_box")
+        if boxes:
+            return boxes
+        time.sleep(_RETRY_SLEEP)  # flaky-empty variant → wait, retry
+    return []  # empty even after retries → genuine end (or a bad streak)
+
+
+def _parse_boxes(boxes, out: list[dict]) -> None:
+    for box in boxes:
+        a = box.find("a", href=True)
+        title_el = box.select_one("div.title h3")
+        if not a or not title_el:
+            continue
+        title = title_el.get_text(" ", strip=True)
+        if not title:
+            continue
+        loc_el = box.select_one("li.info_box")
+        out.append({
+            "title": title[:200],
+            "url": urljoin(_LIST_URL, a["href"]),
+            "location": loc_el.get_text(" ", strip=True) if loc_el else "",
+            "description": "",
+        })
+
+
+def _thegioididong(career_url: str, html: str | None = None) -> list[dict]:
+    # Two-gate design for a flaky site:
+    #   1st gate (phase 1, html=None): cheap fetch-with-retry, paginated.
+    #   2nd gate (phase 2): the cron renders the page and passes the HTML here.
+    #     A real-browser render reliably gets the full page, so if that HTML
+    #     already carries job_box rows we parse them directly — no re-fetch, no
+    #     flakiness. (Render only has page 1 → ~20 jobs, better than 0.)
+    out: list[dict] = []
+    if html:
+        from bs4 import BeautifulSoup
+        rendered = BeautifulSoup(html, "html.parser").select("div.job_box")
+        if rendered:
+            _parse_boxes(rendered, out)
+            logger.info(f"[ats] thegioididong (rendered) → {len(out)} jobs")
+            return out
+        # rendered HTML had no rows (rare) → fall through to the fetch path.
+
+    for page in range(1, _MAX_PAGES + 1):
+        boxes = _fetch_boxes(page)
+        if boxes is None or not boxes:
             break
-        boxes = soup.select("div.job_box")
-        if not boxes:
-            break
-        for box in boxes:
-            a = box.find("a", href=True)
-            title_el = box.select_one("div.title h3")
-            if not a or not title_el:
-                continue
-            title = title_el.get_text(" ", strip=True)
-            href = urljoin(_LIST_URL, a["href"])
-            loc_el = box.select_one("li.info_box")
-            location = loc_el.get_text(" ", strip=True) if loc_el else ""
-            if title:
-                out.append({"title": title[:200], "url": href, "location": location, "description": ""})
+        _parse_boxes(boxes, out)
         if len(out) >= _MAX_ATS_JOBS:
             break
     logger.info(f"[ats] thegioididong → {len(out)} jobs")

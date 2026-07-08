@@ -85,7 +85,7 @@ _ADAPTERS: list = [
     ("successfactors", _is_successfactors,               lambda u, h: _successfactors(u, h)),
     ("viettelhightech", lambda u, h: _is_viettelhightech(u), lambda u, h: _viettelhightech(u)),
     ("vnpt",            lambda u, h: _is_vnpt(u),            lambda u, h: _vnpt(u)),
-    ("thegioididong",   lambda u, h: _is_thegioididong(u),   lambda u, h: _thegioididong(u)),
+    ("thegioididong",   lambda u, h: _is_thegioididong(u),   lambda u, h: _thegioididong(u, h)),
     ("cellphones",      lambda u, h: _is_cellphones(u),      lambda u, h: _cellphones(u)),
     ("vnptai",          lambda u, h: _is_vnptai(u),          lambda u, h: _vnptai(u)),
     ("aeon",            lambda u, h: _is_aeon(u),            lambda u, h: _aeon(u)),
