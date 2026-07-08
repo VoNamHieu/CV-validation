@@ -176,37 +176,58 @@ def _successfactors(career_url: str, html: str | None) -> list[dict]:
     # narrows). Global boards (Adidas) instead carry an explicit
     # locationsearch=Vietnam in career_url — honour it by fetching the career_url
     # AS GIVEN rather than resetting to /search/?q=, else the VN filter is lost.
-    try:
-        is_search = "/search" in (p.path or "")
-        # Use the passed HTML only when career_url IS the search page (so its
-        # rendered tiles are what we parse). For a homepage career_url the passed
-        # HTML has no tiles, so fetch the search endpoint instead.
-        if html and is_search:
-            soup = BeautifulSoup(html, "html.parser")
-        else:
-            fetch_url = career_url if is_search else f"{origin}/search/?q="
-            r = requests.get(fetch_url, headers=_HTML_HEADERS, timeout=_TIMEOUT)
-            if r.status_code != 200:
-                return []
-            soup = BeautifulSoup(r.text, "html.parser")
-    except Exception:
-        return []
+    is_search = "/search" in (p.path or "")
     out, seen = [], set()
-    for a in soup.select('a[href^="/job/"]'):
-        href = a.get("href", "")
-        title = a.get_text(" ", strip=True)
-        if not href or not title or len(title) < 4 or href in seen:
-            continue
-        seen.add(href)
-        # SF classic pairs each title link with a span.jobLocation in the same
-        # row (e.g. "Hanoi, 64, VN"); grab it so ingest/VN-filter has a location.
-        row = a.find_parent(["tr", "li", "div"])
-        loc_el = row.select_one("span.jobLocation") if row else None
-        loc = loc_el.get_text(" ", strip=True) if loc_el else ""
-        out.append({"title": title[:200], "url": origin + href,
-                    "location": loc[:120], "description": ""})
+
+    def _parse_tiles(soup) -> int:
+        added = 0
+        for a in soup.select('a[href^="/job/"]'):
+            href = a.get("href", "")
+            title = a.get_text(" ", strip=True)
+            if not href or not title or len(title) < 4 or href in seen:
+                continue
+            seen.add(href)
+            added += 1
+            # SF classic pairs each title link with a span.jobLocation in the
+            # same row (e.g. "Hanoi, 64, VN"); grab it for the VN filter.
+            row = a.find_parent(["tr", "li", "div"])
+            loc_el = row.select_one("span.jobLocation") if row else None
+            loc = loc_el.get_text(" ", strip=True) if loc_el else ""
+            out.append({"title": title[:200], "url": origin + href,
+                        "location": loc[:120], "description": ""})
+        return added
+
+    try:
+        if is_search:
+            # Classic SF search pages return tiles in static HTML and paginate by
+            # &startrow=N (25/page). A single fetch truncated VN-scoped global
+            # boards to one page (Adidas 75 → 25, Deloitte 80 → 25). Walk startrow
+            # until a page adds nothing. career_url already carries the VN
+            # location facet, so every page stays VN-scoped.
+            sep = "&" if "?" in career_url else "?"
+            for startrow in range(0, 25 * 20, 25):
+                if startrow == 0 and html:
+                    page_html = html                      # reuse rendered page 1
+                else:
+                    page_url = career_url if startrow == 0 else f"{career_url}{sep}startrow={startrow}"
+                    r = requests.get(page_url, headers=_HTML_HEADERS, timeout=_TIMEOUT)
+                    if r.status_code != 200:
+                        break
+                    page_html = r.text
+                if _parse_tiles(BeautifulSoup(page_html, "html.parser")) == 0 \
+                        or len(out) >= _MAX_ATS_JOBS:
+                    break
+        else:
+            # Homepage career_url (no /search path): its passed HTML has no tiles,
+            # so hit the site search once. Not VN-scoped, so single page only —
+            # the downstream VN filter narrows it.
+            r = requests.get(f"{origin}/search/?q=", headers=_HTML_HEADERS, timeout=_TIMEOUT)
+            if r.status_code == 200:
+                _parse_tiles(BeautifulSoup(r.text, "html.parser"))
+    except Exception:
+        pass
     logger.info(f"[ats] successfactors → {len(out)} jobs ({origin})")
-    return out[:50]
+    return out[:_MAX_ATS_JOBS]
 
 
 def _is_basevn(career_url: str, html: str | None) -> bool:
