@@ -67,9 +67,15 @@ _VN_MARKERS = ("vietnam", "viet nam", "việt nam", "hanoi", "ha noi", "hà nộ
 _WD_RX = re.compile(r"https?://([^.]+)\.(wd\d+)\.myworkdayjobs\.com(/[^?]*)?", re.I)
 
 
+# Short standalone location codes some ATS emit instead of a city/country name:
+# ISO "VN"/"VNM" (SuccessFactors → Masan) and city abbreviations "HCM"/"HN"
+# (FE Credit). Matched at word boundaries so "hn" doesn't hit "johnson" etc.
+_VN_ABBR_RX = re.compile(r"\b(vn|vnm|hcm|hn)\b", re.I)
+
+
 def _is_vn_loc(loc: str) -> bool:
     l = (loc or "").lower()
-    return any(m in l for m in _VN_MARKERS)
+    return any(m in l for m in _VN_MARKERS) or bool(_VN_ABBR_RX.search(loc or ""))
 
 
 _BAD_TITLES = {
