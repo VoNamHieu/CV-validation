@@ -160,6 +160,31 @@ async def summary(days: int = 30) -> dict[str, Any]:
     }
 
 
+async def top_optimizers(days: int = 0, limit: int = 20) -> list[dict[str, Any]]:
+    """Leaderboard: users who optimized their CV for the most jobs. Each
+    ``applications`` row is one job the user tailored a CV for, so we count
+    all of a user's applications (status progresses tailored→submitted→…, so
+    filtering by status would undercount). All-time by default; pass
+    ``days > 0`` to window on when the application was created."""
+    pool = await get_pool()
+    d = days if days and days > 0 else _ALL_TIME_DAYS
+    lim = max(1, min(limit, 100))
+    rows = await _try(
+        lambda: pool.fetch(
+            "SELECT p.email AS email, count(a.id) AS n "
+            "FROM applications a JOIN profiles p ON p.id = a.user_id "
+            "WHERE a.created_at > now() - make_interval(days => $1) "
+            "GROUP BY p.id, p.email "
+            "ORDER BY n DESC, p.email ASC "
+            "LIMIT $2",
+            d,
+            lim,
+        ),
+        [],
+    )
+    return [{"email": r["email"], "jobs": int(r["n"])} for r in rows]
+
+
 async def timeseries(days: int = 30) -> dict[str, Any]:
     """Daily series over the last ``days`` days (clamped 1–365) for the four
     headline trends. Zero-filled against a complete date spine so the frontend

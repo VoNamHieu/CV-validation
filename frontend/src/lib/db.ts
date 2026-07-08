@@ -329,7 +329,14 @@ export const admin = {
         req<AnalyticsTimeseries>(`/api/admin/analytics/timeseries?days=${days}`, { auth: true }),
     analyticsFunnel: (days: number) =>
         req<Record<string, number>>(`/api/admin/analytics/funnel?days=${days}`, { auth: true }),
+    analyticsTopOptimizers: (days: number, limit = 20) =>
+        req<TopOptimizer[]>(`/api/admin/analytics/top-optimizers?days=${days}&limit=${limit}`, { auth: true }),
 };
+
+export interface TopOptimizer {
+    email: string;
+    jobs: number;
+}
 
 export type PromotedStatus = 'draft' | 'published' | 'unpublished';
 
