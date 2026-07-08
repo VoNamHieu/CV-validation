@@ -82,29 +82,16 @@ export default function Sidebar() {
             }}
         >
             {/* Brand */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '4px 8px' }}>
-                <div
-                    style={{
-                        width: 34, height: 34, borderRadius: 10,
-                        background: 'var(--gradient-hero)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        boxShadow: '0 2px 10px rgba(99, 102, 241, 0.3)',
-                    }}
-                >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src="/copo-mark-white.png" alt="Copo" width={20} height={20} style={{ display: 'block' }} />
-                </div>
+            <div style={{ display: 'flex', alignItems: 'center', padding: '4px 8px' }}>
                 <span
                     style={{
-                        fontWeight: 700,
-                        fontSize: '0.98rem',
+                        fontWeight: 800,
+                        fontSize: '1.15rem',
                         letterSpacing: '-0.02em',
-                        background: 'var(--gradient-hero)',
-                        WebkitBackgroundClip: 'text',
-                        WebkitTextFillColor: 'transparent',
+                        color: 'var(--text-primary)',
                     }}
                 >
-                    Copo
+                    Copo<span style={{ color: 'var(--accent-red)' }}>.</span>
                 </span>
             </div>
 

@@ -32,15 +32,8 @@
     text-decoration: none;
 }
 
-.brandMark {
-    width: 28px;
-    height: 28px;
-    border-radius: 8px;
-    background: var(--gradient-hero);
-    display: grid;
-    place-items: center;
-    color: #fff;
-    box-shadow: var(--shadow-button);
+.brandDot {
+    color: var(--accent-red);
 }
 
 .topbarHint {

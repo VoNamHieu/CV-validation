@@ -168,11 +168,7 @@ export default async function PromotedJobPage(
             {/* Top bar */}
             <div className={styles.topbar}>
                 <a href="/" className={styles.brand}>
-                    <span className={styles.brandMark}>
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src="/copo-mark-white.png" alt="Copo" width={17} height={17} style={{ display: 'block' }} />
-                    </span>
-                    Copo
+                    <span>Copo<span className={styles.brandDot}>.</span></span>
                 </a>
                 <span className={styles.topbarHint}>Việc làm được tuyển chọn</span>
             </div>
