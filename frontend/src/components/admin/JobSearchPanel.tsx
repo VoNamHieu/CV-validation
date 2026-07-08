@@ -23,6 +23,15 @@ const PROMOTED_STATUS_META: Record<string, { label: string; color: string }> = {
 type Facets = { role_family: FacetValue[]; industry: FacetValue[]; seniority: FacetValue[] };
 type Status = 'all' | 'active' | 'dead';
 type Mode = 'keyword' | 'semantic';
+type Sort = 'hotness' | 'created_at' | 'title' | 'company_name' | 'location';
+
+const SORT_OPTIONS: { value: Sort; label: string }[] = [
+    { value: 'hotness', label: 'Nổi bật (hotness)' },
+    { value: 'created_at', label: 'Mới nhất' },
+    { value: 'company_name', label: 'Công ty (A→Z)' },
+    { value: 'title', label: 'Chức danh (A→Z)' },
+    { value: 'location', label: 'Địa điểm (A→Z)' },
+];
 
 function ago(iso: string | null): string {
     if (!iso) return '-';
@@ -66,6 +75,7 @@ export default function JobSearchPanel() {
     const [industry, setIndustry] = useState('');
     const [seniority, setSeniority] = useState('');
     const [status, setStatus] = useState<Status>('active');
+    const [sort, setSort] = useState<Sort>('hotness');
     const [offset, setOffset] = useState(0);
 
     const [facets, setFacets] = useState<Facets | null>(null);
@@ -171,6 +181,7 @@ export default function JobSearchPanel() {
                 industry: industry || undefined,
                 seniority: seniority || undefined,
                 status,
+                sort,
                 limit: PAGE_SIZE,
                 offset: newOffset,
             });
@@ -185,7 +196,7 @@ export default function JobSearchPanel() {
         } finally {
             if (my === seq.current) setLoading(false);
         }
-    }, [q, mode, roleFamily, industry, seniority, status]);
+    }, [q, mode, roleFamily, industry, seniority, status, sort]);
     searchRef.current = search;
 
     // Initial load + auto re-search when a filter changes (not on keystrokes —
@@ -194,7 +205,7 @@ export default function JobSearchPanel() {
     useEffect(() => {
         search(0);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [mode, roleFamily, industry, seniority, status]);
+    }, [mode, roleFamily, industry, seniority, status, sort]);
 
     const page = Math.floor(offset / PAGE_SIZE) + 1;
     const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -317,6 +328,22 @@ export default function JobSearchPanel() {
                     <option value="active">Đang tuyển</option>
                     <option value="dead">Đã đóng</option>
                     <option value="all">Tất cả</option>
+                </select>
+                <select
+                    value={sort}
+                    onChange={(e) => setSort(e.target.value as Sort)}
+                    disabled={mode === 'semantic'}
+                    title={mode === 'semantic' ? 'Chế độ semantic luôn xếp theo độ tương đồng' : 'Sắp xếp kết quả'}
+                    style={{
+                        padding: '8px 10px', borderRadius: 10, fontSize: '0.8rem',
+                        border: '1px solid var(--border-subtle)', background: 'var(--bg-card)',
+                        color: 'var(--text-primary)', cursor: mode === 'semantic' ? 'not-allowed' : 'pointer',
+                        opacity: mode === 'semantic' ? 0.5 : 1,
+                    }}
+                >
+                    {SORT_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>Sắp xếp: {o.label}</option>
+                    ))}
                 </select>
                 {(roleFamily || industry || seniority || q) && (
                     <button type="button" onClick={() => { setQ(''); setRoleFamily(''); setIndustry(''); setSeniority(''); }}
