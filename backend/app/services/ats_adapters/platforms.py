@@ -179,7 +179,14 @@ def _successfactors(career_url: str, html: str | None) -> list[dict]:
     is_search = "/search" in (p.path or "")
     out, seen = [], set()
 
-    def _parse_tiles(soup) -> int:
+    def _harvest(soup) -> int:
+        # Returns how many NEW VN(-or-untagged) jobs this page added. SF's
+        # `locationsearch=Vietnam` facet only filters the FIRST page — startrow
+        # pages beyond it spill the worldwide board — and nothing downstream
+        # VN-filters an adapter's output. So filter here: keep VN-tagged tiles
+        # (span.jobLocation like "Ho Chi Minh City, 65, VN") and untagged ones
+        # (VN-domestic SF sites often omit the location), but DROP foreign-tagged
+        # rows. When VN rows run out, the caller stops (we've hit the global tail).
         added = 0
         for a in soup.select('a[href^="/job/"]'):
             href = a.get("href", "")
@@ -187,12 +194,12 @@ def _successfactors(career_url: str, html: str | None) -> list[dict]:
             if not href or not title or len(title) < 4 or href in seen:
                 continue
             seen.add(href)
-            added += 1
-            # SF classic pairs each title link with a span.jobLocation in the
-            # same row (e.g. "Hanoi, 64, VN"); grab it for the VN filter.
             row = a.find_parent(["tr", "li", "div"])
             loc_el = row.select_one("span.jobLocation") if row else None
             loc = loc_el.get_text(" ", strip=True) if loc_el else ""
+            if loc and not _is_vn_loc(loc):   # foreign-tagged → not a VN job
+                continue
+            added += 1
             out.append({"title": title[:200], "url": origin + href,
                         "location": loc[:120], "description": ""})
         return added
@@ -200,10 +207,10 @@ def _successfactors(career_url: str, html: str | None) -> list[dict]:
     try:
         if is_search:
             # Classic SF search pages return tiles in static HTML and paginate by
-            # &startrow=N (25/page). A single fetch truncated VN-scoped global
-            # boards to one page (Adidas 75 → 25, Deloitte 80 → 25). Walk startrow
-            # until a page adds nothing. career_url already carries the VN
-            # location facet, so every page stays VN-scoped.
+            # &startrow=N (25/page). Walk startrow until a page adds no new VN
+            # rows (the VN-faceted results end and the global board begins) — this
+            # both de-truncates real VN boards (Deloitte 25 → 48) and stops us
+            # ingesting the foreign tail (Adidas stays 25 VN, not 75).
             sep = "&" if "?" in career_url else "?"
             for startrow in range(0, 25 * 20, 25):
                 if startrow == 0 and html:
@@ -214,19 +221,18 @@ def _successfactors(career_url: str, html: str | None) -> list[dict]:
                     if r.status_code != 200:
                         break
                     page_html = r.text
-                if _parse_tiles(BeautifulSoup(page_html, "html.parser")) == 0 \
+                if _harvest(BeautifulSoup(page_html, "html.parser")) == 0 \
                         or len(out) >= _MAX_ATS_JOBS:
                     break
         else:
             # Homepage career_url (no /search path): its passed HTML has no tiles,
-            # so hit the site search once. Not VN-scoped, so single page only —
-            # the downstream VN filter narrows it.
+            # so hit the site search once (single page — not VN-scoped).
             r = requests.get(f"{origin}/search/?q=", headers=_HTML_HEADERS, timeout=_TIMEOUT)
             if r.status_code == 200:
-                _parse_tiles(BeautifulSoup(r.text, "html.parser"))
+                _harvest(BeautifulSoup(r.text, "html.parser"))
     except Exception:
         pass
-    logger.info(f"[ats] successfactors → {len(out)} jobs ({origin})")
+    logger.info(f"[ats] successfactors → {len(out)} VN jobs ({origin})")
     return out[:_MAX_ATS_JOBS]
 
 

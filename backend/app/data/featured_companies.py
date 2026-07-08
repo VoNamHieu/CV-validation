@@ -1022,7 +1022,10 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="SAP",
         homepage="https://sap.com",
-        career_url="https://jobs.sap.com/go/SAP_Labs_Vietnam/9283701/",
+        # SuccessFactors. The old /go/SAP_Labs_Vietnam landing exposed only the
+        # global board (all foreign → 0 VN after filtering); the VN location
+        # facet returns the real Vietnam postings.
+        career_url="https://jobs.sap.com/search/?q=&locationsearch=Vietnam",
     ),
     FeaturedCompany(
         name="Salesforce",
