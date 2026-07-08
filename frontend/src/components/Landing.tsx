@@ -9,6 +9,7 @@ import {
 } from '@phosphor-icons/react';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuth } from '@/lib/auth';
+import { catalog } from '@/lib/db';
 
 // Landing / front door, shown until the visitor taps "Bắt đầu" (persisted via
 // the `entered` flag). Sells the product before dropping the user into the app;
@@ -62,16 +63,22 @@ const COMPANIES: { name: string; domain: string }[] = [
     { name: 'Heineken', domain: 'heineken.com' },
 ];
 
-// One logo: image from the CDN, falling back to a wordmark on load error.
+// One logo, resolved in a 3-stage fallback so admin-uploaded brands take
+// priority: our stored company logo (by domain) → Clearbit CDN guess →
+// wordmark. Each stage advances on the previous <img>'s load error.
 function LogoItem({ name, domain }: { name: string; domain: string }) {
-    const [failed, setFailed] = useState(false);
-    if (failed) return <span className="lp-logo-text">{name}</span>;
+    const [stage, setStage] = useState<0 | 1 | 2>(0);
+    if (stage === 2) return <span className="lp-logo-text">{name}</span>;
+    const src = stage === 0
+        ? catalog.companyLogoUrlByDomain(domain)
+        : `https://logo.clearbit.com/${domain}`;
     return (
         // eslint-disable-next-line @next/next/no-img-element
         <img
+            key={stage}
             className="lp-logo-img" alt={name} loading="lazy"
-            src={`https://logo.clearbit.com/${domain}`}
-            onError={() => setFailed(true)}
+            src={src}
+            onError={() => setStage((s) => (s + 1) as 0 | 1 | 2)}
         />
     );
 }
