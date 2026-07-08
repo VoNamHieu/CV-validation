@@ -506,7 +506,11 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="PepsiCo",
         homepage="https://pepsico.com",
-        career_url="https://careers.pepsico.com",
+        # careers.pepsico.com is a Jibe/Radancy tenant (pepsicojobs.com). The
+        # `radancy` adapter reads /api/jobs; it keys detection on woe+regionCode
+        # while this tenant filters by location= — so carry all three (the API
+        # uses location and ignores the rest).
+        career_url="https://www.pepsicojobs.com/search-jobs?location=Vietnam&woe=1&regionCode=VN",
     ),
     FeaturedCompany(
         name="Ajinomoto Vietnam",
@@ -619,12 +623,29 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Unilever Vietnam",
         homepage="https://unilever.com.vn",
+        # Global ATS — professional / experienced roles.
         career_url="https://careers.unilever.com/en/location/vietnam-jobs/34155/1562822/2",
+    ),
+    FeaturedCompany(
+        name="Unilever Vietnam (Uniquely U)",
+        homepage="https://uniquelyuvn.com",
+        # Separate from the global ATS above: the VN entry-level / graduate
+        # programmes (UFLP, UFresh, interns) on the "Uniquely U" site, served by
+        # a public GraphQL API → `unilever` adapter.
+        career_url="https://uniquelyuvn.com/job",
     ),
     FeaturedCompany(
         name="P&G Vietnam",
         homepage="https://vn.pg.com",
         career_url="https://www.pgcareers.com/global/en/locations/vietnam",
+    ),
+    FeaturedCompany(
+        name="L'Oréal Vietnam",
+        homepage="https://www.loreal.com/en/vietnam",
+        # Avature behind a Cloudflare JS challenge (server GET 403). Read from the
+        # extension's DOM capture → generic washer picks the /jobs/JobDetail/
+        # cluster. In the batch-capture target list.
+        career_url="https://careers.loreal.com/en_US/jobs/SearchJobs?3_110_3=18078",
     ),
     FeaturedCompany(
         name="Vinpearl",

@@ -21,7 +21,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -106,9 +106,106 @@ _CAPTURE_JOB_PATTERNS = {
 }
 
 
+# ── Generic capture "washer" ────────────────────────────────────────────────
+# Turns a captured DOM's anchor list into jobs WITHOUT a per-host rule, so a new
+# anti-bot site just needs a capture — no hand-written pattern / no Claude to
+# reverse-engineer it. It works by clustering every link by its URL "template"
+# (the path with the trailing slug/id segments stripped), then picking the
+# cluster that looks most like a job list: many links sharing one deep,
+# job-keyworded prefix. Nav/social/label links fall into other, lower-scoring
+# clusters and drop out. A host in _CAPTURE_JOB_PATTERNS still overrides this.
+_SOCIAL_HOSTS = ("facebook.", "linkedin.", "twitter.", "x.com", "youtube.",
+                 "instagram.", "tiktok.", "zalo.", "t.me", "google.")
+_NAV_PATH_RX = re.compile(
+    r"tin-tuc|/news|/blog|gioi-thieu|/about|lien-he|/contact|/login|dang-nhap|"
+    r"/search|privacy|/terms|chinh-sach|dieu-khoan|/category|/tag/|/faq|/event",
+    re.I)
+_JOB_PATH_RX = re.compile(
+    r"job|position|vacanc|recruit|tuyen-?dung|viec-?lam|opening|co-hoi|hiring|"
+    r"jobdetail|vi-tri|chi-tiet|/career", re.I)
+_LABEL_TEXT = {
+    "chi tiet", "chi tiết", "ung tuyen", "ứng tuyển", "apply", "apply now",
+    "see more", "view", "view job", "view details", "xem chi tiet", "xem chi tiết",
+    "xem them", "xem thêm", "read more", "learn more", "details", "detail",
+}
+
+
+def _norm_label(s: str) -> str:
+    import unicodedata
+    s = unicodedata.normalize("NFD", s or "")
+    return "".join(c for c in s if unicodedata.category(c) != "Mn").lower().strip()
+
+
+def _link_template(path: str) -> str:
+    """Strip trailing variable segments (numeric ids, long hyphen/dot slugs) to
+    get the stable prefix a job list shares. e.g.
+      /en_US/jobs/JobDetail/Brand-Lead/245833 → /en_US/jobs/JobDetail
+      /jobs/giam-doc-khcn.2197                 → /jobs
+    """
+    segs = [s for s in path.split("/") if s]
+    while segs:
+        last = segs[-1]
+        variable = last.isdigit() or bool(re.search(r"\d", last)) or \
+            (("-" in last or "." in last) and len(last) > 8)
+        if variable:
+            segs.pop()
+        else:
+            break
+    return "/" + "/".join(segs)
+
+
+def _wash_capture_anchors(anchors: list, career_url: str) -> list[dict]:
+    from collections import defaultdict
+    groups: dict[str, dict[str, str]] = defaultdict(dict)  # template → {url: best_text}
+    for a in anchors or []:
+        href = (a.get("href") or "").strip()
+        text = (a.get("text") or "").strip()
+        if not href or href.startswith(("#", "mailto:", "tel:", "javascript:")):
+            continue
+        u = urljoin(career_url, href)
+        p = urlparse(u)
+        if not (p.scheme or "").startswith("http"):
+            continue
+        host = (p.netloc or "").lower()
+        if any(s in host for s in _SOCIAL_HOSTS):
+            continue
+        if len([s for s in p.path.split("/") if s]) < 2:  # too shallow for a detail page
+            continue
+        tmpl = _link_template(p.path)
+        if tmpl.count("/") < 1 or tmpl == "/":
+            continue
+        if len(text) > len(groups[tmpl].get(u, "")):  # keep the title link, not the "Chi tiết" button
+            groups[tmpl][u] = text
+    # Only consider clusters whose URL template actually carries a job keyword
+    # and no nav keyword. This is deliberately conservative: a site whose job
+    # links have no recognisable keyword returns nothing (safe) rather than the
+    # washer guessing a wrong cluster (e.g. a shop's /shopby/ product links).
+    job_groups = {t: urls for t, urls in groups.items()
+                  if _JOB_PATH_RX.search(t) and not _NAV_PATH_RX.search(t)}
+    if not job_groups:
+        return []
+    best = max(job_groups, key=lambda t: len(job_groups[t]))
+    if len(job_groups[best]) < 2:  # a real list, not one stray link
+        return []
+    groups = job_groups
+    out = []
+    for u, text in groups[best].items():
+        title = text.strip()
+        if not title or _norm_label(title) in _LABEL_TEXT:  # button text → derive from slug
+            slug = re.sub(r"\.[0-9a-f]+$", "", urlparse(u).path.rstrip("/").rsplit("/", 1)[-1])
+            title = re.sub(r"[-_+]+", " ", slug).strip().title()
+        if len(title) < 4:
+            continue
+        out.append({"title": title[:200], "url": u, "location": "",
+                    "description": "", "source": "capture"})
+    return out
+
+
 async def _from_capture(career_url: str) -> list[dict]:
     """Last-resort: read the extension's DOM snapshot from the debug-capture
-    store and extract job anchors. Best-effort → [] when no capture exists."""
+    store and extract jobs. A host in _CAPTURE_JOB_PATTERNS uses its explicit
+    pattern; everything else is auto-extracted by the generic washer. Best-effort
+    → [] when no capture exists."""
     from app.services import cache
     from app.services.ats_adapters.core import _finalize
     host = (urlparse(career_url).netloc or "").lower()
@@ -119,25 +216,44 @@ async def _from_capture(career_url: str) -> list[dict]:
         return []
     if not d:
         return []
+    html = d.get("html") or ""
+    # 1) Run the real ATS-adapter ladder against the CAPTURED HTML first. When a
+    #    board is only readable in a real browser (SC/Heineken behind SuccessFactors
+    #    anti-bot, L'Oréal behind Avature+Cloudflare), the capture carries the true
+    #    page — so its own adapter (successfactors/avature/phenom/…) extracts it
+    #    properly. This beats the generic washer whenever the HTML has ATS signals.
+    if html:
+        from app.services.ats_adapters.core import fetch_ats_jobs
+        adapter_jobs = await asyncio.to_thread(fetch_ats_jobs, career_url, html)
+        if adapter_jobs:
+            for j in adapter_jobs:
+                j.setdefault("source", "capture")
+            logger.info("ingest: capture-backed %s → %d jobs (adapter:%s, captured ts=%s)",
+                        host, len(adapter_jobs), adapter_jobs[0].get("source"), d.get("_ts"))
+            return adapter_jobs
+    # 2) Fall back to the anchor washer / per-host pattern.
+    anchors = d.get("anchors", [])
     pat = _CAPTURE_JOB_PATTERNS.get(host)
-    rx = re.compile(pat) if pat else re.compile(r"/job[s]?/|/position|/recruitment/detail", re.I)
-    out, seen = [], set()
-    for a in d.get("anchors", []):
-        href = (a.get("href") or "").strip()
-        if not href or href in seen or not rx.search(href):
-            continue
-        title = (a.get("text") or "").strip()
-        if not title:  # some anchors carry no text → derive from the URL slug
-            slug = urlparse(href).path.rstrip("/").rsplit("/", 1)[-1]
-            title = re.sub(r"[-_]+", " ", slug).strip().title()
-        if len(title) < 4:
-            continue
-        seen.add(href)
-        out.append({"title": title[:200], "url": href, "location": "",
-                    "description": "", "source": "capture"})
+    if pat:
+        rx = re.compile(pat, re.I)
+        out = []
+        for a in anchors:
+            href = (a.get("href") or "").strip()
+            if not href or not rx.search(href):
+                continue
+            title = (a.get("text") or "").strip()
+            if not title:
+                slug = urlparse(href).path.rstrip("/").rsplit("/", 1)[-1]
+                title = re.sub(r"[-_]+", " ", slug).strip().title()
+            if len(title) < 4:
+                continue
+            out.append({"title": title[:200], "url": urljoin(career_url, href),
+                        "location": "", "description": "", "source": "capture"})
+    else:
+        out = _wash_capture_anchors(anchors, career_url)
     jobs = _finalize(out)
-    logger.info("ingest: capture-backed %s → %d jobs (captured ts=%s)",
-                host, len(jobs), d.get("_ts"))
+    logger.info("ingest: capture-backed %s → %d jobs (%s, captured ts=%s)",
+                host, len(jobs), "pattern" if pat else "washer", d.get("_ts"))
     return jobs
 
 

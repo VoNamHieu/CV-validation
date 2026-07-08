@@ -753,7 +753,9 @@ def _avature(career_url: str, html: str | None) -> list[dict]:
     from bs4 import BeautifulSoup
     soup = BeautifulSoup(html, "html.parser")
     out, seen = [], set()
-    for a in soup.select('a[href*="/job/"]'):
+    # Avature's job-detail path is /{locale}/jobs/JobDetail/{slug}/{id} (plural
+    # "jobs") — the old '/job/' selector never matched it. Match both.
+    for a in soup.select('a[href*="/job/"], a[href*="/JobDetail/"]'):
         href = (a.get("href") or "").strip()
         title = a.get_text(" ", strip=True)
         if not href or not title or len(title) < 4 or href in seen:

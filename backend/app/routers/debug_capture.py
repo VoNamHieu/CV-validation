@@ -38,7 +38,11 @@ router = APIRouter(prefix="/debug", tags=["Debug Capture"])
 # have VN openings). The rest of the old live-0 list either resolved with a
 # correct URL or has no Vietnam career page.
 _CAPTURE_TARGET_NAMES = {
-    "Maersk", "McKinsey", "Rikkeisoft", "Standard Chartered",
+    # Boards only a real browser can read (anti-bot / SF or Cloudflare challenge)
+    # → the batch-capture button re-snapshots these on a cadence. Maersk is NOT
+    # here: it's a plain Workday tenant the `workday` adapter reads server-side.
+    "McKinsey", "Rikkeisoft", "Standard Chartered",
+    "L'Oréal Vietnam", "Heineken Vietnam",
 }
 
 _NS = "debug:cap:v1"

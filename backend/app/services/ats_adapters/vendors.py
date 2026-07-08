@@ -41,6 +41,10 @@ from app.services.ats_adapters.cmctelecom import *  # noqa: F401,F403
 from app.services.ats_adapters.deheus import *  # noqa: F401,F403
 from app.services.ats_adapters.viettelidc import *  # noqa: F401,F403
 from app.services.ats_adapters.guardian import *  # noqa: F401,F403
+from app.services.ats_adapters.f88 import *  # noqa: F401,F403
+from app.services.ats_adapters.fpts import *  # noqa: F401,F403
+from app.services.ats_adapters.seabank import *  # noqa: F401,F403
+from app.services.ats_adapters.unilever import *  # noqa: F401,F403
 
 
 _ADAPTERS: list = [
@@ -104,4 +108,8 @@ _ADAPTERS: list = [
     ("deheus",          lambda u, h: _is_deheus(u),          lambda u, h: _deheus(u)),
     ("viettelidc",      lambda u, h: _is_viettelidc(u),      lambda u, h: _viettelidc(u)),
     ("guardian",        lambda u, h: _is_guardian(u),        lambda u, h: _guardian(u)),
+    ("f88",             lambda u, h: _is_f88(u),             lambda u, h: _f88(u)),
+    ("fpts",            lambda u, h: _is_fpts(u),            lambda u, h: _fpts(u)),
+    ("seabank",         lambda u, h: _is_seabank(u),         lambda u, h: _seabank(u)),
+    ("unilever",        lambda u, h: _is_unilever(u),        lambda u, h: _unilever(u)),
 ]
