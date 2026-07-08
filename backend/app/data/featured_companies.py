@@ -272,6 +272,31 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
 
     # ── IT Services / Outsourcing ─────────────────────────────────────
     FeaturedCompany(
+        name="DXC Technology",
+        homepage="https://dxc.com",
+        # Workday tenant dxctechnology/DXCJobs → existing `workday` adapter.
+        career_url="https://dxctechnology.wd1.myworkdayjobs.com/DXCJobs",
+    ),
+    FeaturedCompany(
+        name="NielsenIQ",
+        homepage="https://nielseniq.com",
+        # SmartRecruiters company "NielsenIQ" → existing generic adapter.
+        career_url="https://jobs.smartrecruiters.com/NielsenIQ",
+    ),
+    FeaturedCompany(
+        name="Thiên Long Group",
+        homepage="https://thienlonggroup.com",
+        # Talent-network SaaS (/tim-viec-lam/tat-ca-viec-lam/vi) → `talentnet` adapter.
+        career_url="https://jobs.thienlonggroup.com/tim-viec-lam/tat-ca-viec-lam/vi",
+    ),
+    FeaturedCompany(
+        name="Tasco",
+        homepage="https://www.tasco.com.vn",
+        # WordPress careers list is JS-rendered from a public WPGraphQL feed
+        # (dash.tasco.com.vn/graphql, category "tuyen-dung") → `tasco` adapter.
+        career_url="https://www.tasco.com.vn/career",
+    ),
+    FeaturedCompany(
         name="CMC Telecom",
         homepage="https://cmctelecom.vn",
         # Server-rendered job table (/recruit/{slug}) → `cmctelecom` adapter.
