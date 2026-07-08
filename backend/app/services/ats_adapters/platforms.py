@@ -469,13 +469,25 @@ def _phenom_services(career_url: str) -> list[dict]:
     country = os.getenv("DISCOVER_COUNTRY", "Vietnam")
     headers = {**_JSON_POST, "Referer": f"{origin}/search-results"}
     out = []
-    try:
-        r = requests.post(f"{origin}/services/jobs/search/", headers=headers, timeout=_TIMEOUT,
-                          json={"page": 0, "keywords": "", "locationsearch": country,
-                                "recordsperpage": 100, "startrow": 0})
-        if r.status_code != 200:
-            return []
-        for j in (r.json() or {}).get("jobList", []):
+    # The feed is server-side location-filtered (locationsearch=Vietnam) but
+    # returns only `recordsperpage` rows per call with NO total field — a single
+    # page truncated big VN Phenom banks (Techcombank: 294 VN jobs → 100). Page
+    # by startrow until a short page (the last) or the global cap.
+    _PER = 100
+    for startrow in range(0, 30 * _PER, _PER):
+        try:
+            r = requests.post(f"{origin}/services/jobs/search/", headers=headers, timeout=_TIMEOUT,
+                              json={"page": startrow // _PER, "keywords": "", "locationsearch": country,
+                                    "recordsperpage": _PER, "startrow": startrow})
+            if r.status_code != 200:
+                break
+            joblist = (r.json() or {}).get("jobList", []) or []
+        except Exception as e:
+            logger.info(f"[ats] phenom-services {origin} failed: {str(e)[:80]}")
+            break
+        if not joblist:
+            break
+        for j in joblist:
             title = (j.get("title") or "").strip()
             loc = j.get("location") or j.get("city") or ""
             if not title or not _is_vn_loc(loc):
@@ -484,8 +496,8 @@ def _phenom_services(career_url: str) -> list[dict]:
             url = f"{origin}/job/{urltitle}/{jid}/" if urltitle and jid else f"{origin}/search-results"
             out.append({"title": title[:200], "url": url, "location": str(loc)[:120],
                         "description": ""})
-    except Exception as e:
-        logger.info(f"[ats] phenom-services {origin} failed: {str(e)[:80]}")
+        if len(joblist) < _PER or len(out) >= _MAX_ATS_JOBS:
+            break
     logger.info(f"[ats] phenom-services → {len(out)} VN jobs ({origin})")
     return out
 
@@ -704,7 +716,7 @@ def _phenom_v2(career_url: str) -> list[dict]:
     domain = _registrable_domain(p.netloc)
     country = os.getenv("DISCOVER_COUNTRY", "Vietnam").lower()
     out, seen = [], set()
-    for start in range(0, 100, 10):       # 10/page
+    for start in range(0, _MAX_ATS_JOBS, 10):       # 10/page
         try:
             r = requests.get(f"{origin}/api/apply/v2/jobs", headers=_JSON_POST, timeout=_TIMEOUT,
                              params={"domain": domain, "location": country, "num": 10, "start": start})
@@ -718,11 +730,16 @@ def _phenom_v2(career_url: str) -> list[dict]:
                 url = j.get("canonicalPositionUrl") or ""
                 if not title or not url or url in seen:
                     continue
+                # The location=vietnam param is a soft filter (HSBC leaks e.g. a
+                # Sheffield, UK req), so drop foreign-tagged rows; keep untagged.
+                loc = (j.get("location") or "")
+                if loc and not _is_vn_loc(loc):
+                    continue
                 seen.add(url)
                 out.append({"title": title[:200], "url": url,
-                            "location": (j.get("location") or "")[:120],
+                            "location": loc[:120],
                             "description": _strip_html(j.get("job_description") or "")})
-            if len(pos) < 10 or len(out) >= 100:
+            if len(pos) < 10 or len(out) >= _MAX_ATS_JOBS:
                 break
         except Exception as e:
             logger.info(f"[ats] phenom_v2 failed: {str(e)[:80]}")
