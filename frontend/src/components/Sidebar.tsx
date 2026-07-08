@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useAppStore, AppView } from '@/store/useAppStore';
-import { Sparkle, MagicWand, Briefcase, FileText, List, X, Sun, Moon, ChatCircleDots } from '@phosphor-icons/react';
+import { MagicWand, Briefcase, FileText, List, X, Sun, Moon, ChatCircleDots } from '@phosphor-icons/react';
 import type { Icon } from '@phosphor-icons/react';
 import AuthButton from './AuthButton';
 
@@ -91,7 +91,8 @@ export default function Sidebar() {
                         boxShadow: '0 2px 10px rgba(99, 102, 241, 0.3)',
                     }}
                 >
-                    <Sparkle size={17} weight="fill" color="white" />
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src="/copo-mark-white.png" alt="Copo" width={20} height={20} style={{ display: 'block' }} />
                 </div>
                 <span
                     style={{
