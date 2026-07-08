@@ -256,11 +256,172 @@
     margin: 0;
 }
 
+/* ── Sidebar "Vị trí tương tự" (compact vertical rows, sits in a factsCard) ── */
+.simRow {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 11px 0;
+    border-top: 1px solid var(--border-subtle);
+    text-decoration: none;
+    color: inherit;
+}
+
+.simRow:hover .simTitle {
+    color: var(--accent-blue);
+}
+
+.simLogo {
+    flex-shrink: 0;
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    background: var(--gradient-hero);
+    color: #fff;
+    display: grid;
+    place-items: center;
+    font-size: 16px;
+    font-weight: 800;
+    object-fit: cover;
+}
+
+.simText {
+    min-width: 0;
+}
+
+.simTitle {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0 0 2px;
+    line-height: 1.35;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    transition: color 0.15s ease;
+}
+
+.simMeta {
+    font-size: 11.5px;
+    color: var(--text-muted);
+    margin: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ── Related sections (cross-links to other /j/ pages) ── */
+.relatedWrap {
+    max-width: 1040px;
+    margin: 0 auto;
+    padding: 8px 24px 40px;
+    display: flex;
+    flex-direction: column;
+    gap: 32px;
+}
+
+.related {
+    min-width: 0;
+}
+
+/* Horizontal slider — fixed-width cards that scroll/snap, so a long location
+   line clips inside the card instead of blowing out a grid track. */
+.relRow {
+    display: flex;
+    gap: 14px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 2px 2px 14px;
+    scroll-snap-type: x proximity;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-default) transparent;
+}
+
+.relRow::-webkit-scrollbar {
+    height: 8px;
+}
+
+.relRow::-webkit-scrollbar-thumb {
+    background: var(--border-default);
+    border-radius: 999px;
+}
+
+.relRow::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.relCard {
+    flex: 0 0 320px;
+    min-width: 0;
+    scroll-snap-align: start;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    border-radius: var(--radius-lg);
+    background: var(--bg-card);
+    border: 1px solid var(--border-default);
+    box-shadow: var(--shadow-card);
+    text-decoration: none;
+    color: inherit;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.relCard:hover {
+    border-color: var(--accent-blue);
+    box-shadow: var(--shadow-card-hover);
+    transform: translateY(-2px);
+}
+
+.relLogo {
+    flex-shrink: 0;
+    width: 44px;
+    height: 44px;
+    border-radius: 11px;
+    background: var(--gradient-hero);
+    color: #fff;
+    display: grid;
+    place-items: center;
+    font-size: 19px;
+    font-weight: 800;
+    object-fit: cover;
+}
+
+.relText {
+    min-width: 0;
+}
+
+.relTitle {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 0 0 3px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.relMeta {
+    font-size: 12.5px;
+    color: var(--text-muted);
+    margin: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .footerNote {
     text-align: center;
     font-size: 12px;
     color: var(--text-muted);
     padding: 8px 24px 32px;
+}
+
+@media (max-width: 640px) {
+    .relCard {
+        flex-basis: 82vw;
+    }
 }
 
 /* ── Responsive ── */

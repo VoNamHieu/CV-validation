@@ -13,7 +13,7 @@ import asyncio
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
 from app.db import companies, jobs, promoted
@@ -268,6 +268,26 @@ async def get_promoted_public(slug: str, preview: Optional[str] = None):
     if not is_preview:
         await promoted.increment_view(slug)
     return promoted.public_view(row)
+
+
+@router.get("/promoted/related/{slug}")
+async def get_promoted_related(slug: str, response: Response):
+    """PUBLIC — cross-links shown on the /j/ page: other PUBLISHED promoted pages
+    with the same role (elsewhere) + more roles at the same company. Computes the
+    match keys from THIS row's snapshot server-side (never trusts the client) and
+    returns only safe card fields (no source_url / logo bytes). The current row
+    itself may be a draft (preview) — related items are always published."""
+    row = await promoted.get_by_slug(slug)
+    if not row:
+        return {"same_company": [], "similar_role": []}
+    snap = row.get("snapshot") or {}
+    company = snap.get("company_name") or ""
+    role_family = snap.get("role_family") or ""
+    same_company = await promoted.list_same_company(company, exclude_slug=slug, limit=10)
+    similar_role = await promoted.list_similar_role(
+        role_family, company_name=company, exclude_slug=slug, limit=10)
+    response.headers["Cache-Control"] = "public, max-age=300"
+    return {"same_company": same_company, "similar_role": similar_role}
 
 
 @router.get("/promoted/logo-by-slug/{slug}")

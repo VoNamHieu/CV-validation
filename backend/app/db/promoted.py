@@ -137,6 +137,52 @@ async def list_pages(*, limit: int = 100, offset: int = 0) -> list[dict]:
     ))
 
 
+# ── Cross-links between published pages (related sections on /j/) ─────────────
+# The SELECTs pull only public-safe card fields via snapshot->>'…' and test
+# ``snapshot ? 'logo_b64'`` for the has_logo flag — they NEVER ship the logo
+# bytes or the internal source_url, so these are safe to serve to anonymous
+# callers directly (no public_view pass needed).
+_CARD_COLS = (
+    "slug, snapshot->>'title' AS title, "
+    "snapshot->>'company_name' AS company_name, "
+    "snapshot->>'location' AS location, "
+    "(snapshot ? 'logo_b64') AS has_logo"
+)
+
+
+async def list_same_company(company_name: str, *, exclude_slug: str, limit: int = 10) -> list[dict]:
+    """Other PUBLISHED promoted pages at the SAME company (more roles there),
+    excluding the current page. Empty company → no-op."""
+    if not (company_name or "").strip():
+        return []
+    pool = await get_pool()
+    return rows_to_dicts(await pool.fetch(
+        f"SELECT {_CARD_COLS} FROM promoted_jobs "
+        "WHERE status = 'published' AND slug <> $1 "
+        "AND snapshot->>'company_name' = $2 "
+        "ORDER BY view_count DESC, created_at DESC LIMIT $3",
+        exclude_slug, company_name, limit,
+    ))
+
+
+async def list_similar_role(role_family: str, *, company_name: str,
+                            exclude_slug: str, limit: int = 10) -> list[dict]:
+    """Other PUBLISHED promoted pages with the SAME role_family at a DIFFERENT
+    company (similar-role openings elsewhere). Excludes the current page and its
+    company (those live in the same-company section). Empty family → no-op."""
+    if not (role_family or "").strip():
+        return []
+    pool = await get_pool()
+    return rows_to_dicts(await pool.fetch(
+        f"SELECT {_CARD_COLS} FROM promoted_jobs "
+        "WHERE status = 'published' AND slug <> $1 "
+        "AND snapshot->>'role_family' = $2 "
+        "AND coalesce(snapshot->>'company_name', '') <> $3 "
+        "ORDER BY view_count DESC, created_at DESC LIMIT $4",
+        exclude_slug, role_family, company_name, limit,
+    ))
+
+
 async def update(page_id: str, **fields) -> Optional[dict]:
     """Patch mutable columns (slug, snapshot, status, template, og_image_url).
 

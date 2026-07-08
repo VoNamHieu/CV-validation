@@ -4,7 +4,7 @@
 // optimize) is a client island.
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
-import { MapPin, Buildings, Briefcase, ChartLineUp, Sparkle } from '@phosphor-icons/react/dist/ssr';
+import { MapPin, Buildings, ChartLineUp, Sparkle } from '@phosphor-icons/react/dist/ssr';
 import PromotedJobCta from '@/components/PromotedJobCta';
 import { renderJd } from '@/lib/renderJd';
 import styles from './promoted.module.css';
@@ -25,6 +25,14 @@ type PromotedPage = {
     has_logo?: boolean;
     job: PublicJob;
 };
+type RelatedItem = {
+    slug: string;
+    title: string;
+    company_name: string;
+    location: string;
+    has_logo: boolean;
+};
+type Related = { same_company: RelatedItem[]; similar_role: RelatedItem[] };
 
 // Public URL of the uploaded company logo (real HTTP URL → works as <img> + og:image).
 function logoUrl(slug: string, preview?: string): string {
@@ -48,6 +56,58 @@ async function fetchPage(slug: string, preview?: string): Promise<PromotedPage |
     } catch {
         return null;
     }
+}
+
+// Cross-links to OTHER published promoted pages (never job-store rows without a
+// page). Best-effort → empty on any failure so the section just doesn't render.
+async function fetchRelated(slug: string): Promise<Related> {
+    const empty: Related = { same_company: [], similar_role: [] };
+    const backendUrl = process.env.BACKEND_URL;
+    if (!backendUrl) return empty;
+    try {
+        const res = await fetch(
+            `${backendUrl}/store/promoted/related/${encodeURIComponent(slug)}`,
+            { next: { revalidate: 300 } },  // related list is stable; cache 5 min
+        );
+        if (!res.ok) return empty;
+        return (await res.json()) as Related;
+    } catch {
+        return empty;
+    }
+}
+
+// One related card → links to another /j/ page. Logo only when the page has one
+// (avoids a 404 flash), else a letter avatar.
+function RelatedCard({ item }: { item: RelatedItem }) {
+    const initial = (item.company_name || item.title || '?').trim().charAt(0).toUpperCase();
+    const meta = [item.company_name, item.location].filter(Boolean).join(' · ');
+    return (
+        <a href={`/j/${item.slug}`} className={styles.relCard}>
+            {item.has_logo ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img className={styles.relLogo} src={logoUrl(item.slug)} alt={item.company_name || item.title}
+                    style={{ objectFit: 'cover', background: '#fff' }} loading="lazy" />
+            ) : (
+                <div className={styles.relLogo}>{initial}</div>
+            )}
+            <div className={styles.relText}>
+                <p className={styles.relTitle}>{item.title}</p>
+                {meta && <p className={styles.relMeta}>{meta}</p>}
+            </div>
+        </a>
+    );
+}
+
+function RelatedSection({ heading, items }: { heading: string; items: RelatedItem[] }) {
+    if (!items.length) return null;
+    return (
+        <section className={styles.related}>
+            <h2 className={styles.sectionHeading}>{heading}</h2>
+            <div className={styles.relRow}>
+                {items.map((it) => <RelatedCard key={it.slug} item={it} />)}
+            </div>
+        </section>
+    );
 }
 
 export async function generateMetadata(
@@ -87,9 +147,14 @@ export default async function PromotedJobPage(
 ) {
     const { slug } = await params;
     const { preview } = await searchParams;
-    const page = await fetchPage(slug, preview);
+    const [page, related] = await Promise.all([fetchPage(slug, preview), fetchRelated(slug)]);
     if (!page) notFound();
-    const { title, company_name, location, description, industry, role_family, seniority } = page.job;
+    const { title, company_name, location, description, industry, seniority } = page.job;
+
+    // Cross-links, page budget = 10 total. Similar-role fills a compact list in
+    // the sidebar (≤5); same-company fills the full-width slider below.
+    const roleShow = (related.similar_role || []).slice(0, 5);
+    const companyShow = (related.same_company || []).slice(0, Math.max(0, 10 - roleShow.length));
 
     const initial = (company_name || title || '?').trim().charAt(0).toUpperCase();
     const chips = [
@@ -97,13 +162,6 @@ export default async function PromotedJobPage(
         industry && { icon: <Buildings size={14} weight="fill" />, text: industry },
         seniority && { icon: <ChartLineUp size={14} weight="fill" />, text: seniority },
     ].filter(Boolean) as { icon: React.ReactNode; text: string }[];
-
-    const facts = [
-        company_name && { icon: <Buildings size={17} weight="fill" />, label: 'Công ty', value: company_name },
-        location && { icon: <MapPin size={17} weight="fill" />, label: 'Địa điểm', value: location },
-        (role_family || industry) && { icon: <Briefcase size={17} weight="fill" />, label: 'Lĩnh vực', value: role_family || industry },
-        seniority && { icon: <ChartLineUp size={17} weight="fill" />, label: 'Cấp bậc', value: seniority },
-    ].filter(Boolean) as { icon: React.ReactNode; label: string; value: string }[];
 
     return (
         <main className={styles.page}>
@@ -151,22 +209,39 @@ export default async function PromotedJobPage(
 
                 <aside className={styles.sidebar}>
                     <PromotedJobCta slug={slug} title={title} />
-                    {facts.length > 0 && (
+                    {roleShow.length > 0 && (
                         <div className={styles.factsCard}>
-                            <p className={styles.factsTitle}>Thông tin</p>
-                            {facts.map((f) => (
-                                <div key={f.label} className={styles.factRow}>
-                                    <span className={styles.factIcon}>{f.icon}</span>
-                                    <div>
-                                        <p className={styles.factLabel}>{f.label}</p>
-                                        <p className={styles.factValue}>{f.value}</p>
+                            <p className={styles.factsTitle}>Vị trí tương tự</p>
+                            {roleShow.map((it) => (
+                                <a key={it.slug} href={`/j/${it.slug}`} className={styles.simRow}>
+                                    {it.has_logo ? (
+                                        // eslint-disable-next-line @next/next/no-img-element
+                                        <img className={styles.simLogo} src={logoUrl(it.slug)}
+                                            alt={it.company_name || it.title}
+                                            style={{ objectFit: 'cover', background: '#fff' }} loading="lazy" />
+                                    ) : (
+                                        <div className={styles.simLogo}>
+                                            {(it.company_name || it.title || '?').trim().charAt(0).toUpperCase()}
+                                        </div>
+                                    )}
+                                    <div className={styles.simText}>
+                                        <p className={styles.simTitle}>{it.title}</p>
+                                        {it.company_name && <p className={styles.simMeta}>{it.company_name}</p>}
                                     </div>
-                                </div>
+                                </a>
                             ))}
                         </div>
                     )}
                 </aside>
             </div>
+
+            {companyShow.length > 0 && (
+                <div className={styles.relatedWrap}>
+                    <RelatedSection
+                        heading={company_name ? `Vị trí khác tại ${company_name}` : 'Vị trí khác cùng công ty'}
+                        items={companyShow} />
+                </div>
+            )}
 
             <div className={styles.footerNote}>Trang được cung cấp bởi Copo · Tối ưu CV &amp; ứng tuyển thông minh</div>
         </main>
