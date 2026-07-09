@@ -351,40 +351,70 @@ export default function Landing() {
                     </div>
                 </div>
 
-                {/* Product mockup */}
+                {/* Product mockup — CV↔job analysis dashboard (all CSS/SVG, no image) */}
                 <div className="lp-mock-wrap">
-                    <div className="lp-mock">
-                        <div className="lp-mock-bar">
-                            <span className="lp-mock-dot" style={{ background: '#ff5f57' }} />
-                            <span className="lp-mock-dot" style={{ background: '#febc2e' }} />
-                            <span className="lp-mock-dot" style={{ background: '#28c840' }} />
-                            <span className="lp-mock-url">copo.ai · So khớp</span>
-                        </div>
-                        <div className="lp-mock-body">
-                            <div className="lp-mock-score">
-                                <div className="lp-ring">
-                                    <span className="lp-ring-num">92<small>%</small></span>
-                                </div>
+                    <div className="lp-frame">
+                        <div className="lp-dash">
+                            <div className="lp-hd">
+                                <span className="lp-hd-logo">1M</span>
+                                <span className="lp-hd-co">One Mount</span>
+                                <span className="lp-hd-sep">·</span>
+                                <span className="lp-hd-role">Product Intern (Supply Chain)</span>
+                                <span className="lp-hd-sp" />
+                                <span className="lp-hd-bk">♡</span>
+                            </div>
+                            <div className="lp-grid3">
+                                {/* col A — overall match + ATS */}
                                 <div>
-                                    <div className="lp-mock-role">Senior Frontend Engineer</div>
-                                    <div className="lp-mock-co"><Briefcase size={12} weight="duotone" /> One Mount · Hà Nội</div>
-                                    <span className="lp-chip lp-chip-green"><CheckCircle size={11} weight="fill" /> Độ khớp rất cao</span>
+                                    <div className="lp-lbl">Overall Match</div>
+                                    <div className="lp-donut"><span className="lp-donut-num">87<small>%</small></span></div>
+                                    <div className="lp-delta">↑ 21% vs. base CV</div>
+                                    <div className="lp-chips2">
+                                        <span className="lp-chip lp-chip-purple">High Fit</span>
+                                        <span className="lp-chip lp-chip-soft">ATS Ready</span>
+                                    </div>
+                                    <div className="lp-ats2">
+                                        <div className="lp-lbl">ATS Resume Score</div>
+                                        <div className="lp-ats-row2">
+                                            <span className="lp-ats-num2">78<small>/100</small></span>
+                                            <span className="lp-ats-good"><span className="lp-gdot" /> Good</span>
+                                        </div>
+                                        <div className="lp-improve">Improve with Copo →</div>
+                                    </div>
+                                </div>
+                                {/* col B — skills */}
+                                <div>
+                                    <div className="lp-lbl">Top skills this job values</div>
+                                    {[
+                                        { m: 'SP', t: 'Supply Planning', v: 90 },
+                                        { m: 'SAP', t: 'SAP', v: 88 },
+                                        { m: 'XL', t: 'Excel', v: 88 },
+                                        { m: 'EN', t: 'English', v: 76 },
+                                        { m: 'JP', t: 'Japanese', v: 65 },
+                                    ].map((s) => (
+                                        <div key={s.t} className="lp-sk-row">
+                                            <span className="lp-sk-ic2">{s.m}</span>
+                                            <div className="lp-sk-b">
+                                                <div className="lp-sk-top"><span className="lp-sk-name">{s.t}</span><span className="lp-sk-pct">{s.v}%</span></div>
+                                                <div className="lp-sk-track"><span style={{ width: `${s.v}%` }} /></div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                                {/* col C — candidate CV */}
+                                <div className="lp-cv">
+                                    <div className="lp-cv-hd">
+                                        <span className="lp-cv-av">HV</span>
+                                        <div><div className="lp-cv-name">Hieu Vo</div><div className="lp-cv-role">Supply Chain · Fresh grad</div></div>
+                                    </div>
+                                    <div className="lp-cv-sec">Summary</div>
+                                    <div className="lp-ln" style={{ width: '100%' }} /><div className="lp-ln" style={{ width: '90%' }} /><div className="lp-ln" style={{ width: '74%' }} />
+                                    <div className="lp-cv-sec">Experience</div>
+                                    <div className="lp-exp"><span className="lp-exp-d" /><div className="lp-exp-l"><div className="lp-ln" style={{ width: '68%' }} /><div className="lp-ln" style={{ width: '94%' }} /></div></div>
+                                    <div className="lp-exp"><span className="lp-exp-d" /><div className="lp-exp-l"><div className="lp-ln" style={{ width: '58%' }} /><div className="lp-ln" style={{ width: '86%' }} /></div></div>
+                                    <div className="lp-exp"><span className="lp-exp-d" /><div className="lp-exp-l"><div className="lp-ln" style={{ width: '64%' }} /></div></div>
                                 </div>
                             </div>
-                            {[
-                                { t: 'Product Designer (UI/UX)', s: 88, c: 'var(--accent-blue)' },
-                                { t: 'Solution Architect', s: 81, c: 'var(--accent-purple)' },
-                                { t: 'QC Engineer (Fresher)', s: 67, c: 'var(--accent-amber)' },
-                            ].map((j) => (
-                                <div key={j.t} className="lp-job">
-                                    <div className="lp-job-info">
-                                        <span className="lp-job-title">{j.t}</span>
-                                        <span className="lp-job-meta">One Mount · Hà Nội</span>
-                                    </div>
-                                    <div className="lp-bar"><span style={{ width: `${j.s}%`, background: j.c }} /></div>
-                                    <span className="lp-job-score">{j.s}%</span>
-                                </div>
-                            ))}
                         </div>
                     </div>
                     <div className="lp-mock-glow" aria-hidden />
@@ -439,6 +469,46 @@ export default function Landing() {
                 </div>
                 <div className="lp-demo-wrap">
                     <DemoPlayer />
+                </div>
+            </section>
+
+            {/* Auto-apply while optimizing */}
+            <section className="lp-section lp-apply">
+                <h2 className="lp-h2">Tối ưu CV xong, đơn cũng nộp xong</h2>
+                <p className="lp-section-sub">Trong lúc AI viết lại CV cho từng vị trí, extension tự động điền và nộp đơn ứng tuyển — bạn không phải mở lại từng trang tuyển dụng.</p>
+                <div className="lp-apply-viz">
+                    <div className="lp-apply-cv">
+                        <div className="lp-ac-head"><MagicWand size={15} weight="fill" /> Đang tối ưu CV theo JD</div>
+                        <div className="lp-ac-line is-hl" style={{ width: '92%' }} />
+                        <div className="lp-ac-line" style={{ width: '78%' }} />
+                        <div className="lp-ac-line is-hl" style={{ width: '85%' }} />
+                        <div className="lp-ac-line" style={{ width: '64%' }} />
+                        <div className="lp-ac-prog">
+                            <div className="lp-ac-prog-label"><span>Độ khớp CV</span><span>+18%</span></div>
+                            <div className="lp-ac-bar"><span /></div>
+                        </div>
+                    </div>
+                    <div className="lp-apply-jobs">
+                        <div className="lp-aj-head"><span>Tự động ứng tuyển</span><span className="lp-aj-count">3/5 đã nộp</span></div>
+                        {[
+                            { m: '1M', t: 'Product Intern (Supply Chain)', co: 'One Mount', st: 'done' },
+                            { m: 'FS', t: 'Frontend Engineer', co: 'FPT Software', st: 'done' },
+                            { m: 'BO', t: 'Supply Chain Intern', co: 'Bosch', st: 'doing' },
+                            { m: 'VN', t: 'Data Analyst', co: 'VNG', st: 'done' },
+                            { m: 'TK', t: 'UX Designer', co: 'Tiki', st: 'queue' },
+                        ].map((j) => (
+                            <div key={j.co} className="lp-aj-row">
+                                <span className="lp-aj-logo">{j.m}</span>
+                                <div className="lp-aj-info">
+                                    <div className="lp-aj-title">{j.t}</div>
+                                    <div className="lp-aj-co">{j.co}</div>
+                                </div>
+                                {j.st === 'done' && <span className="lp-aj-status lp-aj-done"><CheckCircle size={11} weight="fill" /> Đã nộp</span>}
+                                {j.st === 'doing' && <span className="lp-aj-status lp-aj-doing"><span className="lp-aj-dot" /> Đang nộp…</span>}
+                                {j.st === 'queue' && <span className="lp-aj-status lp-aj-queue"><span className="lp-aj-dot" /> Trong hàng đợi</span>}
+                            </div>
+                        ))}
+                    </div>
                 </div>
             </section>
 
@@ -516,7 +586,7 @@ const LP_CSS = `
 .lp-pulse::after { content: ''; position: absolute; inset: 0; border-radius: inherit; box-shadow: 0 0 0 0 rgba(124,58,237,0.5); animation: lp-pulse 2.6s ease-out infinite; }
 @keyframes lp-pulse { 0% { box-shadow: 0 0 0 0 rgba(124,58,237,0.45); } 70%,100% { box-shadow: 0 0 0 18px rgba(124,58,237,0); } }
 
-.lp-hero { max-width: 1120px; margin: 0 auto; padding: 40px 24px 30px; display: grid; grid-template-columns: 1.05fr 0.95fr; gap: 48px; align-items: center; }
+.lp-hero { max-width: 1180px; margin: 0 auto; padding: 40px 24px 30px; display: grid; grid-template-columns: 1fr 1.16fr; gap: 34px; align-items: center; }
 .lp-hero-copy { animation: lp-rise .7s var(--ease-out-expo) both; }
 .lp-badge { display: inline-flex; align-items: center; gap: 7px; font-size: 0.76rem; font-weight: 600; color: var(--accent-purple); background: var(--gradient-hero-subtle); border: 1px solid var(--border-subtle); padding: 6px 14px; border-radius: 999px; margin-bottom: 20px; }
 .lp-h1 { font-size: clamp(2rem, 4.6vw, 3.3rem); font-weight: 800; line-height: 1.08; letter-spacing: -0.03em; margin: 0 0 18px; }
@@ -527,11 +597,84 @@ const LP_CSS = `
 .lp-trust svg { color: var(--accent-green); }
 .lp-dot { width: 3px; height: 3px; border-radius: 50%; background: var(--text-muted); margin: 0 4px; }
 
-/* Product mockup */
-.lp-mock-wrap { position: relative; animation: lp-rise .7s var(--ease-out-expo) .12s both; }
-.lp-mock-glow { position: absolute; inset: 8% 4%; background: var(--gradient-hero); filter: blur(60px); opacity: 0.28; z-index: -1; border-radius: 40px; }
-.lp-mock { border-radius: 18px; border: 1px solid var(--border-default); background: var(--bg-card); box-shadow: var(--shadow-card-hover), 0 30px 80px rgba(0,0,0,0.18); overflow: hidden; transform: perspective(1400px) rotateY(-8deg) rotateX(4deg); transition: transform .5s var(--ease-out-expo); }
-.lp-mock-wrap:hover .lp-mock { transform: perspective(1400px) rotateY(0deg) rotateX(0deg); }
+/* Product mockup — CV↔job analysis dashboard (glass frame + 3 cols, all CSS/SVG) */
+.lp-mock-wrap { position: relative; display: flex; justify-content: flex-end; overflow: visible; perspective: 2400px;
+  /* break out of the centred hero container so the right edge just kisses past
+     the viewport (~35px, clipped by .lp-root overflow-x:hidden) — a natural bleed */
+  margin-right: calc(531px - 50vw); animation: lp-rise .7s var(--ease-out-expo) .12s both; }
+/* mesh glow behind — irregular multi-hue blobs, heavy blur → melt unevenly */
+.lp-mock-glow { position: absolute; inset: -16% -8% -18% -8%; z-index: -1; border-radius: 90px; filter: blur(74px); background:
+  radial-gradient(34% 40% at 24% 32%, rgba(124,58,237,.55), transparent 60%),
+  radial-gradient(30% 36% at 66% 18%, rgba(79,70,229,.50), transparent 62%),
+  radial-gradient(40% 46% at 86% 60%, rgba(192,132,252,.52), transparent 60%),
+  radial-gradient(32% 40% at 42% 84%, rgba(99,102,241,.46), transparent 62%),
+  radial-gradient(26% 30% at 58% 48%, rgba(230,140,236,.40), transparent 58%),
+  radial-gradient(24% 28% at 12% 70%, rgba(147,197,253,.32), transparent 60%); }
+/* frosted-glass frame */
+.lp-frame { padding: 16px; border-radius: 32px; border: 1px solid rgba(255,255,255,.7);
+  transform: rotateY(-6deg) rotateX(2deg); transform-origin: center; transition: transform .5s var(--ease-out-expo);
+  background: linear-gradient(180deg, rgba(255,255,255,.55), rgba(255,255,255,.30));
+  box-shadow: 0 50px 110px rgba(109,77,224,.22), 0 12px 34px rgba(80,60,150,.12), inset 0 1px 0 rgba(255,255,255,.85);
+  backdrop-filter: blur(22px) saturate(150%); -webkit-backdrop-filter: blur(22px) saturate(150%); }
+.lp-mock-wrap:hover .lp-frame { transform: rotateY(-2deg) rotateX(1deg); }
+/* dashboard card — stacked radial surface, light (product screenshot) */
+.lp-dash { position: relative; width: 720px; overflow: hidden; border-radius: 22px; border: 1px solid rgba(124,92,240,.10); padding: 24px 26px; color: #26283a;
+  background:
+    radial-gradient(130% 100% at 8% -6%, rgba(139,111,242,.13), transparent 52%),
+    radial-gradient(110% 90% at 104% 4%, rgba(124,92,240,.11), transparent 48%),
+    radial-gradient(150% 130% at 60% 128%, rgba(168,151,245,.13), transparent 60%),
+    radial-gradient(80% 60% at 50% -10%, rgba(255,255,255,.9), transparent 60%),
+    linear-gradient(180deg, #ffffff, #f9f7ff);
+  box-shadow: 0 20px 50px rgba(109,77,224,.14), inset 0 1px 0 rgba(255,255,255,.9); }
+.lp-hd { display: flex; align-items: center; gap: 9px; margin-bottom: 18px; }
+.lp-hd-logo { width: 24px; height: 24px; border-radius: 7px; background: #20222e; color: #fff; display: grid; place-items: center; font-size: .56rem; font-weight: 800; }
+.lp-hd-co { font-size: .8rem; font-weight: 700; }
+.lp-hd-sep { color: #a3a4bb; }
+.lp-hd-role { font-size: .76rem; font-weight: 600; color: #6d4de0; background: #f2f0fb; padding: 5px 11px; border-radius: 8px; }
+.lp-hd-sp { flex: 1; }
+.lp-hd-bk { width: 26px; height: 26px; border-radius: 8px; background: #f6f4fe; display: grid; place-items: center; color: #a897f5; font-size: .8rem; }
+.lp-grid3 { display: grid; grid-template-columns: 0.82fr 1fr 0.86fr; gap: 24px; align-items: start; }
+.lp-lbl { font-size: .7rem; font-weight: 600; color: #a3a4bb; letter-spacing: .3px; margin-bottom: 12px; }
+.lp-donut { position: relative; width: 138px; height: 138px; border-radius: 50%; display: grid; place-items: center; filter: drop-shadow(0 10px 24px rgba(124,92,240,.28));
+  background: conic-gradient(from 188deg, #6d4de0 0%, #8b6ff2 20%, #c084fc 38%, #e08aec 52%, #818cf8 66%, #6d4de0 78%, #eceaf7 78% 100%); }
+.lp-donut::before { content: ''; position: absolute; width: 106px; height: 106px; border-radius: 50%; box-shadow: inset 0 1px 3px rgba(124,92,240,.10);
+  background: radial-gradient(80% 80% at 32% 24%, #fff, transparent 60%), radial-gradient(90% 90% at 70% 82%, rgba(139,111,242,.12), transparent 62%), #fbfaff; }
+.lp-donut-num { position: relative; font-size: 2.1rem; font-weight: 800; letter-spacing: -.03em; }
+.lp-donut-num small { font-size: .9rem; color: #a3a4bb; font-weight: 700; }
+.lp-delta { font-size: .72rem; font-weight: 700; color: #12a678; margin: 12px 0 9px; }
+.lp-chips2 { display: flex; gap: 6px; flex-wrap: wrap; }
+.lp-chip { display: inline-flex; align-items: center; gap: 4px; font-size: .66rem; font-weight: 600; padding: 5px 10px; border-radius: 999px; }
+.lp-chip-purple { color: #6d4de0; background: #efeafc; }
+.lp-chip-soft { color: #6b6d84; background: #f6f4fe; }
+.lp-ats2 { margin-top: 26px; }
+.lp-ats-row2 { display: flex; align-items: baseline; gap: 10px; }
+.lp-ats-num2 { font-size: 2rem; font-weight: 800; letter-spacing: -.02em; }
+.lp-ats-num2 small { font-size: .9rem; color: #a3a4bb; font-weight: 700; }
+.lp-ats-good { margin-left: auto; font-size: .73rem; font-weight: 700; color: #12a678; display: flex; align-items: center; gap: 5px; }
+.lp-gdot { width: 7px; height: 7px; border-radius: 50%; background: #12a678; }
+.lp-improve { margin-top: 8px; font-size: .72rem; font-weight: 600; color: #6d4de0; }
+.lp-sk-row { display: flex; align-items: center; gap: 11px; margin-bottom: 13px; }
+.lp-sk-ic2 { width: 28px; height: 28px; border-radius: 8px; flex-shrink: 0; display: grid; place-items: center; font-size: .54rem; font-weight: 800; color: #6d4de0; letter-spacing: .3px;
+  background: radial-gradient(90% 90% at 28% 18%, #fff, transparent 62%), radial-gradient(120% 120% at 90% 100%, rgba(139,111,242,.22), transparent 60%), #efeafc; box-shadow: inset 0 0 0 1px rgba(124,92,240,.06); }
+.lp-sk-b { flex: 1; min-width: 0; }
+.lp-sk-top { display: flex; justify-content: space-between; margin-bottom: 6px; }
+.lp-sk-name { font-size: .77rem; font-weight: 600; }
+.lp-sk-pct { font-size: .73rem; font-weight: 700; color: #6b6d84; }
+.lp-sk-track { height: 6px; border-radius: 999px; background: #eceaf7; overflow: hidden; }
+.lp-sk-track span { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, #7c5cf0, #8b6ff2); }
+.lp-cv { align-self: stretch; border: 1px solid rgba(124,92,240,.10); border-radius: 14px; padding: 15px;
+  background: radial-gradient(120% 70% at 100% 0%, rgba(139,111,242,.14), transparent 55%), radial-gradient(90% 60% at 0% 100%, rgba(168,151,245,.10), transparent 60%), linear-gradient(180deg,#fff,#faf8ff);
+  box-shadow: 0 14px 34px rgba(109,77,224,.14), inset 0 1px 0 rgba(255,255,255,.9); }
+.lp-cv-hd { display: flex; align-items: center; gap: 9px; margin-bottom: 13px; }
+.lp-cv-av { width: 30px; height: 30px; border-radius: 50%; background: linear-gradient(135deg,#8b6ff2,#6d4de0); color: #fff; display: grid; place-items: center; font-weight: 800; font-size: .72rem; }
+.lp-cv-name { font-size: .82rem; font-weight: 800; }
+.lp-cv-role { font-size: .62rem; color: #a3a4bb; margin-top: 1px; }
+.lp-cv-sec { font-size: .58rem; font-weight: 800; text-transform: uppercase; letter-spacing: .6px; color: #a897f5; margin: 11px 0 7px; }
+.lp-ln { height: 6px; border-radius: 999px; background: #eceaf7; margin-bottom: 6px; }
+.lp-exp { display: flex; gap: 7px; margin-bottom: 10px; }
+.lp-exp-d { width: 7px; height: 7px; border-radius: 50%; background: #a897f5; margin-top: 2px; flex-shrink: 0; }
+.lp-exp-l { flex: 1; }
+/* shared by the animated walkthrough demo (lp-demo-frame) further down the page */
 .lp-mock-bar { display: flex; align-items: center; gap: 7px; padding: 11px 14px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-elevated); }
 .lp-mock-dot { width: 10px; height: 10px; border-radius: 50%; }
 .lp-mock-url { margin-left: 10px; font-size: 0.72rem; color: var(--text-muted); }
@@ -543,7 +686,6 @@ const LP_CSS = `
 .lp-ring-num small { font-size: 0.7rem; font-weight: 700; color: var(--text-muted); }
 .lp-mock-role { font-weight: 700; font-size: 0.95rem; }
 .lp-mock-co { display: flex; align-items: center; gap: 5px; font-size: 0.76rem; color: var(--text-muted); margin: 3px 0 7px; }
-.lp-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 0.7rem; font-weight: 700; padding: 3px 9px; border-radius: 999px; }
 .lp-chip-green { color: var(--accent-green); background: color-mix(in srgb, var(--accent-green) 14%, transparent); }
 .lp-job { display: flex; align-items: center; gap: 12px; }
 .lp-job-info { flex: 1; min-width: 0; }
@@ -579,6 +721,35 @@ const LP_CSS = `
 .lp-section { max-width: 1000px; margin: 0 auto; padding: 56px 24px; text-align: center; }
 .lp-h2 { font-size: clamp(1.4rem, 3vw, 2rem); font-weight: 800; letter-spacing: -0.025em; margin: 0 0 10px; }
 .lp-section-sub { font-size: 0.92rem; color: var(--text-muted); max-width: 460px; margin: 0 auto 36px; }
+/* Auto-apply-while-optimizing section */
+.lp-apply-viz { max-width: 880px; margin: 0 auto; display: grid; grid-template-columns: 0.82fr 1.18fr; gap: 20px; align-items: stretch; text-align: left; }
+.lp-apply-cv, .lp-apply-jobs { background: var(--bg-card); border: 1px solid var(--border-default); border-radius: 16px; padding: 18px 20px; box-shadow: var(--shadow-card); }
+.lp-ac-head, .lp-aj-head { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; font-weight: 700; margin-bottom: 14px; }
+.lp-ac-head { color: var(--accent-purple); }
+.lp-ac-head svg { flex-shrink: 0; }
+.lp-ac-line { height: 8px; border-radius: 999px; background: var(--border-subtle); margin-bottom: 9px; }
+.lp-ac-line.is-hl { background: color-mix(in srgb, var(--accent-purple) 30%, var(--border-subtle)); }
+.lp-ac-prog { margin-top: 18px; }
+.lp-ac-prog-label { display: flex; justify-content: space-between; font-size: 0.72rem; font-weight: 600; color: var(--text-muted); margin-bottom: 7px; }
+.lp-ac-prog-label span:last-child { color: var(--accent-green); font-weight: 700; }
+.lp-ac-bar { height: 7px; border-radius: 999px; background: var(--border-subtle); overflow: hidden; }
+.lp-ac-bar span { display: block; height: 100%; border-radius: 999px; background: var(--gradient-hero); animation: lp-ac-grow 2.6s var(--ease-out-expo) infinite alternate; }
+@keyframes lp-ac-grow { from { width: 54%; } to { width: 88%; } }
+.lp-aj-head { justify-content: space-between; }
+.lp-aj-count { font-size: 0.72rem; color: var(--text-muted); font-weight: 600; }
+.lp-aj-row { display: flex; align-items: center; gap: 11px; padding: 9px 0; border-top: 1px solid var(--border-subtle); }
+.lp-aj-row:first-of-type { border-top: none; padding-top: 0; }
+.lp-aj-logo { width: 28px; height: 28px; border-radius: 8px; flex-shrink: 0; display: grid; place-items: center; font-size: 0.6rem; font-weight: 800; color: #fff; background: var(--gradient-hero); }
+.lp-aj-info { flex: 1; min-width: 0; }
+.lp-aj-title { font-size: 0.8rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lp-aj-co { font-size: 0.68rem; color: var(--text-muted); }
+.lp-aj-status { display: inline-flex; align-items: center; gap: 5px; font-size: 0.7rem; font-weight: 700; padding: 4px 10px; border-radius: 999px; white-space: nowrap; }
+.lp-aj-done { color: var(--accent-green); background: color-mix(in srgb, var(--accent-green) 13%, transparent); }
+.lp-aj-doing { color: var(--accent-amber); background: color-mix(in srgb, var(--accent-amber) 14%, transparent); }
+.lp-aj-queue { color: var(--text-muted); background: var(--bg-elevated); }
+.lp-aj-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.lp-aj-doing .lp-aj-dot { animation: lp-apply-pulse 1s infinite; }
+@keyframes lp-apply-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
 .lp-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
 .lp-step { position: relative; text-align: left; padding: 24px 20px; border-radius: 16px; border: 1px solid var(--border-subtle); background: var(--bg-card); transition: transform .25s, border-color .25s; }
 .lp-step:hover { transform: translateY(-4px); border-color: var(--border-accent); }
@@ -707,8 +878,11 @@ const LP_CSS = `
   .lp-hero { grid-template-columns: 1fr; gap: 32px; padding-top: 24px; text-align: center; }
   .lp-hero-copy { display: flex; flex-direction: column; align-items: center; }
   .lp-cta-row, .lp-trust { justify-content: center; }
-  .lp-mock { transform: none; }
-  .lp-steps, .lp-features { grid-template-columns: 1fr; }
+  .lp-mock-wrap { justify-content: center; margin-right: 0; }
+  .lp-frame { padding: 10px; transform: none; }
+  .lp-dash { width: 100%; }
+  .lp-grid3 { grid-template-columns: 1fr; gap: 16px; }
+  .lp-steps, .lp-features, .lp-apply-viz { grid-template-columns: 1fr; }
   .lp-stats { grid-template-columns: repeat(2, 1fr); gap: 20px 12px; }
   .lp-nav-cta { display: none; }
 }
