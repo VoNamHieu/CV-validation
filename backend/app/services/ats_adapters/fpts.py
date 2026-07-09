@@ -6,11 +6,19 @@ the session. Each item already carries the JD (Description) and location.
 """
 from __future__ import annotations
 
+import time as _time
+
 from app.services.ats_adapters._shared import *  # noqa: F401,F403
 
 _CAREER = "https://www.fpts.com.vn/co-hoi-nghe-nghiep/"
 _API = "https://www.fpts.com.vn/editor/Surface/CareerBase/GetApplicationPosition"
 _PAGE_SIZE = 100
+
+
+def _dotnet_ms(s: str | None) -> int | None:
+    """Parse ASP.NET '/Date(1786726800000)/' into epoch-ms (None if absent)."""
+    m = re.search(r"/Date\((-?\d+)\)/", s or "")
+    return int(m.group(1)) if m else None
 
 
 def _is_fpts(career_url: str) -> bool:
@@ -27,6 +35,7 @@ def _fpts(career_url: str) -> list[dict]:
         logger.info(f"[ats] fpts warm-up failed: {str(e)[:80]}")
         return []
     out, seen = [], set()
+    now_ms = _time.time() * 1000
     for page in range(1, 8):  # the API caps a company well under 700; stop early anyway
         try:
             r = s.get(_API, timeout=_TIMEOUT, headers={
@@ -47,11 +56,23 @@ def _fpts(career_url: str) -> list[dict]:
             jid = j.get("id")
             if not title or jid in seen:
                 continue
+            # The feed returns the FULL history — most rows are closed (their
+            # application deadline has passed, some back in 2024). Drop anything
+            # whose deadline is a real date in the past; keep future + unset.
+            dl = _dotnet_ms(j.get("deadline"))
+            if dl is not None and 0 < dl < now_ms:
+                continue
             seen.add(jid)
+            # Detail page is /co-hoi-nghe-nghiep/chi-tiet/?id=<jid>. The bare
+            # /co-hoi-nghe-nghiep/<slug> (no chi-tiet/) the adapter used before
+            # just redirects to the LISTING (?id=… on the base path) — the job
+            # never shows. Key on the numeric id (stable, no unicode-slug
+            # encoding issues); fall back to the slug path only if id is absent.
             link = (j.get("titleLink") or "").strip()
             out.append({
                 "title": title[:200],
-                "url": urljoin(_CAREER, link) if link else f"{_CAREER}{jid or ''}",
+                "url": f"{_CAREER}chi-tiet/?id={jid}" if jid else (
+                    f"{_CAREER}chi-tiet/{link}" if link else _CAREER),
                 "location": (j.get("LocationName") or "").strip(),
                 "description": _strip_html(j.get("Description") or j.get("jobsummary") or ""),
                 "category": (j.get("TeamName") or "").strip(),
