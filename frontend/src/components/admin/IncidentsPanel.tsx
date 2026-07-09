@@ -23,6 +23,7 @@ const TYPE_META: Record<IncidentType, { label: string; color: string }> = {
     db_error: { label: 'Lỗi DB', color: '#e11d48' },
     api_error: { label: 'Lỗi API', color: 'var(--accent-amber, #f59e0b)' },
     extension_error: { label: 'Lỗi extension', color: 'var(--accent-blue, #3b82f6)' },
+    cron_error: { label: 'Lỗi cron', color: '#ea580c' },
 };
 
 const TYPE_FILTERS: { value: '' | IncidentType; label: string }[] = [
@@ -31,6 +32,7 @@ const TYPE_FILTERS: { value: '' | IncidentType; label: string }[] = [
     { value: 'db_error', label: 'DB' },
     { value: 'api_error', label: 'API' },
     { value: 'extension_error', label: 'Extension' },
+    { value: 'cron_error', label: 'Cron' },
 ];
 
 const nf = (n: number) => n.toLocaleString('vi-VN');

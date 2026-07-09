@@ -380,7 +380,7 @@ export interface TopOptimizer {
     jobs: number;
 }
 
-export type IncidentType = 'system_error' | 'extension_error' | 'api_error' | 'db_error';
+export type IncidentType = 'system_error' | 'extension_error' | 'api_error' | 'db_error' | 'cron_error';
 
 export interface Incident {
     id: string;

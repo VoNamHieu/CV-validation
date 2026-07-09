@@ -23,6 +23,7 @@ from app.db import feedback as feedback_repo
 from app.db import incidents as incidents_repo
 from app.db import jobs as jobs_repo
 from app.db import profiles as profiles_repo
+from app.services import incidents as incidents_svc
 from app.services.auth import (
     get_admin_identity,
     require_admin,
@@ -215,6 +216,9 @@ async def _run_ingest(render: bool) -> None:
     except Exception as e:  # noqa: BLE001
         logger.exception("admin ingest failed")
         _ingest_last.update(phase="error", error=str(e)[:300])
+        await incidents_svc.report(
+            "cron_error", module="admin.ingest", error=e, context={"render": render},
+        )
     finally:
         _ingest_last["duration_s"] = round(time.time() - t0, 1)
 
