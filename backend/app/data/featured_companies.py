@@ -416,7 +416,10 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="VPBank",
         homepage="https://vpbank.com.vn",
-        career_url="https://tuyendung.vpbank.com.vn",
+        # SuccessFactors Career Site Builder — the bare host is a JS landing with
+        # no tiles (fell to spa_sniff → ~2); /search-jobs renders the /job/ tiles
+        # the SF adapter parses (via the phase-2 render path).
+        career_url="https://tuyendung.vpbank.com.vn/search-jobs",
     ),
     FeaturedCompany(
         name="TPBank",
