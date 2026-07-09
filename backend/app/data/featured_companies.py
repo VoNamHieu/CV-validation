@@ -380,7 +380,10 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="SHB",
         homepage="https://shb.com.vn",
-        career_url="https://tuyendung.shb.com.vn/",
+        # talentnet tenant — the bare host only surfaced ~7 via spa_sniff; the
+        # /tim-viec-lam/tat-ca-viec-lam/ all-jobs path routes to the talentnet
+        # adapter (paginated) → full board.
+        career_url="https://tuyendung.shb.com.vn/tim-viec-lam/tat-ca-viec-lam/vi",
     ),
     FeaturedCompany(
         name="SeABank",
@@ -501,7 +504,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Hoa Sen Group",
         homepage="https://hoasengroup.vn",
-        career_url="https://hoasenjobs.com/",
+        career_url="https://hoasenjobs.com/tim-viec-lam/tat-ca-viec-lam/vi",  # talentnet all-jobs path
     ),
     FeaturedCompany(
         name="Hop Nhat Logistics",
@@ -545,7 +548,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Acecook Vietnam",
         homepage="https://acecookvietnam.vn",
-        career_url="https://acecookcareer.com/",
+        career_url="https://acecookcareer.com/tim-viec-lam/tat-ca-viec-lam/vi",  # talentnet all-jobs path
     ),
     FeaturedCompany(
         name="Suntory PepsiCo Vietnam",
@@ -618,7 +621,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="PNJ",
         homepage="https://pnj.com.vn",
-        career_url="https://tuyendung.pnj.com.vn",
+        career_url="https://tuyendung.pnj.com.vn/tim-viec-lam/tat-ca-viec-lam/vi",  # talentnet all-jobs path
     ),
     FeaturedCompany(
         name="WinMart",
