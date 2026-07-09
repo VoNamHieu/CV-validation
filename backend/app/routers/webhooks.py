@@ -36,9 +36,17 @@ class SupabaseWebhook(BaseModel):
     record: Optional[dict[str, Any]] = None
 
 
-def _fmt_profile(r: dict) -> str:
+async def _fmt_profile(r: dict) -> str:
     who = r.get("email") or r.get("id") or "?"
-    return f"🎉 <b>User mới</b>\n{telegram.esc(str(who))}"
+    total = None
+    try:  # running headcount is a nice-to-have — never let it fail the alert
+        from app.db.pool import get_pool
+        pool = await get_pool()
+        total = await pool.fetchval("SELECT count(*) FROM profiles")
+    except Exception:  # noqa: BLE001
+        pass
+    tail = f"\n<b>Tổng users:</b> {total:,}".replace(",", ".") if total is not None else ""
+    return f"🎉 <b>User mới</b>\n{telegram.esc(str(who))}{tail}"
 
 
 def _fmt_incident(r: dict) -> str:
@@ -56,9 +64,6 @@ def _fmt_incident(r: dict) -> str:
     return "\n".join(parts)
 
 
-_FORMATTERS = {"profiles": _fmt_profile, "incidents": _fmt_incident}
-
-
 @router.post("/supabase")
 async def supabase_webhook(
     body: SupabaseWebhook,
@@ -72,7 +77,9 @@ async def supabase_webhook(
 
     # Only new rows are alerts; ignore UPDATE/DELETE and unhandled tables so
     # Supabase gets a clean 200 (no retries) either way.
-    fmt = _FORMATTERS.get(body.table)
-    if body.type == "INSERT" and body.record and fmt:
-        telegram.notify(fmt(body.record))
+    if body.type == "INSERT" and body.record:
+        if body.table == "profiles":
+            telegram.notify(await _fmt_profile(body.record))
+        elif body.table == "incidents":
+            telegram.notify(_fmt_incident(body.record))
     return {"ok": True}
