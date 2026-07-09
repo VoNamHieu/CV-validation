@@ -127,14 +127,31 @@ def _is_successfactors(career_url: str, html: str | None) -> bool:
 
 def _sf_v4(origin: str) -> list[dict]:
     """Modern SuccessFactors RMK (v4) JSON API — POST /services/recruiting/v1/jobs,
-    server-side filtered to Vietnam + paginated. JS-rendered SF sites (Standard
-    Chartered, …) expose NO /job/ tiles in static HTML, so the scrape below
-    returns 0 for them; this covers those. Returns [] when the site isn't v4."""
+    paginated. JS-rendered SF sites (Standard Chartered, …) expose NO /job/ tiles
+    in static HTML, so the scrape below returns 0 for them; this covers those.
+    Returns [] when the site isn't v4.
+
+    Two-attempt: the ``jobLocationCountry:["Viet Nam"]`` facet + ``en_GB`` locale
+    filters server-side and works for most tenants. But some tenants REJECT that
+    facet (400) and only serve ``en_US`` (Swire Coca-Cola VN — jobs tagged
+    "…, VNM") → they'd come back empty. So on 0 results, retry without the facet
+    on ``en_US`` and VN-filter client-side."""
+    out = _sf_v4_fetch(origin, locale="en_GB", vn_facet=True, vn_filter=False)
+    if out:
+        return out
+    return _sf_v4_fetch(origin, locale="en_US", vn_facet=False, vn_filter=True)
+
+
+def _sf_v4_fetch(origin: str, *, locale: str, vn_facet: bool, vn_filter: bool) -> list[dict]:
+    """One SF v4 fetch pass (see _sf_v4). ``vn_facet`` adds the server-side VN
+    country filter; ``vn_filter`` keeps only VN-tagged jobs client-side (for the
+    no-facet fallback, so a global tenant doesn't leak foreign roles)."""
     out: list[dict] = []
     for page in range(0, 6):
-        body = {"locale": "en_GB", "pageNumber": page, "keywords": "",
-                "facetFilters": {"jobLocationCountry": ["Viet Nam"]},
+        body = {"locale": locale, "pageNumber": page, "keywords": "",
                 "brand": "", "skills": []}
+        if vn_facet:
+            body["facetFilters"] = {"jobLocationCountry": ["Viet Nam"]}
         try:
             r = requests.post(f"{origin}/services/recruiting/v1/jobs", json=body,
                               headers={**_JSON_POST, "Referer": origin}, timeout=_TIMEOUT)
@@ -151,6 +168,8 @@ def _sf_v4(origin: str) -> list[dict]:
             if not title:
                 continue
             loc = (rp.get("jobLocationShort") or [""])[0]
+            if vn_filter and not _is_vn_loc(str(loc)):   # global tenant → keep VN only
+                continue
             jid, ut = rp.get("id"), rp.get("unifiedUrlTitle")
             url = f"{origin}/job/{ut}/{jid}/" if ut and jid else origin
             out.append({"title": title[:200], "url": url,
