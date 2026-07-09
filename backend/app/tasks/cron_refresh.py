@@ -51,6 +51,8 @@ import logging
 import os
 import random
 
+from app.services import incidents as incidents_svc
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("cron_refresh")
 
@@ -133,6 +135,12 @@ async def _link_scan() -> dict:
         sample = next((r for r in results if isinstance(r, BaseException)), None)
         logger.warning("[cron] link scan: %d/%d check(s) raised an exception (sample: %s)",
                        failed, len(jobs), str(sample)[:200])
+        await incidents_svc.report(
+            "cron_error", module="cron.link_scan.check", severity="warning",
+            error=sample if isinstance(sample, BaseException) else None,
+            message=f"{failed}/{len(jobs)} link check(s) raised an exception",
+            context={"failed": failed, "total": len(jobs)},
+        )
     return {"scanned": len(jobs), "broken": broken, "unknown": unknown, "ok": ok, "failed": failed}
 
 
@@ -147,23 +155,29 @@ async def _run() -> None:
                    render, render_limit)
         ingest = await ingest_featured_ats(render=render, render_limit=render_limit)
         logger.info("[cron] ingest done: %s", ingest)
-    except Exception:
+    except Exception as e:
         logger.exception("[cron] ingest_featured_ats failed — continuing with remaining steps")
+        await incidents_svc.report(
+            "cron_error", module="cron.ingest_featured_ats", error=e,
+            context={"render": render, "render_limit": render_limit},
+        )
 
     try:
         from app.services.embed_backfill import embed_backfill
         logger.info("[cron] embedding backfill starting…")
         embedded = await embed_backfill()
         logger.info("[cron] embedding backfill done: %d job(s) embedded", embedded)
-    except Exception:
+    except Exception as e:
         logger.exception("[cron] embedding backfill failed — continuing with remaining steps")
+        await incidents_svc.report("cron_error", module="cron.embed_backfill", error=e)
 
     try:
         logger.info("[cron] link scan starting (limit=%s)…", _SCAN_LIMIT)
         scan = await _link_scan()
         logger.info("[cron] link scan done: %s", scan)
-    except Exception:
+    except Exception as e:
         logger.exception("[cron] link scan failed — continuing with remaining steps")
+        await incidents_svc.report("cron_error", module="cron.link_scan", error=e)
 
     try:
         # Prune promoted landing pages whose backing job just went inactive
@@ -173,8 +187,9 @@ async def _run() -> None:
         dead = await promoted.delete_dead()
         logger.info("[cron] promoted cleanup: deleted %d dead page(s)%s",
                    len(dead), (" — " + ", ".join(dead[:20])) if dead else "")
-    except Exception:
+    except Exception as e:
         logger.exception("[cron] promoted cleanup failed")
+        await incidents_svc.report("cron_error", module="cron.promoted_cleanup", error=e)
 
     try:
         # Hard-delete jobs that have been dead (gone from feed / apply-gate dead)
@@ -184,8 +199,12 @@ async def _run() -> None:
         from app.db import jobs as jobs_repo
         purged = await jobs_repo.purge_dead(_DEAD_GRACE_HOURS)
         logger.info("[cron] purged %d job(s) dead > %dh", purged, _DEAD_GRACE_HOURS)
-    except Exception:
+    except Exception as e:
         logger.exception("[cron] dead-job purge failed")
+        await incidents_svc.report(
+            "cron_error", module="cron.purge_dead", error=e,
+            context={"grace_hours": _DEAD_GRACE_HOURS},
+        )
 
 
 async def main() -> None:
@@ -196,6 +215,11 @@ async def main() -> None:
         await asyncio.wait_for(_run(), timeout=_TOTAL_TIMEOUT)
     except asyncio.TimeoutError:
         logger.error("[cron] refresh exceeded %ds hard timeout — aborting this run", _TOTAL_TIMEOUT)
+        await incidents_svc.report(
+            "cron_error", module="cron.timeout",
+            message=f"Refresh exceeded {_TOTAL_TIMEOUT}s hard timeout",
+            context={"timeout_seconds": _TOTAL_TIMEOUT},
+        )
     finally:
         await close_browser()
         await close_pool()

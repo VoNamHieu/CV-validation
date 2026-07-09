@@ -26,7 +26,7 @@ _MODULE_MAX = 120
 
 # Whitelists — anything outside these is coerced so the columns stay clean even
 # if a client sends garbage.
-INCIDENT_TYPES = {"system_error", "extension_error", "api_error", "db_error"}
+INCIDENT_TYPES = {"system_error", "extension_error", "api_error", "db_error", "cron_error"}
 SOURCES = {"backend", "frontend", "extension"}
 SEVERITIES = {"error", "warning"}
 
