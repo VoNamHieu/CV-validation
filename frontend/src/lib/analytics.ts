@@ -26,8 +26,9 @@ export const FUNNEL_STEPS: { event: string; label: string }[] = [
 ];
 
 // Stable per-tab session id so the backend can count DISTINCT sessions per step
-// (resets on a hard reload / new tab — fine for a funnel).
-function sessionId(): string {
+// (resets on a hard reload / new tab — fine for a funnel). Exported so the
+// incident reporter (lib/incidents.ts) can tag errors with the same session.
+export function sessionId(): string {
     try {
         let id = sessionStorage.getItem('jobfit-sid');
         if (!id) {

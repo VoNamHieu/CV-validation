@@ -20,6 +20,7 @@ from app.db import analytics as analytics_repo
 from app.db import credits as credits_repo
 from app.db import events as events_repo
 from app.db import feedback as feedback_repo
+from app.db import incidents as incidents_repo
 from app.db import jobs as jobs_repo
 from app.db import profiles as profiles_repo
 from app.services.auth import (
@@ -276,3 +277,51 @@ async def analytics_top_optimizers(
 ):
     """Leaderboard of users who optimized their CV for the most jobs."""
     return await analytics_repo.top_optimizers(days=days, limit=limit)
+
+
+# ── Incident log (system / API / DB / extension errors) ──
+
+
+@router.get("/incidents")
+async def list_incidents(
+    incident_type: Optional[str] = Query(None, max_length=40),
+    source: Optional[str] = Query(None, max_length=20),
+    resolved: Optional[bool] = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    _admin: str = Depends(require_admin),
+):
+    """Recent incidents (newest first) + total, filterable by type/source/resolved."""
+    rows, total = await incidents_repo.list_recent(
+        incident_type=incident_type, source=source, resolved=resolved,
+        limit=limit, offset=offset,
+    )
+    return {"total": total, "results": rows}
+
+
+@router.get("/incidents/summary")
+async def incidents_summary(
+    days: int = Query(7, ge=0, le=3650, description="Time window in days; 0 = all time"),
+    _admin: str = Depends(require_admin),
+):
+    """Incident counts by type / source / top module for the dashboard."""
+    return await incidents_repo.summary(days=days)
+
+
+class ResolveIncidentBody(BaseModel):
+    resolution_note: Optional[str] = Field(default=None, max_length=500)
+
+
+@router.post("/incidents/{incident_id}/resolve")
+async def resolve_incident(
+    incident_id: str,
+    body: ResolveIncidentBody,
+    identity: dict = Depends(get_admin_identity),
+):
+    """Mark an incident resolved, stamping the acting admin's email."""
+    ok = await incidents_repo.resolve(
+        incident_id, resolved_by=identity["email"], note=body.resolution_note,
+    )
+    if not ok:
+        raise HTTPException(status_code=404, detail="Không tìm thấy incident")
+    return {"ok": True}

@@ -11,7 +11,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import {
     ShieldCheck, MagnifyingGlass, Coins, ArrowLeft, SpinnerGap, CheckCircle, WarningCircle,
     Heartbeat, PlugsConnected, ChatCircleDots, FunnelSimple, Briefcase, Megaphone, UsersThree,
-    Image as ImageIcon,
+    Image as ImageIcon, Bug,
 } from '@phosphor-icons/react';
 import { useAuth } from '@/lib/auth';
 import { admin, type AdminRole } from '@/lib/db';
@@ -23,9 +23,10 @@ import JobSearchPanel from '@/components/admin/JobSearchPanel';
 import PromotedPanel from '@/components/admin/PromotedPanel';
 import CompanyLogoPanel from '@/components/admin/CompanyLogoPanel';
 import MembersPanel from '@/components/admin/MembersPanel';
+import IncidentsPanel from '@/components/admin/IncidentsPanel';
 
 type Access = 'checking' | 'granted' | 'denied' | 'error';
-type Tab = 'credits' | 'jobs' | 'promoted' | 'logos' | 'analytics' | 'monitor' | 'compat' | 'feedback' | 'members';
+type Tab = 'credits' | 'jobs' | 'promoted' | 'logos' | 'analytics' | 'incidents' | 'monitor' | 'compat' | 'feedback' | 'members';
 
 const QUICK_AMOUNTS = [50, 100, 250, 500];
 const TABS: { id: Tab; label: string; icon: typeof Coins }[] = [
@@ -34,6 +35,7 @@ const TABS: { id: Tab; label: string; icon: typeof Coins }[] = [
     { id: 'promoted', label: 'Trang truyền thông', icon: Megaphone },
     { id: 'logos', label: 'Logo công ty', icon: ImageIcon },
     { id: 'analytics', label: 'Thống kê', icon: FunnelSimple },
+    { id: 'incidents', label: 'Nhật ký lỗi', icon: Bug },
     { id: 'monitor', label: 'Link monitor', icon: Heartbeat },
     { id: 'compat', label: 'Compatibility', icon: PlugsConnected },
     { id: 'feedback', label: 'Feedback', icon: ChatCircleDots },
@@ -283,6 +285,7 @@ function AdminConsole() {
                 {tab === 'promoted' && <PromotedPanel />}
                 {tab === 'logos' && <CompanyLogoPanel />}
                 {tab === 'analytics' && <AnalyticsPanel />}
+                {tab === 'incidents' && <IncidentsPanel />}
                 {tab === 'monitor' && <MonitorPanel />}
                 {tab === 'compat' && <CompatPanel />}
                 {tab === 'feedback' && <FeedbackPanel />}

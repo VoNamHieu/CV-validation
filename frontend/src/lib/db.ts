@@ -100,6 +100,7 @@ export interface Application {
 // Supabase session JWT; falls back to the dev X-User-Id header. setUserId is
 // kept as the public name used elsewhere.
 import { getAuthHeaders, setDevUserId } from './auth-headers';
+import { reportIncident } from './incidents';
 
 export const setUserId = setDevUserId;
 
@@ -107,11 +108,30 @@ async function req<T>(path: string, init?: RequestInit & { auth?: boolean }): Pr
     const headers: Record<string, string> = { ...(init?.headers as Record<string, string>) };
     if (init?.body) headers['Content-Type'] = 'application/json';
     if (init?.auth) Object.assign(headers, await getAuthHeaders());
-    const res = await fetch(path, { ...init, headers });
+    let res: Response;
+    try {
+        res = await fetch(path, { ...init, headers });
+    } catch (netErr) {
+        // Network failure (offline, DNS, CORS) — log as an incident then rethrow.
+        reportIncident({
+            incident_type: 'api_error', module: 'db.req',
+            message: netErr instanceof Error ? netErr.message : 'network error',
+            context: { endpoint: path, kind: 'network' },
+        });
+        throw netErr;
+    }
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         const e = new Error(err.detail || `Request failed: ${res.status}`) as Error & { status?: number };
         e.status = res.status;   // let callers distinguish 403 (real) from 401/5xx (transient)
+        // Only server-side faults are incidents; 4xx are expected client outcomes.
+        if (res.status >= 500) {
+            reportIncident({
+                incident_type: 'api_error', module: 'db.req',
+                message: e.message, code: `HTTP ${res.status}`,
+                context: { endpoint: path, status: res.status },
+            });
+        }
         throw e;
     }
     return res.json();
@@ -337,11 +357,56 @@ export const admin = {
         req<Record<string, number>>(`/api/admin/analytics/funnel?days=${days}`, { auth: true }),
     analyticsTopOptimizers: (days: number, limit = 20) =>
         req<TopOptimizer[]>(`/api/admin/analytics/top-optimizers?days=${days}&limit=${limit}`, { auth: true }),
+
+    // ── Incident log ──
+    listIncidents: (p: { incidentType?: string; resolved?: boolean; limit?: number; offset?: number } = {}) => {
+        const qs = new URLSearchParams();
+        if (p.incidentType) qs.set('incident_type', p.incidentType);
+        if (p.resolved !== undefined) qs.set('resolved', String(p.resolved));
+        if (p.limit !== undefined) qs.set('limit', String(p.limit));
+        if (p.offset !== undefined) qs.set('offset', String(p.offset));
+        return req<{ total: number; results: Incident[] }>(`/api/admin/incidents?${qs}`, { auth: true });
+    },
+    incidentsSummary: (days: number) =>
+        req<IncidentSummary>(`/api/admin/incidents/summary?days=${days}`, { auth: true }),
+    resolveIncident: (id: string, note?: string) =>
+        req<{ ok: boolean }>(`/api/admin/incidents/${id}/resolve`, {
+            method: 'POST', body: JSON.stringify({ resolution_note: note ?? null }), auth: true,
+        }),
 };
 
 export interface TopOptimizer {
     email: string;
     jobs: number;
+}
+
+export type IncidentType = 'system_error' | 'extension_error' | 'api_error' | 'db_error';
+
+export interface Incident {
+    id: string;
+    incident_type: IncidentType;
+    source: string;
+    module: string | null;
+    severity: string;
+    message: string | null;
+    code: string | null;
+    stack: string | null;
+    context: Record<string, unknown> | null;
+    resolved: boolean;
+    resolved_at: string | null;
+    resolved_by: string | null;
+    user_id: string | null;
+    session_id: string | null;
+    created_at: string;
+}
+
+export interface IncidentSummary {
+    window_days: number;
+    total: number;
+    unresolved: number;
+    by_type: Record<string, number>;
+    by_source: Record<string, number>;
+    top_modules: { module: string; count: number }[];
 }
 
 export type PromotedStatus = 'draft' | 'published' | 'unpublished';
