@@ -675,7 +675,9 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Vinpearl",
         homepage="https://vinpearl.com",
-        career_url="https://vinpearl.talent.vn",
+        # Migrated off talent.vn to the Vingroup group portal (eHiring). companyCode
+        # is the OrgLv2Id the Vingroup adapter filters on → Vinpearl's own postings.
+        career_url="https://tuyendung.vingroup.net/jobs?companyCode=45001013",
     ),
     FeaturedCompany(
         name="AEON Việt Nam",
