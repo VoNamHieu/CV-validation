@@ -27,7 +27,7 @@ import type {
 import {
     EMPTY_CONTACT, EMPTY_PERSONAL, EMPTY_EMPLOYMENT, EMPTY_PREFERENCES, COVER_LETTER_LANGUAGES,
 } from '@/lib/types';
-import { promptInstallExtension } from '@/lib/extension-install';
+import { promptInstallExtension, promptGrantPermission, isPermissionError } from '@/lib/extension-install';
 import { cvToExtensionProfile } from '@/lib/extension-profile';
 import { syncProfileToExtension, syncCvFileToExtension, syncCvDataToExtension } from '@/lib/extension-sync';
 import { renderCvHtml, getTemplate, DEFAULT_TEMPLATE_ID } from '@/lib/cv-templates';
@@ -240,6 +240,10 @@ export default function StepEditCv() {
             if (event.data?.type === 'JOBFIT_AUTO_APPLY_ALL_RESPONSE') {
                 if (event.data.success) {
                     setBatchStarting(false);
+                } else if (isPermissionError(event.data.error || '')) {
+                    setBatchStarting(false);
+                    setAutoApplyMessage('Cần cấp quyền cho Copo trên trang này — xem hướng dẫn.');
+                    promptGrantPermission();
                 } else {
                     setBatchStarting(false);
                     setAutoApplyMessage(`Lỗi: ${event.data.error}`);
@@ -599,6 +603,10 @@ export default function StepEditCv() {
                 setAutoApplyMessage('Extension chưa cài. Đang mở trang ứng tuyển...');
                 promptInstallExtension();
                 window.open(jobUrl, '_blank');
+            } else if (isPermissionError(message)) {
+                setAutoApplyStatus('error');
+                setAutoApplyMessage('Cần cấp quyền cho Copo trên trang này — xem hướng dẫn.');
+                promptGrantPermission();
             } else {
                 setAutoApplyStatus('error');
                 setAutoApplyMessage(`Lỗi: ${message}`);

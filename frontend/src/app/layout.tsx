@@ -8,6 +8,7 @@ import GlobalAuthModal from "@/components/GlobalAuthModal";
 import FloatingFeedback from "@/components/FloatingFeedback";
 import AnalyticsTracker from "@/components/AnalyticsTracker";
 import InstallExtensionModal from "@/components/InstallExtensionModal";
+import GrantPermissionModal from "@/components/GrantPermissionModal";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -51,6 +52,7 @@ export default function RootLayout({
               <FloatingFeedback />
               <AnalyticsTracker />
               <InstallExtensionModal />
+              <GrantPermissionModal />
             </ConsentProvider>
           </CreditsProvider>
         </AuthProvider>
