@@ -52,15 +52,15 @@ const COMPANIES: { name: string; domain: string }[] = [
     { name: 'TikTok', domain: 'tiktok.com' },
     { name: 'Agoda', domain: 'agoda.com' },
     { name: 'Traveloka', domain: 'traveloka.com' },
-    { name: 'Visa', domain: 'visa.com' },
+    { name: 'Visa', domain: 'visa.com.vn' },
     { name: 'Mastercard', domain: 'mastercard.com' },
     { name: 'FPT Software', domain: 'fpt-software.com' },
     { name: 'Techcombank', domain: 'techcombank.com.vn' },
     { name: 'Vietcombank', domain: 'vietcombank.com.vn' },
     { name: 'VPBank', domain: 'vpbank.com.vn' },
     { name: 'Vinamilk', domain: 'vinamilk.com.vn' },
-    { name: 'Bosch', domain: 'bosch.com' },
-    { name: 'Heineken', domain: 'heineken.com' },
+    { name: 'Bosch', domain: 'bosch.com.vn' },
+    { name: 'Heineken', domain: 'heinekenvietnam.com' },
 ];
 
 // One logo, resolved in a 3-stage fallback so admin-uploaded brands take
