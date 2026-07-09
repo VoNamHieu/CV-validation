@@ -179,6 +179,18 @@ def _sf_v4_fetch(origin: str, *, locale: str, vn_facet: bool, vn_filter: bool) -
     return out
 
 
+def _sf_tile_href(href: str) -> bool:
+    """A SuccessFactors job-tile link: ``/job/<slug>/<id>/`` — optionally behind
+    ONE site-path segment (EY serves tiles at ``/ey/job/…`` because its career
+    site is mounted under ``/ey``). One segment only, so we match ``/job/`` and
+    ``/ey/job/`` but not arbitrary nav like ``/a/b/job-search``."""
+    parts = (href or "").split("/job/", 1)
+    if len(parts) != 2:
+        return False
+    prefix = parts[0]                       # "" for /job/…, "/ey" for /ey/job/…
+    return prefix == "" or (prefix.startswith("/") and prefix.count("/") == 1)
+
+
 def _successfactors(career_url: str, html: str | None) -> list[dict]:
     from bs4 import BeautifulSoup
     p = urlparse(career_url)
@@ -207,8 +219,10 @@ def _successfactors(career_url: str, html: str | None) -> list[dict]:
         # (VN-domestic SF sites often omit the location), but DROP foreign-tagged
         # rows. When VN rows run out, the caller stops (we've hit the global tail).
         added = 0
-        for a in soup.select('a[href^="/job/"]'):
+        for a in soup.select("a[href]"):
             href = a.get("href", "")
+            if not _sf_tile_href(href):
+                continue
             title = a.get_text(" ", strip=True)
             if not href or not title or len(title) < 4 or href in seen:
                 continue
