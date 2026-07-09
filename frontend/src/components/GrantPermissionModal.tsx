@@ -5,16 +5,26 @@
 // extension popup (the web-app gesture is lost reaching the background worker,
 // and Chrome blocks a page from opening the popup) — so this modal walks the
 // user through it. Globally mounted (layout), opened via NEED_PERMISSION_EVENT.
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { X, ShieldCheck, CheckCircle, PushPin } from '@phosphor-icons/react';
 import { NEED_PERMISSION_EVENT } from '@/lib/extension-install';
 import { useModalA11y } from '@/lib/useModalA11y';
 
-const STEPS = [
-    <>Bấm biểu tượng extension <b>🧩</b> ở góc phải thanh trình duyệt, rồi chọn <b>Copo</b> (ghim lại cho dễ mở).</>,
-    <>Trong popup Copo, bấm <b>&quot;Cho phép trên mọi trang&quot;</b> (hoặc cấp quyền cho trang hiện tại).</>,
-    <>Quay lại đây và bấm <b>&quot;Ứng tuyển&quot;</b> lại — agent sẽ tự chạy.</>,
+const STEPS: { text: ReactNode; img?: string; alt?: string }[] = [
+    {
+        text: <>Bấm biểu tượng extension <b>🧩</b> ở góc phải thanh trình duyệt, rồi chọn <b>Copo</b> (ghim lại cho dễ mở).</>,
+        img: '/guide/grant-1-open.png',
+        alt: 'Mở menu extension của Chrome và chọn Copo',
+    },
+    {
+        text: <>Trong popup Copo, bấm <b>&quot;Bật cho mọi trang&quot;</b>.</>,
+        img: '/guide/grant-2-allow.png',
+        alt: 'Bấm nút Bật cho mọi trang trong popup Copo',
+    },
+    {
+        text: <>Quay lại đây và bấm <b>&quot;Ứng tuyển&quot;</b> lại — agent sẽ tự chạy.</>,
+    },
 ];
 
 export default function GrantPermissionModal() {
@@ -52,9 +62,10 @@ function GrantPermissionDialog({ onClose }: { onClose: () => void }) {
                 aria-labelledby="grant-perm-modal-title"
                 tabIndex={-1}
                 style={{
-                    width: '100%', maxWidth: 400, background: 'var(--bg-secondary)',
+                    width: '100%', maxWidth: 420, background: 'var(--bg-secondary)',
                     border: '1px solid var(--border-subtle)', borderRadius: 16,
                     padding: 24, position: 'relative', boxShadow: '0 20px 60px rgba(0,0,0,0.35)',
+                    maxHeight: '90vh', overflowY: 'auto',
                 }}
             >
                 <button
@@ -82,16 +93,29 @@ function GrantPermissionDialog({ onClose }: { onClose: () => void }) {
                     bảo mật của Chrome, quyền này chỉ cấp được từ <b>popup của extension</b> — làm 1 lần là xong.
                 </p>
 
-                <ol style={{ margin: '0 0 18px', padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <ol style={{ margin: '0 0 18px', padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 14 }}>
                     {STEPS.map((s, i) => (
-                        <li key={i} style={{ display: 'flex', gap: 9, fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                            <span style={{
-                                flexShrink: 0, width: 20, height: 20, borderRadius: '50%',
-                                background: 'var(--bg-card)', border: '1px solid var(--border-subtle)',
-                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-primary)',
-                            }}>{i + 1}</span>
-                            <span>{s}</span>
+                        <li key={i} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            <div style={{ display: 'flex', gap: 9, fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                                <span style={{
+                                    flexShrink: 0, width: 20, height: 20, borderRadius: '50%',
+                                    background: 'var(--bg-card)', border: '1px solid var(--border-subtle)',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-primary)',
+                                }}>{i + 1}</span>
+                                <span>{s.text}</span>
+                            </div>
+                            {s.img && (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img
+                                    src={s.img} alt={s.alt} loading="lazy"
+                                    style={{
+                                        display: 'block', width: '100%', height: 'auto', borderRadius: 10,
+                                        border: '1px solid var(--border-subtle)', marginLeft: 29,
+                                        maxWidth: 'calc(100% - 29px)', boxShadow: '0 2px 10px rgba(0,0,0,0.12)',
+                                    }}
+                                />
+                            )}
                         </li>
                     ))}
                 </ol>
