@@ -47,6 +47,7 @@ from app.services.ats_adapters.seabank import *  # noqa: F401,F403
 from app.services.ats_adapters.unilever import *  # noqa: F401,F403
 from app.services.ats_adapters.tasco import *  # noqa: F401,F403
 from app.services.ats_adapters.decathlon import *  # noqa: F401,F403
+from app.services.ats_adapters.vingroup import *  # noqa: F401,F403
 
 
 _ADAPTERS: list = [
@@ -116,4 +117,5 @@ _ADAPTERS: list = [
     ("unilever",        lambda u, h: _is_unilever(u),        lambda u, h: _unilever(u)),
     ("tasco",           lambda u, h: _is_tasco(u),           lambda u, h: _tasco(u)),
     ("decathlon",       lambda u, h: _is_decathlon(u),       lambda u, h: _decathlon(u)),
+    ("vingroup",        lambda u, h: _is_vingroup(u),        lambda u, h: _vingroup(u)),
 ]
