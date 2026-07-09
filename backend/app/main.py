@@ -31,6 +31,7 @@ from starlette.responses import JSONResponse
 from app.routers import (
     extract, crawl, smart_crawl, render, career, debug_capture, link_monitor,
     compat_monitor, store, account, credits, admin, feedback, events, interview,
+    incidents,
 )
 from app.services.browser_pool import close_browser
 from app.db.pool import close_pool
@@ -51,6 +52,28 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="AI Job Fit Optimizer API", version="1.0.0", lifespan=lifespan)
+
+
+# ── Global exception handler → incident log (system / DB errors) ──
+# FastAPI handles HTTPException (4xx) via its own handler, so this only catches
+# UNhandled exceptions that would otherwise become an opaque 500. We log the
+# traceback (existing behaviour) AND record an incident, classifying asyncpg
+# failures as db_error, then return the same generic 500 as before. Recording
+# is fire-and-forget (services.incidents.report never raises).
+@app.exception_handler(Exception)
+async def _log_unhandled(request: Request, exc: Exception):
+    import asyncpg
+    from app.services import incidents as incidents_svc
+
+    _app_logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+    kind = "db_error" if isinstance(exc, asyncpg.PostgresError) else "system_error"
+    await incidents_svc.report(
+        kind,
+        module=request.url.path,
+        error=exc,
+        context={"method": request.method, "path": request.url.path},
+    )
+    return JSONResponse({"detail": "Internal server error"}, status_code=500)
 
 
 # ── Rate Limiting Middleware (H2) ──
@@ -157,3 +180,4 @@ app.include_router(admin.router)
 app.include_router(feedback.router)
 app.include_router(events.router)
 app.include_router(interview.router)
+app.include_router(incidents.router)

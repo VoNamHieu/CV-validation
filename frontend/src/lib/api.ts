@@ -1,7 +1,46 @@
 // All API calls use Next.js API routes (relative paths)
 import { getAuthHeaders } from './auth-headers';
+import { reportIncident } from './incidents';
 import type { CVData } from './types';
 import type { CvImprovement, CvSuggestion } from './cv-improvements';
+
+// Shared POST→JSON helper for the AI endpoints. Centralises the identical
+// `fetch + !res.ok throw` pattern AND reports server-side failures (5xx /
+// network drop) to the incident log — the choke point for "API call errors".
+// Call sites needing bespoke behaviour (retry, fail-open, warm-up polling) keep
+// their own fetch and are intentionally not routed through here.
+// Default T = any preserves the previous `res.json()` (untyped) return for the
+// loose callers; typed callers pass an explicit T.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function aiPost<T = any>(path: string, body: unknown, fallbackMsg: string): Promise<T> {
+    let res: Response;
+    try {
+        res = await fetch(path, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
+            body: JSON.stringify(body),
+        });
+    } catch (netErr) {
+        reportIncident({
+            incident_type: 'api_error', module: 'api',
+            message: netErr instanceof Error ? netErr.message : 'network error',
+            context: { endpoint: path, kind: 'network' },
+        });
+        throw netErr;
+    }
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        if (res.status >= 500) {
+            reportIncident({
+                incident_type: 'api_error', module: 'api',
+                message: err.detail || `HTTP ${res.status}`, code: `HTTP ${res.status}`,
+                context: { endpoint: path, status: res.status },
+            });
+        }
+        throw new Error(err.detail || fallbackMsg);
+    }
+    return res.json();
+}
 
 export type OptimizeStyle = 'formal' | 'direct' | 'impact-driven' | 'storytelling';
 export type OptimizeFocus = 'balanced' | 'technical' | 'leadership' | 'metrics' | 'ats-keyword';
@@ -40,71 +79,27 @@ export async function parsePdfWithAI(file: File, type: 'cv' | 'jd') {
         new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
     );
 
-    const res = await fetch('/api/parse-pdf', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
-        body: JSON.stringify({ pdf_base64: base64, type }),
-    });
-
-    if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.detail || 'Failed to parse PDF');
-    }
-    return res.json();
+    return aiPost('/api/parse-pdf', { pdf_base64: base64, type }, 'Failed to parse PDF');
 }
 
 export async function extractCvStructured(rawText: string) {
-    const res = await fetch('/api/ai/extract-cv', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
-        body: JSON.stringify({ raw_text: rawText }),
-    });
-    if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.detail || 'Failed to extract CV');
-    }
-    return res.json();
+    return aiPost('/api/ai/extract-cv', { raw_text: rawText }, 'Failed to extract CV');
 }
 
 export async function extractJdStructured(rawText: string) {
-    const res = await fetch('/api/ai/extract-jd', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
-        body: JSON.stringify({ raw_text: rawText }),
-    });
-    if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.detail || 'Failed to extract JD');
-    }
-    return res.json();
+    return aiPost('/api/ai/extract-jd', { raw_text: rawText }, 'Failed to extract JD');
 }
 
 export async function scoreFit(cv: unknown, jd: unknown) {
-    const res = await fetch('/api/ai/score', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
-        body: JSON.stringify({ cv, jd }),
-    });
-    if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.detail || 'Failed to score fit');
-    }
-    return res.json();
+    return aiPost('/api/ai/score', { cv, jd }, 'Failed to score fit');
 }
 
 // Deep gap analysis: JD vs how the current CV demonstrates the candidate's
 // ability. Returns a GapReport (see lib/gap-report). Credit-metered ('gap_report').
 export async function generateGapReport(cv: unknown, jd: unknown, match?: unknown) {
-    const res = await fetch('/api/ai/gap-report', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
-        body: JSON.stringify({ cv, jd, match }),
-    });
-    if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || 'Tạo báo cáo gap thất bại');
-    }
-    return res.json() as Promise<import('@/lib/gap-report').GapReport>;
+    return aiPost<import('@/lib/gap-report').GapReport>(
+        '/api/ai/gap-report', { cv, jd, match }, 'Tạo báo cáo gap thất bại',
+    );
 }
 
 export async function optimizeCvVariants(
@@ -113,16 +108,7 @@ export async function optimizeCvVariants(
     match: unknown,
     options?: OptimizeOptions,
 ): Promise<OptimizeResponse> {
-    const res = await fetch('/api/ai/optimize', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
-        body: JSON.stringify({ cv, jd, match, options }),
-    });
-    if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || 'Failed to optimize CV');
-    }
-    return res.json();
+    return aiPost('/api/ai/optimize', { cv, jd, match, options }, 'Failed to optimize CV');
 }
 
 // Generate a per-job tailored cover letter in the CHOSEN language (anti-
@@ -130,17 +116,10 @@ export async function optimizeCvVariants(
 export async function generateCoverLetter(
     cv: unknown, jd: unknown, match: unknown, lang: string,
 ): Promise<string> {
-    const res = await fetch('/api/ai/cover-letter', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
-        body: JSON.stringify({ cv, jd, match, lang }),
-    });
-    if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || 'Failed to generate cover letter');
-    }
-    const data = await res.json();
-    return data.coverLetter as string;
+    const data = await aiPost<{ coverLetter: string }>(
+        '/api/ai/cover-letter', { cv, jd, match, lang }, 'Failed to generate cover letter',
+    );
+    return data.coverLetter;
 }
 
 export async function crawlUrl(url: string, keepLinks = false): Promise<{ text: string; textWithLinks?: string; jsonLd?: Record<string, unknown> | null; source_url?: string }> {
@@ -161,30 +140,12 @@ export async function crawlUrl(url: string, keepLinks = false): Promise<{ text: 
 //    template table. Pass `jobTitle` (the role confirmed on the upload step)
 //    so the URL respects the user's choice instead of re-inferring from the CV.
 export async function smartSearch(cv: unknown, siteUrl: string, jobTitle?: string) {
-    const res = await fetch('/api/ai/smart-search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
-        body: JSON.stringify({ cv, siteUrl, jobTitle }),
-    });
-    if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.detail || 'Failed to generate search');
-    }
-    return res.json();
+    return aiPost('/api/ai/smart-search', { cv, siteUrl, jobTitle }, 'Failed to generate search');
 }
 
 // ── Extract job links from search results page ──
 export async function extractJobLinks(htmlText: string, siteUrl: string) {
-    const res = await fetch('/api/ai/extract-job-links', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
-        body: JSON.stringify({ html_text: htmlText, site_url: siteUrl }),
-    });
-    if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.detail || 'Failed to extract job links');
-    }
-    return res.json();
+    return aiPost('/api/ai/extract-job-links', { html_text: htmlText, site_url: siteUrl }, 'Failed to extract job links');
 }
 
 // ── Link-health monitor: report a job URL the pipeline failed to fetch ──
@@ -216,16 +177,9 @@ export async function rankJobsByFit(
     cv: unknown,
     jobs: { url: string; title?: string }[],
 ): Promise<RankedJob[]> {
-    const res = await fetch('/api/ai/rank-jobs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
-        body: JSON.stringify({ cv, jobs }),
-    });
-    if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || 'Failed to rank jobs');
-    }
-    const data = await res.json();
+    const data = await aiPost<{ ranked?: RankedJob[] }>(
+        '/api/ai/rank-jobs', { cv, jobs }, 'Failed to rank jobs',
+    );
     return Array.isArray(data?.ranked) ? data.ranked : [];
 }
 
@@ -570,16 +524,7 @@ export interface SearchProfile {
 }
 
 export async function inferSearchProfile(cv: unknown): Promise<SearchProfile> {
-    const res = await fetch('/api/ai/search-profile', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
-        body: JSON.stringify({ cv }),
-    });
-    if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || 'Failed to infer search profile');
-    }
-    return res.json();
+    return aiPost('/api/ai/search-profile', { cv }, 'Failed to infer search profile');
 }
 
 // ── Dynamic discovery (grounded search by candidate profile) ──

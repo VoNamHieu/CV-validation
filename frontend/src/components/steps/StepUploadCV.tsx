@@ -8,10 +8,23 @@ import {
 } from '@phosphor-icons/react';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthGate } from '@/lib/auth';
-import { parsePdfWithAI } from '@/lib/api';
+import { parsePdfWithAI, isExtensionAvailable } from '@/lib/api';
 import { cvToExtensionProfile } from '@/lib/extension-profile';
-import { syncProfileToExtension, syncCvDataToExtension } from '@/lib/extension-sync';
+import { syncProfileToExtension, syncCvDataToExtension, type SyncResult } from '@/lib/extension-sync';
 import { EXTENSION_INSTALL_URL } from '@/lib/extension-install';
+import { reportIncident } from '@/lib/incidents';
+
+// Only a sync failure while the extension IS installed is a real connection
+// incident — a user who simply hasn't installed it isn't an error. Gate on
+// isExtensionAvailable() so the log captures "installed but not responding",
+// not every extension-less visitor.
+function reportExtSyncFailure(res: SyncResult, stage: string): void {
+    if (res.ok || !isExtensionAvailable()) return;
+    reportIncident({
+        incident_type: 'extension_error', module: 'extension_sync',
+        message: res.error, context: { stage },
+    });
+}
 import { track } from '@/lib/analytics';
 import { CITY_OPTIONS, SENIORITY_OPTIONS, canonSeniority } from '@/lib/job-targeting';
 
@@ -79,6 +92,7 @@ export default function StepUploadCV() {
             syncingRef.current = false;
             setExtSynced(res.ok);
             setExtSyncError(res.error ?? '');
+            reportExtSyncFailure(res, 'reuse');
             // Only latch on success so a first-attempt timeout (extension not
             // yet injected) stays retryable when it announces itself later.
             if (res.ok) reusedSyncedRef.current = true;
@@ -139,6 +153,7 @@ export default function StepUploadCV() {
                 setExtSynced(res.ok);
                 setExtSyncError(res.error ?? '');
                 if (!res.ok) console.warn('[Copo] Profile sync → extension failed:', res.error);
+                reportExtSyncFailure(res, 'upload');
             });
             // Also sync the rich CV JSON so the extension can tailor it on a job
             // page (Mode 1) — the relay drops cvData from the profile message.
