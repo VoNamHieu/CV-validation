@@ -13,7 +13,9 @@ from __future__ import annotations
 from app.services.ats_adapters._shared import *  # noqa: F401,F403
 
 _LIST_URL = "https://vieclam.thegioididong.com/tuyen-dung-tat-ca-dia-diem"
-_MAX_PAGES = 5  # ~20/page; caps at _MAX_ATS_JOBS via _finalize anyway
+_MAX_PAGES = 20  # ~20/page; real stop is the empty-page terminator (~pg 13) or
+                 # _MAX_ATS_JOBS. Was 5 (=100 hard cap) which truncated this
+                 # ~217-posting board to 100.
 
 
 def _is_thegioididong(career_url: str) -> bool:

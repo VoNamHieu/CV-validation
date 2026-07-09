@@ -21,7 +21,12 @@ def _is_homecredit(career_url: str) -> bool:
 
 def _homecredit(career_url: str) -> list[dict]:
     try:
-        r = requests.get(_API, headers=_HEADERS, timeout=_TIMEOUT)
+        # verify=False: career.homecredit.vn ships an incomplete TLS chain
+        # (missing intermediate CA), so the default verify=True fails to connect
+        # and the feed silently returns 0. The host is a fixed, known first party.
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        r = requests.get(_API, headers=_HEADERS, timeout=_TIMEOUT, verify=False)
         if r.status_code != 200:
             return []
         items = r.json() or []

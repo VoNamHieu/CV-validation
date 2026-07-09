@@ -48,6 +48,7 @@ from app.services.ats_adapters.unilever import *  # noqa: F401,F403
 from app.services.ats_adapters.tasco import *  # noqa: F401,F403
 from app.services.ats_adapters.decathlon import *  # noqa: F401,F403
 from app.services.ats_adapters.vingroup import *  # noqa: F401,F403
+from app.services.ats_adapters.pharmacity import *  # noqa: F401,F403
 
 
 _ADAPTERS: list = [
@@ -79,6 +80,9 @@ _ADAPTERS: list = [
     ("timo",           lambda u, h: _is_timo(u),           lambda u, h: _timo(u)),
     ("geekadventure",  lambda u, h: _is_geekadventure(u),  lambda u, h: _geekadventure(u)),
     ("garena",         lambda u, h: _is_garena(u),         lambda u, h: _garena(u)),
+    # before talentnet: Pharmacity's /tim-viec-lam/ path would be mis-claimed by
+    # talentnet's loose gate, but it's a WordPress /career/ board — see pharmacity.py.
+    ("pharmacity",     lambda u, h: _is_pharmacity(u),     lambda u, h: _pharmacity(u)),
     ("talentnet",      lambda u, h: _is_talentnet(u),      lambda u, h: _talentnet(u)),
     ("ssi",            lambda u, h: _is_ssi(u),            lambda u, h: _ssi(u)),
     ("appota",         lambda u, h: _is_appota(u),         lambda u, h: _appota(u)),

@@ -798,8 +798,11 @@ def _is_amazon(career_url: str) -> bool:
 
 
 def _amazon(career_url: str) -> list[dict]:
+    # result_limit is capped at 100 server-side: a larger value (we used to send
+    # _MAX_ATS_JOBS=300) is rejected with {"error": "...", "jobs": null}, which
+    # then blew up on iteration → 0 jobs. VN has ~23 postings, well under 100.
     params = {"loc_query": "Vietnam", "country": "VNM",
-              "result_limit": _MAX_ATS_JOBS, "sort": "recent"}
+              "result_limit": min(_MAX_ATS_JOBS, 100), "sort": "recent"}
     try:
         r = requests.get("https://www.amazon.jobs/en/search.json",
                          params=params, headers=_HEADERS, timeout=_TIMEOUT)
@@ -810,7 +813,7 @@ def _amazon(career_url: str) -> list[dict]:
         logger.info(f"[ats] amazon failed: {str(e)[:80]}")
         return []
     out = []
-    for j in data.get("jobs", []):
+    for j in (data.get("jobs") or []):
         title = (j.get("title") or "").strip()
         path = j.get("job_path") or ""
         if not title or not path:
