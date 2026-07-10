@@ -317,7 +317,7 @@ export default function Landing() {
             {/* Nav */}
             <header className="lp-nav">
                 <div className="lp-brand">
-                    <span className="lp-logo"><Sparkle size={18} weight="fill" color="#fff" /></span>
+                    <span className="lp-logo"><img className="lp-logo-mark" src="/copo-logo.png" alt="Copo" /></span>
                     <span className="lp-brand-name">Copo</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -528,7 +528,7 @@ export default function Landing() {
 
             <footer className="lp-footer">
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
-                    <span className="lp-logo lp-logo-sm"><Sparkle size={13} weight="fill" color="#fff" /></span>
+                    <span className="lp-logo lp-logo-sm"><img className="lp-logo-mark" src="/copo-logo.png" alt="Copo" /></span>
                     Copo · Vận hành bởi AI · Cam kết không bịa nội dung
                 </div>
                 <div className="lp-footer-links">
@@ -559,7 +559,8 @@ const LP_CSS = `
 .lp-nav, .lp-hero, .lp-stats, .lp-logos, .lp-section, .lp-cta-band, .lp-footer { position: relative; z-index: 1; }
 .lp-nav { max-width: 1120px; margin: 0 auto; padding: 20px 24px; display: flex; align-items: center; justify-content: space-between; }
 .lp-brand { display: flex; align-items: center; gap: 10px; }
-.lp-logo { width: 34px; height: 34px; border-radius: 10px; background: var(--gradient-hero); display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 16px rgba(99,102,241,0.4); }
+.lp-logo { width: 34px; height: 34px; border-radius: 10px; background: #fff; display: flex; align-items: center; justify-content: center; padding: 3px; overflow: hidden; box-shadow: 0 4px 14px rgba(20,20,45,0.14); }
+.lp-logo-mark { width: 100%; height: 100%; object-fit: contain; display: block; }
 .lp-logo-sm { width: 24px; height: 24px; border-radius: 7px; }
 .lp-brand-name { font-weight: 800; font-size: 1.05rem; letter-spacing: -0.02em; background: var(--gradient-hero); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
 
