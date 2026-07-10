@@ -33,11 +33,6 @@ const FEATURES = [
     { icon: FileText, title: 'Mẫu CV & xuất PDF', desc: 'Chọn mẫu, sửa trực tiếp và tải CV chuẩn PDF chỉ trong vài giây.' },
 ];
 
-const STATS = [
-    { value: '3', label: 'bước từ CV đến việc' },
-    { value: '50', label: 'credit miễn phí khi đăng ký' },
-    { value: '0', label: 'tin tuyển dụng rác' },
-];
 
 // Recognizable employers from the featured pool, shown as a logo marquee for
 // social proof. Domains feed a logo CDN; a failed load falls back to the name
@@ -446,16 +441,6 @@ export default function Landing() {
                     </div>
                     <div className="lp-mock-glow" aria-hidden />
                 </div>
-            </section>
-
-            {/* Stats */}
-            <section className="lp-stats">
-                {STATS.map((s) => (
-                    <div key={s.label} className="lp-stat">
-                        <div className="lp-stat-val">{s.value}</div>
-                        <div className="lp-stat-label">{s.label}</div>
-                    </div>
-                ))}
             </section>
 
             {/* Featured company logos */}
