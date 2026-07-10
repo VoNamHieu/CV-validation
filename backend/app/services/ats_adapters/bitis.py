@@ -16,6 +16,16 @@ def _is_bitis(career_url: str) -> bool:
     return (urlparse(career_url or "").netloc or "").lower() == "tuyendung.bitis.com.vn"
 
 
+def _slug(s: str) -> str:
+    """VN-safe slug for the detail URL. The SPA only reads the trailing id, so the
+    slug is cosmetic — but keeping one makes the URL match the real site."""
+    import unicodedata
+    s = (s or "").replace("đ", "d").replace("Đ", "D")
+    s = "".join(c for c in unicodedata.normalize("NFD", s)
+                if unicodedata.category(c) != "Mn")
+    return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")[:80] or "viec-lam"
+
+
 def _bitis(career_url: str) -> list[dict]:
     out = []
     for unit in _UNITS:
@@ -40,7 +50,10 @@ def _bitis(career_url: str) -> list[dict]:
                     loc = next((k for k in (j.get("kinds") or []) if "Miền" in k or "HCM" in k), "")
                 out.append({
                     "title": title[:200],
-                    "url": f"{_BASE}/viec-lam/chi-tiet/{jid}",
+                    # Detail route is /chi-tiet-viec-lam/<unit>/<slug>-<id> (the SPA
+                    # keys off the trailing id). The old /viec-lam/chi-tiet/<id>
+                    # rendered the SPA's error page ("Có lỗi xảy ra").
+                    "url": f"{_BASE}/chi-tiet-viec-lam/{j.get('unit', unit)}/{_slug(title)}-{jid}",
                     "location": loc,
                     "description": _strip_html(j.get("description", "")),
                 })
