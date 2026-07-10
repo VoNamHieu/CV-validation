@@ -339,12 +339,13 @@ export default function Landing() {
                         <Sparkle size={13} weight="fill" /> Tự động tìm việc khắp nơi bằng AI · không bịa nội dung
                     </span>
                     <h1 className="lp-h1">
-                        Tải CV lên, AI tự động tìm kiếm job{' '}
-                        <span className="lp-grad-text">ở bất cứ đâu</span> cho bạn
+                        CV của bạn.<br />
+                        Cơ hội phù hợp.<br />
+                        <span className="lp-grad-text">Copo lo.</span>
                     </h1>
                     <p className="lp-sub">
-                        Phân tích CV, tự động tìm job khớp ở mọi nơi, chấm điểm độ phù hợp và chỉnh CV
-                        theo từng vị trí. Từ một file PDF đến danh sách việc phù hợp, chỉ vài phút.
+                        Copo tự động phân tích CV, tìm kiếm công việc phù hợp để tối ưu
+                        và giúp bạn apply tự động nhiều job cùng một lúc.
                     </p>
                     <div className="lp-cta-row">
                         <button className="lp-btn-primary lp-btn-lg lp-pulse" onClick={onStart}>
@@ -576,7 +577,7 @@ const LP_CSS = `
 .lp-hero { max-width: 1180px; margin: 0 auto; padding: 40px 24px 30px; display: grid; grid-template-columns: 1fr 1.16fr; gap: 34px; align-items: center; }
 .lp-hero-copy { animation: lp-rise .7s var(--ease-out-expo) both; }
 .lp-badge { display: inline-flex; align-items: center; gap: 7px; font-size: 0.76rem; font-weight: 600; color: var(--accent-purple); background: var(--gradient-hero-subtle); border: 1px solid var(--border-subtle); padding: 6px 14px; border-radius: 999px; margin-bottom: 20px; }
-.lp-h1 { font-size: clamp(2rem, 4.6vw, 3.3rem); font-weight: 800; line-height: 1.08; letter-spacing: -0.03em; margin: 0 0 18px; }
+.lp-h1 { font-size: clamp(2.1rem, 4.8vw, 3.5rem); font-weight: 800; line-height: 1.16; letter-spacing: -0.03em; margin: 0 0 18px; }
 .lp-grad-text { background: var(--gradient-hero); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
 .lp-sub { font-size: 1.02rem; color: var(--text-secondary); line-height: 1.6; max-width: 520px; margin: 0 0 28px; }
 .lp-cta-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
