@@ -83,6 +83,18 @@ function LogoItem({ name, domain }: { name: string; domain: string }) {
     );
 }
 
+// Company logo tile inside the hero dashboard — the real uploaded logo (by
+// domain), falling back to a monogram tile on load error.
+function MockLogo({ domain, m, cls }: { domain: string; m: string; cls: string }) {
+    const [failed, setFailed] = useState(false);
+    if (failed || !domain) return <span className={cls}>{m}</span>;
+    return (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img className={cls} alt={m} loading="lazy" src={catalog.companyLogoUrlByDomain(domain)}
+            style={{ objectFit: 'cover', background: '#fff' }} onError={() => setFailed(true)} />
+    );
+}
+
 // Auto-playing, video-style walkthrough of the flow: CV → tìm việc khắp nơi →
 // chấm điểm → tối ưu CV. Pure CSS/JS — no real video asset. Scenes advance on a
 // timer (paused on hover or via the play/pause button) and the timeline tabs let
@@ -356,14 +368,18 @@ export default function Landing() {
                     <div className="lp-frame">
                         <div className="lp-dash">
                             <div className="lp-hd">
-                                <span className="lp-hd-logo">1M</span>
-                                <span className="lp-hd-co">One Mount</span>
+                                <MockLogo domain="bosch.com.vn" m="BO" cls="lp-hd-logo" />
+                                <span className="lp-hd-co">Bosch</span>
                                 <span className="lp-hd-sep">·</span>
                                 <span className="lp-hd-role">Product Intern (Supply Chain)</span>
                                 <span className="lp-hd-sp" />
                                 <span className="lp-hd-bk">♡</span>
                             </div>
-                            <div className="lp-grid3">
+                            <div className="lp-split">
+                              {/* feature 1 — CV analysis & optimization (left) */}
+                              <div className="lp-panel">
+                                <div className="lp-panel-hd"><span className="lp-live" /> Phân tích &amp; tối ưu CV<span className="lp-panel-tag">đang chạy</span></div>
+                                <div className="lp-grid2">
                                 {/* col A — overall match + ATS */}
                                 <div>
                                     <div className="lp-lbl">Overall Match</div>
@@ -401,18 +417,28 @@ export default function Landing() {
                                         </div>
                                     ))}
                                 </div>
-                                {/* col C — candidate CV */}
-                                <div className="lp-cv">
-                                    <div className="lp-cv-hd">
-                                        <span className="lp-cv-av">HV</span>
-                                        <div><div className="lp-cv-name">Hieu Vo</div><div className="lp-cv-role">Supply Chain · Fresh grad</div></div>
-                                    </div>
-                                    <div className="lp-cv-sec">Summary</div>
-                                    <div className="lp-ln" style={{ width: '100%' }} /><div className="lp-ln" style={{ width: '90%' }} /><div className="lp-ln" style={{ width: '74%' }} />
-                                    <div className="lp-cv-sec">Experience</div>
-                                    <div className="lp-exp"><span className="lp-exp-d" /><div className="lp-exp-l"><div className="lp-ln" style={{ width: '68%' }} /><div className="lp-ln" style={{ width: '94%' }} /></div></div>
-                                    <div className="lp-exp"><span className="lp-exp-d" /><div className="lp-exp-l"><div className="lp-ln" style={{ width: '58%' }} /><div className="lp-ln" style={{ width: '86%' }} /></div></div>
-                                    <div className="lp-exp"><span className="lp-exp-d" /><div className="lp-exp-l"><div className="lp-ln" style={{ width: '64%' }} /></div></div>
+                                </div>
+                              </div>
+                              {/* feature 2 — auto-apply, running in parallel (right) */}
+                              <div className="lp-panel lp-panel-apply">
+                                    <div className="lp-panel-hd"><span className="lp-live" /> Tự động ứng tuyển<span className="lp-apc-count">3/6</span></div>
+                                    {[
+                                        { m: 'FS', co: 'FPT Software', d: 'fpt-software.com', st: 'done' },
+                                        { m: 'VN', co: 'VNG', d: 'vng.com.vn', st: 'done' },
+                                        { m: 'MA', co: 'Maersk', d: 'maersk.com', st: 'done' },
+                                        { m: 'TK', co: 'Tiki', d: 'tiki.vn', st: 'doing' },
+                                        { m: 'KV', co: 'KiotViet', d: 'kiotviet.vn', st: 'queue' },
+                                        { m: 'BO', co: 'Bosch', d: 'bosch.com.vn', st: 'opt' },
+                                    ].map((j) => (
+                                        <div key={j.co} className="lp-apc-row">
+                                            <MockLogo domain={j.d} m={j.m} cls="lp-apc-logo" />
+                                            <span className="lp-apc-co">{j.co}</span>
+                                            {j.st === 'done' && <span className="lp-apc-st lp-apc-done"><CheckCircle size={10} weight="fill" /> Đã nộp</span>}
+                                            {j.st === 'doing' && <span className="lp-apc-st lp-apc-doing"><span className="lp-apc-spin" /> Đang nộp</span>}
+                                            {j.st === 'queue' && <span className="lp-apc-st lp-apc-queue">Chờ</span>}
+                                            {j.st === 'opt' && <span className="lp-apc-st lp-apc-opt"><span className="lp-apc-spin lp-apc-spin-p" /> Đang tối ưu</span>}
+                                        </div>
+                                    ))}
                                 </div>
                             </div>
                         </div>
@@ -469,46 +495,6 @@ export default function Landing() {
                 </div>
                 <div className="lp-demo-wrap">
                     <DemoPlayer />
-                </div>
-            </section>
-
-            {/* Auto-apply while optimizing */}
-            <section className="lp-section lp-apply">
-                <h2 className="lp-h2">Tối ưu CV xong, đơn cũng nộp xong</h2>
-                <p className="lp-section-sub">Trong lúc AI viết lại CV cho từng vị trí, extension tự động điền và nộp đơn ứng tuyển — bạn không phải mở lại từng trang tuyển dụng.</p>
-                <div className="lp-apply-viz">
-                    <div className="lp-apply-cv">
-                        <div className="lp-ac-head"><MagicWand size={15} weight="fill" /> Đang tối ưu CV theo JD</div>
-                        <div className="lp-ac-line is-hl" style={{ width: '92%' }} />
-                        <div className="lp-ac-line" style={{ width: '78%' }} />
-                        <div className="lp-ac-line is-hl" style={{ width: '85%' }} />
-                        <div className="lp-ac-line" style={{ width: '64%' }} />
-                        <div className="lp-ac-prog">
-                            <div className="lp-ac-prog-label"><span>Độ khớp CV</span><span>+18%</span></div>
-                            <div className="lp-ac-bar"><span /></div>
-                        </div>
-                    </div>
-                    <div className="lp-apply-jobs">
-                        <div className="lp-aj-head"><span>Tự động ứng tuyển</span><span className="lp-aj-count">3/5 đã nộp</span></div>
-                        {[
-                            { m: '1M', t: 'Product Intern (Supply Chain)', co: 'One Mount', st: 'done' },
-                            { m: 'FS', t: 'Frontend Engineer', co: 'FPT Software', st: 'done' },
-                            { m: 'BO', t: 'Supply Chain Intern', co: 'Bosch', st: 'doing' },
-                            { m: 'VN', t: 'Data Analyst', co: 'VNG', st: 'done' },
-                            { m: 'TK', t: 'UX Designer', co: 'Tiki', st: 'queue' },
-                        ].map((j) => (
-                            <div key={j.co} className="lp-aj-row">
-                                <span className="lp-aj-logo">{j.m}</span>
-                                <div className="lp-aj-info">
-                                    <div className="lp-aj-title">{j.t}</div>
-                                    <div className="lp-aj-co">{j.co}</div>
-                                </div>
-                                {j.st === 'done' && <span className="lp-aj-status lp-aj-done"><CheckCircle size={11} weight="fill" /> Đã nộp</span>}
-                                {j.st === 'doing' && <span className="lp-aj-status lp-aj-doing"><span className="lp-aj-dot" /> Đang nộp…</span>}
-                                {j.st === 'queue' && <span className="lp-aj-status lp-aj-queue"><span className="lp-aj-dot" /> Trong hàng đợi</span>}
-                            </div>
-                        ))}
-                    </div>
                 </div>
             </section>
 
@@ -598,10 +584,7 @@ const LP_CSS = `
 .lp-dot { width: 3px; height: 3px; border-radius: 50%; background: var(--text-muted); margin: 0 4px; }
 
 /* Product mockup — CV↔job analysis dashboard (glass frame + 3 cols, all CSS/SVG) */
-.lp-mock-wrap { position: relative; display: flex; justify-content: flex-end; overflow: visible; perspective: 2400px;
-  /* break out of the centred hero container so the right edge just kisses past
-     the viewport (~35px, clipped by .lp-root overflow-x:hidden) — a natural bleed */
-  margin-right: calc(531px - 50vw); animation: lp-rise .7s var(--ease-out-expo) .12s both; }
+.lp-mock-wrap { position: relative; display: flex; justify-content: flex-end; overflow: visible; perspective: 2400px; margin-right: calc(531px - 50vw); animation: lp-rise .7s var(--ease-out-expo) .12s both; }
 /* mesh glow behind — irregular multi-hue blobs, heavy blur → melt unevenly */
 .lp-mock-glow { position: absolute; inset: -16% -8% -18% -8%; z-index: -1; border-radius: 90px; filter: blur(74px); background:
   radial-gradient(34% 40% at 24% 32%, rgba(124,58,237,.55), transparent 60%),
@@ -609,16 +592,17 @@ const LP_CSS = `
   radial-gradient(40% 46% at 86% 60%, rgba(192,132,252,.52), transparent 60%),
   radial-gradient(32% 40% at 42% 84%, rgba(99,102,241,.46), transparent 62%),
   radial-gradient(26% 30% at 58% 48%, rgba(230,140,236,.40), transparent 58%),
-  radial-gradient(24% 28% at 12% 70%, rgba(147,197,253,.32), transparent 60%); }
+  radial-gradient(24% 28% at 12% 70%, rgba(147,197,253,.32), transparent 60%); transition: transform .6s var(--ease-out-expo), filter .6s ease, opacity .6s ease; }
+.lp-mock-wrap:hover .lp-mock-glow { transform: scale(1.06); filter: blur(80px) saturate(1.08); }
 /* frosted-glass frame */
 .lp-frame { padding: 16px; border-radius: 32px; border: 1px solid rgba(255,255,255,.7);
-  transform: rotateY(-6deg) rotateX(2deg); transform-origin: center; transition: transform .5s var(--ease-out-expo);
+  transform: rotateY(-5deg) rotateX(1.5deg); transform-origin: center; transition: transform .55s var(--ease-out-expo), box-shadow .55s var(--ease-out-expo);
   background: linear-gradient(180deg, rgba(255,255,255,.55), rgba(255,255,255,.30));
   box-shadow: 0 50px 110px rgba(109,77,224,.22), 0 12px 34px rgba(80,60,150,.12), inset 0 1px 0 rgba(255,255,255,.85);
   backdrop-filter: blur(22px) saturate(150%); -webkit-backdrop-filter: blur(22px) saturate(150%); }
-.lp-mock-wrap:hover .lp-frame { transform: rotateY(-2deg) rotateX(1deg); }
+.lp-mock-wrap:hover .lp-frame { transform: rotateY(-1.5deg) rotateX(.5deg) translateY(-8px) scale(1.012); box-shadow: 0 66px 140px rgba(109,77,224,.30), 0 18px 44px rgba(80,60,150,.17), inset 0 1px 0 rgba(255,255,255,.92); }
 /* dashboard card — stacked radial surface, light (product screenshot) */
-.lp-dash { position: relative; width: 720px; overflow: hidden; border-radius: 22px; border: 1px solid rgba(124,92,240,.10); padding: 24px 26px; color: #26283a;
+.lp-dash { position: relative; width: 760px; overflow: hidden; border-radius: 22px; border: 1px solid rgba(124,92,240,.10); padding: 24px 26px; color: #26283a;
   background:
     radial-gradient(130% 100% at 8% -6%, rgba(139,111,242,.13), transparent 52%),
     radial-gradient(110% 90% at 104% 4%, rgba(124,92,240,.11), transparent 48%),
@@ -627,20 +611,31 @@ const LP_CSS = `
     linear-gradient(180deg, #ffffff, #f9f7ff);
   box-shadow: 0 20px 50px rgba(109,77,224,.14), inset 0 1px 0 rgba(255,255,255,.9); }
 .lp-hd { display: flex; align-items: center; gap: 9px; margin-bottom: 18px; }
-.lp-hd-logo { width: 24px; height: 24px; border-radius: 7px; background: #20222e; color: #fff; display: grid; place-items: center; font-size: .56rem; font-weight: 800; }
+.lp-hd-logo { width: 24px; height: 24px; border-radius: 7px; background: #20222e; color: #fff; display: grid; place-items: center; font-size: .56rem; font-weight: 800; overflow: hidden; }
 .lp-hd-co { font-size: .8rem; font-weight: 700; }
 .lp-hd-sep { color: #a3a4bb; }
 .lp-hd-role { font-size: .76rem; font-weight: 600; color: #6d4de0; background: #f2f0fb; padding: 5px 11px; border-radius: 8px; }
 .lp-hd-sp { flex: 1; }
 .lp-hd-bk { width: 26px; height: 26px; border-radius: 8px; background: #f6f4fe; display: grid; place-items: center; color: #a897f5; font-size: .8rem; }
+/* two parallel feature panels inside the modal — slightly separated */
+.lp-split { display: grid; grid-template-columns: 2fr 1fr; gap: 14px; align-items: stretch; }
+.lp-panel { position: relative; border: 1px solid rgba(124,92,240,.13); border-radius: 15px; padding: 15px 16px;
+  background: linear-gradient(180deg, #ffffff, #faf9ff); box-shadow: 0 8px 22px rgba(109,77,224,.06), inset 0 1px 0 rgba(255,255,255,.9); }
+.lp-panel-apply { background: linear-gradient(180deg, #fbfaff, #f5f2ff); }
+.lp-panel-hd { display: flex; align-items: center; gap: 7px; font-size: .69rem; font-weight: 800; color: #26283a; letter-spacing: .2px; margin-bottom: 15px; }
+.lp-panel-hd .lp-apc-count { margin-left: auto; }
+.lp-panel-tag { margin-left: auto; font-size: .57rem; font-weight: 800; color: #12a678; background: rgba(18,166,120,.12); padding: 2px 8px; border-radius: 999px; text-transform: none; }
+.lp-live { width: 6px; height: 6px; border-radius: 50%; background: #12a678; box-shadow: 0 0 0 3px rgba(18,166,120,.16); animation: lp-apply-pulse 1.4s infinite; flex-shrink: 0; }
+.lp-grid2 { display: grid; grid-template-columns: 0.82fr 1fr; gap: 18px; align-items: start; }
 .lp-grid3 { display: grid; grid-template-columns: 0.82fr 1fr 0.86fr; gap: 24px; align-items: start; }
 .lp-lbl { font-size: .7rem; font-weight: 600; color: #a3a4bb; letter-spacing: .3px; margin-bottom: 12px; }
-.lp-donut { position: relative; width: 138px; height: 138px; border-radius: 50%; display: grid; place-items: center; filter: drop-shadow(0 10px 24px rgba(124,92,240,.28));
+.lp-donut { position: relative; width: 138px; height: 138px; border-radius: 50%; display: grid; place-items: center; filter: drop-shadow(0 10px 24px rgba(124,92,240,.28)); transition: transform .3s var(--ease-out-expo), filter .3s ease;
   background: conic-gradient(from 188deg, #6d4de0 0%, #8b6ff2 20%, #c084fc 38%, #e08aec 52%, #818cf8 66%, #6d4de0 78%, #eceaf7 78% 100%); }
 .lp-donut::before { content: ''; position: absolute; width: 106px; height: 106px; border-radius: 50%; box-shadow: inset 0 1px 3px rgba(124,92,240,.10);
   background: radial-gradient(80% 80% at 32% 24%, #fff, transparent 60%), radial-gradient(90% 90% at 70% 82%, rgba(139,111,242,.12), transparent 62%), #fbfaff; }
 .lp-donut-num { position: relative; font-size: 2.1rem; font-weight: 800; letter-spacing: -.03em; }
 .lp-donut-num small { font-size: .9rem; color: #a3a4bb; font-weight: 700; }
+.lp-dash:hover .lp-donut { transform: scale(1.03); filter: drop-shadow(0 16px 32px rgba(124,92,240,.36)); }
 .lp-delta { font-size: .72rem; font-weight: 700; color: #12a678; margin: 12px 0 9px; }
 .lp-chips2 { display: flex; gap: 6px; flex-wrap: wrap; }
 .lp-chip { display: inline-flex; align-items: center; gap: 4px; font-size: .66rem; font-weight: 600; padding: 5px 10px; border-radius: 999px; }
@@ -653,7 +648,9 @@ const LP_CSS = `
 .lp-ats-good { margin-left: auto; font-size: .73rem; font-weight: 700; color: #12a678; display: flex; align-items: center; gap: 5px; }
 .lp-gdot { width: 7px; height: 7px; border-radius: 50%; background: #12a678; }
 .lp-improve { margin-top: 8px; font-size: .72rem; font-weight: 600; color: #6d4de0; }
-.lp-sk-row { display: flex; align-items: center; gap: 11px; margin-bottom: 13px; }
+.lp-sk-row { display: flex; align-items: center; gap: 11px; margin-bottom: 13px; transition: transform .2s ease; }
+.lp-sk-row:hover { transform: translateX(3px); }
+.lp-sk-row:hover .lp-sk-track span { filter: brightness(1.06) saturate(1.1); }
 .lp-sk-ic2 { width: 28px; height: 28px; border-radius: 8px; flex-shrink: 0; display: grid; place-items: center; font-size: .54rem; font-weight: 800; color: #6d4de0; letter-spacing: .3px;
   background: radial-gradient(90% 90% at 28% 18%, #fff, transparent 62%), radial-gradient(120% 120% at 90% 100%, rgba(139,111,242,.22), transparent 60%), #efeafc; box-shadow: inset 0 0 0 1px rgba(124,92,240,.06); }
 .lp-sk-b { flex: 1; min-width: 0; }
@@ -674,6 +671,23 @@ const LP_CSS = `
 .lp-exp { display: flex; gap: 7px; margin-bottom: 10px; }
 .lp-exp-d { width: 7px; height: 7px; border-radius: 50%; background: #a897f5; margin-top: 2px; flex-shrink: 0; }
 .lp-exp-l { flex: 1; }
+/* auto-apply column inside the hero dashboard */
+.lp-apc-head { display: flex; align-items: center; justify-content: space-between; font-size: .7rem; font-weight: 800; color: #26283a; margin-bottom: 11px; }
+.lp-apc-count { font-size: .64rem; font-weight: 700; color: #6d4de0; background: #efeafc; padding: 2px 8px; border-radius: 999px; }
+.lp-apc-row { display: flex; align-items: center; gap: 9px; padding: 9px 8px; margin: 0 -8px; border-radius: 8px; border-top: 1px solid #f0eef7; transition: background .2s ease, transform .2s ease; }
+.lp-apc-row:hover { background: #f5f2fe; transform: translateX(3px); }
+.lp-apc-row:hover .lp-apc-logo { transform: scale(1.06); }
+.lp-apc-row:first-of-type { border-top: none; padding-top: 2px; }
+.lp-apc-logo { width: 24px; height: 24px; border-radius: 7px; flex-shrink: 0; transition: transform .2s ease; display: grid; place-items: center; font-size: .52rem; font-weight: 800; color: #fff; background: linear-gradient(135deg, #8b6ff2, #6d4de0); overflow: hidden; }
+.lp-apc-co { flex: 1; min-width: 0; font-size: .74rem; font-weight: 600; color: #26283a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lp-apc-st { display: inline-flex; align-items: center; gap: 4px; font-size: .62rem; font-weight: 700; padding: 3px 8px; border-radius: 999px; white-space: nowrap; }
+.lp-apc-done { color: #12a678; background: rgba(18,166,120,.12); }
+.lp-apc-doing { color: #d97706; background: rgba(217,119,6,.13); }
+.lp-apc-queue { color: #a3a4bb; background: #f3f2f8; }
+.lp-apc-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; animation: lp-apply-pulse 1s infinite; }
+.lp-apc-opt { color: #6d4de0; background: rgba(109,77,224,.12); }
+.lp-apc-spin { width: 11px; height: 11px; border-radius: 50%; box-sizing: border-box; border: 2px solid rgba(217,119,6,.28); border-top-color: #d97706; animation: lp-sweep .7s linear infinite; }
+.lp-apc-spin-p { border-color: rgba(109,77,224,.26); border-top-color: #6d4de0; }
 /* shared by the animated walkthrough demo (lp-demo-frame) further down the page */
 .lp-mock-bar { display: flex; align-items: center; gap: 7px; padding: 11px 14px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-elevated); }
 .lp-mock-dot { width: 10px; height: 10px; border-radius: 50%; }
