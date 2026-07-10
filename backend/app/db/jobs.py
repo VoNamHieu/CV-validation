@@ -7,9 +7,19 @@ cosine retrieval (``embedding <=> $query``).
 """
 from __future__ import annotations
 
+import logging
 from typing import Optional, Sequence
 
 from app.db.pool import get_pool, row_to_dict, rows_to_dicts
+
+logger = logging.getLogger(__name__)
+
+# Anti-flap guard for deactivate_missing (see there). A feed run returning far
+# fewer postings than the company currently has active is almost always a
+# transient fetch failure, not a real mass-closure — pruning on it wipes good
+# jobs. Skip the prune below these thresholds (mirrors career_compat's guard).
+_PRUNE_MIN_BASELINE = 5         # ignore tiny boards (noise)
+_PRUNE_DROP_RATIO = 0.6         # live set < 40% of active baseline → suspected flaky run
 
 # Every column EXCEPT embedding — reads must not haul the vector around.
 _COLS = (
@@ -293,10 +303,25 @@ async def deactivate_missing(company_id: str, live_external_ids: Sequence[str]) 
 
     Empty ``live_external_ids`` → no-op: a transient fetch that returns nothing
     must NOT wipe a company's whole pool. Reactivation happens automatically on
-    the next successful ingest (``upsert`` sets is_active=true)."""
+    the next successful ingest (``upsert`` sets is_active=true).
+
+    Anti-flap guard: even a NON-empty but suspiciously-small feed (e.g. the
+    adapter fell to a render/capture fallback that only sees page 1) must not
+    prune. When the live set collapses to <40% of what the company currently has
+    active, treat the run as flaky and skip the prune — the good jobs stay live
+    and a later healthy run reconciles. Genuine one-off closures are still caught
+    per-job by the link-health scan / apply-gate, so nothing leaks permanently."""
     if not company_id or not live_external_ids:
         return 0
     pool = await get_pool()
+    live = set(live_external_ids)
+    active_now = await pool.fetchval(
+        "SELECT count(*) FROM jobs WHERE company_id = $1 AND is_active", company_id) or 0
+    if active_now >= _PRUNE_MIN_BASELINE and len(live) < active_now * (1 - _PRUNE_DROP_RATIO):
+        logger.warning(
+            "[jobs] deactivate_missing skipped for company %s: feed returned %d vs %d active "
+            "(suspected flaky run — not pruning)", company_id, len(live), active_now)
+        return 0
     rows = await pool.fetch(
         "UPDATE jobs SET is_active = false, dead_reason = 'left_feed', "
         "last_verified_at = now() "
