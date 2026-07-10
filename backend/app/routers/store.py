@@ -252,6 +252,12 @@ async def list_promoted(
     return rows
 
 
+@router.get("/promoted/featured")
+async def list_promoted_featured(limit: int = Query(12, le=24)):
+    """PUBLIC — recent published promoted pages for the landing featured strip."""
+    return await promoted.list_featured(limit=limit)
+
+
 @router.get("/promoted/by-slug/{slug}")
 async def get_promoted_public(slug: str, preview: Optional[str] = None):
     """PUBLIC — the landing page read. Only PUBLISHED pages are served, EXCEPT
