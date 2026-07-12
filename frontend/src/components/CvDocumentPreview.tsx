@@ -96,10 +96,10 @@ function InlineEdit({
                     style={{
                         width: '100%', minHeight: 60, resize: 'vertical',
                         padding: '8px 10px',
-                        border: '1.5px solid #6366f1', borderRadius: 6,
+                        border: '1.5px solid #c43b2e', borderRadius: 6,
                         fontSize: 'inherit', fontFamily: 'inherit', lineHeight: 'inherit',
                         color: '#1a1a1a', background: '#f8f9ff',
-                        outline: 'none', boxShadow: '0 0 0 3px rgba(99,102,241,0.1)',
+                        outline: 'none', boxShadow: '0 0 0 3px rgba(196, 59, 46,0.1)',
                         ...extraStyle,
                     }}
                 />
@@ -116,10 +116,10 @@ function InlineEdit({
                 placeholder={placeholder}
                 style={{
                     width: '100%', padding: '4px 8px',
-                    border: '1.5px solid #6366f1', borderRadius: 4,
+                    border: '1.5px solid #c43b2e', borderRadius: 4,
                     fontSize: 'inherit', fontFamily: 'inherit', fontWeight: 'inherit',
                     color: '#1a1a1a', background: '#f8f9ff',
-                    outline: 'none', boxShadow: '0 0 0 3px rgba(99,102,241,0.1)',
+                    outline: 'none', boxShadow: '0 0 0 3px rgba(196, 59, 46,0.1)',
                     ...extraStyle,
                 }}
             />
@@ -350,14 +350,14 @@ function SkillsTags({
                         placeholder="Tên kỹ năng..."
                         style={{
                             width: 120, padding: '3px 8px', fontSize: '0.82rem',
-                            border: '1.5px solid #6366f1', borderRadius: 4,
+                            border: '1.5px solid #c43b2e', borderRadius: 4,
                             outline: 'none', color: '#1a1a1a', background: '#f8f9ff',
                         }}
                     />
                     <button
                         onClick={() => { addSkill(); }}
                         style={{
-                            background: '#6366f1', color: 'white', border: 'none',
+                            background: '#c43b2e', color: 'white', border: 'none',
                             borderRadius: 4, padding: '3px 8px', cursor: 'pointer',
                             fontSize: '0.75rem', fontWeight: 600,
                         }}
@@ -810,14 +810,14 @@ export default function CvDocumentPreview({
 
             <style>{`
                 .cv-editable-text:hover {
-                    background: rgba(99, 102, 241, 0.06) !important;
-                    outline: 1px dashed rgba(99, 102, 241, 0.3);
+                    background: rgba(196, 59, 46, 0.06) !important;
+                    outline: 1px dashed rgba(196, 59, 46, 0.3);
                 }
                 .cv-skill-remove { opacity: 0; transition: opacity 0.15s; }
                 .cv-skill-remove:hover { color: #e53935 !important; }
                 span:hover > .cv-skill-remove { opacity: 1; }
-                .cv-add-skill-btn:hover { border-color: #6366f1 !important; color: #6366f1 !important; }
-                .cv-add-bullet-btn:hover { border-color: #6366f1 !important; color: #6366f1 !important; }
+                .cv-add-skill-btn:hover { border-color: #c43b2e !important; color: #c43b2e !important; }
+                .cv-add-bullet-btn:hover { border-color: #c43b2e !important; color: #c43b2e !important; }
 
                 .cv-bullet-row:hover .cv-bullet-actions { opacity: 1; }
                 .cv-item:hover .cv-item-actions { opacity: 1; }

@@ -8,6 +8,7 @@ import GlobalAuthModal from "@/components/GlobalAuthModal";
 import FloatingFeedback from "@/components/FloatingFeedback";
 import AnalyticsTracker from "@/components/AnalyticsTracker";
 import InstallExtensionModal from "@/components/InstallExtensionModal";
+import GrantPermissionModal from "@/components/GrantPermissionModal";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -39,6 +40,15 @@ export default function RootLayout({
             __html: `(function(){try{var t=localStorage.getItem('jobfit-theme');if(t==='dark'){document.documentElement.setAttribute('data-theme','dark');}}catch(e){}})();`,
           }}
         />
+        {/* Editorial "manifesto" type system (Copo brand). Used by the landing
+            front door today; being rolled across the app. Be Vietnam Pro carries
+            the Vietnamese diacritics the display face may not cover. */}
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link
+          href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Be+Vietnam+Pro:ital,wght@0,400;0,500;0,600;1,400&family=Lora:ital,wght@0,400;0,500;1,400;1,500&family=IBM+Plex+Mono:wght@400;500&display=swap"
+          rel="stylesheet"
+        />
       </head>
       <body
         className={`${inter.variable} ${geistMono.variable} antialiased`}
@@ -51,6 +61,7 @@ export default function RootLayout({
               <FloatingFeedback />
               <AnalyticsTracker />
               <InstallExtensionModal />
+              <GrantPermissionModal />
             </ConsentProvider>
           </CreditsProvider>
         </AuthProvider>

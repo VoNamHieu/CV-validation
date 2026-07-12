@@ -1,0 +1,375 @@
+/* Featured-jobs in-app view — master-detail (list left, detail right). Uses the
+   global seal/editorial CSS variables so it tracks the app theme automatically
+   (paper surfaces, ink text, seal accent). */
+
+.view {
+    padding: 4px 0 20px;
+}
+
+/* ── hero (compact) ── */
+.hero {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 20px 24px 22px;
+    text-align: center;
+}
+.eyebrow {
+    display: inline-block;
+    font-size: 0.74rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent-blue);
+    margin-bottom: 10px;
+}
+.title {
+    font-size: clamp(1.4rem, 3vw, 2rem);
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1.12;
+    margin: 0 0 10px;
+}
+.sub {
+    font-size: 0.92rem;
+    line-height: 1.6;
+    color: var(--text-muted);
+    max-width: 540px;
+    margin: 0 auto;
+}
+
+.empty {
+    max-width: 1180px;
+    margin: 20px auto;
+    padding: 60px 24px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.95rem;
+}
+
+/* ── two-pane layout ── */
+.layout {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 0 24px;
+    display: flex;
+    gap: 18px;
+    align-items: flex-start;
+}
+
+/* Left: independently-scrolling job list */
+.list {
+    width: 372px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: calc(100vh - 190px);
+    overflow-y: auto;
+    padding-right: 6px;
+    position: sticky;
+    top: 16px;
+}
+
+/* ── list card ── */
+.jobCard {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    text-align: left;
+    width: 100%;
+    padding: 13px 14px;
+    border-radius: 14px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    cursor: pointer;
+    transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s var(--ease-out-expo);
+}
+.jobCard:hover {
+    border-color: var(--border-accent);
+    transform: translateY(-1px);
+}
+.jobCardActive {
+    border-color: var(--border-accent);
+    background: var(--bg-elevated);
+    box-shadow: inset 3px 0 0 var(--accent-blue);
+}
+
+.cardLogo,
+.cardLogoFallback {
+    width: 42px;
+    height: 42px;
+    flex-shrink: 0;
+    border-radius: 10px;
+    object-fit: contain;
+    background: #fff;
+    border: 1px solid var(--border-subtle);
+    box-sizing: border-box;
+    padding: 4px;
+}
+.cardLogoFallback {
+    display: grid;
+    place-items: center;
+    font-size: 1.15rem;
+    font-weight: 800;
+    color: var(--accent-blue);
+    padding: 0;
+}
+
+.cardMain {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1;
+}
+.cardTitle {
+    font-size: 0.92rem;
+    font-weight: 700;
+    line-height: 1.3;
+    letter-spacing: -0.01em;
+    color: var(--text-primary);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+.cardMeta {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-top: 3px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.cardBadge {
+    align-self: flex-start;
+    margin-top: 8px;
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-subtle);
+    padding: 2px 8px;
+    border-radius: 999px;
+}
+
+/* Right: detail pane */
+.detail {
+    flex: 1;
+    min-width: 0;
+    position: sticky;
+    top: 16px;
+    max-height: calc(100vh - 190px);
+    overflow-y: auto;
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: 18px;
+    box-shadow: 0 10px 30px rgba(30, 18, 22, 0.06);
+}
+
+.backBtn {
+    display: none; /* mobile only */
+    align-items: center;
+    gap: 6px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 14px 16px 0;
+}
+
+/* sticky detail header (stays while JD scrolls) */
+.detailHead {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding: 22px 24px 16px;
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border-subtle);
+}
+.detailTop {
+    display: flex;
+    gap: 14px;
+    align-items: center;
+}
+.detailLogo,
+.detailLogoFallback {
+    width: 52px;
+    height: 52px;
+    flex-shrink: 0;
+    border-radius: 12px;
+    object-fit: contain;
+    background: #fff;
+    border: 1px solid var(--border-subtle);
+    box-sizing: border-box;
+    padding: 6px;
+}
+.detailLogoFallback {
+    display: grid;
+    place-items: center;
+    font-size: 1.4rem;
+    font-weight: 800;
+    color: var(--accent-blue);
+    padding: 0;
+}
+.detailHeadText {
+    min-width: 0;
+}
+.detailCompany {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin: 0 0 2px;
+}
+.detailTitle {
+    font-size: 1.3rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+    margin: 0;
+    color: var(--text-primary);
+}
+
+.chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 14px;
+}
+.chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-subtle);
+    padding: 4px 10px;
+    border-radius: 999px;
+}
+
+/* action buttons */
+.actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 18px;
+    flex-wrap: wrap;
+}
+.primaryBtn,
+.secondaryBtn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    font-size: 0.88rem;
+    font-weight: 700;
+    padding: 10px 18px;
+    border-radius: 10px;
+    cursor: pointer;
+    text-decoration: none;
+    transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+.primaryBtn {
+    color: #fff;
+    background: var(--gradient-hero);
+    border: none;
+    box-shadow: 0 6px 16px rgba(196, 59, 46, 0.28);
+}
+.primaryBtn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 10px 22px rgba(196, 59, 46, 0.34);
+}
+.secondaryBtn {
+    color: var(--text-primary);
+    background: transparent;
+    border: 1px solid var(--border-default, var(--border-subtle));
+}
+.secondaryBtn:hover {
+    background: var(--bg-elevated);
+    border-color: var(--border-accent);
+}
+
+/* JD body */
+.detailBody {
+    padding: 18px 24px 26px;
+}
+.bodyHeading {
+    font-size: 0.82rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin: 0 0 12px;
+}
+.jd {
+    font-size: 0.9rem;
+    line-height: 1.7;
+    color: var(--text-secondary);
+}
+.jd p {
+    margin: 0 0 10px;
+}
+.jd ul {
+    margin: 0 0 12px;
+    padding-left: 18px;
+}
+.jd li {
+    margin: 0 0 6px;
+}
+.jdMuted {
+    color: var(--text-muted);
+}
+
+.detailLoading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding: 80px 24px;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+}
+.spin {
+    color: var(--accent-blue);
+    animation: spin 0.9s linear infinite;
+}
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* ── mobile: detail becomes an off-canvas overlay ── */
+@media (max-width: 860px) {
+    .layout {
+        display: block;
+        padding: 0 16px;
+    }
+    .list {
+        width: 100%;
+        max-height: none;
+        overflow: visible;
+        position: static;
+        padding-right: 0;
+    }
+    .detail {
+        position: fixed;
+        inset: 0;
+        z-index: 60;
+        max-height: none;
+        border-radius: 0;
+        border: none;
+        transform: translateX(100%);
+        transition: transform 0.28s var(--ease-out-expo);
+        overflow-y: auto;
+    }
+    .detailOpen {
+        transform: translateX(0);
+    }
+    .backBtn {
+        display: inline-flex;
+    }
+    .detailHead {
+        padding-top: 12px;
+    }
+}

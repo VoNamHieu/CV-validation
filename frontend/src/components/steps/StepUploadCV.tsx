@@ -217,7 +217,7 @@ export default function StepUploadCV() {
                         background: 'var(--gradient-hero)',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         margin: '0 auto 24px',
-                        boxShadow: '0 8px 32px rgba(99, 102, 241, 0.25)',
+                        boxShadow: '0 8px 32px rgba(196, 59, 46, 0.25)',
                     }}>
                         <Brain size={32} weight="duotone" color="white" />
                     </div>
@@ -416,8 +416,8 @@ export default function StepUploadCV() {
                 <div className="glass-card" style={{
                     padding: '18px 20px', marginTop: 16,
                     display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap',
-                    background: 'rgba(124, 58, 237, 0.05)',
-                    borderColor: 'rgba(124, 58, 237, 0.18)',
+                    background: 'rgba(196, 59, 46, 0.05)',
+                    borderColor: 'rgba(196, 59, 46, 0.18)',
                 }}>
                     <div style={{
                         width: 44, height: 44, borderRadius: 12, flexShrink: 0,
@@ -505,7 +505,7 @@ export default function StepUploadCV() {
                                         padding: '8px 16px', borderRadius: 20, cursor: 'pointer',
                                         fontSize: '0.83rem', fontWeight: active ? 600 : 400,
                                         border: `1px solid ${active ? 'var(--accent-purple)' : 'var(--border-default)'}`,
-                                        background: active ? 'rgba(139,92,246,0.12)' : 'var(--bg-secondary)',
+                                        background: active ? 'rgba(196, 59, 46,0.12)' : 'var(--bg-secondary)',
                                         color: active ? 'var(--accent-purple)' : 'var(--text-secondary)',
                                         transition: 'all 0.18s ease',
                                     }}
@@ -592,8 +592,8 @@ export default function StepUploadCV() {
                     title="Tự động tìm việc, tối ưu CV và ứng tuyển, không cần thao tác thêm"
                     style={{
                         display: 'flex', alignItems: 'center', gap: 8, padding: '13px 22px',
-                        background: 'linear-gradient(135deg, #059669, #10b981)',
-                        boxShadow: '0 2px 12px rgba(5,150,105,0.3)',
+                        background: 'var(--gradient-hero)',
+                        boxShadow: '0 2px 12px rgba(196, 59, 46, 0.3)',
                     }}
                 >
                     <Lightning size={16} weight="fill" /> Ứng tuyển tự động hoàn toàn

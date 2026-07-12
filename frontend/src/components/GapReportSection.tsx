@@ -37,7 +37,7 @@ function GapCard({ g }: { g: GapItem }) {
             </div>
             <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.5, margin: '0 0 6px' }}>{g.detail}</p>
             <div style={{ display: 'flex', gap: 6, fontSize: '0.78rem', color: 'var(--text-primary)', lineHeight: 1.5 }}>
-                <Sparkle size={13} weight="fill" style={{ color: 'var(--accent-purple, #8b5cf6)', flexShrink: 0, marginTop: 2 }} />
+                <Sparkle size={13} weight="fill" style={{ color: 'var(--accent-purple, #c43b2e)', flexShrink: 0, marginTop: 2 }} />
                 <span><strong>Nên làm:</strong> {g.recommendation}</span>
             </div>
         </div>
@@ -88,7 +88,7 @@ export default function GapReportSection(
     return (
         <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                <MagnifyingGlassPlus size={15} weight="duotone" style={{ color: 'var(--accent-purple, #8b5cf6)' }} />
+                <MagnifyingGlassPlus size={15} weight="duotone" style={{ color: 'var(--accent-purple, #c43b2e)' }} />
                 <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-primary)' }}>Phân tích gap chuyên sâu</span>
             </div>
             <p style={{ fontSize: '0.74rem', color: 'var(--text-muted)', margin: '0 0 10px', lineHeight: 1.5 }}>

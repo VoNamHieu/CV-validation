@@ -11,7 +11,7 @@ import { useModalA11y } from '@/lib/useModalA11y';
 type Tone = 'default' | 'warning' | 'danger';
 
 const TONE: Record<Tone, { color: string; bg: string; border: string }> = {
-    default: { color: 'var(--accent-blue)', bg: 'rgba(99, 102, 241, 0.12)', border: 'rgba(99, 102, 241, 0.35)' },
+    default: { color: 'var(--accent-blue)', bg: 'rgba(196, 59, 46, 0.12)', border: 'rgba(196, 59, 46, 0.35)' },
     warning: { color: 'var(--accent-amber)', bg: 'rgba(251, 191, 36, 0.12)', border: 'rgba(251, 191, 36, 0.35)' },
     danger: { color: 'var(--accent-red)', bg: 'rgba(248, 113, 113, 0.12)', border: 'rgba(248, 113, 113, 0.35)' },
 };

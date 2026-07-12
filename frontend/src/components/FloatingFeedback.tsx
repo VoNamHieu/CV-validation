@@ -130,7 +130,7 @@ export default function FloatingFeedback() {
                     width: 52, height: 52, borderRadius: '50%', border: 'none',
                     background: 'var(--gradient-hero)', color: '#fff', cursor: 'pointer',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    boxShadow: '0 8px 24px rgba(99,102,241,0.45)',
+                    boxShadow: '0 8px 24px rgba(196, 59, 46,0.45)',
                     transition: 'transform 0.18s ease',
                 }}
                 onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-2px) scale(1.05)'; }}
@@ -188,8 +188,8 @@ export default function FloatingFeedback() {
                                             style={{
                                                 flex: 1, padding: '8px 0', borderRadius: 10, cursor: 'pointer',
                                                 fontSize: '1.3rem', lineHeight: 1,
-                                                border: `1px solid ${active ? 'var(--accent-purple, #8b5cf6)' : 'var(--border-subtle)'}`,
-                                                background: active ? 'var(--gradient-hero-subtle, rgba(139,92,246,0.12))' : 'var(--bg-card)',
+                                                border: `1px solid ${active ? 'var(--accent-purple, #c43b2e)' : 'var(--border-subtle)'}`,
+                                                background: active ? 'var(--gradient-hero-subtle, rgba(196, 59, 46,0.12))' : 'var(--bg-card)',
                                                 filter: active ? 'none' : 'grayscale(0.4)',
                                                 transition: 'all 0.15s ease',
                                             }}

@@ -12,7 +12,21 @@ const rateLimit = new Map<string, number[]>();
 const WINDOW_MS = 60_000; // 1 minute
 const MAX_REQUESTS = 20;  // 20 AI calls per minute per IP
 
+// Only the expensive AI routes are worth throttling. This MUST be re-checked
+// inside the function, not left to `config.matcher`: Next.js 16 no longer honors
+// the matcher for the legacy `middleware` file (it's deprecated in favour of
+// `proxy`), so without this guard the limiter ran on EVERY /api/* call. On
+// localhost every request also collapses into the single `'unknown'` IP bucket
+// (no x-forwarded-for), so a normal page load — /admin fires featured +
+// applications + profiles + logo-by-domain ×N + admin/check on mount — blew past
+// 20/min in seconds and got /api/admin/check a 429, which the admin page reads as
+// a transient server error ("Không kiểm tra được quyền").
+const RATE_LIMITED = (path: string): boolean =>
+    path.startsWith('/api/ai/') || path === '/api/parse-pdf';
+
 export function middleware(request: NextRequest) {
+    if (!RATE_LIMITED(request.nextUrl.pathname)) return NextResponse.next();
+
     const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
     const now = Date.now();
 

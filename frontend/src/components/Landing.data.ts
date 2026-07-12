@@ -1,5 +1,5 @@
 import {
-    FileText, Brain, Target, MagicWand, Briefcase, Lightning,
+    FileText, Brain, Target, MagicWand,
     FilePdf, GlobeHemisphereWest,
 } from '@phosphor-icons/react';
 
@@ -9,16 +9,6 @@ export const STEPS = [
     { icon: Target, title: 'Chấm điểm độ khớp', desc: 'Mỗi tin được xếp hạng theo CV, biết ngay mình hợp bao nhiêu phần trăm và còn thiếu gì.' },
     { icon: MagicWand, title: 'Tối ưu CV & ứng tuyển', desc: 'AI viết lại CV phù hợp từng vị trí (không bịa nội dung), xuất PDF, sẵn sàng nộp.' },
 ];
-
-export const FEATURES = [
-    { icon: Brain, title: 'Phân tích CV bằng AI', desc: 'Trích xuất kỹ năng, kinh nghiệm và suy ra vai trò chỉ từ file PDF.' },
-    { icon: Target, title: 'Chấm điểm độ khớp', desc: 'Biết ngay mình hợp bao nhiêu phần trăm với từng vị trí, và vì sao.' },
-    { icon: MagicWand, title: 'Tối ưu CV theo job', desc: 'Gợi ý chỉnh CV cho từng vị trí, cam kết không bịa thêm nội dung.' },
-    { icon: Briefcase, title: 'Việc từ nguồn thật', desc: 'Link tuyển dụng chính thức của công ty, không phải tin trung gian.' },
-    { icon: Lightning, title: 'Hỗ trợ tự động điền', desc: 'Đồng bộ hồ sơ để điền form ứng tuyển nhanh hơn nhiều lần.' },
-    { icon: FileText, title: 'Mẫu CV & xuất PDF', desc: 'Chọn mẫu, sửa trực tiếp và tải CV chuẩn PDF chỉ trong vài giây.' },
-];
-
 
 // Curated brand logos for the "opportunities from top companies" strip — real
 // artwork under public/logos (transparent, professional), shown grayscale.

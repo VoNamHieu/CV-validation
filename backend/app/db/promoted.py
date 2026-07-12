@@ -137,6 +137,22 @@ async def list_pages(*, limit: int = 100, offset: int = 0) -> list[dict]:
     ))
 
 
+async def list_featured(*, limit: int = 12) -> list[dict]:
+    """PUBLIC — most-recent PUBLISHED promoted pages for the landing's featured
+    strip. Public-safe card fields only (no logo bytes / source_url)."""
+    pool = await get_pool()
+    return rows_to_dicts(await pool.fetch(
+        "SELECT slug, snapshot->>'title' AS title, "
+        "snapshot->>'company_name' AS company_name, "
+        "snapshot->>'location' AS location, "
+        "snapshot->>'role_family' AS role_family, "
+        "snapshot->>'seniority' AS seniority, "
+        "(snapshot ? 'logo_b64') AS has_logo "
+        "FROM promoted_jobs WHERE status = 'published' "
+        "ORDER BY created_at DESC LIMIT $1", limit,
+    ))
+
+
 # ── Cross-links between published pages (related sections on /j/) ─────────────
 # The SELECTs pull only public-safe card fields via snapshot->>'…' and test
 # ``snapshot ? 'logo_b64'`` for the has_logo flag — they NEVER ship the logo

@@ -177,7 +177,7 @@ export interface CandidateJob {
 }
 
 type Step = 1 | 2 | 3 | 4;
-export type AppView = 'apply' | 'editor' | 'history' | 'interview';
+export type AppView = 'apply' | 'editor' | 'history' | 'interview' | 'featured';
 
 interface AppState {
   // Has the visitor left the landing page and entered the app (persisted, so

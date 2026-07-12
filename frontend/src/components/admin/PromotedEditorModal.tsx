@@ -192,7 +192,7 @@ export default function PromotedEditorModal({
                         Chỉnh sửa trang truyền thông
                     </h2>
                     <button type="button" onClick={save} disabled={busy}
-                        style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.82rem', fontWeight: 700, color: '#fff', cursor: 'pointer', background: 'var(--gradient-hero, linear-gradient(135deg,#4f46e5,#7c3aed))', border: 'none', borderRadius: 8, padding: '7px 16px', opacity: busy ? 0.5 : 1 }}>
+                        style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.82rem', fontWeight: 700, color: '#fff', cursor: 'pointer', background: 'var(--gradient-hero, linear-gradient(135deg,#c43b2e,#c43b2e))', border: 'none', borderRadius: 8, padding: '7px 16px', opacity: busy ? 0.5 : 1 }}>
                         {busy ? <SpinnerGap size={14} style={{ animation: 'spin 0.8s linear infinite' }} /> : <Check size={14} weight="bold" />} Lưu
                     </button>
                     <button type="button" onClick={onClose} aria-label="Đóng"

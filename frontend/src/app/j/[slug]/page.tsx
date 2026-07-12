@@ -179,7 +179,7 @@ export default async function PromotedJobPage(
                     {page.has_logo ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img className={styles.avatar} src={logoUrl(slug, preview)} alt={company_name || title}
-                            style={{ objectFit: 'cover' }} />
+                            style={{ objectFit: 'contain', background: '#fff', boxSizing: 'border-box', padding: 6 }} />
                     ) : (
                         <div className={styles.avatar}>{initial}</div>
                     )}

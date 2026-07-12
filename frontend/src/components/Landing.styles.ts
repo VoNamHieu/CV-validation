@@ -18,7 +18,7 @@ export const LP_CSS = `
   mask-image: radial-gradient(ellipse 80% 50% at 50% 0%, #000 35%, transparent 70%); opacity: 0.1; }
 @keyframes lp-float { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(40px,30px) scale(1.08); } }
 
-.lp-nav, .lp-hero, .lp-stats, .lp-logos, .lp-featured, .lp-section, .lp-cta-band, .lp-footer { position: relative; z-index: 1; }
+.lp-nav, .lp-hero, .lp-stats, .lp-logos, .lp-featured, .lp-section, .lp-contact, .lp-cta-band, .lp-footer { position: relative; z-index: 1; }
 .lp-nav { position: fixed; top: 14px; left: 0; right: 0; z-index: 50; max-width: 1180px; margin: 0 auto; padding: 11px 14px 11px 22px; display: flex; align-items: center; justify-content: space-between; gap: 16px;
   background: linear-gradient(180deg, rgba(255,255,255,0.5) 0%, rgba(255,255,255,0.28) 100%); -webkit-backdrop-filter: blur(16px) saturate(1.5); backdrop-filter: blur(16px) saturate(1.5);
   border: 1px solid rgba(255,255,255,0.55); border-radius: 20px; box-shadow: 0 6px 22px rgba(30,18,22,0.06), inset 0 1px 0 rgba(255,255,255,0.85);
@@ -320,12 +320,6 @@ export const LP_CSS = `
   .lp-how-desc { max-width: none; }
 }
 
-.lp-features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; text-align: left; }
-.lp-feature { padding: 22px 20px; border-radius: 16px; border: 1px solid var(--border-subtle); background: var(--gradient-card), var(--bg-card); transition: transform .25s var(--ease-spring), border-color .25s, box-shadow .25s; }
-.lp-feature:hover { transform: translateY(-5px); border-color: var(--border-accent); box-shadow: var(--shadow-card-hover); }
-.lp-feature-icon { width: 40px; height: 40px; border-radius: 11px; }
-.lp-feature-title { font-weight: 700; font-size: 0.95rem; margin-bottom: 6px; }
-
 /* CTA band */
 .lp-cta-band { max-width: 1000px; margin: 20px auto 0; padding: 0 24px; }
 .lp-cta-inner { border-radius: 24px; padding: 52px 32px; text-align: center; background: linear-gradient(135deg, #c43b2e 0%, #e27263 100%); position: relative; overflow: hidden; box-shadow: 0 24px 60px rgba(235,80,60,0.4); }
@@ -334,6 +328,34 @@ export const LP_CSS = `
 .lp-cta-desc { position: relative; color: rgba(255,255,255,0.9); font-size: 0.95rem; margin: 0 0 24px; }
 .lp-cta-band .lp-btn-primary { position: relative; background: #fff; color: #9a2a20; box-shadow: 0 10px 30px rgba(0,0,0,0.18); }
 .lp-cta-band .lp-btn-primary:hover { box-shadow: 0 14px 40px rgba(0,0,0,0.28); }
+
+/* Contact */
+.lp-contact { max-width: 1000px; margin: 56px auto 0; padding: 0 24px; scroll-margin-top: 88px; }
+.lp-contact-inner { display: grid; grid-template-columns: 0.82fr 1.18fr; gap: 40px; align-items: start; border-radius: 24px; border: 1px solid var(--border-subtle); background: var(--gradient-card), var(--bg-card); padding: 40px; }
+.lp-contact-eyebrow { display: inline-block; font-size: 0.74rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #c43b2e; margin-bottom: 12px; }
+.lp-contact-title { font-size: clamp(1.4rem, 2.6vw, 1.9rem); font-weight: 800; letter-spacing: -0.02em; line-height: 1.15; margin: 0 0 12px; color: var(--text-primary); }
+.lp-contact-sub { font-size: 0.92rem; line-height: 1.65; color: var(--text-muted); margin: 0 0 18px; }
+.lp-contact-mail { display: inline-flex; align-items: center; gap: 8px; font-size: 0.86rem; font-weight: 600; color: var(--text-secondary); text-decoration: none; transition: color .18s ease; }
+.lp-contact-mail:hover { color: #c43b2e; }
+.lp-contact-form { display: flex; flex-direction: column; gap: 14px; }
+.lp-contact-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.lp-field { display: flex; flex-direction: column; gap: 6px; }
+.lp-field > span { font-size: 0.78rem; font-weight: 600; color: var(--text-secondary); }
+.lp-field input, .lp-field textarea { width: 100%; font: inherit; font-size: 0.9rem; color: var(--text-primary); background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: 11px; padding: 11px 13px; outline: none; box-sizing: border-box; resize: vertical; transition: border-color .18s ease, box-shadow .18s ease; }
+.lp-field input:focus, .lp-field textarea:focus { border-color: var(--border-accent); box-shadow: 0 0 0 3px rgba(196,59,46,0.12); }
+.lp-field input::placeholder, .lp-field textarea::placeholder { color: var(--text-muted); }
+.lp-contact-submit { align-self: flex-start; margin-top: 2px; }
+.lp-contact-err { font-size: 0.82rem; font-weight: 500; color: #c43b2e; }
+.lp-contact-done { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 4px; padding: 24px 20px; }
+.lp-contact-done > svg { color: var(--accent-green, #22c55e); margin-bottom: 6px; }
+.lp-contact-done h3 { font-size: 1.1rem; font-weight: 800; color: var(--text-primary); margin: 0; }
+.lp-contact-done p { font-size: 0.88rem; color: var(--text-muted); margin: 0; }
+.lp-contact-again { margin-top: 14px; background: none; border: 1px solid var(--border-subtle); border-radius: 10px; padding: 8px 16px; font-size: 0.82rem; font-weight: 600; color: var(--text-secondary); cursor: pointer; transition: border-color .18s ease, color .18s ease; }
+.lp-contact-again:hover { border-color: var(--border-accent); color: var(--text-primary); }
+@media (max-width: 820px) {
+  .lp-contact-inner { grid-template-columns: 1fr; gap: 24px; padding: 28px 22px; }
+  .lp-contact-fields { grid-template-columns: 1fr; }
+}
 
 .lp-footer { max-width: 1000px; margin: 0 auto; padding: 40px 24px 48px; display: flex; flex-direction: column; align-items: center; gap: 12px; font-size: 0.78rem; color: var(--text-muted); }
 .lp-footer-links { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; }

@@ -146,7 +146,7 @@ export default function PromotedResume() {
                             <span style={{
                                 width: 40, height: 40, borderRadius: 12, flexShrink: 0,
                                 background: 'var(--gradient-hero)', display: 'grid', placeItems: 'center',
-                                boxShadow: '0 4px 14px rgba(99,102,241,0.35)',
+                                boxShadow: '0 4px 14px rgba(196, 59, 46,0.35)',
                             }}>
                                 <Target size={21} weight="fill" color="#fff" />
                             </span>

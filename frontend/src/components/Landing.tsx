@@ -7,7 +7,8 @@ import { useAuth } from '@/lib/auth';
 import { catalog } from '@/lib/db';
 import { LP_CSS } from './Landing.styles';
 import HowItWorks from './HowItWorks';
-import { FEATURES, FEATURED_LOGOS, JOB_BANNERS, JOBS, seniorityBadge } from './Landing.data';
+import LandingContact from './LandingContact';
+import { FEATURED_LOGOS, JOB_BANNERS, JOBS, seniorityBadge } from './Landing.data';
 import type { JobCard, PromotedCard } from './Landing.data';
 
 // Landing / front door, shown until the visitor taps "Bắt đầu" (persisted via
@@ -71,7 +72,7 @@ export default function Landing() {
     // Scroll-spy: track the section currently in view. A thin activation band
     // near the viewport middle (rootMargin) makes exactly one section active as
     // you scroll. Defaults to 'top' (homepage/hero) so the pill starts there.
-    const NAV_IDS = ['top', 'featured', 'how'];
+    const NAV_IDS = ['top', 'featured', 'how', 'lien-he'];
     const [activeSection, setActiveSection] = useState('top');
     useEffect(() => {
         const els = NAV_IDS.map((id) => document.getElementById(id)).filter(Boolean) as HTMLElement[];
@@ -162,6 +163,7 @@ export default function Landing() {
                     <a href="#top" data-section="top" className={activeSection === 'top' ? 'is-active' : undefined} aria-current={activeSection === 'top' ? 'true' : undefined}>Trang chủ</a>
                     <a href="#featured" data-section="featured" className={activeSection === 'featured' ? 'is-active' : undefined} aria-current={activeSection === 'featured' ? 'true' : undefined}>Cơ hội</a>
                     <a href="#how" data-section="how" className={activeSection === 'how' ? 'is-active' : undefined} aria-current={activeSection === 'how' ? 'true' : undefined}>Cách hoạt động</a>
+                    <a href="#lien-he" data-section="lien-he" className={activeSection === 'lien-he' ? 'is-active' : undefined} aria-current={activeSection === 'lien-he' ? 'true' : undefined}>Liên hệ</a>
                 </nav>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     {enabled && !user && (
@@ -368,22 +370,8 @@ export default function Landing() {
             {/* How it works — self-contained animated section (shadow-DOM isolated) */}
             <HowItWorks />
 
-            {/* Features */}
-            <section className="lp-section">
-                <h2 className="lp-h2">Mọi thứ bạn cần để ứng tuyển thông minh hơn</h2>
-                <div className="lp-features">
-                    {FEATURES.map((f) => {
-                        const Icon = f.icon;
-                        return (
-                            <div key={f.title} className="lp-feature">
-                                <span className="lp-feature-icon"><Icon size={20} weight="duotone" /></span>
-                                <div className="lp-feature-title">{f.title}</div>
-                                <div className="lp-feature-desc">{f.desc}</div>
-                            </div>
-                        );
-                    })}
-                </div>
-            </section>
+            {/* Contact — anonymous form → admin feedback panel (source='contact') */}
+            <LandingContact />
 
             {/* CTA band */}
             <section className="lp-cta-band">
@@ -406,7 +394,7 @@ export default function Landing() {
                     <span>·</span>
                     <a href="/terms">Điều khoản sử dụng</a>
                     <span>·</span>
-                    <a href="mailto:charles@copoai.net">Liên hệ</a>
+                    <a href="#lien-he">Liên hệ</a>
                 </div>
             </footer>
         </div>

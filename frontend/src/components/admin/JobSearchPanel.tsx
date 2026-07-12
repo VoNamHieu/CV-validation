@@ -299,7 +299,7 @@ export default function JobSearchPanel() {
                         <button key={id} type="button" onClick={() => setMode(id)} style={{
                             display: 'flex', alignItems: 'center', gap: 5, padding: '0 12px',
                             fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer', border: 'none',
-                            background: mode === id ? 'var(--accent-purple, #8b5cf6)' : 'var(--bg-card)',
+                            background: mode === id ? 'var(--accent-purple, #c43b2e)' : 'var(--bg-card)',
                             color: mode === id ? '#fff' : 'var(--text-secondary)',
                         }}>
                             <Icon size={14} weight={mode === id ? 'fill' : 'regular'} /> {label}
@@ -451,7 +451,7 @@ export default function JobSearchPanel() {
                                 </div>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
                                     {j.role_family && chip(j.role_family, 'var(--accent-blue, #3b82f6)', 'rgba(59,130,246,0.1)')}
-                                    {j.seniority && chip(j.seniority, 'var(--accent-purple, #8b5cf6)', 'rgba(139,92,246,0.1)')}
+                                    {j.seniority && chip(j.seniority, 'var(--accent-purple, #c43b2e)', 'rgba(196, 59, 46,0.1)')}
                                     {j.is_active
                                         ? chip('Đang tuyển', 'var(--accent-green, #22c55e)', 'rgba(34,197,94,0.1)')
                                         : chip(j.dead_reason ? `Đã đóng · ${j.dead_reason}` : 'Đã đóng', 'var(--accent-red, #ef4444)', 'rgba(239,68,68,0.1)')}
@@ -501,7 +501,7 @@ export default function JobSearchPanel() {
                                             style={{
                                                 display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.8rem',
                                                 fontWeight: 700, color: '#fff', cursor: 'pointer',
-                                                background: 'var(--gradient-hero, linear-gradient(135deg,#4f46e5,#7c3aed))',
+                                                background: 'var(--gradient-hero, linear-gradient(135deg,#c43b2e,#c43b2e))',
                                                 border: 'none', borderRadius: 8, padding: '7px 14px',
                                                 opacity: promoting === j.id ? 0.6 : 1,
                                             }}

@@ -33,7 +33,7 @@ export default function CvTemplatePicker({ selected, onSelect, compact }: Props)
                                 ? `2px solid ${t.accentColor}`
                                 : '1.5px solid var(--border-subtle)',
                             borderRadius: 8,
-                            background: isActive ? 'rgba(99,102,241,0.05)' : 'var(--bg-card)',
+                            background: isActive ? 'rgba(196, 59, 46,0.05)' : 'var(--bg-card)',
                             cursor: 'pointer',
                             textAlign: 'center',
                             fontFamily: 'inherit',

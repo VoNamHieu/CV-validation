@@ -121,7 +121,7 @@ export default function Mode1ResultBanner() {
             position: 'fixed', bottom: 20, right: 20, zIndex: 9999, maxWidth: 380,
             background: 'linear-gradient(135deg, #1e1b4b, #312e81)', color: '#fff',
             padding: '16px 20px', borderRadius: 16, boxShadow: '0 12px 40px rgba(0,0,0,0.4)',
-            border: '1px solid rgba(139,92,246,0.35)', fontSize: 14, lineHeight: 1.5,
+            border: '1px solid rgba(196, 59, 46,0.35)', fontSize: 14, lineHeight: 1.5,
         }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                 <strong>✨ CV đã tinh chỉnh cho 1 việc</strong>
@@ -142,7 +142,7 @@ export default function Mode1ResultBanner() {
                 style={{
                     width: '100%', padding: '10px 14px', borderRadius: 10, border: 'none',
                     cursor: applying ? 'default' : 'pointer', fontWeight: 700,
-                    background: applying ? '#4338ca' : 'linear-gradient(135deg,#8b5cf6,#6366f1)', color: '#fff',
+                    background: applying ? '#9a2a20' : 'linear-gradient(135deg,#c43b2e,#c43b2e)', color: '#fff',
                 }}
             >
                 {applying ? '⏳…' : '🚀 Ứng tuyển'}

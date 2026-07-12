@@ -171,7 +171,10 @@ def _sf_v4_fetch(origin: str, *, locale: str, vn_facet: bool, vn_filter: bool) -
             if vn_filter and not _is_vn_loc(str(loc)):   # global tenant → keep VN only
                 continue
             jid, ut = rp.get("id"), rp.get("unifiedUrlTitle")
-            url = f"{origin}/job/{ut}/{jid}/" if ut and jid else origin
+            # SF detail URL is /job/{slug}/{id}-{locale}. The bare /{id}/ form
+            # (trailing slash, no locale) 302s to /errorpage/?errortype=Exception,
+            # so the locale suffix is mandatory — reuse this pass's locale.
+            url = f"{origin}/job/{ut}/{jid}-{locale}" if ut and jid else origin
             out.append({"title": title[:200], "url": url,
                         "location": str(loc)[:120], "description": ""})
         if len(results) < 10 or len(out) >= _MAX_ATS_JOBS:

@@ -27,7 +27,7 @@ import type {
 import {
     EMPTY_CONTACT, EMPTY_PERSONAL, EMPTY_EMPLOYMENT, EMPTY_PREFERENCES, COVER_LETTER_LANGUAGES,
 } from '@/lib/types';
-import { promptInstallExtension } from '@/lib/extension-install';
+import { promptInstallExtension, promptGrantPermission, isPermissionError } from '@/lib/extension-install';
 import { cvToExtensionProfile } from '@/lib/extension-profile';
 import { syncProfileToExtension, syncCvFileToExtension, syncCvDataToExtension } from '@/lib/extension-sync';
 import { renderCvHtml, getTemplate, DEFAULT_TEMPLATE_ID } from '@/lib/cv-templates';
@@ -240,6 +240,10 @@ export default function StepEditCv() {
             if (event.data?.type === 'JOBFIT_AUTO_APPLY_ALL_RESPONSE') {
                 if (event.data.success) {
                     setBatchStarting(false);
+                } else if (isPermissionError(event.data.error || '')) {
+                    setBatchStarting(false);
+                    setAutoApplyMessage('Cần cấp quyền cho Copo trên trang này — xem hướng dẫn.');
+                    promptGrantPermission();
                 } else {
                     setBatchStarting(false);
                     setAutoApplyMessage(`Lỗi: ${event.data.error}`);
@@ -599,6 +603,10 @@ export default function StepEditCv() {
                 setAutoApplyMessage('Extension chưa cài. Đang mở trang ứng tuyển...');
                 promptInstallExtension();
                 window.open(jobUrl, '_blank');
+            } else if (isPermissionError(message)) {
+                setAutoApplyStatus('error');
+                setAutoApplyMessage('Cần cấp quyền cho Copo trên trang này — xem hướng dẫn.');
+                promptGrantPermission();
             } else {
                 setAutoApplyStatus('error');
                 setAutoApplyMessage(`Lỗi: ${message}`);
@@ -786,9 +794,9 @@ export default function StepEditCv() {
 
     // Auto Apply button config based on status
     const autoApplyBtn = {
-        idle: { label: 'Tự động ứng tuyển', icon: <RocketLaunch size={14} weight="fill" />, disabled: false, bg: 'linear-gradient(135deg, #059669, #10B981)' },
-        checking: { label: 'Kiểm tra...', icon: <CircleNotch size={14} className="spin" />, disabled: true, bg: 'linear-gradient(135deg, #6366f1, #818cf8)' },
-        sending: { label: 'Đang gửi...', icon: <CircleNotch size={14} className="spin" />, disabled: true, bg: 'linear-gradient(135deg, #6366f1, #818cf8)' },
+        idle: { label: 'Tự động ứng tuyển', icon: <RocketLaunch size={14} weight="fill" />, disabled: false, bg: 'linear-gradient(135deg, #c43b2e, #e27263)' },
+        checking: { label: 'Kiểm tra...', icon: <CircleNotch size={14} className="spin" />, disabled: true, bg: 'linear-gradient(135deg, #c43b2e, #e27263)' },
+        sending: { label: 'Đang gửi...', icon: <CircleNotch size={14} className="spin" />, disabled: true, bg: 'linear-gradient(135deg, #c43b2e, #e27263)' },
         opened: { label: 'Đã mở tab!', icon: <CheckCircle size={14} weight="fill" />, disabled: true, bg: 'linear-gradient(135deg, #059669, #34d399)' },
         error: { label: 'Lỗi', icon: <Warning size={14} />, disabled: true, bg: 'linear-gradient(135deg, #dc2626, #ef4444)' },
         'no-extension': { label: 'Cần cài extension', icon: <Lightning size={14} />, disabled: true, bg: 'linear-gradient(135deg, #d97706, #f59e0b)' },
@@ -1112,8 +1120,8 @@ export default function StepEditCv() {
             {/* ═══ Batch Apply Progress Panel ═══ */}
             {(isBatchActive || batchDone) && batchProgress && (
                 <div style={{
-                    background: 'linear-gradient(135deg, rgba(124,58,237,0.06), rgba(236,72,153,0.04))',
-                    border: '1px solid rgba(124,58,237,0.2)',
+                    background: 'linear-gradient(135deg, rgba(196, 59, 46,0.06), rgba(226, 114, 99,0.04))',
+                    border: '1px solid rgba(196, 59, 46,0.2)',
                     borderRadius: 'var(--radius-md, 12px)',
                     padding: '16px 20px',
                     marginBottom: 16,
@@ -1123,7 +1131,7 @@ export default function StepEditCv() {
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                             {batchProgress.isProcessing
-                                ? <CircleNotch size={16} className="spin" style={{ color: '#a78bfa' }} />
+                                ? <CircleNotch size={16} className="spin" style={{ color: '#e27263' }} />
                                 : <CheckCircle size={16} weight="fill" style={{ color: '#22c55e' }} />
                             }
                             <span style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--text-primary)' }}>
@@ -1138,7 +1146,7 @@ export default function StepEditCv() {
                             <div style={{
                                 height: '100%',
                                 width: `${batchProgress.total > 0 ? (batchProgress.completed / batchProgress.total) * 100 : 0}%`,
-                                background: 'linear-gradient(90deg, #7c3aed, #ec4899)',
+                                background: 'linear-gradient(90deg, #c43b2e, #e27263)',
                                 borderRadius: 3,
                                 transition: 'width 0.5s ease',
                             }} />
@@ -1163,7 +1171,7 @@ export default function StepEditCv() {
                                 display: 'flex', alignItems: 'center', gap: 10,
                                 padding: '8px 12px',
                                 background: job.status === 'processing'
-                                    ? 'rgba(124,58,237,0.1)'
+                                    ? 'rgba(196, 59, 46,0.1)'
                                     : job.status === 'done'
                                         ? 'rgba(34,197,94,0.06)'
                                         : job.status === 'error'
@@ -1171,14 +1179,14 @@ export default function StepEditCv() {
                                             : 'rgba(255,255,255,0.02)',
                                 borderRadius: 8,
                                 border: job.status === 'processing'
-                                    ? '1px solid rgba(124,58,237,0.3)'
+                                    ? '1px solid rgba(196, 59, 46,0.3)'
                                     : '1px solid rgba(255,255,255,0.05)',
                                 transition: 'all 0.3s ease',
                             }}>
                                 {/* Status icon */}
                                 <div style={{ flexShrink: 0, width: 20, display: 'flex', justifyContent: 'center' }}>
                                     {job.status === 'pending' && <span style={{ opacity: 0.3, fontSize: '0.75rem' }}>⏳</span>}
-                                    {job.status === 'processing' && <CircleNotch size={14} className="spin" style={{ color: '#a78bfa' }} />}
+                                    {job.status === 'processing' && <CircleNotch size={14} className="spin" style={{ color: '#e27263' }} />}
                                     {job.status === 'done' && <CheckCircle size={14} weight="fill" style={{ color: '#22c55e' }} />}
                                     {job.status === 'error' && <XCircle size={14} weight="fill" style={{ color: '#ef4444' }} />}
                                 </div>
@@ -1187,7 +1195,7 @@ export default function StepEditCv() {
                                 <div style={{ flex: 1, minWidth: 0 }}>
                                     <p style={{
                                         fontSize: '0.8rem', fontWeight: 600,
-                                        color: job.status === 'processing' ? '#a78bfa' : 'var(--text-primary)',
+                                        color: job.status === 'processing' ? '#e27263' : 'var(--text-primary)',
                                         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                                     }}>
                                         {job.jobTitle}
@@ -1203,11 +1211,11 @@ export default function StepEditCv() {
                                     padding: '2px 8px', borderRadius: 6,
                                     background: job.status === 'done' ? 'rgba(34,197,94,0.15)'
                                         : job.status === 'error' ? 'rgba(239,68,68,0.15)'
-                                            : job.status === 'processing' ? 'rgba(124,58,237,0.15)'
+                                            : job.status === 'processing' ? 'rgba(196, 59, 46,0.15)'
                                                 : 'rgba(255,255,255,0.05)',
                                     color: job.status === 'done' ? '#22c55e'
                                         : job.status === 'error' ? '#ef4444'
-                                            : job.status === 'processing' ? '#a78bfa'
+                                            : job.status === 'processing' ? '#e27263'
                                                 : 'var(--text-muted)',
                                 }}>
                                     {job.status === 'pending' && 'Chờ'}
@@ -1243,12 +1251,12 @@ export default function StepEditCv() {
                         ? 'rgba(16,185,129,0.1)'
                         : autoApplyStatus === 'error' || autoApplyStatus === 'no-extension'
                             ? 'rgba(239,68,68,0.1)'
-                            : 'rgba(99,102,241,0.1)',
+                            : 'rgba(196, 59, 46,0.1)',
                     border: `1px solid ${autoApplyStatus === 'opened'
                         ? 'rgba(16,185,129,0.3)'
                         : autoApplyStatus === 'error' || autoApplyStatus === 'no-extension'
                             ? 'rgba(239,68,68,0.3)'
-                            : 'rgba(99,102,241,0.3)'}`,
+                            : 'rgba(196, 59, 46,0.3)'}`,
                     borderRadius: 'var(--radius-sm)',
                     padding: '10px 16px',
                     marginBottom: 16,
@@ -1257,7 +1265,7 @@ export default function StepEditCv() {
                         ? '#10b981'
                         : autoApplyStatus === 'error' || autoApplyStatus === 'no-extension'
                             ? '#ef4444'
-                            : '#818cf8',
+                            : '#e27263',
                     display: 'flex',
                     alignItems: 'center',
                     gap: 8,
@@ -1357,7 +1365,7 @@ export default function StepEditCv() {
                                         ? '1.5px solid var(--accent-blue)'
                                         : '1px solid var(--border-subtle)',
                                     background: isActive
-                                        ? 'linear-gradient(135deg, rgba(99,102,241,0.08), rgba(139,92,246,0.04))'
+                                        ? 'linear-gradient(135deg, rgba(196, 59, 46,0.08), rgba(196, 59, 46,0.04))'
                                         : 'var(--bg-card)',
                                     cursor: 'pointer',
                                     color: 'var(--text-primary)',
@@ -1365,7 +1373,7 @@ export default function StepEditCv() {
                                     minWidth: 0,
                                     flexShrink: 0,
                                     whiteSpace: 'nowrap',
-                                    boxShadow: isActive ? '0 0 12px rgba(99,102,241,0.12)' : 'none',
+                                    boxShadow: isActive ? '0 0 12px rgba(196, 59, 46,0.12)' : 'none',
                                 }}
                             >
                                 {/* Mini score */}
@@ -2035,7 +2043,7 @@ function SuggestionsPanel({
     return (
         <div style={{
             marginBottom: 10, borderRadius: 8,
-            border: '1px solid rgba(139,92,246,0.35)', background: 'rgba(139,92,246,0.05)',
+            border: '1px solid rgba(196, 59, 46,0.35)', background: 'rgba(196, 59, 46,0.05)',
         }}>
             <button
                 type="button"
@@ -2046,7 +2054,7 @@ function SuggestionsPanel({
                     padding: '10px 12px', textAlign: 'left',
                 }}
             >
-                <Lightning size={15} weight="fill" style={{ color: 'var(--accent-purple, #8b5cf6)', flexShrink: 0 }} />
+                <Lightning size={15} weight="fill" style={{ color: 'var(--accent-purple, #c43b2e)', flexShrink: 0 }} />
                 <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)', flex: 1, minWidth: 0 }}>
                     Có thể cân nhắc để mạnh hơn
                     <span style={{ color: 'var(--text-muted)', fontWeight: 400, marginLeft: 6, fontSize: '0.72rem' }}>
