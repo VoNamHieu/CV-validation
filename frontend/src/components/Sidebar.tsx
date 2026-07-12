@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useAppStore, AppView } from '@/store/useAppStore';
-import { MagicWand, Briefcase, FileText, List, X, Sun, Moon, ChatCircleDots } from '@phosphor-icons/react';
+import { MagicWand, Briefcase, FileText, List, X, Sun, Moon, ChatCircleDots, Sparkle } from '@phosphor-icons/react';
 import type { Icon } from '@phosphor-icons/react';
 import AuthButton from './AuthButton';
 
@@ -18,6 +18,7 @@ const NAV_ITEMS: NavItem[] = [
     { id: 'editor', label: 'Sửa CV', icon: FileText, description: 'Tạo · Sửa · Xuất PDF' },
     { id: 'history', label: 'Lịch sử', icon: Briefcase, description: 'Hồ sơ đã lưu' },
     { id: 'interview', label: 'Phỏng vấn', icon: ChatCircleDots, description: 'Luyện tập · Đánh giá' },
+    { id: 'featured', label: 'Cơ hội nổi bật', icon: Sparkle, description: 'Việc tuyển chọn mỗi ngày' },
 ];
 
 export const SIDEBAR_WIDTH = 232;
@@ -82,21 +83,21 @@ export default function Sidebar() {
             }}
         >
             {/* Brand */}
-            <div style={{ display: 'flex', alignItems: 'center', padding: '4px 8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '10px 8px 6px' }}>
                 <span
                     style={{
                         fontWeight: 800,
-                        fontSize: '1.15rem',
-                        letterSpacing: '-0.02em',
+                        fontSize: '1.7rem',
+                        letterSpacing: '-0.03em',
                         color: 'var(--text-primary)',
                     }}
                 >
-                    Copo<span style={{ color: 'var(--accent-red)' }}>.</span>
+                    Copo<span style={{ color: 'var(--accent-blue)' }}>.</span>
                 </span>
             </div>
 
-            {/* Nav */}
-            <nav style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8 }}>
+            {/* Nav — sits right under the brand; footer is pushed to the bottom */}
+            <nav style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 2 }}>
                 {NAV_ITEMS.map((item) => {
                     const isActive = view === item.id;
                     const Icon = item.icon;
@@ -114,19 +115,19 @@ export default function Sidebar() {
                             }}
                             aria-current={isActive ? 'page' : undefined}
                             style={{
+                                position: 'relative',
                                 display: 'flex',
                                 alignItems: 'center',
                                 gap: 12,
-                                padding: '10px 12px',
-                                borderRadius: 10,
-                                border: '1px solid transparent',
+                                padding: '9px 12px 9px 14px',
+                                borderRadius: 9,
+                                border: 'none',
                                 background: isActive ? 'var(--gradient-hero-subtle)' : 'transparent',
-                                borderColor: isActive ? 'var(--border-subtle)' : 'transparent',
                                 color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
                                 cursor: 'pointer',
                                 width: '100%',
                                 textAlign: 'left',
-                                transition: 'all 0.18s ease',
+                                transition: 'background 0.16s ease, color 0.16s ease',
                             }}
                             onMouseEnter={(e) => {
                                 if (!isActive) {
@@ -141,21 +142,27 @@ export default function Sidebar() {
                                 }
                             }}
                         >
-                            <div
-                                style={{
-                                    width: 28, height: 28, borderRadius: 8,
-                                    background: isActive ? 'var(--gradient-hero)' : 'var(--bg-card)',
-                                    border: '1px solid',
-                                    borderColor: isActive ? 'transparent' : 'var(--border-subtle)',
-                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                    flexShrink: 0,
-                                }}
-                            >
-                                <Icon size={14} weight={isActive ? 'fill' : 'duotone'} color={isActive ? 'white' : 'currentColor'} />
-                            </div>
+                            {/* Active indicator — a slim accent bar, not a boxed icon */}
+                            {isActive && (
+                                <span
+                                    aria-hidden
+                                    style={{
+                                        position: 'absolute',
+                                        left: 0, top: '50%', transform: 'translateY(-50%)',
+                                        width: 3, height: 18, borderRadius: 3,
+                                        background: 'var(--accent-blue)',
+                                    }}
+                                />
+                            )}
+                            <Icon
+                                size={19}
+                                weight={isActive ? 'fill' : 'regular'}
+                                color={isActive ? 'var(--accent-blue)' : 'currentColor'}
+                                style={{ flexShrink: 0 }}
+                            />
                             <div style={{ flex: 1, minWidth: 0 }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                    <span style={{ fontWeight: 600, fontSize: '0.85rem', letterSpacing: '-0.01em' }}>
+                                    <span style={{ fontWeight: isActive ? 700 : 500, fontSize: '0.85rem', letterSpacing: '-0.01em' }}>
                                         {item.label}
                                     </span>
                                     {showBadge && (
@@ -165,8 +172,8 @@ export default function Sidebar() {
                                                 fontWeight: 700,
                                                 padding: '1px 7px',
                                                 borderRadius: 10,
-                                                background: isActive ? 'rgba(255,255,255,0.15)' : 'var(--bg-elevated)',
-                                                color: isActive ? 'white' : 'var(--text-secondary)',
+                                                background: 'var(--bg-elevated)',
+                                                color: 'var(--text-secondary)',
                                                 lineHeight: 1.5,
                                             }}
                                         >

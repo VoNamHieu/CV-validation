@@ -64,7 +64,77 @@ async function upload(payload) {
     return { ok: true, result: body };
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Wait until the tab finished loading (status 'complete'), bounded by timeout.
+function waitTabComplete(tabId, timeoutMs) {
+    return new Promise((resolve) => {
+        const started = Date.now();
+        const tick = async () => {
+            try {
+                const t = await chrome.tabs.get(tabId);
+                if (t.status === 'complete') return resolve(true);
+            } catch { return resolve(false); }
+            if (Date.now() - started > timeoutMs) return resolve(true); // give up waiting, try anyway
+            setTimeout(tick, 500);
+        };
+        tick();
+    });
+}
+
+// Walk the backend's capture-target list, opening each in a background tab, letting
+// the real browser solve any Cloudflare/anti-bot challenge, then collect + upload.
+// Progress is streamed to the popup via BATCH_PROGRESS messages.
+async function batchCapture() {
+    const { backendUrl, debugToken } = await getConfig();
+    if (!debugToken) return { ok: false, error: 'Chưa nhập Debug token.' };
+    let targets;
+    try {
+        const r = await fetch(`${backendUrl}/debug/capture/targets`, {
+            headers: { 'X-Debug-Token': debugToken },
+        });
+        if (!r.ok) return { ok: false, error: `targets ${r.status}` };
+        targets = (await r.json()).targets || [];
+    } catch (e) {
+        return { ok: false, error: 'Không lấy được targets: ' + String(e) };
+    }
+    const results = [];
+    for (let i = 0; i < targets.length; i++) {
+        const t = targets[i];
+        const emit = (status, extra) => chrome.runtime.sendMessage({
+            type: 'BATCH_PROGRESS', i, total: targets.length, name: t.name, status, ...extra,
+        }).catch(() => {});
+        emit('opening');
+        let tab = null;
+        try {
+            tab = await chrome.tabs.create({ url: t.url, active: false });
+            await waitTabComplete(tab.id, 25000);
+            await sleep(6000);                       // let JS + Cloudflare challenge settle
+            const collected = await collectFromTab(tab.id, `batch: ${t.name}`);
+            if (!collected.ok) {
+                results.push({ name: t.name, ok: false, error: collected.error });
+                emit('fail', { error: collected.error });
+            } else {
+                const up = await upload(collected.payload);
+                const rec = { name: t.name, ok: up.ok, anchors: collected.payload.anchors.length, error: up.error };
+                results.push(rec);
+                emit(up.ok ? 'ok' : 'fail', rec);
+            }
+        } catch (e) {
+            results.push({ name: t.name, ok: false, error: String(e) });
+            emit('fail', { error: String(e) });
+        } finally {
+            if (tab) { try { await chrome.tabs.remove(tab.id); } catch { /* already closed */ } }
+        }
+    }
+    return { ok: true, results };
+}
+
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+    if (msg && msg.type === 'BATCH_CAPTURE') {
+        batchCapture().then(sendResponse).catch((e) => sendResponse({ ok: false, error: String(e) }));
+        return true; // async
+    }
     if (msg && msg.type === 'CAPTURE') {
         (async () => {
             try {

@@ -1252,7 +1252,7 @@ export default function StepInputUrl() {
             {/* How it works */}
             <div className="glass-card" style={{
                 padding: '16px 20px', marginBottom: 24,
-                background: 'linear-gradient(135deg, rgba(139,92,246,0.05), rgba(59,130,246,0.04))',
+                background: 'linear-gradient(135deg, rgba(196, 59, 46,0.05), rgba(59,130,246,0.04))',
             }}>
                 <p style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                     Cách hoạt động
@@ -1370,7 +1370,7 @@ export default function StepInputUrl() {
                 <div style={{
                     display: 'inline-flex', alignItems: 'center', gap: 6,
                     padding: '6px 14px', borderRadius: 20, marginBottom: 12,
-                    background: 'rgba(139,92,246,0.1)', border: '1px solid rgba(139,92,246,0.25)',
+                    background: 'rgba(196, 59, 46,0.1)', border: '1px solid rgba(196, 59, 46,0.25)',
                     fontSize: '0.82rem', color: 'var(--accent-purple)', fontWeight: 500,
                 }}>
                     <Brain size={13} weight="duotone" /> AI nhận diện: {inferredTitle}

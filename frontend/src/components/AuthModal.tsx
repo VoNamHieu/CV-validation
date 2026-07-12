@@ -95,9 +95,9 @@ export default function AuthModal({ onClose, reason }: { onClose: () => void; re
                 </h2>
                 {reason && (
                     <div style={{
-                        fontSize: '0.78rem', color: 'var(--accent-purple, #8b5cf6)', fontWeight: 600,
+                        fontSize: '0.78rem', color: 'var(--accent-purple, #c43b2e)', fontWeight: 600,
                         marginBottom: 8, padding: '8px 10px', borderRadius: 8,
-                        background: 'var(--gradient-hero-subtle, rgba(139,92,246,0.1))',
+                        background: 'var(--gradient-hero-subtle, rgba(196, 59, 46,0.1))',
                     }}>
                         {reason}
                     </div>

@@ -85,7 +85,7 @@ export default function AuthCallback() {
                     <div style={{
                         width: 44, height: 44, borderRadius: '50%',
                         border: '3px solid var(--border-subtle)',
-                        borderTopColor: 'var(--accent-purple, #8b5cf6)',
+                        borderTopColor: 'var(--accent-purple, #c43b2e)',
                         animation: 'spin 0.7s linear infinite',
                     }} />
                     <div style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-primary)' }}>

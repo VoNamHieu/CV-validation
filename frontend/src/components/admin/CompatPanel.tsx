@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { getAuthHeaders } from '@/lib/auth-headers';
 
@@ -15,6 +15,7 @@ type CompatRecord = {
         | 'needs_new_adapter'
         | 'needs_capture'
         | 'needs_login'
+        | 'no_vn_jobs'
         | 'unsupported';
     usable: boolean;
     strategy: string;
@@ -35,29 +36,6 @@ type CompatRecord = {
     baseline_job_count?: number;
 };
 
-// Verdict → colour. Usable = xanh, cần adapter = hổ phách, bị chặn = tím, không hỗ trợ = đỏ.
-// Theme tokens, not hand-picked hex — these render on --bg-card and must clear
-// AA contrast in both themes (the raw hex this replaced, e.g. #22c55e/#ef4444
-// on white, sat at ~2.3–3.8:1 and didn't adapt for dark mode at all).
-const VERDICT_COLOR: Record<string, string> = {
-    supported: 'var(--accent-green)',
-    supported_render: 'var(--accent-green)',
-    needs_new_adapter: 'var(--accent-amber)',
-    needs_capture: 'var(--accent-purple)',
-    needs_login: 'var(--accent-purple)',
-    unsupported: 'var(--accent-red)',
-};
-
-// Verdict → nhãn tiếng Việt ngắn gọn cho cột trạng thái.
-const VERDICT_LABEL: Record<string, string> = {
-    supported: 'Hỗ trợ',
-    supported_render: 'Hỗ trợ (render)',
-    needs_new_adapter: 'Cần adapter',
-    needs_capture: 'Cần extension',
-    needs_login: 'Cần đăng nhập',
-    unsupported: 'Không hỗ trợ',
-};
-
 function ago(ts: number): string {
     if (!ts) return '-';
     const s = Math.max(0, Math.floor(Date.now() / 1000 - ts));
@@ -68,8 +46,8 @@ function ago(ts: number): string {
 }
 
 // `cron` records come from the real ingest run that also built the pool — they
-// mirror it exactly. `scan`/`probe`/`recheck` are manual dry-runs (ATS feed →
-// SPA sniff, no capture/LLM) that can disagree with the pool, so flag them.
+// mirror it exactly. `scan`/`probe`/`recheck` are manual dry-runs that can
+// disagree with the pool, so they get their own (dimmer) badge.
 const SOURCE_STYLE: Record<string, { label: string; color: string; title: string }> = {
     cron: { label: 'cron', color: 'var(--accent-green)', title: 'Từ lần ingest thật gần nhất — khớp pool' },
     scan: { label: 'scan', color: 'var(--accent-amber)', title: 'Quét dry-run thủ công — có thể không khớp pool thật' },
@@ -79,25 +57,82 @@ const SOURCE_STYLE: Record<string, { label: string; color: string; title: string
 
 // A usable verdict reached via a fallback rung (render/SPA-sniff or an
 // extension capture) rather than a dedicated `ats:<name>` adapter: it works but
-// is slow/fragile — a candidate for a real adapter, and worth watching for
-// regressions.
+// is slow/fragile — a candidate for a real adapter, and worth watching.
 const isFallbackStrategy = (s: string): boolean => /spa_sniff|capture/i.test(s || '');
 
-// Issue-type ordering for the "sort by issue type" view — most actionable first
-// so triage runs top-down. `stale` = a supported feed the last cron missed (has
-// jobs but degrading, worth a look before it empties); `ok` = supported & fresh.
-const ISSUE_RANK: Record<string, number> = {
-    regressed: -1, unsupported: 0, needs_new_adapter: 1, needs_capture: 2, needs_login: 3,
-    no_vn_jobs: 4, stale: 5, ok: 6,
+// Blocker code / verdict → câu giải thích RÕ RÀNG vì sao lần gần nhất không lấy
+// được job. Đây là điểm chính của bảng: đọc là hiểu, không phải đoán mã lỗi.
+const REASON: Record<string, string> = {
+    no_extractor: 'Là trang tuyển dụng thật nhưng chưa rung nào đọc được → cần viết adapter riêng',
+    anti_bot: 'Bị anti-bot chặn (Cloudflare / PerimeterX…) → phải đi qua extension',
+    login: 'Danh sách việc làm nằm sau lớp đăng nhập',
+    no_vn: 'Feed chạy được nhưng không có vị trí nào ở Việt Nam',
+    unreachable: 'Không truy cập được (fetch lỗi hoặc timeout)',
+    soft_404: 'Trang mở được nhưng trống / không còn tồn tại',
+    not_careerish: 'Không nhận diện được nội dung tuyển dụng ở trang này',
+    url_disallowed: 'URL bị chặn bởi SSRF guard',
+    stale_feed: 'Feed cũ — lần cron gần nhất không còn thấy job',
 };
-function issueOf(l: CompatRecord): string {
-    // A steep drop off baseline outranks everything — the feed still "works" but
-    // is quietly returning a fraction of its jobs (e.g. a broken signature).
-    if (l.regressed) return 'regressed';
-    if (!l.usable) return l.verdict;
-    if ((l.blockers || []).includes('stale_feed')) return 'stale';
-    return 'ok';
+
+function reasonText(l: CompatRecord): string {
+    for (const b of l.blockers || []) {
+        if (REASON[b]) return REASON[b];
+    }
+    if (l.verdict === 'needs_new_adapter') return REASON.no_extractor;
+    if (l.verdict === 'needs_capture') return REASON.anti_bot;
+    if (l.verdict === 'needs_login') return REASON.login;
+    if (l.verdict === 'no_vn_jobs') return REASON.no_vn;
+    return l.detail || 'Không rõ nguyên nhân';
 }
+
+// Kết quả lần chạy gần nhất, gói gọn để render: lấy được (kèm số & cảnh báo
+// tụt/dự phòng) hay không lấy được (kèm lý do).
+type Outcome = { ok: boolean; count: number; note: string; color: string };
+function outcomeOf(l: CompatRecord): Outcome {
+    if (l.usable) {
+        if (l.regressed) {
+            return {
+                ok: true, count: l.job_count || 0, color: 'var(--accent-amber)',
+                note: `tụt mạnh từ đỉnh ${l.baseline_job_count} — adapter có thể đã gãy một phần`,
+            };
+        }
+        if (isFallbackStrategy(l.strategy)) {
+            return {
+                ok: true, count: l.job_count || 0, color: 'var(--accent-amber)',
+                note: 'qua nhánh dự phòng (render/capture) — chậm & dễ gãy, nên viết adapter riêng',
+            };
+        }
+        return { ok: true, count: l.job_count || 0, color: 'var(--accent-green)', note: '' };
+    }
+    const color =
+        l.verdict === 'needs_capture' || l.verdict === 'needs_login' ? 'var(--accent-purple)'
+        : l.verdict === 'no_vn_jobs' ? 'var(--text-muted)'
+        : l.verdict === 'needs_new_adapter' ? 'var(--accent-amber)'
+        : 'var(--accent-red)';
+    return { ok: false, count: 0, color, note: reasonText(l) };
+}
+
+// Xếp hạng "cần xử lý trước" — tụt job (đang gãy dần) lên đầu, rồi cần adapter,
+// rồi bị chặn, cuối cùng là chạy tốt.
+function severity(l: CompatRecord): number {
+    if (l.regressed) return 0;
+    if (!l.usable) {
+        return ({ needs_new_adapter: 1, needs_capture: 2, needs_login: 3, no_vn_jobs: 4, unsupported: 5 } as Record<string, number>)[l.verdict] ?? 5;
+    }
+    if (isFallbackStrategy(l.strategy)) return 6;
+    return 7;
+}
+
+// Bộ lọc theo chip tóm tắt.
+const FILTERS: Record<string, (l: CompatRecord) => boolean> = {
+    got: (l) => l.usable,
+    notGot: (l) => !l.usable,
+    regressed: (l) => !!l.regressed,
+    fallback: (l) => l.usable && !l.regressed && isFallbackStrategy(l.strategy),
+    adapter: (l) => l.verdict === 'needs_new_adapter',
+    blocked: (l) => l.verdict === 'needs_capture' || l.verdict === 'needs_login',
+    novn: (l) => l.verdict === 'no_vn_jobs',
+};
 
 export default function CompatPanel() {
     const [rows, setRows] = useState<CompatRecord[]>([]);
@@ -108,7 +143,9 @@ export default function CompatPanel() {
     const [probeUrl, setProbeUrl] = useState('');
     const [companyFilter, setCompanyFilter] = useState('');
     const [busyUrl, setBusyUrl] = useState('');
-    const [sortBy, setSortBy] = useState<'recency' | 'issue'>('recency');
+    const [sortBy, setSortBy] = useState<'severity' | 'jobs' | 'recency'>('severity');
+    const [sourceView, setSourceView] = useState<'cron' | 'all'>('cron');
+    const [chip, setChip] = useState<keyof typeof FILTERS | null>(null);
 
     const load = useCallback(async () => {
         setLoading(true);
@@ -125,8 +162,6 @@ export default function CompatPanel() {
 
     useEffect(() => { load(); }, [load]);
 
-    // Probe một career URL bất kỳ, đây là tính năng chính: kiểm tra một trang
-    // tuyển dụng đích có chạy được với cấu hình hiện tại không.
     const probeOne = async () => {
         const url = probeUrl.trim();
         if (!url) return;
@@ -140,8 +175,11 @@ export default function CompatPanel() {
             });
             const d = await r.json();
             if (!r.ok) throw new Error(d.detail || `Probe lỗi (${r.status})`);
-            const v = d.record?.verdict as string;
-            setMsg(`${VERDICT_LABEL[v] || v}: ${d.record?.detail || ''}`);
+            const rec = d.record as CompatRecord | undefined;
+            if (rec) {
+                const o = outcomeOf(rec);
+                setMsg(o.ok ? `✓ Lấy được ${o.count} job` : `✕ Không lấy được — ${o.note}`);
+            }
             setProbeUrl('');
             await load();
         } catch (e) {
@@ -162,8 +200,9 @@ export default function CompatPanel() {
             if (!r.ok) throw new Error(d.detail || `Quét lỗi (${r.status})`);
             setMsg(
                 `Đã quét ${d.scanned}/${d.total_available}` +
-                `${d.truncated ? ' (giới hạn)' : ''} → ${d.usable} dùng được`,
+                `${d.truncated ? ' (giới hạn)' : ''} → ${d.usable} lấy được`,
             );
+            setSourceView('all');   // scan rows are source=scan; surface them
             await load();
         } catch (e) {
             setMsg(e instanceof Error ? e.message : 'Quét lỗi');
@@ -207,57 +246,153 @@ export default function CompatPanel() {
         setMsg('Đã xoá nhật ký.');
     };
 
-    const usable = rows.filter((l) => l.usable).length;
-    const regressed = rows.filter((l) => l.regressed).length;
-    const needsAdapter = rows.filter((l) => l.verdict === 'needs_new_adapter').length;
-    const blocked = rows.filter((l) => l.verdict === 'needs_capture' || l.verdict === 'needs_login').length;
-    // Trust signals: how many rows reflect the real ingest (source=cron) vs
-    // stale manual dry-runs, and how many usable ones lean on a fragile fallback.
-    const fromCron = rows.filter((l) => l.source === 'cron').length;
-    const fallback = rows.filter((l) => l.usable && isFallbackStrategy(l.strategy)).length;
+    // ── Dẫn xuất ──────────────────────────────────────────────────────────────
+    // "Lần cron gần nhất" luôn tính trên toàn bộ dòng cron, không phụ thuộc bộ lọc.
+    const cronRows = useMemo(() => rows.filter((l) => l.source === 'cron'), [rows]);
+    const lastCronAt = useMemo(() => cronRows.reduce((m, l) => Math.max(m, l.last_checked || 0), 0), [cronRows]);
+    const cronJobs = useMemo(() => cronRows.reduce((s, l) => s + (l.usable ? (l.job_count || 0) : 0), 0), [cronRows]);
+    const cronGot = useMemo(() => cronRows.filter((l) => l.usable).length, [cronRows]);
 
-    // "Theo loại vấn đề" groups rows by issue (broken → needs-adapter → …→ stale
-    // → ok), most actionable first, then by company; default is recency.
-    const sorted = [...rows].sort((a, b) => {
-        if (sortBy === 'issue') {
-            const ra = ISSUE_RANK[issueOf(a)] ?? 9;
-            const rb = ISSUE_RANK[issueOf(b)] ?? 9;
-            if (ra !== rb) return ra - rb;
+    // Dòng đang hiển thị: lọc theo nguồn (mặc định chỉ cron thật), rồi theo chip.
+    const scoped = useMemo(
+        () => (sourceView === 'cron' ? cronRows : rows),
+        [sourceView, cronRows, rows],
+    );
+
+    const counts = useMemo(() => ({
+        all: scoped.length,
+        got: scoped.filter(FILTERS.got).length,
+        notGot: scoped.filter(FILTERS.notGot).length,
+        regressed: scoped.filter(FILTERS.regressed).length,
+        fallback: scoped.filter(FILTERS.fallback).length,
+        adapter: scoped.filter(FILTERS.adapter).length,
+        blocked: scoped.filter(FILTERS.blocked).length,
+        novn: scoped.filter(FILTERS.novn).length,
+    }), [scoped]);
+
+    const visible = useMemo(() => {
+        const base = chip ? scoped.filter(FILTERS[chip]) : scoped;
+        return [...base].sort((a, b) => {
+            if (sortBy === 'jobs') return (b.job_count || 0) - (a.job_count || 0);
+            if (sortBy === 'recency') return (b.last_checked || 0) - (a.last_checked || 0);
+            const s = severity(a) - severity(b);
+            if (s !== 0) return s;
             return (a.company || a.host).localeCompare(b.company || b.host);
-        }
-        return (b.last_checked || 0) - (a.last_checked || 0);
-    });
+        });
+    }, [scoped, chip, sortBy]);
 
+    // ── styles ────────────────────────────────────────────────────────────────
     const btn = (extra: React.CSSProperties = {}): React.CSSProperties => ({
         padding: '8px 16px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-default)',
         background: 'var(--bg-card)', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '0.85rem',
         ...extra,
     });
-
     const input = (extra: React.CSSProperties = {}): React.CSSProperties => ({
         padding: '8px 12px', borderRadius: 'var(--radius-md)', fontSize: '0.85rem',
         border: '1px solid var(--border-default)', background: 'var(--bg-secondary)',
         color: 'var(--text-primary)', ...extra,
     });
 
+    const Chip = ({ id, label, count, color }: { id: keyof typeof FILTERS; label: string; count: number; color: string }) => {
+        const active = chip === id;
+        return (
+            <button
+                onClick={() => setChip(active ? null : id)}
+                disabled={count === 0}
+                style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6, cursor: count ? 'pointer' : 'default',
+                    padding: '4px 10px', borderRadius: 999, fontSize: '0.8rem', fontWeight: 600,
+                    border: `1px solid ${active ? color : 'var(--border-subtle)'}`,
+                    background: active ? color : 'transparent',
+                    color: active ? 'var(--text-inverse)' : color, opacity: count ? 1 : 0.4,
+                }}
+            >
+                <b>{count}</b> {label}
+            </button>
+        );
+    };
+
+    const segBtn = (on: boolean): React.CSSProperties => ({
+        padding: '5px 12px', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer', border: 'none',
+        background: on ? 'var(--accent-blue)' : 'transparent', color: on ? '#fff' : 'var(--text-muted)',
+    });
+
     return (
-        <div style={{ maxWidth: 1100, margin: '0 auto', padding: '32px 24px', color: 'var(--text-primary)' }}>
-            <h1 style={{ fontSize: '1.5rem', fontWeight: 700, marginBottom: 4 }}>🔌 Kiểm tra tương thích career page</h1>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: 20 }}>
-                Mỗi công ty lấy được job với cấu hình hiện tại không, bằng cách nào, và nếu không thì vì
-                sao. Dòng <b>nguồn=cron</b> đến thẳng từ lần ingest thật gần nhất nên khớp pool; probe/scan
-                là chạy thử thủ công (ATS feed → SPA sniff, không capture/LLM) để soi nhanh một URL và có
-                thể lệch pool.
+        <div style={{ maxWidth: 1080, margin: '0 auto', padding: '32px 24px', color: 'var(--text-primary)' }}>
+            <h1 style={{ fontSize: '1.5rem', fontWeight: 700, marginBottom: 4 }}>🔌 Hiệu năng adapter — lần cron gần nhất</h1>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: 18 }}>
+                Mỗi công ty, lần chạy gần nhất <b>có lấy được job không</b> — lấy được thì <b>bao nhiêu</b>, không
+                thì <b>vì sao</b>. Mặc định chỉ hiện dòng từ <b>cron thật</b> (khớp pool); chuyển sang “Tất cả” để
+                xem thêm các lần probe/scan thủ công.
             </p>
 
-            {/* Probe một URL bất kỳ, tính năng chính */}
-            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
+            {/* Banner: lần cron gần nhất */}
+            <div style={{
+                display: 'flex', gap: 20, flexWrap: 'wrap', alignItems: 'center', marginBottom: 16,
+                padding: '12px 16px', borderRadius: 'var(--radius-lg)',
+                border: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)',
+            }}>
+                <span style={{ fontSize: '0.9rem' }}>
+                    🕑 Lần cron gần nhất: <b>{lastCronAt ? ago(lastCronAt) : '—'}</b>
+                </span>
+                <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
+                    <b style={{ color: 'var(--text-primary)' }}>{cronRows.length}</b> công ty
+                </span>
+                <span style={{ fontSize: '0.9rem', color: 'var(--accent-green)' }}>
+                    <b>{cronGot}</b> lấy được · <b>{cronJobs}</b> job về pool
+                </span>
+                {cronRows.length - cronGot > 0 && (
+                    <span style={{ fontSize: '0.9rem', color: 'var(--accent-red)' }}>
+                        <b>{cronRows.length - cronGot}</b> không lấy được
+                    </span>
+                )}
+                <div style={{ marginLeft: 'auto', display: 'inline-flex', borderRadius: 'var(--radius-md)', overflow: 'hidden', border: '1px solid var(--border-default)' }}>
+                    <button style={segBtn(sourceView === 'cron')} onClick={() => setSourceView('cron')}>Cron thật</button>
+                    <button style={segBtn(sourceView === 'all')} onClick={() => setSourceView('all')}>Tất cả</button>
+                </div>
+            </div>
+
+            {/* Chip tóm tắt — bấm để lọc */}
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
+                <button
+                    onClick={() => setChip(null)}
+                    style={{
+                        padding: '4px 10px', borderRadius: 999, fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer',
+                        border: `1px solid ${chip === null ? 'var(--text-primary)' : 'var(--border-subtle)'}`,
+                        background: chip === null ? 'var(--text-primary)' : 'transparent',
+                        color: chip === null ? 'var(--bg-primary)' : 'var(--text-primary)',
+                    }}
+                >
+                    <b>{counts.all}</b> tất cả
+                </button>
+                <Chip id="got" label="lấy được" count={counts.got} color="var(--accent-green)" />
+                <Chip id="notGot" label="không lấy được" count={counts.notGot} color="var(--accent-red)" />
+                <span style={{ width: 1, height: 18, background: 'var(--border-default)', margin: '0 2px' }} />
+                <Chip id="regressed" label="tụt job" count={counts.regressed} color="var(--accent-red)" />
+                <Chip id="adapter" label="cần adapter" count={counts.adapter} color="var(--accent-amber)" />
+                <Chip id="blocked" label="bị chặn" count={counts.blocked} color="var(--accent-purple)" />
+                <Chip id="fallback" label="nhánh dự phòng" count={counts.fallback} color="var(--accent-amber)" />
+                <Chip id="novn" label="không job VN" count={counts.novn} color="var(--text-muted)" />
+                <select
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value as 'severity' | 'jobs' | 'recency')}
+                    title="Sắp xếp bảng"
+                    style={input({ cursor: 'pointer', marginLeft: 'auto' })}
+                >
+                    <option value="severity">Sắp xếp: Cần xử lý trước</option>
+                    <option value="jobs">Sắp xếp: Job nhiều nhất</option>
+                    <option value="recency">Sắp xếp: Mới chạy nhất</option>
+                </select>
+            </div>
+
+            {/* Công cụ probe/scan thủ công */}
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 16 }}>
                 <input
                     value={probeUrl}
                     onChange={(e) => setProbeUrl(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter') probeOne(); }}
-                    placeholder="Dán URL career page để kiểm tra…"
-                    style={input({ flex: 1, minWidth: 280 })}
+                    placeholder="Dán URL career page để kiểm tra thử…"
+                    style={input({ flex: 1, minWidth: 260 })}
                 />
                 <button onClick={probeOne} disabled={probing || !probeUrl.trim()} style={btn({
                     background: 'var(--accent-blue)', borderColor: 'var(--accent-blue)', color: '#fff',
@@ -265,133 +400,105 @@ export default function CompatPanel() {
                 })}>
                     {probing ? 'Đang kiểm tra…' : 'Kiểm tra URL'}
                 </button>
-            </div>
-
-            {/* Quét cả pool công ty nổi bật */}
-            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 16 }}>
                 <input
                     value={companyFilter}
                     onChange={(e) => setCompanyFilter(e.target.value)}
-                    placeholder="Lọc theo công ty (tuỳ chọn)"
-                    style={input({ minWidth: 220 })}
+                    placeholder="Lọc công ty khi quét"
+                    style={input({ minWidth: 160 })}
                 />
                 <button onClick={runScan} disabled={scanning} style={btn({ opacity: scanning ? 0.6 : 1 })}>
-                    {scanning ? 'Đang quét…' : 'Quét công ty nổi bật'}
+                    {scanning ? 'Đang quét…' : 'Quét lại pool'}
                 </button>
-                <select
-                    value={sortBy}
-                    onChange={(e) => setSortBy(e.target.value as 'recency' | 'issue')}
-                    title="Sắp xếp bảng"
-                    style={input({ cursor: 'pointer' })}
-                >
-                    <option value="recency">Sắp xếp: Mới nhất</option>
-                    <option value="issue">Sắp xếp: Theo loại vấn đề</option>
-                </select>
                 <button onClick={load} disabled={loading} style={btn()}>Làm mới</button>
-                <button onClick={clearAll} style={btn({ marginLeft: 'auto', color: 'var(--accent-red)' })}>Xoá nhật ký</button>
+                <button onClick={clearAll} style={btn({ color: 'var(--accent-red)' })}>Xoá nhật ký</button>
+                {msg && <span style={{ color: 'var(--text-muted)', fontSize: '0.82rem', width: '100%' }}>{msg}</span>}
             </div>
 
-            <div style={{ display: 'flex', gap: 16, marginBottom: 16, fontSize: '0.85rem' }}>
-                <span><b>{rows.length}</b> đã probe</span>
-                <span style={{ color: 'var(--accent-green)' }}><b>{usable}</b> dùng được</span>
-                {regressed > 0 && (
-                    <span style={{ color: 'var(--accent-red)' }} title="Số job tụt mạnh so với mức nền — adapter có thể đã gãy (vẫn còn ít job nên verdict vẫn 'hỗ trợ')">
-                        <b>{regressed}</b> ↓ tụt job
-                    </span>
-                )}
-                <span style={{ color: 'var(--accent-amber)' }}><b>{needsAdapter}</b> cần adapter</span>
-                <span style={{ color: 'var(--accent-purple)' }}><b>{blocked}</b> bị chặn</span>
-                <span title="Số dòng đến từ lần ingest thật (cron) — khớp pool; phần còn lại là scan/probe dry-run cũ">
-                    <b>{fromCron}</b> từ cron
-                </span>
-                {fallback > 0 && (
-                    <span style={{ color: 'var(--accent-amber)' }} title="Dùng được nhưng qua nhánh dự phòng (render/capture) — nên viết adapter riêng">
-                        <b>{fallback}</b> ⚠ fallback
-                    </span>
-                )}
-                {msg && <span style={{ color: 'var(--text-muted)', marginLeft: 'auto' }}>{msg}</span>}
-            </div>
-
-            {rows.length === 0 ? (
+            {visible.length === 0 ? (
                 <div style={{
                     padding: 40, textAlign: 'center', color: 'var(--text-muted)',
                     border: '1px dashed var(--border-default)', borderRadius: 'var(--radius-lg)',
                 }}>
-                    {loading ? 'Đang tải…' : 'Chưa có kết quả. Dán một URL để kiểm tra, hoặc quét pool công ty nổi bật.'}
+                    {loading ? 'Đang tải…'
+                        : sourceView === 'cron' && rows.length > 0
+                            ? 'Chưa có dòng nào từ cron. Bấm “Tất cả” để xem các lần probe/scan thủ công, hoặc chạy ingest.'
+                            : 'Chưa có kết quả. Dán một URL để kiểm tra, hoặc quét pool công ty nổi bật.'}
                 </div>
             ) : (
                 <div style={{ overflowX: 'auto', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.84rem' }}>
                         <thead>
                             <tr style={{ textAlign: 'left', background: 'var(--bg-secondary)', color: 'var(--text-muted)' }}>
-                                {['Kết luận', 'Công ty', 'Career page', 'Cách lấy', 'Job', 'Nguồn', 'Vướng mắc', 'Kiểm tra', ''].map((h) => (
+                                {['Công ty', 'Kết quả lần gần nhất', 'Cách lấy', 'Chạy lúc', 'Nguồn', ''].map((h) => (
                                     <th key={h} style={{ padding: '10px 12px', fontWeight: 600 }}>{h}</th>
                                 ))}
                             </tr>
                         </thead>
                         <tbody>
-                            {sorted.map((l) => (
-                                <tr key={l.url} style={{ borderTop: '1px solid var(--border-subtle)' }}>
-                                    <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }} title={l.detail}>
-                                        <span style={{ color: VERDICT_COLOR[l.verdict] || 'var(--text-muted)', fontWeight: 600 }}>
-                                            ● {VERDICT_LABEL[l.verdict] || l.verdict}
-                                        </span>
-                                        {l.regressed && (
-                                            <span title={`Job tụt còn ${l.job_count}/${l.baseline_job_count} so với mức nền — kiểm tra adapter`}
-                                                style={{
-                                                    marginLeft: 6, padding: '1px 6px', borderRadius: 6, fontSize: '0.7rem', fontWeight: 700,
-                                                    color: '#fff', background: 'var(--accent-red)', whiteSpace: 'nowrap',
-                                                }}>↓ tụt</span>
-                                        )}
-                                    </td>
-                                    <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>{l.company || l.host}</td>
-                                    <td style={{ padding: '10px 12px', maxWidth: 300 }}>
-                                        <a href={l.url} target="_blank" rel="noreferrer"
-                                            style={{ color: 'var(--accent-blue)', textDecoration: 'none' }}>
-                                            {l.host || l.url}
-                                        </a>
-                                    </td>
-                                    <td style={{ padding: '10px 12px', color: 'var(--text-muted)' }}>
-                                        {isFallbackStrategy(l.strategy) && (
-                                            <span title="Không có adapter riêng — đang dùng nhánh dự phòng (render/capture), chậm & dễ gãy"
-                                                style={{ color: 'var(--accent-amber)', marginRight: 4 }}>⚠</span>
-                                        )}
-                                        {l.strategy || (l.ats ? `ats:${l.ats}` : '-')}
-                                    </td>
-                                    <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
-                                        {l.job_count || '-'}
-                                        {l.regressed && !!l.baseline_job_count && (
-                                            <span style={{ color: 'var(--accent-red)', fontSize: '0.72rem', marginLeft: 4 }}
-                                                title="mức nền (high-water) trước khi tụt">↓{l.baseline_job_count}</span>
-                                        )}
-                                    </td>
-                                    <td style={{ padding: '10px 12px' }}>
-                                        {(() => {
-                                            const s = SOURCE_STYLE[l.source] || { label: l.source || '-', color: 'var(--text-muted)', title: '' };
-                                            return (
-                                                <span title={s.title} style={{
-                                                    fontSize: '0.72rem', fontWeight: 600, padding: '2px 7px', borderRadius: 8,
-                                                    color: s.color, border: `1px solid ${s.color}`, whiteSpace: 'nowrap',
-                                                }}>{s.label}</span>
-                                            );
-                                        })()}
-                                    </td>
-                                    <td style={{ padding: '10px 12px', color: 'var(--text-muted)' }}>
-                                        {l.blockers && l.blockers.length ? l.blockers.join(', ') : '-'}
-                                    </td>
-                                    <td style={{ padding: '10px 12px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{ago(l.last_checked)}</td>
-                                    <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
-                                        <button onClick={() => recheck(l)} disabled={busyUrl === l.url}
-                                            style={btn({ padding: '4px 10px', fontSize: '0.78rem', marginRight: 6 })}>
-                                            {busyUrl === l.url ? '…' : 'Probe lại'}
-                                        </button>
-                                        <button onClick={() => remove(l)} disabled={busyUrl === l.url}
-                                            style={btn({ padding: '4px 10px', fontSize: '0.78rem', color: 'var(--text-muted)' })}>
-                                            ✕
-                                        </button>
-                                    </td>
-                                </tr>
-                            ))}
+                            {visible.map((l) => {
+                                const o = outcomeOf(l);
+                                const s = SOURCE_STYLE[l.source] || { label: l.source || '-', color: 'var(--text-muted)', title: '' };
+                                const fallback = l.usable && isFallbackStrategy(l.strategy);
+                                return (
+                                    <tr key={l.url} style={{ borderTop: '1px solid var(--border-subtle)' }}>
+                                        {/* Công ty + link nhỏ tới career page */}
+                                        <td style={{ padding: '10px 12px', borderLeft: `3px solid ${o.color}` }}>
+                                            <div style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>{l.company || l.host}</div>
+                                            <a href={l.url} target="_blank" rel="noreferrer"
+                                                style={{ color: 'var(--text-muted)', textDecoration: 'none', fontSize: '0.74rem' }}>
+                                                {l.host || l.url} ↗
+                                            </a>
+                                        </td>
+
+                                        {/* Kết quả: lấy được N job / không lấy được + vì sao */}
+                                        <td style={{ padding: '10px 12px', maxWidth: 420 }} title={l.detail}>
+                                            {o.ok ? (
+                                                <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
+                                                    <span style={{ color: o.color, fontWeight: 700 }}>✓ Lấy được</span>
+                                                    <span style={{ fontSize: '1.05rem', fontWeight: 800 }}>{o.count}</span>
+                                                    <span style={{ color: 'var(--text-muted)' }}>job</span>
+                                                </div>
+                                            ) : (
+                                                <span style={{ color: o.color, fontWeight: 700 }}>✕ Không lấy được</span>
+                                            )}
+                                            {o.note && (
+                                                <div style={{ fontSize: '0.76rem', color: o.ok ? 'var(--accent-amber)' : 'var(--text-muted)', marginTop: 2 }}>
+                                                    {o.ok ? '⚠ ' : ''}{o.note}
+                                                </div>
+                                            )}
+                                        </td>
+
+                                        {/* Cách lấy — adapter riêng hay nhánh dự phòng */}
+                                        <td style={{ padding: '10px 12px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                                            {fallback && (
+                                                <span title="Không có adapter riêng — đang dùng nhánh dự phòng (render/capture)"
+                                                    style={{ color: 'var(--accent-amber)', marginRight: 4 }}>⚠</span>
+                                            )}
+                                            {l.strategy || (l.ats ? `ats:${l.ats}` : '—')}
+                                        </td>
+
+                                        <td style={{ padding: '10px 12px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{ago(l.last_checked)}</td>
+
+                                        <td style={{ padding: '10px 12px' }}>
+                                            <span title={s.title} style={{
+                                                fontSize: '0.72rem', fontWeight: 600, padding: '2px 7px', borderRadius: 8,
+                                                color: s.color, border: `1px solid ${s.color}`, whiteSpace: 'nowrap',
+                                            }}>{s.label}</span>
+                                        </td>
+
+                                        <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
+                                            <button onClick={() => recheck(l)} disabled={busyUrl === l.url}
+                                                style={btn({ padding: '4px 10px', fontSize: '0.78rem', marginRight: 6 })}>
+                                                {busyUrl === l.url ? '…' : 'Probe lại'}
+                                            </button>
+                                            <button onClick={() => remove(l)} disabled={busyUrl === l.url}
+                                                style={btn({ padding: '4px 10px', fontSize: '0.78rem', color: 'var(--text-muted)' })}>
+                                                ✕
+                                            </button>
+                                        </td>
+                                    </tr>
+                                );
+                            })}
                         </tbody>
                     </table>
                 </div>

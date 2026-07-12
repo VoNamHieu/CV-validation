@@ -11,6 +11,7 @@ import StepEditCv from '@/components/steps/StepEditCv';
 import CvEditorView from '@/components/views/CvEditorView';
 import HistoryView from '@/components/views/HistoryView';
 import InterviewPrepView from '@/components/views/InterviewPrepView';
+import FeaturedJobsView from '@/components/views/FeaturedJobsView';
 import Mode1ResultBanner from '@/components/Mode1ResultBanner';
 import PromotedResume from '@/components/PromotedResume';
 import Landing from '@/components/Landing';
@@ -86,6 +87,7 @@ export default function Home() {
           {view === 'editor' && <CvEditorView />}
           {view === 'history' && <HistoryView />}
           {view === 'interview' && <InterviewPrepView />}
+          {view === 'featured' && <FeaturedJobsView />}
         </main>
 
         <footer style={{

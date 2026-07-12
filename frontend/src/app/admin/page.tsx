@@ -215,7 +215,7 @@ function AdminConsole() {
                     <button key={a} onClick={() => setAmount(a)} type="button" style={{
                         padding: '5px 12px', borderRadius: 20, cursor: 'pointer', fontSize: '0.78rem', fontWeight: 600,
                         border: '1px solid var(--border-subtle)',
-                        background: amount === a ? 'var(--accent-purple, #8b5cf6)' : 'var(--bg-card)',
+                        background: amount === a ? 'var(--accent-purple, #c43b2e)' : 'var(--bg-card)',
                         color: amount === a ? 'white' : 'var(--text-secondary)',
                     }}>+{a}</button>
                 ))}
@@ -250,7 +250,7 @@ function AdminConsole() {
                 {/* Header */}
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, flexWrap: 'wrap', gap: 10 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <ShieldCheck size={22} weight="duotone" style={{ color: 'var(--accent-purple, #8b5cf6)' }} />
+                        <ShieldCheck size={22} weight="duotone" style={{ color: 'var(--accent-purple, #c43b2e)' }} />
                         <h1 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>Admin console</h1>
                     </div>
                     <button onClick={() => router.replace('/')} style={{

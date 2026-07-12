@@ -16,8 +16,8 @@ import { useRef, useEffect, useCallback } from 'react';
 
 const EDIT_STYLE = `
   [data-f] { cursor: text; transition: background 0.12s; border-radius: 2px; }
-  [data-f]:hover { background: rgba(99,102,241,0.08); outline: 1px dashed rgba(99,102,241,0.55); outline-offset: 1px; }
-  [data-f]:focus { background: rgba(99,102,241,0.06); outline: 2px solid #6366f1; outline-offset: 1px; }
+  [data-f]:hover { background: rgba(196, 59, 46,0.08); outline: 1px dashed rgba(196, 59, 46,0.55); outline-offset: 1px; }
+  [data-f]:focus { background: rgba(196, 59, 46,0.06); outline: 2px solid #c43b2e; outline-offset: 1px; }
 `;
 
 interface EditableTemplateFrameProps {

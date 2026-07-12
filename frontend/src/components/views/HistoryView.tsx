@@ -11,7 +11,7 @@ import { useAppStore, JobRecord, JobStatus, JOB_STATUS_ORDER } from '@/store/use
 // ── Status presentation ──
 const STATUS_META: Record<JobStatus, { label: string; color: string; bg: string; border: string }> = {
     saved: { label: 'Đã lưu', color: 'var(--text-secondary)', bg: 'var(--bg-elevated)', border: 'var(--border-default)' },
-    applied: { label: 'Đã ứng tuyển', color: 'var(--accent-blue)', bg: 'rgba(99, 102, 241, 0.12)', border: 'rgba(99, 102, 241, 0.3)' },
+    applied: { label: 'Đã ứng tuyển', color: 'var(--accent-blue)', bg: 'rgba(196, 59, 46, 0.12)', border: 'rgba(196, 59, 46, 0.3)' },
     interviewing: { label: 'Phỏng vấn', color: 'var(--accent-purple)', bg: 'rgba(167, 139, 250, 0.12)', border: 'rgba(167, 139, 250, 0.3)' },
     offer: { label: 'Nhận offer', color: 'var(--accent-green)', bg: 'rgba(52, 211, 153, 0.12)', border: 'rgba(52, 211, 153, 0.3)' },
     rejected: { label: 'Bị từ chối', color: 'var(--accent-red)', bg: 'rgba(248, 113, 113, 0.1)', border: 'rgba(248, 113, 113, 0.25)' },
@@ -24,7 +24,7 @@ function ScoreBadge({ score }: { score: number }) {
     let color = 'var(--accent-red)';
     let bg = 'rgba(248, 113, 113, 0.12)';
     if (score >= 80) { color = 'var(--accent-green)'; bg = 'rgba(52, 211, 153, 0.12)'; }
-    else if (score >= 60) { color = 'var(--accent-blue)'; bg = 'rgba(99, 102, 241, 0.12)'; }
+    else if (score >= 60) { color = 'var(--accent-blue)'; bg = 'rgba(196, 59, 46, 0.12)'; }
     else if (score >= 40) { color = 'var(--accent-amber)'; bg = 'rgba(251, 191, 36, 0.12)'; }
 
     return (
@@ -497,7 +497,7 @@ export default function HistoryView() {
                                         {isExpanded && (
                                             <div style={{
                                                 padding: '16px 22px 18px',
-                                                background: 'rgba(99, 102, 241, 0.03)',
+                                                background: 'rgba(196, 59, 46, 0.03)',
                                                 borderBottom: '1px solid var(--border-subtle)',
                                             }}>
                                                 <ScoreBreakdown record={record} />

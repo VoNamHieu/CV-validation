@@ -10,24 +10,24 @@
 :root {
   color-scheme: light;
 
-  /* ── Surfaces ── */
-  --bg-primary: #f6f7f9;
+  /* ── Surfaces (warm paper — Copo editorial) ── */
+  --bg-primary: #fafaf7;       /* paper */
   --bg-secondary: #ffffff;
   --bg-card: #ffffff;
-  --bg-card-hover: #f3f4f6;
-  --bg-elevated: #f9fafb;
-  --bg-glass: rgba(255, 255, 255, 0.82);
-  --bg-glass-light: rgba(255, 255, 255, 0.6);
+  --bg-card-hover: #f4f2ec;
+  --bg-elevated: #f2efe9;      /* paper-ink */
+  --bg-glass: rgba(250, 250, 247, 0.82);
+  --bg-glass-light: rgba(250, 250, 247, 0.6);
 
-  /* ── Borders ── */
-  --border-subtle: rgba(17, 24, 39, 0.07);
-  --border-default: rgba(17, 24, 39, 0.12);
-  --border-accent: rgba(17, 24, 39, 0.2);
-  --border-focus: rgba(79, 70, 229, 0.45);
+  /* ── Borders (warm mist) ── */
+  --border-subtle: rgba(20, 24, 29, 0.07);
+  --border-default: rgba(20, 24, 29, 0.12);
+  --border-accent: rgba(20, 24, 29, 0.2);
+  --border-focus: rgba(196, 59, 46, 0.45);
 
-  /* ── Text ── */
-  --text-primary: #111827;
-  --text-secondary: #4b5563;
+  /* ── Text (ink) ── */
+  --text-primary: #14181d;     /* ink */
+  --text-secondary: #5c6159;   /* quiet ink */
   /* #9097a1 read at 2.95:1 on --bg-card / 2.75:1 on --bg-primary — fails WCAG
      AA (4.5:1) for normal text. #6b7280 clears 4.5:1 on every light surface
      this token is used against (182+ usages incl. phase-progress detail text,
@@ -35,31 +35,31 @@
   --text-muted: #6b7280;
   --text-inverse: #ffffff;
 
-  /* ── Accents (tuned for contrast on light surfaces) ── */
-  --accent-blue: #4f46e5;
-  --accent-blue-glow: rgba(79, 70, 229, 0.18);
+  /* ── Accents (seal red — the one brand accent; tuned for light surfaces) ── */
+  --accent-blue: #c43b2e;      /* seal — primary action (name kept stable for components) */
+  --accent-blue-glow: rgba(196, 59, 46, 0.18);
   --accent-cyan: #0e7490;
-  --accent-purple: #7c3aed;
+  --accent-purple: #9a2a20;    /* seal-deep — secondary accent / gradient end */
   --accent-green: #059669;
   --accent-amber: #d97706;
   --accent-red: #dc2626;
   --accent-pink: #db2777;
 
   /* ── Gradients (used sparingly — brand mark, score ring) ── */
-  --gradient-hero: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
-  --gradient-hero-subtle: linear-gradient(135deg, rgba(79, 70, 229, 0.06), rgba(124, 58, 237, 0.04));
-  --gradient-card: linear-gradient(145deg, rgba(17, 24, 39, 0.015), transparent);
-  --gradient-score: linear-gradient(135deg, #4f46e5, #7c3aed);
+  --gradient-hero: linear-gradient(135deg, #c43b2e 0%, #9a2a20 100%);
+  --gradient-hero-subtle: linear-gradient(135deg, rgba(196, 59, 46, 0.06), rgba(154, 42, 32, 0.04));
+  --gradient-card: linear-gradient(145deg, rgba(20, 24, 29, 0.015), transparent);
+  --gradient-score: linear-gradient(135deg, #c43b2e, #9a2a20);
   --gradient-success: linear-gradient(135deg, #059669, #0e7490);
-  --gradient-mesh: radial-gradient(ellipse at 15% 0%, rgba(79, 70, 229, 0.05) 0%, transparent 45%),
-    radial-gradient(ellipse at 85% 10%, rgba(124, 58, 237, 0.04) 0%, transparent 45%);
+  --gradient-mesh: radial-gradient(ellipse at 15% 0%, rgba(196, 59, 46, 0.05) 0%, transparent 45%),
+    radial-gradient(ellipse at 85% 10%, rgba(154, 42, 32, 0.04) 0%, transparent 45%);
 
   /* ── Shadows (soft, low neon) ── */
   --shadow-glow: 0 0 0 rgba(0, 0, 0, 0);
   --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.08);
   --shadow-card-hover: 0 8px 24px rgba(16, 24, 40, 0.1), 0 2px 6px rgba(16, 24, 40, 0.06);
   --shadow-button: 0 1px 2px rgba(16, 24, 40, 0.12);
-  --shadow-button-hover: 0 4px 14px rgba(79, 70, 229, 0.28);
+  --shadow-button-hover: 0 4px 14px rgba(196, 59, 46, 0.28);
 
   /* ── Radius ── */
   --radius-xs: 6px;
@@ -75,6 +75,24 @@
   --duration-fast: 150ms;
   --duration-normal: 250ms;
   --duration-slow: 400ms;
+
+  /* ── Copo editorial system (manifesto look) ──
+     Warm paper + ink + ONE red "seal" accent. Being rolled across the app,
+     starting with the landing front door. Fonts are loaded in app/layout.tsx. */
+  --paper: #FAFAF7;
+  --paper-ink: #F2EFE9;      /* raised paper panel */
+  --ink: #14181D;
+  --seal: #C43B2E;
+  --seal-deep: #9A2A20;
+  --mist: #E7E8E2;           /* hairline borders on paper */
+  --mist-deep: #DDDACE;      /* borders on paper-ink panels */
+  --quiet: #5C6159;          /* muted ink */
+  --ink-quiet: #8A9088;      /* muted text on ink backgrounds */
+
+  --font-display: 'Bricolage Grotesque', 'Be Vietnam Pro', system-ui, sans-serif;
+  --font-editorial: 'Be Vietnam Pro', system-ui, sans-serif;
+  --font-letter: 'Lora', Georgia, serif;
+  --font-mono-editorial: 'IBM Plex Mono', ui-monospace, monospace;
 }
 
 [data-theme="dark"] {
@@ -91,35 +109,35 @@
   --border-subtle: rgba(255, 255, 255, 0.07);
   --border-default: rgba(255, 255, 255, 0.12);
   --border-accent: rgba(255, 255, 255, 0.2);
-  --border-focus: rgba(129, 140, 248, 0.5);
+  --border-focus: rgba(232, 96, 79, 0.5);
 
   --text-primary: #ededee;
   --text-secondary: #a1a7b3;
   --text-muted: #6b7280;
   --text-inverse: #0d0e11;
 
-  --accent-blue: #818cf8;
-  --accent-blue-glow: rgba(99, 102, 241, 0.25);
+  --accent-blue: #e8604f;      /* seal, lightened for dark surfaces */
+  --accent-blue-glow: rgba(232, 96, 79, 0.25);
   --accent-cyan: #22d3ee;
-  --accent-purple: #a78bfa;
+  --accent-purple: #d9473a;    /* seal-bright */
   --accent-green: #34d399;
   --accent-amber: #fbbf24;
   --accent-red: #f87171;
   --accent-pink: #f472b6;
 
-  --gradient-hero: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-  --gradient-hero-subtle: linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(167, 139, 250, 0.05));
+  --gradient-hero: linear-gradient(135deg, #e8604f 0%, #c43b2e 100%);
+  --gradient-hero-subtle: linear-gradient(135deg, rgba(232, 96, 79, 0.08), rgba(196, 59, 46, 0.05));
   --gradient-card: linear-gradient(145deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.01));
-  --gradient-score: linear-gradient(135deg, #6366f1, #818cf8);
+  --gradient-score: linear-gradient(135deg, #e8604f, #c43b2e);
   --gradient-success: linear-gradient(135deg, #34d399, #22d3ee);
-  --gradient-mesh: radial-gradient(ellipse at 15% 0%, rgba(99, 102, 241, 0.06) 0%, transparent 45%),
-    radial-gradient(ellipse at 85% 10%, rgba(167, 139, 250, 0.04) 0%, transparent 45%);
+  --gradient-mesh: radial-gradient(ellipse at 15% 0%, rgba(232, 96, 79, 0.06) 0%, transparent 45%),
+    radial-gradient(ellipse at 85% 10%, rgba(196, 59, 46, 0.04) 0%, transparent 45%);
 
-  --shadow-glow: 0 0 28px rgba(99, 102, 241, 0.1);
+  --shadow-glow: 0 0 28px rgba(232, 96, 79, 0.1);
   --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.4), 0 0 1px rgba(0, 0, 0, 0.6);
   --shadow-card-hover: 0 8px 28px rgba(0, 0, 0, 0.5), 0 0 1px rgba(255, 255, 255, 0.05);
   --shadow-button: 0 2px 8px rgba(0, 0, 0, 0.4);
-  --shadow-button-hover: 0 4px 16px rgba(99, 102, 241, 0.4);
+  --shadow-button-hover: 0 4px 16px rgba(232, 96, 79, 0.4);
 }
 
 @theme inline {
@@ -422,7 +440,7 @@ h1, h2, h3, h4 {
   }
 
   50% {
-    box-shadow: 0 0 40px var(--accent-blue-glow), 0 0 60px rgba(79, 143, 247, 0.1);
+    box-shadow: 0 0 40px var(--accent-blue-glow), 0 0 60px rgba(196, 59, 46, 0.1);
   }
 }
 

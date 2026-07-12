@@ -1,3 +1,4 @@
+import ipaddress
 import logging
 import os
 import sys
@@ -110,8 +111,27 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 return parts[idx] if idx >= 0 else parts[0]
         return request.client.host if request.client else "unknown"
 
+    @staticmethod
+    def _is_exempt(key: str) -> bool:
+        """Never throttle loopback/private clients. Behind the Railway edge the
+        client key is the real forwarded public IP, so a loopback/private key
+        only shows up when there's no edge in front — i.e. LOCAL DEV, where the
+        Next dev-server proxy and every API call all originate from 127.0.0.1 and
+        would otherwise collapse into ONE 30-req/min bucket. A single /admin load
+        fans out to /me + /credits/balance + /admin/check + /store/... + a burst
+        of /events, instantly tripping the cap and 429-ing /admin/check — which
+        the UI reads as 'Không kiểm tra được quyền'. Exempting private space
+        fixes dev with zero effect on the public abuse guard."""
+        try:
+            addr = ipaddress.ip_address(key)
+        except ValueError:
+            return False
+        return addr.is_loopback or addr.is_private
+
     async def dispatch(self, request: Request, call_next):
         key = self._client_key(request)
+        if self._is_exempt(key):
+            return await call_next(request)
         now = time.time()
         stamps = [t for t in self.clients[key] if now - t < self.window]
         if len(stamps) >= self.max_requests:
@@ -126,7 +146,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
-app.add_middleware(RateLimitMiddleware, max_requests=30, window_seconds=60)
+# Cap is env-tunable so ops can raise it without a code change. 30/min is tight
+# for a real SPA session (one dashboard load = a dozen+ calls); loopback/private
+# clients (local dev) are exempt entirely — see RateLimitMiddleware._is_exempt.
+app.add_middleware(
+    RateLimitMiddleware,
+    max_requests=int(os.getenv("RATE_LIMIT_MAX", "30")),
+    window_seconds=int(os.getenv("RATE_LIMIT_WINDOW", "60")),
+)
 
 # ── CORS — use explicit origin whitelist instead of wildcard (B2) ──
 allowed_origins = os.getenv(

@@ -96,7 +96,7 @@ export default function MembersPanel({ role }: { role: AdminRole }) {
             {isSuper && (
             <div className="glass-card" style={{ padding: 24, marginBottom: 18 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                    <UserPlus size={18} weight="duotone" style={{ color: 'var(--accent-purple, #8b5cf6)' }} />
+                    <UserPlus size={18} weight="duotone" style={{ color: 'var(--accent-purple, #c43b2e)' }} />
                     <h3 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>Cấp quyền admin</h3>
                 </div>
                 <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: '0 0 16px', lineHeight: 1.5 }}>

@@ -70,7 +70,7 @@ export default function BeforeAfterModal({
                     padding: '14px 18px', borderBottom: '1px solid var(--border-subtle)',
                 }}>
                     <h2 id="before-after-modal-title" style={{ fontSize: '0.98rem', fontWeight: 700, margin: 0, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <ArrowsLeftRight size={17} weight="duotone" style={{ color: 'var(--accent-purple, #8b5cf6)' }} />
+                        <ArrowsLeftRight size={17} weight="duotone" style={{ color: 'var(--accent-purple, #c43b2e)' }} />
                         So sánh CV: gốc &harr; đã tối ưu
                     </h2>
                     <button onClick={onClose} aria-label="Đóng"
@@ -82,7 +82,7 @@ export default function BeforeAfterModal({
                 <div className="ba-cols" style={{ flex: 1, display: 'flex', minHeight: 0 }}>
                     {col('CV gốc', 'var(--text-muted)', original)}
                     <div className="ba-divider" style={{ width: 1, background: 'var(--border-subtle)' }} />
-                    {col('Đã tối ưu', 'var(--accent-purple, #8b5cf6)', optimized)}
+                    {col('Đã tối ưu', 'var(--accent-purple, #c43b2e)', optimized)}
                 </div>
             </div>
 

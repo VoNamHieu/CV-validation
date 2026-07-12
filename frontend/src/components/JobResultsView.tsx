@@ -114,7 +114,7 @@ function JdBody({ text }: { text: string }) {
         if (bt !== null) {
             blocks.push(
                 <div key={i} style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-                    <span style={{ color: 'var(--accent-purple, #8b5cf6)', flexShrink: 0 }}>•</span>
+                    <span style={{ color: 'var(--accent-purple, #c43b2e)', flexShrink: 0 }}>•</span>
                     <span>{bt}</span>
                 </div>,
             );
@@ -182,7 +182,7 @@ function JobCard({ c, busy, onRemove }: { c: CandidateJob; busy: boolean; onRemo
                                 fontSize: '0.92rem', fontWeight: 600, color: 'var(--text-primary)',
                                 marginBottom: 4, textDecoration: 'none',
                             }}
-                            onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--accent-purple, #8b5cf6)'; }}
+                            onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--accent-purple, #c43b2e)'; }}
                             onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-primary)'; }}
                         >
                             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.title}</span>
@@ -228,7 +228,7 @@ function JobCard({ c, busy, onRemove }: { c: CandidateJob; busy: boolean; onRemo
                             style={{
                                 marginTop: 10, display: 'inline-flex', alignItems: 'center', gap: 5,
                                 background: 'none', border: 'none', padding: 0,
-                                color: 'var(--accent-purple, #8b5cf6)', fontSize: '0.78rem', fontWeight: 600,
+                                color: 'var(--accent-purple, #c43b2e)', fontSize: '0.78rem', fontWeight: 600,
                                 cursor: busy ? 'default' : 'pointer',
                             }}
                         >
@@ -269,7 +269,7 @@ function JobCard({ c, busy, onRemove }: { c: CandidateJob; busy: boolean; onRemo
                             {error}{' '}
                             {jdLink && (
                                 <a href={jdLink} target="_blank" rel="noopener noreferrer"
-                                    style={{ color: 'var(--accent-purple, #8b5cf6)', fontWeight: 600 }}>
+                                    style={{ color: 'var(--accent-purple, #c43b2e)', fontWeight: 600 }}>
                                     Mở trang →
                                 </a>
                             )}

@@ -173,7 +173,7 @@ export default function CreditRequestModal({
                                     <div style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-primary)' }}>
                                         {p.credits} <span style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-muted)' }}>token</span>
                                     </div>
-                                    <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--accent-purple, #8b5cf6)', marginTop: 2 }}>
+                                    <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--accent-purple, #c43b2e)', marginTop: 2 }}>
                                         {p.priceVnd.toLocaleString('vi-VN')}đ
                                     </div>
                                 </div>
@@ -272,7 +272,7 @@ function Row({ label, value, onCopy, highlight }: {
             <span style={{ color: 'var(--text-muted)' }}>{label}</span>
             <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
                 <span style={{
-                    fontWeight: 700, color: highlight ? 'var(--accent-purple, #8b5cf6)' : 'var(--text-primary)',
+                    fontWeight: 700, color: highlight ? 'var(--accent-purple, #c43b2e)' : 'var(--text-primary)',
                     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                 }}>{value}</span>
                 {onCopy && (
