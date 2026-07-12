@@ -380,7 +380,10 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="SHB",
         homepage="https://shb.com.vn",
-        career_url="https://tuyendung.shb.com.vn/",
+        # talentnet tenant — the bare host only surfaced ~7 via spa_sniff; the
+        # /tim-viec-lam/tat-ca-viec-lam/ all-jobs path routes to the talentnet
+        # adapter (paginated) → full board.
+        career_url="https://tuyendung.shb.com.vn/tim-viec-lam/tat-ca-viec-lam/vi",
     ),
     FeaturedCompany(
         name="SeABank",
@@ -413,7 +416,10 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="VPBank",
         homepage="https://vpbank.com.vn",
-        career_url="https://tuyendung.vpbank.com.vn",
+        # SuccessFactors Career Site Builder — the bare host is a JS landing with
+        # no tiles (fell to spa_sniff → ~2); /search-jobs renders the /job/ tiles
+        # the SF adapter parses (via the phase-2 render path).
+        career_url="https://tuyendung.vpbank.com.vn/search-jobs",
     ),
     FeaturedCompany(
         name="TPBank",
@@ -501,7 +507,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Hoa Sen Group",
         homepage="https://hoasengroup.vn",
-        career_url="https://hoasenjobs.com/",
+        career_url="https://hoasenjobs.com/tim-viec-lam/tat-ca-viec-lam/vi",  # talentnet all-jobs path
     ),
     FeaturedCompany(
         name="Hop Nhat Logistics",
@@ -545,7 +551,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Acecook Vietnam",
         homepage="https://acecookvietnam.vn",
-        career_url="https://acecookcareer.com/",
+        career_url="https://acecookcareer.com/tim-viec-lam/tat-ca-viec-lam/vi",  # talentnet all-jobs path
     ),
     FeaturedCompany(
         name="Suntory PepsiCo Vietnam",
@@ -618,7 +624,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="PNJ",
         homepage="https://pnj.com.vn",
-        career_url="https://tuyendung.pnj.com.vn",
+        career_url="https://tuyendung.pnj.com.vn/tim-viec-lam/tat-ca-viec-lam/vi",  # talentnet all-jobs path
     ),
     FeaturedCompany(
         name="WinMart",
@@ -675,7 +681,9 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Vinpearl",
         homepage="https://vinpearl.com",
-        career_url="https://vinpearl.talent.vn",
+        # Migrated off talent.vn to the Vingroup group portal (eHiring). companyCode
+        # is the OrgLv2Id the Vingroup adapter filters on → Vinpearl's own postings.
+        career_url="https://tuyendung.vingroup.net/jobs?companyCode=45001013",
     ),
     FeaturedCompany(
         name="AEON Việt Nam",

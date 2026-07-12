@@ -182,6 +182,18 @@ def _sf_v4_fetch(origin: str, *, locale: str, vn_facet: bool, vn_filter: bool) -
     return out
 
 
+def _sf_tile_href(href: str) -> bool:
+    """A SuccessFactors job-tile link: ``/job/<slug>/<id>/`` — optionally behind
+    ONE site-path segment (EY serves tiles at ``/ey/job/…`` because its career
+    site is mounted under ``/ey``). One segment only, so we match ``/job/`` and
+    ``/ey/job/`` but not arbitrary nav like ``/a/b/job-search``."""
+    parts = (href or "").split("/job/", 1)
+    if len(parts) != 2:
+        return False
+    prefix = parts[0]                       # "" for /job/…, "/ey" for /ey/job/…
+    return prefix == "" or (prefix.startswith("/") and prefix.count("/") == 1)
+
+
 def _successfactors(career_url: str, html: str | None) -> list[dict]:
     from bs4 import BeautifulSoup
     p = urlparse(career_url)
@@ -210,8 +222,10 @@ def _successfactors(career_url: str, html: str | None) -> list[dict]:
         # (VN-domestic SF sites often omit the location), but DROP foreign-tagged
         # rows. When VN rows run out, the caller stops (we've hit the global tail).
         added = 0
-        for a in soup.select('a[href^="/job/"]'):
+        for a in soup.select("a[href]"):
             href = a.get("href", "")
+            if not _sf_tile_href(href):
+                continue
             title = a.get_text(" ", strip=True)
             if not href or not title or len(title) < 4 or href in seen:
                 continue
@@ -331,11 +345,14 @@ def _eightfold(career_url: str) -> list[dict]:
     domain = _registrable_domain(p.netloc)
     country = os.getenv("DISCOVER_COUNTRY", "Vietnam")
     out, seen = [], set()
-    for start in range(0, 200, 50):
+    # The pcsx API serves 10 positions/response and IGNORES `num` — so the loop
+    # MUST step `start` by 10, not 50, or it skips straight past page 1's rows to
+    # an empty page and stops (silently truncating every tenant to 10 VN jobs).
+    for start in range(0, _MAX_ATS_JOBS + 10, 10):
         try:
             r = requests.get(f"{origin}/api/pcsx/search", headers=_JSON_POST, timeout=_TIMEOUT,
                              params={"domain": domain, "query": "", "location": country,
-                                     "start": start, "sort_by": "relevance", "num": 50})
+                                     "start": start, "sort_by": "relevance", "num": 10})
             if r.status_code != 200:
                 break
             data = (r.json() or {}).get("data", {}) or {}
@@ -363,7 +380,7 @@ def _eightfold(career_url: str) -> list[dict]:
                             "location": str(vn)[:120], "description": ""})
             # `count` is the API's own total — pace off it instead of a fixed
             # page cap, so a company with >30 VN postings isn't truncated.
-            if start + 50 >= (data.get("count") or 0) or len(out) >= _MAX_ATS_JOBS:
+            if start + 10 >= (data.get("count") or 0) or len(out) >= _MAX_ATS_JOBS:
                 break
         except Exception as e:
             logger.info(f"[ats] eightfold {domain} page {start} failed: {str(e)[:80]}")
@@ -787,8 +804,11 @@ def _is_amazon(career_url: str) -> bool:
 
 
 def _amazon(career_url: str) -> list[dict]:
+    # result_limit is capped at 100 server-side: a larger value (we used to send
+    # _MAX_ATS_JOBS=300) is rejected with {"error": "...", "jobs": null}, which
+    # then blew up on iteration → 0 jobs. VN has ~23 postings, well under 100.
     params = {"loc_query": "Vietnam", "country": "VNM",
-              "result_limit": _MAX_ATS_JOBS, "sort": "recent"}
+              "result_limit": min(_MAX_ATS_JOBS, 100), "sort": "recent"}
     try:
         r = requests.get("https://www.amazon.jobs/en/search.json",
                          params=params, headers=_HEADERS, timeout=_TIMEOUT)
@@ -799,7 +819,7 @@ def _amazon(career_url: str) -> list[dict]:
         logger.info(f"[ats] amazon failed: {str(e)[:80]}")
         return []
     out = []
-    for j in data.get("jobs", []):
+    for j in (data.get("jobs") or []):
         title = (j.get("title") or "").strip()
         path = j.get("job_path") or ""
         if not title or not path:
@@ -821,25 +841,51 @@ def _amazon(career_url: str) -> list[dict]:
 # supplies it via the render fallback). The career_url should already carry a
 # Vietnam location filter, so we trust it rather than per-job location parsing.
 def _is_avature(career_url: str, html: str | None) -> bool:
+    # Match on the URL too, not just HTML — is_known_ats_url() calls every gate
+    # with html=None, so an HTML-only check meant avature never registered as a
+    # known ATS (its regression signal was always blank) and the cheap html=None
+    # pass returned 0. These path shapes are Avature-specific.
+    u = (career_url or "").lower()
+    if "/externaljobs/searchjobs" in u or "/jobdetail/" in u:
+        return True
     return bool(html) and "avature" in html.lower()
 
 
 def _avature(career_url: str, html: str | None) -> list[dict]:
-    if not html:
-        return []
     from bs4 import BeautifulSoup
-    soup = BeautifulSoup(html, "html.parser")
     out, seen = [], set()
-    # Avature's job-detail path is /{locale}/jobs/JobDetail/{slug}/{id} (plural
-    # "jobs") — the old '/job/' selector never matched it. Match both.
-    for a in soup.select('a[href*="/job/"], a[href*="/JobDetail/"]'):
-        href = (a.get("href") or "").strip()
-        title = a.get_text(" ", strip=True)
-        if not href or not title or len(title) < 4 or href in seen:
-            continue
-        seen.add(href)
-        out.append({"title": title[:200], "url": urljoin(career_url, href),
-                    "location": "", "description": ""})
+    # Avature hard-caps at 6 results/page and IGNORES folderRecordsPerPage; the
+    # only way to the full board is walking &folderOffset=N (N += 6). Parsing the
+    # single handed-in page returned just 6 (Siemens VN: 6 of 19).
+    base = (career_url or "").rstrip("&")
+    sep = "&" if "?" in base else "?"
+    for offset in range(0, 6 * 25, 6):
+        if offset == 0 and html:
+            page_html = html
+        else:
+            try:
+                r = requests.get(f"{base}{sep}folderOffset={offset}",
+                                 headers=_HTML_HEADERS, timeout=_TIMEOUT)
+                if r.status_code != 200:
+                    break
+                page_html = r.text
+            except Exception:
+                break
+        soup = BeautifulSoup(page_html, "html.parser")
+        added = 0
+        # Avature's job-detail path is /{locale}/jobs/JobDetail/{slug}/{id} (plural
+        # "jobs") — the old '/job/' selector never matched it. Match both.
+        for a in soup.select('a[href*="/job/"], a[href*="/JobDetail/"]'):
+            href = (a.get("href") or "").strip()
+            title = a.get_text(" ", strip=True)
+            if not href or not title or len(title) < 4 or href in seen:
+                continue
+            seen.add(href)
+            added += 1
+            out.append({"title": title[:200], "url": urljoin(base, href),
+                        "location": "", "description": ""})
+        if added == 0 or len(out) >= _MAX_ATS_JOBS:
+            break
     logger.info(f"[ats] avature -> {len(out)} jobs ({career_url})")
     return out
 

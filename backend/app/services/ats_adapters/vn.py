@@ -28,7 +28,11 @@ def _workatsea(career_url: str) -> list[dict]:
     origin = f"{p.scheme}://{p.netloc}"
     api = "https://ats.workatsea.com/ats/api/v1/user/job/list/"
     out, seen = [], set()
-    for offset in (0, 20, 40):
+    # Walk offset until a short/empty page or the global cap. Was a fixed
+    # (0, 20, 40) tuple with a len(out) >= 40 sub-cap, which truncated big VN
+    # boards (Shopee: 252 → 40) to the first 3 pages.
+    offset = 0
+    while offset < _MAX_ATS_JOBS + 20:
         try:
             r = requests.get(api, headers=_JSON_POST, timeout=_TIMEOUT,
                              params={"region_ids": _WORKATSEA_VN_REGION, "limit": 20,
@@ -51,8 +55,9 @@ def _workatsea(career_url: str) -> list[dict]:
                 # headless render). Same id-keyed-detail class as base.vn.
                 out.append({"title": title[:200], "url": f"{origin}/job-detail/{jid}/",
                             "location": "Vietnam", "description": desc})
-            if len(jl) < 20 or len(out) >= 40:
+            if len(jl) < 20 or len(out) >= _MAX_ATS_JOBS:
                 break
+            offset += 20
         except Exception as e:
             logger.info(f"[ats] workatsea offset {offset} failed: {str(e)[:80]}")
             break
