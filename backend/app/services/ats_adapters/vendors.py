@@ -46,6 +46,9 @@ from app.services.ats_adapters.fpts import *  # noqa: F401,F403
 from app.services.ats_adapters.seabank import *  # noqa: F401,F403
 from app.services.ats_adapters.unilever import *  # noqa: F401,F403
 from app.services.ats_adapters.tasco import *  # noqa: F401,F403
+from app.services.ats_adapters.vinamilk import *  # noqa: F401,F403
+from app.services.ats_adapters.msb import *  # noqa: F401,F403
+from app.services.ats_adapters.dhl import *  # noqa: F401,F403
 from app.services.ats_adapters.decathlon import *  # noqa: F401,F403
 from app.services.ats_adapters.vingroup import *  # noqa: F401,F403
 from app.services.ats_adapters.pharmacity import *  # noqa: F401,F403
@@ -89,6 +92,7 @@ _ADAPTERS: list = [
     ("vinacapital",    lambda u, h: _is_vinacapital(u),    lambda u, h: _vinacapital(u, h)),
     ("ahamove",        _is_ahamove,                      lambda u, h: _ahamove(u)),
     ("fptsoft",        _is_fptsoft,                      lambda u, h: _fptsoft(u)),
+    ("dhl",            lambda u, h: _is_dhl(u),          lambda u, h: _dhl(u)),
     ("phenom-v2",      _is_phenom_v2,                    lambda u, h: _phenom_v2(u)),
     ("odoo",           _is_odoo_jobs,                    lambda u, h: _odoo_jobs(u, h)),
     ("phenom",         lambda u, h: _is_phenom_services(u), lambda u, h: _phenom_services(u)),
@@ -122,4 +126,6 @@ _ADAPTERS: list = [
     ("tasco",           lambda u, h: _is_tasco(u),           lambda u, h: _tasco(u)),
     ("decathlon",       lambda u, h: _is_decathlon(u),       lambda u, h: _decathlon(u)),
     ("vingroup",        lambda u, h: _is_vingroup(u),        lambda u, h: _vingroup(u)),
+    ("vinamilk",        lambda u, h: _is_vinamilk(u),        lambda u, h: _vinamilk(u)),
+    ("msb",             lambda u, h: _is_msb(u),             lambda u, h: _msb(u)),
 ]

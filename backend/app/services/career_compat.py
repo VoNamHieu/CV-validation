@@ -151,13 +151,12 @@ def verdict_from_signals(url: str, *, http_ok: bool, html: str, jobs: list[dict]
     from app.services.ats_adapters import core as ats
 
     html_low = (html or "").lower()
-    if _has(html_low, _ANTIBOT_MARKERS) or (not http_ok and "403" in fetch_error):
-        return _verdict("needs_capture", blockers=["anti_bot"], http_code=403,
-                        detail="anti-bot interstitial — route via extension capture")
-    if _has(html_low, _LOGIN_MARKERS):
-        return _verdict("needs_login", blockers=["login"],
-                        detail="listing appears to be behind authentication")
 
+    # Jobs in hand beat any wall marker. A page can carry a nav "Đăng nhập" link
+    # (MSB) or a stale anti-bot string in a script and STILL have served us real
+    # postings — treating those markers as blocking here dropped the jobs and
+    # mislabeled the site needs_login/needs_capture. So classify a non-empty
+    # `jobs` first; only fall through to the wall markers when we got nothing.
     if jobs:
         name = jobs[0].get("source") or ats_sig or "ats"
         strategy = "spa_sniff" if rendered else f"ats:{name}"
@@ -175,6 +174,13 @@ def verdict_from_signals(url: str, *, http_ok: bool, html: str, jobs: list[dict]
         return _verdict(verdict, strategy=strategy, ats=name,
                         job_count=len(jobs), samples=_samples(jobs),
                         detail=f"{len(jobs)} jobs via {via}; location n/a")
+
+    if _has(html_low, _ANTIBOT_MARKERS) or (not http_ok and "403" in fetch_error):
+        return _verdict("needs_capture", blockers=["anti_bot"], http_code=403,
+                        detail="anti-bot interstitial — route via extension capture")
+    if _has(html_low, _LOGIN_MARKERS):
+        return _verdict("needs_login", blockers=["login"],
+                        detail="listing appears to be behind authentication")
 
     if not http_ok:
         return _verdict("unsupported", blockers=["unreachable"],
