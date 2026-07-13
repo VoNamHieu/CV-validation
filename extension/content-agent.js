@@ -941,6 +941,9 @@ function scanButtons() {
 
     for (const el of allClickables) {
         if (!el.offsetParent) continue;
+        // Never offer a third-party "Apply with Indeed/LinkedIn" shortcut to the
+        // LLM — clicking it hands the flow to a foreign login and loops.
+        if (isThirdPartyApply(el)) continue;
         const text = el.textContent?.trim().toLowerCase() || '';
         if (!text || text.length > 50) continue;
 
@@ -1184,6 +1187,40 @@ async function callAgentPlan(pageState, profileData, history, hasCV) {
 // Find "Apply" button on page
 // ═══════════════════════════════════════════════════════════════════
 
+// "Apply with Indeed / LinkedIn / Google" style shortcuts hand the application
+// off to a THIRD-PARTY provider (a foreign login / different form) instead of the
+// employer's own form. Clicking one derails auto-apply into a redirect/login loop
+// (the exact "reload + click lung tung" symptom). Detect them so BOTH the apply
+// hunt and the action list skip them.
+function isThirdPartyApply(el) {
+    if (!el) return false;
+    const t = (el.textContent || '').toLowerCase();
+    const href = ((el.getAttribute && el.getAttribute('href')) || '').toLowerCase();
+    // Third-party = a KNOWN external provider (Indeed/LinkedIn/…) named next to an
+    // apply / sign-in verb, or a link straight to that provider. It is NOT enough
+    // to say "apply with …": "Apply with CV / resume / profile / your CV / email"
+    // is the EMPLOYER's own form and must be clicked — those name no provider.
+    const PROVIDER = /indeed|linkedin|glassdoor|ziprecruiter/;
+    if (PROVIDER.test(t) && /(apply|sign\s*in|log\s*in|continue|đăng nhập)/.test(t)) return true;
+    if (/indeed\.com|linkedin\.com\/(oauth|uas|checkpoint)|glassdoor\.com|ziprecruiter\.com/.test(href)) return true;
+    return false;
+}
+
+// Are we already ON an application form? (Several visible fillable fields, or an
+// apply-mode URL with at least one.) If so the agent must fill DIRECTLY and NOT
+// hunt for an "Apply" button — on a form page that hunt matches a third-party
+// shortcut and loops. Search forms rarely have 3+ fillable fields, so this
+// doesn't false-positive on a listing page's "search jobs" box.
+function isApplicationFormPage() {
+    const u = location.href.toLowerCase();
+    const urlApply = /[?&]apply=|\/apply(\/|$|\?|#)|\/application|applicationform|jobapplication/.test(u);
+    const fields = [...document.querySelectorAll(
+        'input[type="text"], input[type="email"], input[type="tel"], input[type="url"], ' +
+        'input[type="number"], input:not([type]), textarea, select, input[type="file"]'
+    )].filter(el => el.offsetParent !== null);
+    return fields.length >= 3 || (urlApply && fields.length >= 1);
+}
+
 function findApplyButton() {
     const applyTexts = [
         'ứng tuyển', 'apply', 'nộp đơn', 'apply now',
@@ -1195,12 +1232,12 @@ function findApplyButton() {
         '[class*="apply" i]:not(nav *), [class*="btn-apply" i], ' +
         'a[href*="apply"], button[data-action*="apply"]'
     );
-    if (byClass && byClass.offsetParent) return byClass;
+    if (byClass && byClass.offsetParent && !isThirdPartyApply(byClass)) return byClass;
 
     const allClickables = document.querySelectorAll('button, a, [role="button"]');
     for (const el of allClickables) {
         const text = el.textContent?.trim().toLowerCase() || '';
-        if (applyTexts.some(t => text.includes(t)) && el.offsetParent) {
+        if (applyTexts.some(t => text.includes(t)) && el.offsetParent && !isThirdPartyApply(el)) {
             return el;
         }
     }
@@ -1261,20 +1298,29 @@ async function runAgentLoop(profile) {
     });
 
     try {
-        // Step 0: Find and click Apply button
-        showProgress(0, AGENT_MAX_ITERATIONS, 'Tìm nút Ứng tuyển...');
+        // Step 0: click an Apply button ONLY if we're not already on the form.
+        // On an application form (e.g. Trakstar's ?apply=true) hunting for "Apply"
+        // matches a third-party shortcut ("Apply with Indeed") and hijacks the
+        // flow into a redirect/reload loop — so when the form is here, fill it.
+        showProgress(0, AGENT_MAX_ITERATIONS, 'Kiểm tra trang...');
         await sleep(1000);
 
-        const applyBtn = findApplyButton();
-        if (applyBtn) {
-            console.log('[Copo Apply] step0: clicked Apply button:', (applyBtn.innerText || applyBtn.value || '').trim().slice(0, 40));
-            applyBtn.click();
-            showProgress(0, AGENT_MAX_ITERATIONS, 'Đã click nút Ứng tuyển, chờ form...');
-            await sleep(2000);
+        if (isApplicationFormPage()) {
+            console.log('[Copo Apply] step0: already on an application form — filling directly (skip Apply hunt)', location.href);
+            showProgress(0, AGENT_MAX_ITERATIONS, 'Đã ở form ứng tuyển, bắt đầu điền...');
+            await sleep(300);
         } else {
-            console.log('[Copo Apply] step0: no Apply button found — scanning current form');
-            showProgress(0, AGENT_MAX_ITERATIONS, 'Không tìm thấy nút Apply, scan form hiện tại...');
-            await sleep(500);
+            const applyBtn = findApplyButton();
+            if (applyBtn) {
+                console.log('[Copo Apply] step0: clicked Apply button:', (applyBtn.innerText || applyBtn.value || '').trim().slice(0, 40));
+                applyBtn.click();
+                showProgress(0, AGENT_MAX_ITERATIONS, 'Đã click nút Ứng tuyển, chờ form...');
+                await sleep(2000);
+            } else {
+                console.log('[Copo Apply] step0: no Apply button found — scanning current form');
+                showProgress(0, AGENT_MAX_ITERATIONS, 'Không tìm thấy nút Apply, scan form hiện tại...');
+                await sleep(500);
+            }
         }
 
         // Scroll to discover all fields
@@ -1704,34 +1750,54 @@ function injectFloatingButton(profile) {
 // Initialize
 // ═══════════════════════════════════════════════════════════════════
 
+// A pendingAutoApply flag older than this is stale (e.g. the apply tab closed
+// before reporting) — do NOT let it auto-fire on some unrelated job page the
+// user opens later. The background clears it on result / tab-close, but this is
+// the content-side backstop.
+const APPLY_SESSION_TTL_MS = 10 * 60 * 1000;
+
 async function init() {
     // Small grace period so we don't race with the very first paint.
     await sleep(800);
 
     try {
         const data = await new Promise(r => {
-            chrome.storage.local.get(['pendingAutoApply', 'jobfitProfile', 'batchMode'], r);
+            chrome.storage.local.get(['pendingAutoApply', 'jobfitProfile', 'batchMode', 'applySession'], r);
         });
 
         // Auto-apply was triggered from the web app / batch flow → run immediately,
         // do NOT gate on heuristics (the user already chose this URL).
         if (data.pendingAutoApply && data.jobfitProfile) {
-            const isBatch = data.batchMode === true;
+            const sess = data.applySession || {};
+            const fresh = sess.startedAt && (Date.now() - sess.startedAt < APPLY_SESSION_TTL_MS);
+            if (!fresh) {
+                // Stale flag → clear and fall through to manual mode.
+                chrome.storage.local.remove(['pendingAutoApply', 'autoApplyJobUrl', 'batchMode', 'applySession']);
+            } else if (window.__copoAgentStarted) {
+                // This document already has an agent running (e.g. declarative +
+                // a programmatic re-inject after a redirect) — don't double-run.
+                return;
+            } else {
+                window.__copoAgentStarted = true;
+                const isBatch = data.batchMode === true;
 
-            await new Promise(r => {
-                chrome.storage.local.remove(['pendingAutoApply', 'autoApplyJobUrl', 'batchMode'], r);
-            });
+                // IMPORTANT: do NOT clear pendingAutoApply here. It must survive a
+                // full-page redirect (job page → "Apply" → the form on another ATS
+                // domain) so the agent re-injected on the landing page RESUMES the
+                // fill. Background owns the flag's lifecycle: it clears it on
+                // AUTO_APPLY_RESULT, on the apply tab closing, or when the redirect
+                // chain exceeds its hop budget.
+                console.log(`[Copo Agent] Auto-apply triggered (batch: ${isBatch}, host: ${location.hostname})`);
 
-            console.log(`[Copo Agent] Auto-apply triggered (batch: ${isBatch})`);
+                showToast(isBatch
+                    ? '🚀 Batch Apply — Đang xử lý job này...'
+                    : '🚀 Copo Agent đang xử lý...', 0);
+                await sleep(500);
+                document.getElementById('jobfit-toast')?.remove();
 
-            showToast(isBatch
-                ? '🚀 Batch Apply — Đang xử lý job này...'
-                : '🚀 Copo Agent đang xử lý...', 0);
-            await sleep(500);
-            document.getElementById('jobfit-toast')?.remove();
-
-            await runAgentLoop(data.jobfitProfile);
-            return;
+                await runAgentLoop(data.jobfitProfile);
+                return;
+            }
         }
     } catch (e) {
         console.warn('[Copo Agent] Auto-apply check failed:', e);

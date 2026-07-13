@@ -1,13 +1,14 @@
 {
   "manifest_version": 3,
   "name": "Copo — Auto Apply",
-  "version": "2.5.1",
+  "version": "2.6.0",
   "description": "AI Agent tự động ứng tuyển trên BẤT KỲ job site nào với CV đã optimize từ Copo",
   "permissions": [
     "activeTab",
     "storage",
     "tabs",
-    "scripting"
+    "scripting",
+    "webNavigation"
   ],
   "host_permissions": [
     "https://*.topcv.vn/*",

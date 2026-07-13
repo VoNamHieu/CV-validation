@@ -102,18 +102,9 @@ async function ensureHostAccess(url) {
     }
 }
 
-// Inject the agent into a granted UNKNOWN host once the tab finishes loading
-// (known hosts already have it via the declarative content script).
-function injectAgentOnLoad(tabId) {
-    const listener = (id, info) => {
-        if (id !== tabId || info.status !== 'complete') return;
-        chrome.tabs.onUpdated.removeListener(listener);
-        chrome.scripting.insertCSS({ target: { tabId }, files: ['content.css'] }).catch(() => { });
-        chrome.scripting.executeScript({ target: { tabId }, files: ['utils.js', 'content-agent.js'] })
-            .catch((e) => console.warn('[Copo] inject agent failed:', e?.message || e));
-    };
-    chrome.tabs.onUpdated.addListener(listener);
-}
+// (Agent injection for granted UNKNOWN hosts is handled per apply-session by the
+// webNavigation.onCompleted → ensureAgentInjected path below, which also covers
+// redirect targets — a one-shot on-load inject couldn't.)
 
 // ─── Credit metering ────────────────────────────────────────────────────────
 // Charge the user for an LLM-backed action via the web app's /api/credits/spend
@@ -143,6 +134,102 @@ async function extSpend(action, units = 1) {
     }
 }
 
+// ─── Apply-session: follow the flow across full-page redirects / new tabs ────
+// One "apply" is rarely one page. Clicking Apply frequently does a full-page
+// redirect to another ATS domain, or opens the form in a NEW tab — and a content
+// script's JS context dies on a full navigation, so runAgentLoop can't just
+// "continue". We instead keep the driven tab under a lightweight session:
+// pendingAutoApply stays set (the re-injected agent RESUMES the fill), we cap the
+// redirect chain, adopt a spawned tab, and re-inject on granted unknown hosts.
+// Known ATS targets re-inject declaratively (manifest content_scripts), so this
+// works out of the box for job-page → known-ATS redirects.
+const APPLY_MAX_HOPS = 6;   // initial job page + up to ~5 redirects before we bail
+let applyTabId = null;
+let applyHops = 0;
+
+function startApplySession(tabId, jobUrl) {
+    applyTabId = tabId;
+    applyHops = 0;
+    let jobHost = '';
+    try { jobHost = new URL(jobUrl).hostname; } catch (e) { }
+    chrome.storage.local.set({ applySession: { tabId, jobHost, startedAt: Date.now() } });
+}
+function endApplySession() {
+    applyTabId = null;
+    applyHops = 0;
+    chrome.storage.local.remove(['applySession']);
+}
+
+// Ensure the agent is present on a (possibly redirected) apply page. Skip KNOWN
+// hosts — they inject content-agent.js declaratively, and re-executing that file
+// into a document that already has it throws ("Identifier already declared").
+// Unknown hosts have no declarative match, so inject once, guarded by a page flag
+// so a repeat onCompleted can't double-run it.
+async function ensureAgentInjected(tabId, url) {
+    if (isKnownHost(url)) return;
+    const access = await ensureHostAccess(url);
+    if (!access.ok) return;   // host not granted mid-flow (no gesture) → can't drive it
+    try {
+        const [{ result: already }] = await chrome.scripting.executeScript({
+            target: { tabId }, func: () => !!window.__copoAgentInjected,
+        });
+        if (already) return;
+        await chrome.scripting.executeScript({ target: { tabId }, func: () => { window.__copoAgentInjected = true; } });
+        await chrome.scripting.insertCSS({ target: { tabId }, files: ['content.css'] }).catch(() => { });
+        await chrome.scripting.executeScript({ target: { tabId }, files: ['utils.js', 'content-agent.js'] });
+    } catch (e) {
+        console.warn('[Copo] ensureAgentInjected failed:', e?.message || e);
+    }
+}
+
+// Bound the redirect chain — a bounce loop or a redirect to an unrelated page
+// must not keep the agent running forever.
+chrome.webNavigation.onCommitted.addListener((d) => {
+    if (d.frameId !== 0 || d.tabId !== applyTabId) return;
+    applyHops++;
+    if (applyHops > APPLY_MAX_HOPS) {
+        console.warn(`[Copo] apply: redirect chain > ${APPLY_MAX_HOPS} hops — aborting session`);
+        chrome.storage.local.remove(['pendingAutoApply', 'autoApplyJobUrl']);
+        if (isProcessing && currentJobIndex >= 0 && currentJobIndex < applyQueue.length) {
+            applyQueue[currentJobIndex].status = 'error';
+            applyQueue[currentJobIndex].result = { success: false, detail: 'Chuỗi redirect quá dài — bỏ qua job này.' };
+            persistState(); broadcastProgress();
+            endApplySession();
+            setTimeout(() => processNextJob(), TAB_DELAY_MS);
+        } else {
+            endApplySession();
+        }
+    }
+});
+
+// After each full page load on the apply tab, make sure the agent is running —
+// pendingAutoApply is still set, so it resumes the fill on the redirect target.
+chrome.webNavigation.onCompleted.addListener((d) => {
+    if (d.frameId !== 0 || d.tabId !== applyTabId) return;
+    ensureAgentInjected(d.tabId, d.url);
+});
+
+// Apply opened the form in a NEW tab (target=_blank). Adopt it as the tab we
+// drive so redirect-following + batch result routing track the real form tab.
+chrome.webNavigation.onCreatedNavigationTarget.addListener((d) => {
+    if (d.sourceTabId !== applyTabId) return;
+    console.log('[Copo] apply: adopting spawned tab', d.tabId, 'from', d.sourceTabId);
+    applyTabId = d.tabId;
+    if (isProcessing) currentTabId = d.tabId;   // keep AUTO_APPLY_RESULT routing correct
+    jobStartedAt = Date.now();
+    // known host → declarative agent resumes; unknown → onCompleted injects.
+});
+
+// Single-apply tab closed before reporting → clear the stale pending flag so it
+// can't auto-fire on the next job page the user opens. (Batch has its own
+// watchdog + queue advance, so only touch this outside a batch.)
+chrome.tabs.onRemoved.addListener((tabId) => {
+    if (tabId === applyTabId && !isProcessing) {
+        chrome.storage.local.remove(['pendingAutoApply', 'autoApplyJobUrl']);
+        endApplySession();
+    }
+});
+
 // ─── Single auto-apply (shared by relay + external paths) ───
 function handleAutoApplyStart(message, sendResponse) {
     const { jobUrl, profile } = message;
@@ -160,6 +247,7 @@ function handleAutoApplyStart(message, sendResponse) {
         jobfitProfile: profile,
         pendingAutoApply: true,
         autoApplyJobUrl: jobUrl,
+        batchMode: false,   // don't inherit a stale batchMode from a prior batch
     };
     // Per-job CV file from the web app (rendered at Optimize time) so the
     // agent can satisfy required file-upload fields on single applies too.
@@ -185,7 +273,7 @@ function handleAutoApplyStart(message, sendResponse) {
         }
         chrome.storage.local.set(storage, () => {
             chrome.tabs.create({ url: jobUrl, active: true }, (tab) => {
-                if (!access.known) injectAgentOnLoad(tab.id);  // unknown host: no declarative script
+                startApplySession(tab.id, jobUrl);  // follow redirects/new-tabs; onCompleted injects unknown hosts
                 console.log('[Copo] Auto Apply: opened tab', tab.id, 'for', jobUrl);
                 sendResponse({ success: true, tabId: tab.id });
             });
@@ -616,7 +704,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         applyQueue = [];
         currentJobIndex = -1;
         currentTabId = null;
-        chrome.storage.local.remove(['applyQueue', 'isProcessing', 'currentJobIndex', 'currentTabId', 'jobStartedAt']);
+        chrome.storage.local.remove(['applyQueue', 'isProcessing', 'currentJobIndex', 'currentTabId', 'jobStartedAt', 'pendingAutoApply', 'autoApplyJobUrl', 'batchMode']);
+        endApplySession();
         broadcastProgress();
         sendResponse({ success: true });
         return true;
@@ -672,6 +761,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         } else {
             // Single apply (not batch)
             chrome.storage.local.remove(['pendingAutoApply', 'autoApplyJobUrl']);
+            endApplySession();
         }
 
         sendResponse({ success: true });
@@ -690,6 +780,8 @@ function processNextJob() {
         console.log('[Copo] Batch Apply: all jobs completed!');
         isProcessing = false;
         currentTabId = null;
+        chrome.storage.local.remove(['pendingAutoApply', 'autoApplyJobUrl', 'batchMode']);
+        endApplySession();
         persistState();
         broadcastProgress();
         return;
@@ -748,7 +840,7 @@ function processNextJob() {
             chrome.tabs.create({ url: job.jobUrl, active: true }, (tab) => {
                 currentTabId = tab.id;
                 jobStartedAt = Date.now();
-                if (!access.known) injectAgentOnLoad(tab.id);  // unknown host: inject agent manually
+                startApplySession(tab.id, job.jobUrl);  // follow redirects/new-tabs; onCompleted injects unknown hosts
                 persistState();
                 broadcastProgress();
 
