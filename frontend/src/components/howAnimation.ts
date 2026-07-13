@@ -311,7 +311,10 @@ button.pp:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 }
 
 /* ---- heading ---- */
+/* stationary heading — sits above the video (z-index) so when the full-width
+   video lifts up under it, the title reads on top; no overlap once contained. */
 .how-head{
+  position:relative;z-index:5;
   text-align:center;max-width:640px;margin-bottom:clamp(44px,7vh,84px);
   opacity:0;transform:translateY(22px);
   transition:opacity .9s cubic-bezier(.16,.84,.24,1), transform .9s cubic-bezier(.16,.84,.24,1);
@@ -338,7 +341,7 @@ button.pp:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
 /* ---- the floating stage ---- */
 .float{
-  position:relative;width:100%;max-width:1000px;
+  position:relative;z-index:1;width:100%;max-width:var(--float-mw,1000px);
   perspective:1800px;
   opacity:0;transform:translateY(40px);
   transition:opacity 1s cubic-bezier(.16,.84,.24,1), transform 1s cubic-bezier(.16,.84,.24,1);
@@ -1402,6 +1405,55 @@ if(reduce){
     requestAnimationFrame(loop2);
   });
 }
+  /* ── Scroll-scale: the stage enters at full width and shrinks to its
+     contained 1000px as it settles into view. We drive --float-mw (the .float
+     max-width); a ResizeObserver on the stage re-runs measure() so K (scene
+     scale) refits crisply the whole way — measure() alone only fires on window
+     resize, which a width-only change wouldn't trigger. No-op on small screens
+     (available width ≤ contained), so the panel just stays contained there. ── */
+  (function(){
+    var CONTAINED = 1000;                       // resting width — matches .float
+    var gap0 = 0;                               // title-top → video-top distance at rest
+    function availW(){                          // .how content box = float's max width
+      return Math.max(CONTAINED, floatEl.parentElement.getBoundingClientRect().width - 40);
+    }
+    function measureGap(){                       // measured with lift removed, so it's stable
+      var prev = floatEl.style.marginTop;
+      floatEl.style.marginTop = '0px';
+      gap0 = floatEl.getBoundingClientRect().top - headEl.getBoundingClientRect().top;
+      floatEl.style.marginTop = prev;
+    }
+    function update(){
+      var vh = window.innerHeight || 800;
+      // Progress read from the STATIONARY title (not the video) so lifting the
+      // video can't feed back into the measurement. 0 while the section enters
+      // (title near viewport bottom) → 1 once it's settled near the top.
+      var htop = headEl.getBoundingClientRect().top;
+      var start = vh * 0.85, end = vh * 0.20;
+      var p = (start - htop) / (start - end);
+      p = p < 0 ? 0 : p > 1 ? 1 : p;
+      var w = availW();
+      floatEl.style.setProperty('--float-mw', (w + (CONTAINED - w) * p).toFixed(0) + 'px');
+      // Full width → video lifts up under the fixed title (title overlays it);
+      // contained → drops back to its resting spot below the title (no overlap).
+      floatEl.style.marginTop = (-gap0 * (1 - p)).toFixed(0) + 'px';
+    }
+    var ticking = false;
+    function onScroll(){
+      if (ticking) return; ticking = true;
+      requestAnimationFrame(function(){ ticking = false; update(); });
+    }
+    function onResize(){ measureGap(); update(); }
+    reg(window, 'scroll', onScroll, { passive: true });
+    reg(window, 'resize', onResize);
+    measureGap(); update();
+    if (typeof ResizeObserver !== 'undefined') {
+      var mwObs = new ResizeObserver(function(){ measure(); measureButtons(); });
+      mwObs.observe($('stage'));
+      cleanups.push(function(){ try { mwObs.disconnect(); } catch (e) {} });
+    }
+  })();
+
   cleanups.push(function(){ try { revObs.disconnect(); } catch (e) {} try { playObs.disconnect(); } catch (e) {} });
   return function(){ __alive = false; cleanups.forEach(function(f){ try { f(); } catch (e) {} }); };
 }
