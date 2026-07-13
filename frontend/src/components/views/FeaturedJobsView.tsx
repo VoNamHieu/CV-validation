@@ -6,7 +6,7 @@
 // flow via the store, same path a public /j/<slug> page uses) and "Xem chi
 // tiết" (opens the full self-hosted landing page). Shown only inside the authed
 // app shell, so no auth guard here.
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
     ArrowLeft, ArrowSquareOut, Sparkle, MapPin, Buildings,
@@ -21,6 +21,7 @@ type FeaturedJob = {
     title?: string;
     company_name?: string;
     location?: string;
+    industry?: string;
     role_family?: string;
     seniority?: string;
     has_logo?: boolean;
@@ -48,6 +49,20 @@ function seniorityBadge(sen?: string): string {
     return 'Toàn thời gian';
 }
 
+// Level filter: map each raw taxonomy seniority to a compact VN label, ordered
+// entry-level → executive so the menu reads top-down. Filtering matches the raw
+// `seniority` value exactly (keyword match, no embedding) — the label is display
+// only. Unknown values fall through to their raw string.
+const LEVEL_ORDER = ['Intern/Fresher', 'Junior', 'Senior', 'Lead/Manager', 'Director/Head+'];
+const LEVEL_LABEL: Record<string, string> = {
+    'Intern/Fresher': 'Thực tập / Fresher',
+    'Junior': 'Junior',
+    'Senior': 'Senior',
+    'Lead/Manager': 'Quản lý',
+    'Director/Head+': 'Giám đốc / Head',
+};
+const levelLabel = (s: string) => LEVEL_LABEL[s] || s;
+
 const logoSrc = (slug: string) => `/api/store/promoted/logo-by-slug/${encodeURIComponent(slug)}`;
 
 export default function FeaturedJobsView() {
@@ -60,6 +75,11 @@ export default function FeaturedJobsView() {
     const [mobileOpen, setMobileOpen] = useState(false);
     const [details, setDetails] = useState<Record<string, JobDetail>>({});
     const [detailStatus, setDetailStatus] = useState<'idle' | 'loading' | 'error'>('idle');
+    // Keyword (structured) filters over the loaded featured set — industry +
+    // seniority, matched exactly against each job's own field. No pool search,
+    // no embedding: we just narrow the ~24 curated cards already in hand.
+    const [industryFilter, setIndustryFilter] = useState('');
+    const [levelFilter, setLevelFilter] = useState('');
 
     // "Tối ưu CV cho job này" — seeding pendingPromotedSlug is exactly what a
     // public /j/<slug> CTA does; PromotedResume (mounted in the app shell) picks
@@ -103,6 +123,34 @@ export default function FeaturedJobsView() {
         return () => { alive = false; };
     }, [selected, details]);
 
+    // Dropdown options = only the industries / levels actually present in the
+    // loaded cards, so a filter never lands on an empty result. Industries are
+    // ordered by how many jobs carry them; levels by seniority rank.
+    const industryOpts = useMemo(() => {
+        const m = new Map<string, number>();
+        for (const j of jobs) if (j.industry) m.set(j.industry, (m.get(j.industry) || 0) + 1);
+        return [...m.entries()].sort((a, b) => b[1] - a[1]);
+    }, [jobs]);
+    const levelOpts = useMemo(() => {
+        const s = new Set<string>();
+        for (const j of jobs) if (j.seniority) s.add(j.seniority);
+        const rank = (v: string) => { const i = LEVEL_ORDER.indexOf(v); return i < 0 ? 99 : i; };
+        return [...s].sort((a, b) => rank(a) - rank(b));
+    }, [jobs]);
+
+    const visibleJobs = useMemo(() => jobs.filter((j) =>
+        (!industryFilter || j.industry === industryFilter) &&
+        (!levelFilter || j.seniority === levelFilter),
+    ), [jobs, industryFilter, levelFilter]);
+
+    // Keep the selection valid as filters change: if the selected card was
+    // filtered out, jump to the first still-visible one so the detail pane never
+    // shows a job the list no longer contains.
+    useEffect(() => {
+        if (!visibleJobs.length) return;
+        if (!visibleJobs.some((j) => j.slug === selected)) setSelected(visibleJobs[0].slug);
+    }, [visibleJobs, selected]);
+
     const selectJob = (slug: string) => { setSelected(slug); setMobileOpen(true); };
 
     const listMeta = (j: FeaturedJob) =>
@@ -130,10 +178,47 @@ export default function FeaturedJobsView() {
                     {status === 'ready' && 'Chưa có cơ hội nào được đăng. Quay lại sau nhé.'}
                 </div>
             ) : (
-                <div className={styles.layout}>
+                <>
+                    {(industryOpts.length > 1 || levelOpts.length > 1) && (
+                        <div className={styles.filterBar}>
+                            <select
+                                className={`${styles.filterSelect} ${industryFilter ? styles.filterSelectActive : ''}`}
+                                value={industryFilter}
+                                onChange={(e) => setIndustryFilter(e.target.value)}
+                                aria-label="Lọc theo ngành"
+                            >
+                                <option value="">Tất cả ngành</option>
+                                {industryOpts.map(([name, n]) => (
+                                    <option key={name} value={name}>{name} ({n})</option>
+                                ))}
+                            </select>
+                            <select
+                                className={`${styles.filterSelect} ${levelFilter ? styles.filterSelectActive : ''}`}
+                                value={levelFilter}
+                                onChange={(e) => setLevelFilter(e.target.value)}
+                                aria-label="Lọc theo cấp bậc"
+                            >
+                                <option value="">Tất cả cấp bậc</option>
+                                {levelOpts.map((s) => (
+                                    <option key={s} value={s}>{levelLabel(s)}</option>
+                                ))}
+                            </select>
+                            {(industryFilter || levelFilter) && (
+                                <button type="button" className={styles.filterReset}
+                                    onClick={() => { setIndustryFilter(''); setLevelFilter(''); }}>
+                                    Xoá lọc
+                                </button>
+                            )}
+                            <span className={styles.filterCount}>{visibleJobs.length} vị trí</span>
+                        </div>
+                    )}
+
+                    <div className={styles.layout}>
                     {/* ── Left: job list ── */}
                     <div className={styles.list}>
-                        {jobs.map((j) => {
+                        {visibleJobs.length === 0 ? (
+                            <div className={styles.listEmpty}>Không có vị trí nào khớp bộ lọc.</div>
+                        ) : visibleJobs.map((j) => {
                             const active = j.slug === selected;
                             return (
                                 <button
@@ -231,7 +316,8 @@ export default function FeaturedJobsView() {
                             </>
                         ) : null}
                     </div>
-                </div>
+                    </div>
+                </>
             )}
         </div>
     );

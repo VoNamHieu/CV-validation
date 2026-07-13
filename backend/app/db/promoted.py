@@ -145,6 +145,7 @@ async def list_featured(*, limit: int = 12) -> list[dict]:
         "SELECT slug, snapshot->>'title' AS title, "
         "snapshot->>'company_name' AS company_name, "
         "snapshot->>'location' AS location, "
+        "snapshot->>'industry' AS industry, "
         "snapshot->>'role_family' AS role_family, "
         "snapshot->>'seniority' AS seniority, "
         "(snapshot ? 'logo_b64') AS has_logo "

@@ -46,6 +46,66 @@
     font-size: 0.95rem;
 }
 
+/* ── filter bar (industry + level) ── */
+.filterBar {
+    max-width: 1180px;
+    margin: 0 auto 14px;
+    padding: 0 24px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+}
+.filterSelect {
+    appearance: none;
+    -webkit-appearance: none;
+    padding: 8px 32px 8px 14px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: 999px;
+    cursor: pointer;
+    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 11px center;
+    transition: border-color 0.18s ease, color 0.18s ease;
+}
+.filterSelect:hover {
+    border-color: var(--border-accent);
+}
+.filterSelectActive {
+    border-color: var(--accent-blue);
+    color: var(--accent-blue);
+}
+.filterReset {
+    padding: 6px 10px;
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+.filterReset:hover {
+    color: var(--text-primary);
+}
+.filterCount {
+    margin-left: auto;
+    font-size: 0.82rem;
+    color: var(--text-muted);
+}
+.listEmpty {
+    padding: 32px 16px;
+    text-align: center;
+    font-size: 0.88rem;
+    color: var(--text-muted);
+    border: 1px dashed var(--border-subtle);
+    border-radius: 14px;
+}
+
 /* ── two-pane layout ── */
 .layout {
     max-width: 1180px;
