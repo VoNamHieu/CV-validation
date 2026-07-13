@@ -53,7 +53,11 @@ export default function ConfirmModal({
                 style={{
                     width: '100%', maxWidth: 440, background: 'var(--bg-secondary)',
                     border: '1px solid var(--border-subtle)', borderRadius: 16,
-                    overflow: 'hidden', boxShadow: '0 24px 64px rgba(0,0,0,0.5)',
+                    // Cap to the viewport + scroll on short screens (matches the app's
+                    // other modals); `hidden auto` keeps the horizontal rounded-corner
+                    // clip while allowing vertical scroll instead of off-screen clipping.
+                    maxHeight: '90vh', overflow: 'hidden auto',
+                    boxShadow: '0 24px 64px rgba(0,0,0,0.5)',
                 }}
             >
                 <div style={{ padding: '22px 22px 18px' }}>

@@ -29,6 +29,21 @@ function MockLogo({ domain, m, cls }: { domain: string; m: string; cls: string }
     );
 }
 
+// Featured-job cards render the logo in a WIDE banner (max-width 66%,
+// max-height 56px). Admin-uploaded company logos are often square/small and get
+// lost there, so for known brands prefer a horizontal wordmark from
+// /public/logos. Unilever's "Uniquely U" graduate site is the same brand → reuse
+// the Unilever mark. Falls through to the admin logo for everyone else.
+const CARD_LOGO: { re: RegExp; src: string }[] = [
+    { re: /unilever|uniquely\s*u/i, src: '/logos/unilever.png' },
+    { re: /mondelez/i, src: '/logos/mondelez.webp' },
+    { re: /\bey\b|ernst\s*&?\s*young/i, src: '/logos/ey.png' },
+    { re: /\bdhl\b/i, src: '/logos/dhl.png' },
+    { re: /\bmomo\b|m_?service/i, src: '/logos/momo.png' },
+];
+const cardLogo = (co: string): string | undefined =>
+    CARD_LOGO.find((m) => m.re.test(co))?.src;
+
 export default function Landing() {
     const enterApp = useAppStore((s) => s.enterApp);
     const setView = useAppStore((s) => s.setView);
@@ -127,7 +142,10 @@ export default function Landing() {
                     badge: seniorityBadge(r.seniority),
                     tags: [r.role_family].filter((t): t is string => !!t),
                     note: 'Xem chi tiết',
-                    logo: r.has_logo ? `/api/store/promoted/logo-by-slug/${encodeURIComponent(r.slug)}` : '',
+                    // Prefer a horizontal brand wordmark for the wide card banner;
+                    // fall back to the admin (square) logo, then a monogram.
+                    logo: cardLogo(r.company_name || '')
+                        ?? (r.has_logo ? `/api/store/promoted/logo-by-slug/${encodeURIComponent(r.slug)}` : ''),
                     slug: r.slug,
                 })));
             })

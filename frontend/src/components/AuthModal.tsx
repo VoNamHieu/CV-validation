@@ -77,6 +77,11 @@ export default function AuthModal({ onClose, reason }: { onClose: () => void; re
                     border: '1px solid var(--border-subtle)', borderRadius: 16,
                     padding: 24, position: 'relative',
                     boxShadow: '0 20px 60px rgba(0,0,0,0.35)',
+                    // Never exceed the viewport on short screens / with the mobile
+                    // keyboard open — scroll inside instead of clipping the top &
+                    // bottom off-screen. Matches the 90vh cap the app's other modals
+                    // (CreditRequest, GrantPermission, Terms…) already use.
+                    maxHeight: '90vh', overflowY: 'auto',
                 }}
             >
                 <button
