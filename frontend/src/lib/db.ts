@@ -357,6 +357,8 @@ export const admin = {
         req<Record<string, number>>(`/api/admin/analytics/funnel?days=${days}`, { auth: true }),
     analyticsTopOptimizers: (days: number, limit = 20) =>
         req<TopOptimizer[]>(`/api/admin/analytics/top-optimizers?days=${days}&limit=${limit}`, { auth: true }),
+    analyticsTopSpenders: (days: number, limit = 20) =>
+        req<TopSpender[]>(`/api/admin/analytics/top-spenders?days=${days}&limit=${limit}`, { auth: true }),
 
     // ── Incident log ──
     listIncidents: (p: { incidentType?: string; resolved?: boolean; limit?: number; offset?: number } = {}) => {
@@ -378,6 +380,13 @@ export const admin = {
 export interface TopOptimizer {
     email: string;
     jobs: number;
+}
+
+export interface TopSpender {
+    email: string;
+    spent: number;
+    balance: number;
+    granted: number;
 }
 
 export type IncidentType = 'system_error' | 'extension_error' | 'api_error' | 'db_error' | 'cron_error';

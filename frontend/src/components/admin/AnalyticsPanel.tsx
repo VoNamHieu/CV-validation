@@ -9,7 +9,7 @@ import {
     ArrowsClockwise, Users, Lightning, Briefcase, Coins, Megaphone,
     ChatCircleDots, Buildings, TrendDown, GraduationCap, Trophy,
 } from '@phosphor-icons/react';
-import { admin, type AnalyticsSummary, type AnalyticsTimeseries, type TopOptimizer } from '@/lib/db';
+import { admin, type AnalyticsSummary, type AnalyticsTimeseries, type TopOptimizer, type TopSpender } from '@/lib/db';
 import { FUNNEL_STEPS } from '@/lib/analytics';
 import { AreaChart, BarList } from './charts';
 
@@ -85,6 +85,7 @@ export default function AnalyticsPanel() {
     const [ts, setTs] = useState<AnalyticsTimeseries | null>(null);
     const [funnel, setFunnel] = useState<Record<string, number> | null>(null);
     const [topOptimizers, setTopOptimizers] = useState<TopOptimizer[] | null>(null);
+    const [topSpenders, setTopSpenders] = useState<TopSpender[] | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
 
@@ -94,13 +95,14 @@ export default function AnalyticsPanel() {
         // finite span — cap it at a year so the chart stays readable.
         const tsDays = days > 0 ? days : 365;
         try {
-            const [s, t, f, o] = await Promise.all([
+            const [s, t, f, o, sp] = await Promise.all([
                 admin.analyticsSummary(days),
                 admin.analyticsTimeseries(tsDays),
                 admin.analyticsFunnel(days),
                 admin.analyticsTopOptimizers(days, 20),
+                admin.analyticsTopSpenders(days, 20),
             ]);
-            setSummary(s); setTs(t); setFunnel(f); setTopOptimizers(o);
+            setSummary(s); setTs(t); setFunnel(f); setTopOptimizers(o); setTopSpenders(sp);
         } catch (e) {
             setError(e instanceof Error ? e.message : 'Không tải được dữ liệu thống kê');
         } finally {
@@ -233,6 +235,9 @@ export default function AnalyticsPanel() {
 
                     {/* Leaderboard — users who optimized a CV for the most jobs */}
                     {topOptimizers && <TopOptimizersSection users={topOptimizers} />}
+
+                    {/* Leaderboard — users who spent the most credits */}
+                    {topSpenders && <TopSpendersSection users={topSpenders} />}
                 </>
             )}
             <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
@@ -273,6 +278,47 @@ function TopOptimizersSection({ users }: { users: TopOptimizer[] }) {
                             }} title={u.email}>{nameOf(u.email)}</span>
                             <span style={{ flexShrink: 0, fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-primary)' }}>
                                 {nf(u.jobs)} <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>việc</span>
+                            </span>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </Section>
+    );
+}
+
+// ── Leaderboard: top users by credits spent (current balance shown for context) ──
+function TopSpendersSection({ users }: { users: TopSpender[] }) {
+    const MEDAL = ['#f5b301', '#a8b0bd', '#cd7f32'];
+    const nameOf = (email: string) => email.split('@')[0] || email;
+    return (
+        <Section title="Người tiêu nhiều credit nhất"
+            right={<span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>xếp theo credit đã tiêu</span>}>
+            {users.length === 0 ? (
+                <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', padding: '8px 0' }}>Chưa có ai tiêu credit.</div>
+            ) : (
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    {users.map((u, i) => (
+                        <div key={u.email} style={{
+                            display: 'flex', alignItems: 'center', gap: 12, padding: '9px 0',
+                            borderTop: i === 0 ? 'none' : '1px solid var(--border-subtle)',
+                        }}>
+                            <span style={{
+                                flexShrink: 0, width: 26, height: 26, borderRadius: 7, display: 'grid', placeItems: 'center',
+                                fontSize: '0.74rem', fontWeight: 800,
+                                color: i < 3 ? '#1a1a1a' : 'var(--text-muted)',
+                                background: i < 3 ? MEDAL[i] : 'var(--bg-secondary)',
+                            }}>
+                                {i < 3 ? <Trophy size={14} weight="fill" /> : i + 1}
+                            </span>
+                            <span style={{
+                                flex: 1, minWidth: 0, fontSize: '0.84rem', fontWeight: 600, color: 'var(--text-primary)',
+                                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                            }} title={u.email}>{nameOf(u.email)}</span>
+                            <span style={{ flexShrink: 0, fontSize: '0.72rem', color: 'var(--text-muted)' }}
+                                title="Số dư hiện tại">còn {nf(u.balance)}</span>
+                            <span style={{ flexShrink: 0, fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-primary)', minWidth: 78, textAlign: 'right' }}>
+                                {nf(u.spent)} <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>credit</span>
                             </span>
                         </div>
                     ))}
