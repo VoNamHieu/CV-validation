@@ -185,6 +185,50 @@ async def top_optimizers(days: int = 0, limit: int = 20) -> list[dict[str, Any]]
     return [{"email": r["email"], "jobs": int(r["n"])} for r in rows]
 
 
+async def top_spenders(days: int = 0, limit: int = 20) -> list[dict[str, Any]]:
+    """Leaderboard: users who spent the most credits. All-time (default) reads
+    the maintained, refund-adjusted ``credits.spent_total``; a ``days`` window
+    instead sums the ledger's in-window spend rows (gross of refunds). Each row
+    also carries the user's current balance + granted total for context."""
+    pool = await get_pool()
+    lim = max(1, min(limit, 100))
+    if days and days > 0:
+        rows = await _try(
+            lambda: pool.fetch(
+                "SELECT p.email AS email, -sum(l.delta)::bigint AS spent, "
+                "max(c.balance) AS balance, max(c.granted_total) AS granted "
+                "FROM credit_ledger l "
+                "JOIN profiles p ON p.id = l.user_id "
+                "JOIN credits c ON c.user_id = l.user_id "
+                "WHERE l.reason = 'spend' "
+                "AND l.created_at > now() - make_interval(days => $1) "
+                "GROUP BY p.id, p.email "
+                "HAVING -sum(l.delta) > 0 "
+                "ORDER BY spent DESC, p.email ASC LIMIT $2",
+                days,
+                lim,
+            ),
+            [],
+        )
+    else:
+        rows = await _try(
+            lambda: pool.fetch(
+                "SELECT p.email AS email, c.spent_total AS spent, "
+                "c.balance AS balance, c.granted_total AS granted "
+                "FROM credits c JOIN profiles p ON p.id = c.user_id "
+                "WHERE c.spent_total > 0 "
+                "ORDER BY c.spent_total DESC, p.email ASC LIMIT $1",
+                lim,
+            ),
+            [],
+        )
+    return [
+        {"email": r["email"], "spent": int(r["spent"]),
+         "balance": int(r["balance"]), "granted": int(r["granted"])}
+        for r in rows
+    ]
+
+
 async def timeseries(days: int = 30) -> dict[str, Any]:
     """Daily series over the last ``days`` days (clamped 1–365) for the four
     headline trends. Zero-filled against a complete date spine so the frontend

@@ -283,6 +283,16 @@ async def analytics_top_optimizers(
     return await analytics_repo.top_optimizers(days=days, limit=limit)
 
 
+@router.get("/analytics/top-spenders")
+async def analytics_top_spenders(
+    days: int = Query(0, ge=0, le=3650, description="Time window in days; 0 = all time"),
+    limit: int = Query(20, ge=1, le=100, description="Number of top users to return"),
+    _admin: str = Depends(require_admin),
+):
+    """Leaderboard of users who spent the most credits."""
+    return await analytics_repo.top_spenders(days=days, limit=limit)
+
+
 # ── Incident log (system / API / DB / extension errors) ──
 
 
