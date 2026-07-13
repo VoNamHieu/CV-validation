@@ -217,6 +217,11 @@ chrome.webNavigation.onCreatedNavigationTarget.addListener((d) => {
     applyTabId = d.tabId;
     if (isProcessing) currentTabId = d.tabId;   // keep AUTO_APPLY_RESULT routing correct
     jobStartedAt = Date.now();
+    // Keep the persisted session tab id in sync so the content agent's tab-scope
+    // check (IS_APPLY_TAB) still recognizes this tab if the service worker restarts.
+    chrome.storage.local.get('applySession', (s) => {
+        if (s.applySession) chrome.storage.local.set({ applySession: { ...s.applySession, tabId: d.tabId } });
+    });
     // known host → declarative agent resumes; unknown → onCompleted injects.
 });
 
@@ -721,6 +726,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             completed: applyQueue.filter(j => j.status === 'done' || j.status === 'error').length,
         });
         return true;
+    }
+
+    // ── Tab-scope check: is the asking content script running in the tab that
+    // actually launched the current apply session? The agent uses this to avoid
+    // auto-running on an unrelated known-host page (e.g. the user's LinkedIn feed)
+    // just because a pendingAutoApply flag is still live. Falls back to the
+    // persisted session tab id so it survives a service-worker restart.
+    if (message.type === 'IS_APPLY_TAB') {
+        const tid = sender.tab && sender.tab.id;
+        if (tid && tid === applyTabId) { sendResponse({ isApplyTab: true }); return true; }
+        chrome.storage.local.get('applySession', (d) => {
+            sendResponse({ isApplyTab: !!(tid && d.applySession && d.applySession.tabId === tid) });
+        });
+        return true;  // async response
     }
 
     // ── Agent heartbeat: the driven page is alive, extend the watchdog ──

@@ -1770,9 +1770,26 @@ async function init() {
         if (data.pendingAutoApply && data.jobfitProfile) {
             const sess = data.applySession || {};
             const fresh = sess.startedAt && (Date.now() - sess.startedAt < APPLY_SESSION_TTL_MS);
+
+            // Tab-scope guard: only auto-run in the tab the user actually launched
+            // auto-apply in (or one it redirected / spawned into). Otherwise a
+            // still-live pendingAutoApply flag fires the agent on ANY known-host
+            // page the user opens — e.g. their LinkedIn feed. A content script
+            // can't read its own tabId, so ask the background which owns the
+            // apply-session tab id.
+            const isApplyTab = fresh && await new Promise(r => {
+                chrome.runtime.sendMessage({ type: 'IS_APPLY_TAB' }, (resp) => {
+                    r(!chrome.runtime.lastError && !!(resp && resp.isApplyTab));
+                });
+            });
+
             if (!fresh) {
                 // Stale flag → clear and fall through to manual mode.
                 chrome.storage.local.remove(['pendingAutoApply', 'autoApplyJobUrl', 'batchMode', 'applySession']);
+            } else if (!isApplyTab) {
+                // Live apply session, but this is NOT its tab — do NOT auto-run.
+                // Leave the flag intact for the real apply tab; behave as manual mode here.
+                console.log('[Copo Agent] pendingAutoApply is set but this is not the apply tab — skipping auto-run', location.hostname);
             } else if (window.__copoAgentStarted) {
                 // This document already has an agent running (e.g. declarative +
                 // a programmatic re-inject after a redirect) — don't double-run.
