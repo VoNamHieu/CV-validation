@@ -410,8 +410,8 @@ export const HOW_MARKUP = `
 <section class="how">
   <div class="how-head" id="howHead">
     <div class="how-eyebrow">Cách hoạt động</div>
-    <h1 class="how-title">Từ CV đến đơn ứng tuyển,<br><span>tự động từ đầu đến cuối</span></h1>
-    <p class="how-sub">Bạn tải CV lên một lần. Copo đọc, tìm việc khớp, viết lại cho từng nơi, rồi nộp đơn thay bạn — bên dưới là toàn bộ quy trình, đúng thứ tự nó diễn ra.</p>
+    <h1 class="how-title">Từ CV đến ứng tuyển,<br><span>tự động hoàn toàn</span></h1>
+    <p class="how-sub">Bạn chỉ cần tải lên CV, Copo đọc, tìm việc phù hợp với bạn, tối ưu CV cho từng job, rồi nộp đơn thay bạn. Bên dưới là toàn bộ quy trình, đúng thứ tự hệ thống xử lý.</p>
   </div>
 
   <div class="float" id="float">
