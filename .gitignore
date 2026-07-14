@@ -26,3 +26,11 @@ tools/research-extension/
 
 # Local scratch doc — not part of the product
 copo-manifesto.html
+
+# Design/asset scratch dropped at the repo root — not source
+Copo.png
+Horizontal Logos/
+copo-section*.html
+
+# Versioned extension build artifacts (rebuild from extension/)
+copo-extension-*.zip
