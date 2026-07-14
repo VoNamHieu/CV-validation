@@ -53,6 +53,8 @@ from app.services.ats_adapters.vietcetera import *  # noqa: F401,F403
 from app.services.ats_adapters.nashtech import *  # noqa: F401,F403
 from app.services.ats_adapters.mondelez import *  # noqa: F401,F403
 from app.services.ats_adapters.express247 import *  # noqa: F401,F403
+from app.services.ats_adapters.vietjet import *  # noqa: F401,F403
+from app.services.ats_adapters.cake import *  # noqa: F401,F403
 from app.services.ats_adapters.dhl import *  # noqa: F401,F403
 from app.services.ats_adapters.decathlon import *  # noqa: F401,F403
 from app.services.ats_adapters.vingroup import *  # noqa: F401,F403
@@ -138,4 +140,6 @@ _ADAPTERS: list = [
     ("nashtech",        lambda u, h: _is_nashtech(u),        lambda u, h: _nashtech(u)),
     ("mondelez",        lambda u, h: _is_mondelez(u),        lambda u, h: _mondelez(u)),
     ("247express",      lambda u, h: _is_express247(u),      lambda u, h: _express247(u)),
+    ("vietjet",         lambda u, h: _is_vietjet(u),         lambda u, h: _vietjet(u)),
+    ("cake",            lambda u, h: _is_cake(u),            lambda u, h: _cake(u)),
 ]
