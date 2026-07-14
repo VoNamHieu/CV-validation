@@ -224,19 +224,27 @@ async def resolve_full_jd(source_url: str, existing: str = "") -> str:
         return existing
 
     best = existing
+    # The ATS list-scan paginates a whole board and often returns nothing for one
+    # URL (e.g. thegioididong takes 20s+ → 0 chars). Cap it so a single slow site
+    # can't hang the publish request — the crawl below usually gets the JD anyway.
     try:
-        ats = await asyncio.to_thread(resolve_jd_via_ats, source_url)
+        ats = await asyncio.wait_for(
+            asyncio.to_thread(resolve_jd_via_ats, source_url), timeout=12)
         if ats and len(ats) > len(best):
             best = ats
+    except asyncio.TimeoutError:
+        logger.info(f"[resolve_full_jd] ats timed out (12s) {source_url}")
     except Exception as e:  # never break publish
         logger.info(f"[resolve_full_jd] ats miss {source_url}: {str(e)[:80]}")
 
     if len(best) < 200:
         try:
             from app.services.crawler import crawl_url
-            cr = await crawl_url(source_url)
+            cr = await asyncio.wait_for(crawl_url(source_url), timeout=25)
             if cr.cleaned_text and len(cr.cleaned_text) > len(best):
                 best = cr.cleaned_text
+        except asyncio.TimeoutError:
+            logger.info(f"[resolve_full_jd] crawl timed out (25s) {source_url}")
         except Exception as e:
             logger.info(f"[resolve_full_jd] crawl miss {source_url}: {str(e)[:80]}")
 
