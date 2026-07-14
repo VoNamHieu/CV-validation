@@ -52,6 +52,7 @@ from app.services.ats_adapters.bat import *  # noqa: F401,F403
 from app.services.ats_adapters.vietcetera import *  # noqa: F401,F403
 from app.services.ats_adapters.nashtech import *  # noqa: F401,F403
 from app.services.ats_adapters.mondelez import *  # noqa: F401,F403
+from app.services.ats_adapters.express247 import *  # noqa: F401,F403
 from app.services.ats_adapters.dhl import *  # noqa: F401,F403
 from app.services.ats_adapters.decathlon import *  # noqa: F401,F403
 from app.services.ats_adapters.vingroup import *  # noqa: F401,F403
@@ -136,4 +137,5 @@ _ADAPTERS: list = [
     ("vietcetera",      lambda u, h: _is_vietcetera(u),      lambda u, h: _vietcetera(u)),
     ("nashtech",        lambda u, h: _is_nashtech(u),        lambda u, h: _nashtech(u)),
     ("mondelez",        lambda u, h: _is_mondelez(u),        lambda u, h: _mondelez(u)),
+    ("247express",      lambda u, h: _is_express247(u),      lambda u, h: _express247(u)),
 ]
