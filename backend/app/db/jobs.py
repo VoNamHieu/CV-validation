@@ -9,8 +9,38 @@ from __future__ import annotations
 
 import logging
 from typing import Optional, Sequence
+from urllib.parse import urlparse
 
 from app.db.pool import get_pool, row_to_dict, rows_to_dicts
+
+# Friendly platform label from an apply URL's host — companies.ats_type is
+# unreliable/empty, so we derive the "site type" from where the job actually
+# applies. Known ATS hosts map to a name; everything else falls back to the
+# registrable domain, which is a fine per-site grouping for apply testing.
+_ATS_HOSTS = [
+    ("myworkdayjobs.com", "Workday"), ("smartrecruiters.com", "SmartRecruiters"),
+    ("lever.co", "Lever"), ("greenhouse.io", "Greenhouse"), ("ashbyhq.com", "Ashby"),
+    ("recruitee.com", "Recruitee"), ("eightfold.ai", "Eightfold"), ("avature.net", "Avature"),
+    ("oraclecloud.com", "Oracle HCM"), ("taleo.net", "Taleo"), ("icims.com", "iCIMS"),
+    ("workable.com", "Workable"), ("phenompeople.com", "Phenom"), ("phenom.com", "Phenom"),
+    ("successfactors.com", "SuccessFactors"), ("sapsf.com", "SuccessFactors"),
+    ("base.vn", "base.vn"), ("talent.vn", "base.vn"), ("mokahr.com", "MokaHR"),
+    ("odoo.com", "Odoo"), ("radancy", "Radancy"),
+]
+
+
+def _platform_from_url(url: str) -> str:
+    host = (urlparse(url or "").netloc or "").lower()
+    if host.startswith("www."):
+        host = host[4:]
+    for pat, name in _ATS_HOSTS:
+        if pat in host:
+            return name
+    parts = host.split(".")
+    # keep 3 labels for second-level TLDs (…com.vn, …co.uk), else the last 2
+    if len(parts) >= 3 and parts[-2] in ("com", "co", "org", "net", "gov", "edu"):
+        return ".".join(parts[-3:])
+    return ".".join(parts[-2:]) if len(parts) >= 2 else (host or "khác")
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +121,41 @@ async def get(job_id: str) -> Optional[dict]:
     return row_to_dict(
         await pool.fetchrow(f"SELECT {_COLS} FROM jobs WHERE id = $1", job_id)
     )
+
+
+async def random_per_company(limit: int = 300) -> list[dict]:
+    """ONE random ACTIVE job per company (each company = a distinct apply
+    "site"), joined with its name / domain / ats_type. Powers the admin
+    "test apply" panel: a representative live posting on every site so the
+    extension's auto-apply can be exercised against each ATS / apply form.
+
+    ``DISTINCT ON (company_id)`` with ``ORDER BY company_id, random()`` keeps the
+    first row per company after a random shuffle → a random job for each. The
+    outer query then re-orders alphabetically for a stable, scannable list."""
+    pool = await get_pool()
+    lim = max(1, min(limit, 2000))
+    rows = await pool.fetch(
+        """
+        SELECT job_id, title, location, url, company, domain, ats_type
+        FROM (
+            SELECT DISTINCT ON (j.company_id)
+                   j.id AS job_id, j.title AS title, j.location AS location,
+                   j.source_url AS url, c.name AS company,
+                   c.domain AS domain, c.ats_type AS ats_type
+            FROM jobs j JOIN companies c ON c.id = j.company_id
+            WHERE j.is_active = true
+              AND j.source_url IS NOT NULL AND j.source_url <> ''
+            ORDER BY j.company_id, random()
+        ) t
+        ORDER BY company NULLS LAST, domain NULLS LAST
+        LIMIT $1
+        """,
+        lim,
+    )
+    out = rows_to_dicts(rows)
+    for r in out:  # DB ats_type is empty → derive the apply-site platform from the URL
+        r["ats_type"] = _platform_from_url(r.get("url") or "")
+    return out
 
 
 async def list_facet(

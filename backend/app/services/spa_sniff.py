@@ -18,6 +18,9 @@ from urllib.parse import urljoin, urlparse
 # i18n site whose job route is /vi/tim-kiem-viec-lam/chi-tiet/[slug].
 _SLUG_DETAIL_PREFIX = {
     "career.vng.com.vn": "/vi/tim-kiem-viec-lam/chi-tiet/",
+    # 247Express SPA returns rows with a numeric id but no url; its detail route
+    # is /tuyen-dung/{id} (the bare /job/{id} default 404s).
+    "247express.vn": "tuyen-dung",
 }
 
 import requests
@@ -234,8 +237,10 @@ def _items_to_jobs(items, origin: str, title_keys=_TITLE_KEYS, url_keys=_URL_KEY
         if not url:
             jid = (core.get("id") or core.get("jobId") or core.get("Id")
                    or it.get("id") or it.get("jobId") or it.get("slug"))
-            if jid and detail_prefix:
-                url = f"{origin}/{detail_prefix.strip('/')}/{jid}"
+            host = (urlparse(origin).netloc or "").lower()
+            prefix = detail_prefix or _SLUG_DETAIL_PREFIX.get(host)
+            if jid and prefix:
+                url = f"{origin}/{prefix.strip('/')}/{jid}"
             elif jid:
                 url = f"{origin}/job/{jid}"
             else:
