@@ -14,6 +14,7 @@ DEBUG_CAPTURE_TOKEN is set, and each request must present that token via the
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import time
@@ -123,6 +124,59 @@ async def latest(host: str = Query(...), x_debug_token: str | None = Header(defa
 async def list_captures(x_debug_token: str | None = Header(default=None)):
     _require_token(x_debug_token)
     return {"captures": await cache.get_json(_INDEX_KEY) or []}
+
+
+@router.get("/fetch")
+async def debug_fetch(url: str = Query(..., max_length=2000),
+                      x_debug_token: str | None = Header(default=None)):
+    """Diagnostic: fetch `url` from THIS server's IP (Railway) exactly like the
+    cron's cheap path, and report what we get — to tell real anti-bot IP blocking
+    (403 / Cloudflare challenge) apart from an adapter that merely breaks mid-way.
+    Token-gated (off unless DEBUG_CAPTURE_TOKEN is set)."""
+    _require_token(x_debug_token)
+    import requests
+    from app.services.ats_adapters.core import fetch_ats_jobs, is_known_ats_url
+
+    hdr = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,*/*",
+    }
+    _CHAL = ("just a moment", "cloudflare", "attention required", "perimeterx",
+             "px-captcha", "captcha", "access denied", "enable javascript",
+             "cf-browser-verification", "datadome", "/cdn-cgi/challenge")
+    _LOGIN = ("vui lòng đăng nhập", "please sign in", "please log in", "login required")
+    t0 = time.time()
+    out: dict = {"url": url, "from": "railway-server-ip"}
+    html = None
+    try:
+        r = await asyncio.to_thread(
+            lambda: requests.get(url, headers=hdr, timeout=15, allow_redirects=True))
+        body = r.text or ""
+        low = body.lower()
+        html = body
+        out.update({
+            "status": r.status_code,
+            "final_url": r.url,
+            "server": r.headers.get("server"),
+            "cf_ray": r.headers.get("cf-ray"),
+            "bytes": len(body),
+            "challenge_markers": [m for m in _CHAL if m in low],
+            "login_markers": [m for m in _LOGIN if m in low],
+            "head": body[:400],
+        })
+    except Exception as e:
+        out["error"] = str(e)[:300]
+
+    out["adapter"] = is_known_ats_url(url)
+    try:
+        jobs = await asyncio.to_thread(fetch_ats_jobs, url, html)
+        out["adapter_jobs"] = len(jobs)
+        out["sample"] = [(j.get("title") or "")[:60] for j in jobs[:3]]
+    except Exception as e:
+        out["adapter_error"] = str(e)[:200]
+    out["elapsed_s"] = round(time.time() - t0, 1)
+    return out
 
 
 @router.get("/capture/targets")
