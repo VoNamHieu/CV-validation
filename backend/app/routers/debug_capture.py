@@ -136,6 +136,12 @@ async def debug_fetch(url: str = Query(..., max_length=2000),
     _require_token(x_debug_token)
     import requests
     from app.services.ats_adapters.core import fetch_ats_jobs, is_known_ats_url
+    from app.services.url_validator import is_allowed_url_resolved
+
+    # SSRF guard: even token-gated, never let this fetch a private/internal host
+    # (resolved check also rejects a public name that DNS-resolves internal).
+    if not await is_allowed_url_resolved(url):
+        raise HTTPException(status_code=400, detail="url blocked by SSRF guard")
 
     hdr = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "

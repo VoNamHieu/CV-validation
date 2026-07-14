@@ -260,6 +260,26 @@ async def _from_capture(career_url: str) -> list[dict]:
 _CHEAP_CONCURRENCY = 8   # phase 1: adapter fetch / cheap GET / capture read
 _HEAVY_CONCURRENCY = 5   # phase 2: render + SPA sniff — heavier, keep lighter
 
+# ── Phase 3: self-heal (retry transient-empty companies) ─────────────────────
+# Some "empty" results are a burst timeout / rate-limit — a site that USED to
+# return jobs momentarily choked under the concurrent cheap pass (verified: from
+# our server IP Acecook 403s nothing, it just times out mid-burst then serves 32
+# jobs on a calm single request). We retry those, but DEFENSIVELY, to avoid a
+# domino effect — a naive fast retry would just recreate the burst that caused
+# the failure:
+#   • low concurrency (2) — the retry must not re-burst the targets,
+#   • jittered spacing — several tenants share one ATS backend (e.g. talentnet);
+#     staggering avoids re-hammering that one host,
+#   • one attempt each, and
+#   • a hard cap — a MASS failure is systemic (our network / a provider outage),
+#     not N independent blips; retrying all of it would double the whole load, so
+#     past the cap we skip self-heal and log it instead.
+# Anti-bot 403s (Cloudflare "Just a moment" from our IP — VPBankS, Guardian) are
+# deterministic per-IP, so they're excluded: a retry only adds load, never heals.
+_HEAL_CONCURRENCY = 2
+_HEAL_MAX = 25
+_HEAL_JITTER_S = (0.4, 1.8)
+
 
 async def _upsert_company_jobs(c, jobs_list: list[dict]) -> dict | None:
     """Shared upsert path for BOTH phases: classify, upsert company + jobs,
@@ -431,6 +451,48 @@ async def _one_heavy(c, sem: asyncio.Semaphore) -> dict:
         return {"ok": False, **_empty(c, ats_name=ats_sig or "")}
 
 
+async def _heal_eligibility() -> dict:
+    """Per-company signals from the compat log that decide self-heal eligibility:
+      baseline  — the high-water job count (>0 ⇒ it used to work ⇒ worth a retry)
+      antibot   — last verdict was needs_capture (a deterministic per-IP block ⇒
+                  a retry from our IP can't help, skip it)."""
+    from app.services import career_compat
+    out: dict = {}
+    for r in await career_compat.list_results():
+        name = r.get("company")
+        if not name:
+            continue
+        out[name] = {
+            "baseline": int(r.get("baseline_job_count") or 0),
+            "antibot": r.get("verdict") == "needs_capture",
+        }
+    return out
+
+
+async def _self_heal(companies: list) -> list:
+    """Gently retry transient-empty companies (see _HEAL_* notes). Low concurrency
+    + jittered spacing so the retry can't recreate the burst that caused the
+    failure. Returns [(company, upsert_result), …] for the ones that recovered."""
+    import random
+    sem = asyncio.Semaphore(_HEAL_CONCURRENCY)
+    healed: list = []
+
+    async def _retry(c) -> None:
+        async with sem:
+            await asyncio.sleep(random.uniform(*_HEAL_JITTER_S))
+            try:
+                r = await _one_cheap(c, asyncio.Semaphore(1))
+            except Exception as e:  # noqa: BLE001
+                logger.info("ingest: self-heal %s errored: %s", c.name, str(e)[:80])
+                return
+            if r.get("ok"):
+                logger.info("ingest: self-heal recovered %s → %s jobs", c.name, r.get("n"))
+                healed.append((c, r))
+
+    await asyncio.gather(*[_retry(c) for c in companies], return_exceptions=True)
+    return healed
+
+
 async def ingest_featured_ats(*, render: bool = False, limit: int | None = None,
                               render_limit: int | None = None) -> dict:
     """Ingest ATS-backed featured companies into the store, in two passes:
@@ -480,6 +542,8 @@ async def ingest_featured_ats(*, render: bool = False, limit: int | None = None,
         else:
             still_empty.append(c)
 
+    # ── Phase 2 (render) — collect the ones STILL empty afterwards for self-heal ──
+    final_empty: list = []
     if render and still_empty:
         to_render = still_empty[:render_limit] if render_limit else still_empty
         if render_limit and len(still_empty) > render_limit:
@@ -491,13 +555,40 @@ async def ingest_featured_ats(*, render: bool = False, limit: int | None = None,
         for c, r in zip(to_render, heavy_results):
             if isinstance(r, BaseException):
                 logger.warning("ingest: one_heavy raised for %s: %s", c.name, str(r)[:120])
-                stats["ats_feed_empty"].append(_empty(c))
-                continue
-            _record(r)
-        for c in still_empty[len(to_render):]:
-            stats["ats_feed_empty"].append(_empty(c))
+                final_empty.append(c)
+            elif r.get("ok"):
+                _record(r)
+            else:
+                final_empty.append(c)
+        final_empty.extend(still_empty[len(to_render):])
     else:
-        for c in still_empty:
+        final_empty.extend(still_empty)
+
+    # ── Phase 3: self-heal — retry the transient-empty subset (domino-safe) ──
+    healed_names: set = set()
+    if final_empty:
+        elig = await _heal_eligibility()
+        heal_pool = [c for c in final_empty
+                     if elig.get(c.name, {}).get("baseline", 0) > 0
+                     and not elig.get(c.name, {}).get("antibot", False)]
+        # A mass failure is systemic (our network / a provider blip), not N
+        # independent site failures — retrying all of it would double the load,
+        # the exact domino we're guarding against. Cap and log the skip.
+        if len(heal_pool) > _HEAL_MAX:
+            logger.info("ingest: self-heal — %d eligible, capping at %d (mass failure looks systemic, not per-site)",
+                        len(heal_pool), _HEAL_MAX)
+            heal_pool = heal_pool[:_HEAL_MAX]
+        if heal_pool:
+            logger.info("ingest: self-heal — retrying %d transient-empty compan(y/ies) at concurrency=%d",
+                        len(heal_pool), _HEAL_CONCURRENCY)
+            for c, r in await _self_heal(heal_pool):
+                _record(r)
+                healed_names.add(c.name)
+            stats["self_healed"] = len(healed_names)
+
+    # The ones that genuinely stayed empty (self-heal didn't recover them).
+    for c in final_empty:
+        if c.name not in healed_names:
             stats["ats_feed_empty"].append(_empty(c))
 
     logger.info("[ingest] featured ATS → %s", stats)
