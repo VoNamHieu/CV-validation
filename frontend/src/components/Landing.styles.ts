@@ -71,7 +71,7 @@ export const LP_CSS = `
 .lp-pulse::after { content: ''; position: absolute; inset: 0; border-radius: inherit; box-shadow: 0 0 0 0 rgba(230,60,45,0.5); animation: lp-pulse 2.6s ease-out infinite; }
 @keyframes lp-pulse { 0% { box-shadow: 0 0 0 0 rgba(230,60,45,0.45); } 70%,100% { box-shadow: 0 0 0 18px rgba(230,60,45,0); } }
 
-.lp-hero { max-width: 1460px; margin: 0 auto; padding: 40px 52px 30px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 46px; align-items: center; }
+.lp-hero { max-width: 1460px; margin: 0 auto; padding: 40px 52px 30px; display: grid; grid-template-columns: minmax(300px, 1fr) minmax(0, 700px); gap: clamp(24px, 3.4vw, 46px); align-items: center; }
 .lp-hero-copy { padding-left: 40px; animation: lp-rise .7s var(--ease-out-expo) both; }
 .lp-badge { display: inline-flex; align-items: center; gap: 7px; font-size: 0.76rem; font-weight: 600; color: #c43b2e; background: linear-gradient(135deg, rgba(224,85,114,0.08), rgba(242,160,138,0.05)); border: 1px solid var(--border-subtle); padding: 6px 14px; border-radius: 999px; margin-bottom: 20px; }
 .lp-h1 { font-size: clamp(2.1rem, 4.8vw, 3.5rem); font-weight: 800; line-height: 1.16; letter-spacing: -0.03em; margin: 0 0 18px; }
@@ -101,7 +101,7 @@ export const LP_CSS = `
   backdrop-filter: blur(22px) saturate(150%); -webkit-backdrop-filter: blur(22px) saturate(150%); }
 .lp-mock-wrap:hover .lp-frame { transform: rotateY(-1.5deg) rotateX(.5deg) translateY(-8px) scale(1.012); box-shadow: 0 66px 140px rgba(220,55,42,.30), 0 18px 44px rgba(80,60,150,.17), inset 0 1px 0 rgba(255,255,255,.92); }
 /* dashboard card — stacked radial surface, light (product screenshot) */
-.lp-dash { position: relative; width: 700px; overflow: hidden; border-radius: 22px; border: 1px solid rgba(24,20,26,.09); padding: 24px 26px; color: #211d22;
+.lp-dash { position: relative; width: 100%; max-width: 700px; overflow: hidden; border-radius: 22px; border: 1px solid rgba(24,20,26,.09); padding: 24px 26px; color: #211d22;
   background:
     radial-gradient(120% 90% at 100% -6%, rgba(235,58,43,.07), transparent 55%),
     linear-gradient(180deg, #fdf7f5, #fbf2f0);
