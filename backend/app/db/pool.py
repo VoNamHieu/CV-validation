@@ -15,10 +15,11 @@ connections; cached prepared-statement names can collide otherwise.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
-from typing import Optional
+from typing import Awaitable, Callable, Optional, TypeVar
 
 import asyncpg
 from pgvector.asyncpg import register_vector
@@ -92,3 +93,24 @@ def row_to_dict(record: Optional[asyncpg.Record]) -> Optional[dict]:
 
 def rows_to_dicts(records) -> list[dict]:
     return [dict(r) for r in records]
+
+
+_T = TypeVar("_T")
+
+
+async def with_deadlock_retry(op: Callable[[], Awaitable[_T]], *, attempts: int = 3) -> _T:
+    """Re-run a self-contained DB op that Postgres aborted with a deadlock
+    (40P01). A deadlock rolls back the WHOLE transaction, so ``op`` must open its
+    own connection + transaction each call (it's re-invoked from scratch). Cheap
+    safety net *beyond* the per-user advisory lock: covers deadlock sources the
+    lock can't (e.g. an FK share-lock on ``users`` racing a cron job). Backs off
+    a little between tries; re-raises after the last attempt."""
+    for i in range(attempts):
+        try:
+            return await op()
+        except asyncpg.exceptions.DeadlockDetectedError:
+            if i == attempts - 1:
+                logger.warning("deadlock (40P01) persisted after %d attempts", attempts)
+                raise
+            await asyncio.sleep(0.05 * (2 ** i))  # 50ms, 100ms
+    raise AssertionError("unreachable")  # loop always returns or raises
