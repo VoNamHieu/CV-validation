@@ -279,6 +279,14 @@ _HEAVY_CONCURRENCY = 5   # phase 2: render + SPA sniff — heavier, keep lighter
 _HEAL_CONCURRENCY = 2
 _HEAL_MAX = 25
 _HEAL_JITTER_S = (0.4, 1.8)
+# An anti-bot verdict is normally skipped (a 403 from our IP is deterministic).
+# EXCEPTION: a site that usually lets us through and only just started failing
+# (short consecutive-failure streak — a Cloudflare bot-score blip, e.g. L'Oréal)
+# is INTERMITTENT, not blocked, so it's worth one gentle retry. A long streak
+# (VPBankS/Guardian — blocked every run) stays skipped. New records start at
+# streak 0, so a freshly-blocked site burns at most this many wasted retries
+# before the streak marks it deterministic.
+_HEAL_ANTIBOT_MAX_STREAK = 2
 
 
 async def _upsert_company_jobs(c, jobs_list: list[dict]) -> dict | None:
@@ -465,6 +473,7 @@ async def _heal_eligibility() -> dict:
         out[name] = {
             "baseline": int(r.get("baseline_job_count") or 0),
             "antibot": r.get("verdict") == "needs_capture",
+            "fail_streak": int(r.get("fail_streak") or 0),
         }
     return out
 
@@ -568,9 +577,17 @@ async def ingest_featured_ats(*, render: bool = False, limit: int | None = None,
     healed_names: set = set()
     if final_empty:
         elig = await _heal_eligibility()
-        heal_pool = [c for c in final_empty
-                     if elig.get(c.name, {}).get("baseline", 0) > 0
-                     and not elig.get(c.name, {}).get("antibot", False)]
+
+        def _eligible(c) -> bool:
+            e = elig.get(c.name, {})
+            if e.get("baseline", 0) <= 0:
+                return False          # never worked → genuinely unsupported
+            if not e.get("antibot", False):
+                return True           # plain transient (timeout / rate-limit)
+            # Anti-bot: retry only if the block looks INTERMITTENT (short streak).
+            return e.get("fail_streak", 99) <= _HEAL_ANTIBOT_MAX_STREAK
+
+        heal_pool = [c for c in final_empty if _eligible(c)]
         # A mass failure is systemic (our network / a provider blip), not N
         # independent site failures — retrying all of it would double the load,
         # the exact domino we're guarding against. Cap and log the skip.
