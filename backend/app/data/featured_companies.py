@@ -373,11 +373,6 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         career_url="https://tuyendung.vietinbank.vn",
     ),
     FeaturedCompany(
-        name="Agribank",
-        homepage="https://agribank.com.vn",
-        career_url="https://www.agribank.com.vn/vn/tuyen-dung/chuong-trinh-tuyen-dung",
-    ),
-    FeaturedCompany(
         name="SHB",
         homepage="https://shb.com.vn",
         # talentnet tenant — the bare host only surfaced ~7 via spa_sniff; the
@@ -988,7 +983,11 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Accor",
         homepage="https://accor.com",
-        career_url="https://careers.accor.com",
+        # careers.accor.com is an Attrax SPA (headless-blocked); the real feed is
+        # the AccorHotel SmartRecruiters instance (101 VN jobs). Use the canonical
+        # careers.smartrecruiters.com/<company> URL — NOT the oneclick-ui link,
+        # which detect_ats mis-parses ("oneclick-ui" as the company slug → 0).
+        career_url="https://careers.smartrecruiters.com/AccorHotel",
     ),
     FeaturedCompany(
         name="IHG",

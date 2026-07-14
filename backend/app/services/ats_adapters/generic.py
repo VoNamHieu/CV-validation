@@ -85,10 +85,16 @@ def _smartrecruiters(slug: str) -> list[dict]:
             for j in content:
                 loc = j.get("location") or {}
                 jid = j.get("id", "")
+                # Keep the COUNTRY in the location, not just the city — the
+                # downstream _is_vn_loc re-filter (core.py) doesn't know smaller VN
+                # cities (Phu Quoc, Cam Ranh, Nha Trang…), so a bare city dropped
+                # legit VN jobs (AccorHotel: 101 VN → 10). "Phu Quoc, VN" matches.
+                city = loc.get("city", "") if isinstance(loc, dict) else ""
+                country = (loc.get("country", "") if isinstance(loc, dict) else "").upper()
                 out.append({
                     "title": j.get("name", ""),
                     "url": f"https://jobs.smartrecruiters.com/{slug}/{jid}" if jid else "",
-                    "location": loc.get("city", "") if isinstance(loc, dict) else "",
+                    "location": ", ".join(p for p in (city, country) if p),
                     "description": "",  # JD needs a per-posting call; skip for now
                 })
             offset += 100
