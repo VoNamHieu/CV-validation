@@ -50,6 +50,7 @@ from app.services.ats_adapters.vinamilk import *  # noqa: F401,F403
 from app.services.ats_adapters.msb import *  # noqa: F401,F403
 from app.services.ats_adapters.bat import *  # noqa: F401,F403
 from app.services.ats_adapters.vietcetera import *  # noqa: F401,F403
+from app.services.ats_adapters.nashtech import *  # noqa: F401,F403
 from app.services.ats_adapters.dhl import *  # noqa: F401,F403
 from app.services.ats_adapters.decathlon import *  # noqa: F401,F403
 from app.services.ats_adapters.vingroup import *  # noqa: F401,F403
@@ -132,4 +133,5 @@ _ADAPTERS: list = [
     ("msb",             lambda u, h: _is_msb(u),             lambda u, h: _msb(u)),
     ("bat",             lambda u, h: _is_bat(u),             lambda u, h: _bat(u)),
     ("vietcetera",      lambda u, h: _is_vietcetera(u),      lambda u, h: _vietcetera(u)),
+    ("nashtech",        lambda u, h: _is_nashtech(u),        lambda u, h: _nashtech(u)),
 ]
