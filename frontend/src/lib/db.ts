@@ -359,6 +359,8 @@ export const admin = {
         req<TopOptimizer[]>(`/api/admin/analytics/top-optimizers?days=${days}&limit=${limit}`, { auth: true }),
     analyticsTopSpenders: (days: number, limit = 20) =>
         req<TopSpender[]>(`/api/admin/analytics/top-spenders?days=${days}&limit=${limit}`, { auth: true }),
+    testRandomJobs: (limit = 300) =>
+        req<TestJob[]>(`/api/admin/test/random-jobs?limit=${limit}`, { auth: true }),
 
     // ── Incident log ──
     listIncidents: (p: { incidentType?: string; resolved?: boolean; limit?: number; offset?: number } = {}) => {
@@ -387,6 +389,16 @@ export interface TopSpender {
     spent: number;
     balance: number;
     granted: number;
+}
+
+export interface TestJob {
+    job_id: string;
+    title: string;
+    location: string | null;
+    url: string;
+    company: string | null;
+    domain: string | null;
+    ats_type: string | null;
 }
 
 export type IncidentType = 'system_error' | 'extension_error' | 'api_error' | 'db_error' | 'cron_error';

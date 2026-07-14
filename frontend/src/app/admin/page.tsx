@@ -11,7 +11,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import {
     ShieldCheck, MagnifyingGlass, Coins, ArrowLeft, SpinnerGap, CheckCircle, WarningCircle,
     Heartbeat, PlugsConnected, ChatCircleDots, FunnelSimple, Briefcase, Megaphone, UsersThree,
-    Image as ImageIcon, Bug,
+    Image as ImageIcon, Bug, TestTube,
 } from '@phosphor-icons/react';
 import { useAuth } from '@/lib/auth';
 import { admin, type AdminRole } from '@/lib/db';
@@ -24,9 +24,10 @@ import PromotedPanel from '@/components/admin/PromotedPanel';
 import CompanyLogoPanel from '@/components/admin/CompanyLogoPanel';
 import MembersPanel from '@/components/admin/MembersPanel';
 import IncidentsPanel from '@/components/admin/IncidentsPanel';
+import TestApplyPanel from '@/components/admin/TestApplyPanel';
 
 type Access = 'checking' | 'granted' | 'denied' | 'error';
-type Tab = 'credits' | 'jobs' | 'promoted' | 'logos' | 'analytics' | 'incidents' | 'monitor' | 'compat' | 'feedback' | 'members';
+type Tab = 'credits' | 'jobs' | 'promoted' | 'logos' | 'analytics' | 'incidents' | 'monitor' | 'compat' | 'feedback' | 'members' | 'test';
 
 const QUICK_AMOUNTS = [50, 100, 250, 500];
 const TABS: { id: Tab; label: string; icon: typeof Coins }[] = [
@@ -40,6 +41,7 @@ const TABS: { id: Tab; label: string; icon: typeof Coins }[] = [
     { id: 'compat', label: 'Compatibility', icon: PlugsConnected },
     { id: 'feedback', label: 'Feedback', icon: ChatCircleDots },
     { id: 'members', label: 'Phân quyền', icon: UsersThree },
+    { id: 'test', label: 'Test apply', icon: TestTube },
 ];
 
 function AdminConsole() {
@@ -290,6 +292,7 @@ function AdminConsole() {
                 {tab === 'compat' && <CompatPanel />}
                 {tab === 'feedback' && <FeedbackPanel />}
                 {tab === 'members' && <MembersPanel role={role} />}
+                {tab === 'test' && <TestApplyPanel />}
             </div>
             <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
         </div>

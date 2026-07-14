@@ -192,6 +192,16 @@ async def job_facets(_admin: str = Depends(require_admin)):
     return await jobs_repo.facet_values()
 
 
+@router.get("/test/random-jobs")
+async def test_random_jobs(
+    limit: int = Query(300, ge=1, le=2000),
+    _admin: str = Depends(require_admin),
+):
+    """One random ACTIVE job per company — a representative apply URL on every
+    site — so the extension's auto-apply can be tested across all ATS types."""
+    return await jobs_repo.random_per_company(limit=limit)
+
+
 # ── Crawl trigger — ATS ingest + embedding backfill, as ONE shared background
 # task (same pattern as the featured-crawl refresh in career.py). The ingest
 # sweeps every featured company's ATS feed and can run for minutes, far past
