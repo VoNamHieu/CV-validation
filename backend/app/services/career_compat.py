@@ -344,6 +344,16 @@ async def _record_locked(url: str, res: dict, *, company: str, source: str, now:
                    prev_count, cur_count)
     # Ignore noise from tiny boards; flag a ≥60% drop off the baseline.
     regressed = baseline >= _REGRESS_MIN_BASELINE and cur_count < baseline * (1 - _REGRESS_DROP_RATIO)
+    # Consecutive-failure streak: how many recent runs this company came back
+    # NOT usable. Distinguishes an INTERMITTENT block (short streak — a site that
+    # usually works but blipped, e.g. a Cloudflare bot-score flap on L'Oréal)
+    # from a DETERMINISTIC per-IP block (long streak — VPBankS/Guardian always
+    # 403 our server). The self-heal uses it to decide whether an anti-bot verdict
+    # is worth a gentle retry. Reset to 0 on any usable run.
+    usable_now = bool(res.get("usable", False))
+    prev_fail = int((existing or {}).get("fail_streak", 0) or 0)
+    fail_streak = 0 if usable_now else prev_fail + 1
+    last_ok = now if usable_now else int((existing or {}).get("last_ok", 0) or 0)
     rec = {
         "url": url,
         "host": _host(url),
@@ -364,6 +374,8 @@ async def _record_locked(url: str, res: dict, *, company: str, source: str, now:
         "prev_job_count": prev_count,
         "baseline_job_count": baseline,
         "regressed": regressed,
+        "fail_streak": fail_streak,
+        "last_ok": last_ok,
     }
     index.insert(0, rec)
     await _save_index(index)
