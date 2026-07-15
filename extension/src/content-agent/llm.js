@@ -6,7 +6,7 @@ import { LLM_TIMEOUT } from './constants.js';
  */
 export async function callLLMMapping(formFields, profileData) {
     return new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('LLM proxy timeout (30s)')), LLM_TIMEOUT);
+        const timeout = setTimeout(() => reject(new Error('LLM proxy timeout (65s)')), LLM_TIMEOUT);
         chrome.runtime.sendMessage({
             type: 'PROXY_LLM_MAP_FORM',
             formFields,
@@ -26,7 +26,7 @@ export async function callLLMMapping(formFields, profileData) {
  */
 export async function callAgentPlan(pageState, profileData, history, hasCV) {
     return new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('Agent plan timeout (30s)')), LLM_TIMEOUT);
+        const timeout = setTimeout(() => reject(new Error('Agent plan timeout (65s)')), LLM_TIMEOUT);
         chrome.runtime.sendMessage({
             type: 'PROXY_LLM_AGENT_PLAN',
             pageState,

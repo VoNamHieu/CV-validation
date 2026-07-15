@@ -385,6 +385,45 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     // ══════════════════════════════════════════════════════════════
+    // ── APPLY RECIPES — per-ATS form recipes for the auto-apply agent ──
+    // Public feed (/api/apply-recipes, no auth — recipes carry no user data).
+    // Cached in storage for 6h; on a network failure we serve the last cache
+    // (even stale) so the agent degrades to the bundled fallback only when it
+    // has never fetched. Content script matches the recipe by host itself.
+    // ══════════════════════════════════════════════════════════════
+    if (message.type === 'GET_APPLY_RECIPES') {
+        (async () => {
+            const CACHE_TTL = 6 * 3600 * 1000;
+            try {
+                const data = await chrome.storage.local.get(['jobfitAppUrl', 'jobfitApplyRecipes']);
+                const cached = data.jobfitApplyRecipes;
+                if (cached?.recipes?.length && (Date.now() - (cached.fetchedAt || 0) < CACHE_TTL)) {
+                    sendResponse({ success: true, data: { version: cached.version, recipes: cached.recipes }, cached: true });
+                    return;
+                }
+                const appUrl = data.jobfitAppUrl || 'https://copoai.net';
+                const res = await fetch(`${appUrl}/api/apply-recipes`, { signal: AbortSignal.timeout(15000) });
+                if (!res.ok) throw new Error(`API error: ${res.status}`);
+                const result = await res.json();
+                const recipes = Array.isArray(result?.recipes) ? result.recipes : [];
+                if (recipes.length) {
+                    chrome.storage.local.set({ jobfitApplyRecipes: { version: result.version, recipes, fetchedAt: Date.now() } });
+                }
+                sendResponse({ success: true, data: { version: result.version, recipes } });
+            } catch (e) {
+                const { jobfitApplyRecipes: cached } = await chrome.storage.local.get('jobfitApplyRecipes');
+                if (cached?.recipes?.length) {
+                    sendResponse({ success: true, data: { version: cached.version, recipes: cached.recipes }, cached: true, stale: true });
+                } else {
+                    console.warn('[Copo] apply-recipes fetch failed, no cache:', e.message);
+                    sendResponse({ success: false, error: e.message });
+                }
+            }
+        })();
+        return true; // async response
+    }
+
+    // ══════════════════════════════════════════════════════════════
     // ── LLM PROXY — content scripts route AI calls through the background ──
     // ══════════════════════════════════════════════════════════════
     if (message.type === 'PROXY_LLM_MAP_FORM') {
@@ -406,7 +445,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json', ...authHeaders },
                             body: JSON.stringify({ formFields, profileData }),
-                            signal: AbortSignal.timeout(30000),
+                            signal: AbortSignal.timeout(60000),   // room for dev cold-compile + thinking model
                         });
                         if (!res.ok) {
                             const err = await res.json().catch(() => ({}));
@@ -455,7 +494,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json', ...authHeaders },
                             body: JSON.stringify({ pageState, profileData, history, hasCV }),
-                            signal: AbortSignal.timeout(30000),
+                            signal: AbortSignal.timeout(60000),   // room for dev cold-compile + thinking model
                         });
                         if (!res.ok) {
                             const err = await res.json().catch(() => ({}));

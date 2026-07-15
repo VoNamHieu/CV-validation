@@ -15,13 +15,14 @@
  */
 
 import { AGENT_MAX_ITERATIONS, APPLY_SESSION_TTL_MS, FILL_RETRY_THRESHOLD, POST_ACTION_WAIT_MS } from './constants.js';
-import { sleep } from './dom.js';
+import { overlayClick, sleep } from './dom.js';
 import { removeProgress, showConfirmation, showProgress, showToast } from './ui.js';
 import { callAgentPlan, callLLMMapping } from './llm.js';
 import { executeFillInstructions } from './fill.js';
 import { observePageState, scrollAndCollect } from './observe.js';
 import { findApplyButton, isApplicationFormPage, summarizeState, waitForJobPageSignal } from './detect.js';
 import { getApplyCredentials, handleLoginWall } from './login.js';
+import { applyRecipeFields, atFinalStep, clickRecipeGateway, loadRecipes, recipeForUrl } from './recipe.js';
 
 /**
  * Main agentic loop: Observe → Plan → Act → Verify.
@@ -39,6 +40,8 @@ async function runAgentLoop(profile) {
     // after we actually did something count as a submitted application.
     let baselineSignals = null;
     let actionsTaken = 0;
+    let loginAttempts = 0;   // cap login-wall retries so a wrong password can't loop forever
+    const gatewayClicks = new Map();   // recipe gateway label → click count (loop guard)
 
     // Load CV data if available
     const cvData = await new Promise(r => {
@@ -52,9 +55,22 @@ async function runAgentLoop(profile) {
     });
     const hasCV = !!cvData;
     const applyCreds = await getApplyCredentials();
+
+    // Per-ATS recipe for THIS host (Workday…): exact verified selectors for the
+    // standardized fields, so the reliable text inputs get filled deterministically
+    // and the LLM only handles dropdowns / navigation / non-standard questions.
+    // Loaded once per page (a redirect to the ATS re-injects the agent → new load).
+    let recipe = null;
+    try {
+        recipe = recipeForUrl(await loadRecipes(), location.href);
+        if (recipe) console.log(`[Copo Apply] recipe matched: ${recipe.ats} v${recipe.version} (verified: ${recipe.verified})`);
+    } catch (e) {
+        console.warn('[Copo Apply] recipe load failed (LLM-only):', e?.message);
+    }
+
     console.log('[Copo Apply] ▶ runAgentLoop start', {
         url: location.href, host: location.hostname, hasCV, hasCreds: !!applyCreds?.password,
-        profileFields: Object.keys(profile || {}).length,
+        recipe: recipe?.ats || null, profileFields: Object.keys(profile || {}).length,
     });
 
     try {
@@ -73,7 +89,7 @@ async function runAgentLoop(profile) {
             const applyBtn = findApplyButton();
             if (applyBtn) {
                 console.log('[Copo Apply] step0: clicked Apply button:', (applyBtn.innerText || applyBtn.value || '').trim().slice(0, 40));
-                applyBtn.click();
+                overlayClick(applyBtn);
                 showProgress(0, AGENT_MAX_ITERATIONS, 'Đã click nút Ứng tuyển, chờ form...');
                 await sleep(2000);
             } else {
@@ -110,6 +126,30 @@ async function runAgentLoop(profile) {
                 return;
             }
 
+            // ── NEVER AUTO-SUBMIT: stop at the ATS's final review step and hand off.
+            // Workday's review "Submit" reuses pageFooterNextButton, so an overlay-aware
+            // Next click would otherwise send the application. Fill up to here only.
+            if (recipe && atFinalStep(recipe)) {
+                removeProgress();
+                showToast('✅ Đã điền xong tới bước cuối — kiểm tra rồi bấm "Submit" để nộp.', 7000);
+                reportResult(true, 'Reached review step — filled, awaiting user submit', 'filled');
+                showConfirmation(state.totalFields, state.totalFields, false);
+                return;
+            }
+
+            // ── RECIPE GATEWAY: click through a non-form gateway (Workday's "Start
+            // Your Application" modal, whose options are <a role="button"> the generic
+            // scan misses) to reach the form. Before login/fill; capped so it can't loop.
+            if (recipe) {
+                const gw = clickRecipeGateway(recipe, hasCV, gatewayClicks);
+                if (gw.clicked) {
+                    actionsTaken++;
+                    showProgress(i + 1, AGENT_MAX_ITERATIONS, `Tiếp tục: ${gw.label}`);
+                    await sleep(1500);
+                    continue; // re-observe the screen the gateway led to
+                }
+            }
+
             // ── Login / sign-up wall: sign in with the user's synced credentials
             // (Workday & friends gate the form behind an account). Do this BEFORE
             // the LLM plan — the planner refuses password fields by design. On
@@ -117,12 +157,62 @@ async function runAgentLoop(profile) {
             // the real form. Guarded to a genuine login/signup page inside
             // handleLoginWall, so it no-ops on a normal application form.
             if (applyCreds?.password && document.querySelector('input[type="password"]')) {
-                const loggedIn = await handleLoginWall(applyCreds);
-                if (loggedIn) {
+                // Fill + submit the sign-in (handleLoginWall clicks the click_filter
+                // overlay over Workday's button — pure JS). Two auto passes.
+                if (loginAttempts < 2) {
+                    loginAttempts++;
+                    await handleLoginWall(applyCreds, recipe?.login);
                     actionsTaken++;
-                    showProgress(i + 1, AGENT_MAX_ITERATIONS, 'Đăng nhập / tạo tài khoản…');
-                    await sleep(2500);   // let the login submit navigate; agent resumes after
-                    continue;
+                    showProgress(i + 1, AGENT_MAX_ITERATIONS, 'Đăng nhập…');
+                    await sleep(3200);
+                    continue; // re-observe: a successful submit cleared the wall
+                }
+                // Still walled after two auto passes (wrong credentials, or an ATS we
+                // can't submit) → pre-fill so the user clicks "Sign In" once, then
+                // auto-resume when the wall clears. Waits up to 3 min; no burned iters.
+                await handleLoginWall(applyCreds, recipe?.login); // (re)fill + submit
+                showToast('🔐 Đã điền sẵn email + mật khẩu. Nếu chưa tự đăng nhập, hãy bấm nút "Sign In" — '
+                    + 'hệ thống sẽ tự động điền tiếp sau khi bạn đăng nhập.', 0);
+                const waitStart = Date.now();
+                let cleared = false;
+                while (Date.now() - waitStart < 180000) {
+                    sendHeartbeat();
+                    showProgress(i + 1, AGENT_MAX_ITERATIONS, '⏳ Chờ đăng nhập…');
+                    const pwNow = document.querySelector('input[type="password"]');
+                    if (!pwNow) { cleared = true; break; }          // signed in → wall gone
+                    if (!pwNow.value) await handleLoginWall(applyCreds, recipe?.login); // re-render cleared it
+                    await sleep(2000);
+                }
+                document.getElementById('jobfit-toast')?.remove();
+                if (!cleared) {
+                    removeProgress();
+                    showToast('⚠️ Chưa đăng nhập sau 3 phút. Đăng nhập thủ công rồi bấm Auto Apply lại nhé.', 6000);
+                    reportResult(false, 'Manual login timeout');
+                    return;
+                }
+                showToast('✅ Đã đăng nhập — tiếp tục điền hồ sơ...', 3000);
+                prevStateHash = ''; fillAttempts.clear(); persistentlyUnfilled.clear();
+                await sleep(1500);
+                continue; // resume on the post-login step
+            }
+
+            // ── RECIPE PRE-FILL: for a known ATS (Workday…), fill the standardized
+            // text fields with exact verified selectors BEFORE the LLM plans. It's
+            // idempotent (skips already-filled inputs) so it goes quiet once the
+            // step is done; when it fills something new we re-observe so the LLM
+            // sees the pre-filled state and only handles the rest (dropdowns, Next).
+            if (recipe) {
+                const rf = await applyRecipeFields(recipe, profile, cvData);
+                if (rf.filled > 0) {
+                    actionsTaken++;
+                    history.push({
+                        iteration: i,
+                        plan: { action: 'RECIPE', reason: `recipe ${recipe.ats}/${rf.step}` },
+                        result: { filled: rf.filled },
+                    });
+                    showProgress(i + 1, AGENT_MAX_ITERATIONS, `Điền tự động (${recipe.label}) — ${rf.filled} trường`);
+                    await sleep(600);
+                    continue; // re-observe; LLM handles dropdowns / navigation next
                 }
             }
 
@@ -261,7 +351,10 @@ async function runAgentLoop(profile) {
             } else if (plan.action === 'CLICK' && plan.clickTarget) {
                 const target = document.querySelector(plan.clickTarget);
                 if (target) {
-                    target.click();
+                    // Overlay-aware: Workday covers Next/Continue/Submit buttons with
+                    // a "click_filter" div that owns the handler — a plain .click() on
+                    // the button is swallowed, so the agent could never advance a step.
+                    overlayClick(target);
                     actionResult = { clicked: plan.clickTarget };
                     actionsTaken++;
                 } else {
