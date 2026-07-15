@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import time
 from urllib.parse import urlparse
 
@@ -79,6 +80,42 @@ def _host(url: str) -> str:
     return (urlparse(url).netloc or "unknown").lower().removeprefix("www.")
 
 
+def _key(url: str) -> str:
+    """Storage key = host + path, so a multi-step flow whose steps live at
+    different URLs (each apply step, each job) is kept SEPARATELY instead of the
+    latest overwriting the rest. (A pure SPA that never changes its URL across
+    steps still collapses to one key — capture those one at a time.)"""
+    p = urlparse(url)
+    host = (p.netloc or "unknown").lower().removeprefix("www.")
+    slug = re.sub(r"[^a-z0-9]+", "-", ((p.path or "/").lower())).strip("-")[:100]
+    return f"{host}:{slug}" if slug else host
+
+
+def _step_hint(html: str) -> str:
+    """A multi-step wizard (Workday apply: My Information → My Experience → … →
+    Review) keeps ONE url across steps and swaps the content via JS. Derive the
+    current step from the DOM (Workday's active-step marker, else a known step
+    heading) so each step is stored under its own key instead of overwriting."""
+    if not html:
+        return ""
+    name = ""
+    # Workday's active step is <li data-automation-id="progressBarActiveStep"> …
+    # <label>current step N of M</label><label>STEP NAME</label></li> — take the
+    # label that isn't the "current step N of M" counter.
+    m = re.search(r'data-automation-id="progressBarActiveStep".*?</li>', html, re.S)
+    if m:
+        for lbl in re.findall(r"<label[^>]*>(.*?)</label>", m.group(0), re.S):
+            t = re.sub(r"<[^>]+>", "", lbl).strip()
+            if t and not re.match(r"(?i)\s*current step\b", t):
+                name = t
+                break
+    if not name:  # fallback: the step heading (h3) / any known step label
+        m = re.search(r'>\s*(My Information|My Experience|Application Questions|'
+                      r'Voluntary Disclosures|Self Identify|Review|Create Account|Sign In)\s*<', html)
+        name = m.group(1) if m else ""
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:30]
+
+
 @router.post("/capture")
 async def capture(payload: CapturePayload, x_debug_token: str | None = Header(default=None)):
     _require_token(x_debug_token)
@@ -87,17 +124,24 @@ async def capture(payload: CapturePayload, x_debug_token: str | None = Header(de
     if data.get("html") and len(data["html"]) > _MAX_HTML:
         data["html"] = data["html"][:_MAX_HTML]
         data["_html_truncated"] = True
+    # A same-URL wizard (Workday apply) → append the current step so each step is
+    # stored SEPARATELY instead of the next overwriting the last.
+    step = _step_hint(data.get("html", ""))
+    key = _key(payload.url)
+    if step:
+        key = f"{key}:{step}"
     ts = int(time.time())
     data["_ts"] = ts
     data["_host"] = host
+    data["_step"] = step
 
-    await cache.set_json(f"{_NS}:{host}", data, _TTL)
+    await cache.set_json(f"{_NS}:{key}", data, _TTL)
 
     # Maintain a small recency index (read-modify-write; low volume).
     index = await cache.get_json(_INDEX_KEY) or []
-    index = [e for e in index if e.get("host") != host]   # de-dup by host
-    index.insert(0, {"host": host, "url": payload.url, "title": payload.title,
-                     "ts": ts, "bytes": len(data.get("html", "")),
+    index = [e for e in index if e.get("key") != key]   # de-dup by host+path(+step)
+    index.insert(0, {"key": key, "host": host, "url": payload.url, "title": payload.title,
+                     "step": step, "ts": ts, "bytes": len(data.get("html", "")),
                      "anchors": len(payload.anchors), "tables": len(payload.tables),
                      "apis": len(payload.apis), "extras": len(payload.extras or {})})
     await cache.set_json(_INDEX_KEY, index[:_MAX_INDEX], _TTL)
@@ -111,13 +155,33 @@ async def capture(payload: CapturePayload, x_debug_token: str | None = Header(de
 
 
 @router.get("/capture/latest")
-async def latest(host: str = Query(...), x_debug_token: str | None = Header(default=None)):
+async def latest(host: str = Query(None), url: str = Query(None), key: str = Query(None),
+                 x_debug_token: str | None = Header(default=None)):
+    """`?key=` fetches one exact capture (use the `key` from /capture/list — the
+    only way to pick a specific step of a same-url wizard); `?url=` fetches the
+    step-less capture for that page (host+path); `?host=` returns the MOST RECENT
+    capture for that host (there can be several — one per step/path)."""
     _require_token(x_debug_token)
+    if key:
+        data = await cache.get_json(f"{_NS}:{key}")
+        if not data:
+            raise HTTPException(status_code=404, detail=f"no capture for key {key}")
+        return data
+    if url:
+        data = await cache.get_json(f"{_NS}:{_key(url)}")
+        if not data:
+            raise HTTPException(status_code=404, detail=f"no capture for url {url}")
+        return data
+    if not host:
+        raise HTTPException(status_code=400, detail="provide host or url")
     h = host.lower().removeprefix("www.")
-    data = await cache.get_json(f"{_NS}:{h}")
-    if not data:
-        raise HTTPException(status_code=404, detail=f"no capture for host {h}")
-    return data
+    # index is newest-first (insert at 0); first match = most recent for this host.
+    for e in (await cache.get_json(_INDEX_KEY) or []):
+        if e.get("host") == h and e.get("key"):
+            data = await cache.get_json(f"{_NS}:{e['key']}")
+            if data:
+                return data
+    raise HTTPException(status_code=404, detail=f"no capture for host {h}")
 
 
 @router.get("/capture/list")
