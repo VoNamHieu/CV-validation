@@ -1,0 +1,302 @@
+[
+ {
+  "id": 1,
+  "title": "TSM - KA",
+  "company": "Coca-Cola"
+ },
+ {
+  "id": 3,
+  "title": "Chuyên viên Cao cấp Phát triển Ứng dụng Nền tảng (Core Development)",
+  "company": "VPBank Securities"
+ },
+ {
+  "id": 5,
+  "title": "Director of Engineering",
+  "company": "Accor"
+ },
+ {
+  "id": 7,
+  "title": "Sales Performance Development Executive",
+  "company": "Nestlé Vietnam"
+ },
+ {
+  "id": 9,
+  "title": "Chuyên Viên Cao Cấp/ Chuyên Viên Giao Dịch Chứng Khoán Môi Giới KHTC (ưu tiên nam)",
+  "company": "VPBank Securities"
+ },
+ {
+  "id": 11,
+  "title": "HO - CV/NV Thu hồi nợ qua điện thoại",
+  "company": "OCB"
+ },
+ {
+  "id": 13,
+  "title": "Quản lý Trung tâm Thức ăn (Quảng Ngãi)",
+  "company": "TH Group"
+ },
+ {
+  "id": 15,
+  "title": "Operational Excellence Manager",
+  "company": "PNJ"
+ },
+ {
+  "id": 17,
+  "title": "[Hà Nội] Kiểm tra viên cao cấp Kiểm soát nội bộ và tuân thủ Tín dụng",
+  "company": "TPBank"
+ },
+ {
+  "id": 19,
+  "title": "Giám đốc Phòng giao dịch Đồng Đăng - Chi nhánh Lạng Sơn",
+  "company": "SHB"
+ },
+ {
+  "id": 21,
+  "title": "Senior Relationship Manager, Priority",
+  "company": "Standard Chartered"
+ },
+ {
+  "id": 23,
+  "title": "Data Rater (Russian) - Nhân Viên Nhập Liệu Tiếng Nga",
+  "company": "NashTech"
+ },
+ {
+  "id": 25,
+  "title": "Brand Management - Business Development, Shopee",
+  "company": "Shopee"
+ },
+ {
+  "id": 27,
+  "title": "Trưởng ban Vận hành Siêu thị (Miền Bắc)",
+  "company": "Vinamilk"
+ },
+ {
+  "id": 29,
+  "title": "[SSC] Senior Data Scientist",
+  "company": "Pharmacity"
+ },
+ {
+  "id": 31,
+  "title": "Executive Pastry Chef",
+  "company": "Accor"
+ },
+ {
+  "id": 33,
+  "title": "[HCM] Penetration Tester (Security)",
+  "company": "CMC Telecom"
+ },
+ {
+  "id": 35,
+  "title": "AI Solution Architect - Offer Up to $3500",
+  "company": "FPT Software"
+ },
+ {
+  "id": 37,
+  "title": "Manager, Trade Product & Processing Ops - Open Account",
+  "company": "Standard Chartered"
+ },
+ {
+  "id": 39,
+  "title": "Giám sát Thú y (Quảng Ngãi)",
+  "company": "TH Group"
+ },
+ {
+  "id": 41,
+  "title": "Chuyên gia ALM – Phòng Nguồn Vốn và Kinh Doanh Tài Chính",
+  "company": "VPBank Securities"
+ },
+ {
+  "id": 43,
+  "title": "Data Scientist (Middle - Senior)",
+  "company": "Cake"
+ },
+ {
+  "id": 45,
+  "title": "Claim & Compensation - SPX Express",
+  "company": "Shopee"
+ },
+ {
+  "id": 47,
+  "title": "[SO] Product Legal Analyst",
+  "company": "Bosch"
+ },
+ {
+  "id": 49,
+  "title": "Hub Team Lead (Trưởng Nhóm Trạm Giao Nhận) Miền Bắc - Hub Operations, SPX Express",
+  "company": "Shopee"
+ },
+ {
+  "id": 51,
+  "title": "Nhân viên bán thời gian siêu thị Bách Hóa Xanh (Quầy hàng khô)",
+  "company": "Thế Giới Di Động"
+ },
+ {
+  "id": 53,
+  "title": "Chuyên viên cao cấp Quản trị dữ liệu EDA",
+  "company": "VPBank Securities"
+ },
+ {
+  "id": 55,
+  "title": "Intern, Partnerships, Singapore",
+  "company": "Klook"
+ },
+ {
+  "id": 57,
+  "title": "Duty Manager",
+  "company": "Accor"
+ },
+ {
+  "id": 59,
+  "title": "Chuyên viên Tập sự Khách hàng Cá nhân - CN. Phúc Yên - Phường Phúc Yên, Phú Thọ",
+  "company": "MB Bank"
+ },
+ {
+  "id": 61,
+  "title": "NHÂN VIÊN TÀI CHÍNH",
+  "company": "Acecook Vietnam"
+ },
+ {
+  "id": 63,
+  "title": "Cộng tác viên Hậu kiểm eKYC",
+  "company": "SHB"
+ },
+ {
+  "id": 65,
+  "title": "Tư vấn viên (Tam Kỳ)",
+  "company": "PNJ"
+ },
+ {
+  "id": 67,
+  "title": "Giám đốc kênh kinh doanh",
+  "company": "247Express"
+ },
+ {
+  "id": 69,
+  "title": "Commercial Insights Associate - SPX Express",
+  "company": "Shopee"
+ },
+ {
+  "id": 71,
+  "title": "Nhân viên giao nhận (Vinh)",
+  "company": "247Express"
+ },
+ {
+  "id": 73,
+  "title": "Trưởng bộ phận Tư vấn Sản phẩm đầu tư",
+  "company": "VPBank Securities"
+ },
+ {
+  "id": 75,
+  "title": "Chuyên viên/CVCC/Chuyên gia Quản Lý Thay Đổi (Change Management) - Khối Ngân hàng số",
+  "company": "SHB"
+ },
+ {
+  "id": 77,
+  "title": "Trưởng bưu cục (Hưng Yên)",
+  "company": "247Express"
+ },
+ {
+  "id": 79,
+  "title": "Search Recommendation & Traffic Quality Assurance Analyst - Vietnam",
+  "company": "TikTok"
+ },
+ {
+  "id": 81,
+  "title": "Trưởng phòng/ Phó Trưởng phòng Phát triển thương hiệu - Khối Marcom",
+  "company": "SHB"
+ },
+ {
+  "id": 83,
+  "title": "Fraud Risk Analyst",
+  "company": "Cake"
+ },
+ {
+  "id": 85,
+  "title": "Chuyên viên Tập sự Khách hàng Doanh nghiệp - Phòng giao dịch Nam Vĩ Dạ - CN. Huế - Phường Thuận Hóa, Huế",
+  "company": "MB Bank"
+ },
+ {
+  "id": 87,
+  "title": "[Aeon Mall Thanh Hóa] - Kế toán Cửa hàng",
+  "company": "PNJ"
+ },
+ {
+  "id": 89,
+  "title": "Chuyên Viên Điều Phối Mảng Tác Nghiệp Xuất Khẩu (International Business)",
+  "company": "Vinamilk"
+ },
+ {
+  "id": 91,
+  "title": "CV/CVC Thu Hồi Nợ Qua Điện Thoại",
+  "company": "Cake"
+ },
+ {
+  "id": 93,
+  "title": "Nhân viên phòng Chất lượng Dịch vụ (CUS_SQ_T2_0726_0)",
+  "company": "Honda Vietnam"
+ },
+ {
+  "id": 95,
+  "title": "Chuyên gia/Chuyên viên Cao cấp Phát triển sản phẩm đầu tư",
+  "company": "VPBank Securities"
+ },
+ {
+  "id": 97,
+  "title": "Sales Account Orchestrator 9",
+  "company": "Siemens"
+ },
+ {
+  "id": 99,
+  "title": "Sports Academy Manager",
+  "company": "Accor"
+ },
+ {
+  "id": 101,
+  "title": "Trưởng Nhóm Vận Hành Kinh Doanh Quốc Tế",
+  "company": "TH Group"
+ },
+ {
+  "id": 103,
+  "title": "NHÂN VIÊN KẾ HOẠCH NGUYÊN VẬT LIỆU",
+  "company": "Acecook Vietnam"
+ },
+ {
+  "id": 105,
+  "title": "Chuyên viên Cao cấp Quản lý Bảng Cân đối Kế toán",
+  "company": "SHB"
+ },
+ {
+  "id": 107,
+  "title": "Giám đốc Phòng giao dịch",
+  "company": "SHB"
+ },
+ {
+  "id": 109,
+  "title": "Spa Supervisor (Vietnamese local)",
+  "company": "Accor"
+ },
+ {
+  "id": 111,
+  "title": "Chuyên viên cao cấp dịch vụ Ngân hàng đầu tư",
+  "company": "VPBank Securities"
+ },
+ {
+  "id": 113,
+  "title": "Giao dịch viên",
+  "company": "SHB"
+ },
+ {
+  "id": 115,
+  "title": "AV Supervisor (Vietnamese Local Only)",
+  "company": "Accor"
+ },
+ {
+  "id": 117,
+  "title": "Chuyên viên chính/Chuyên viên cao cấp Thẩm định tài sản",
+  "company": "SHB"
+ },
+ {
+  "id": 119,
+  "title": "Chuyên viên cao cấp Nghiên cứu Thị trường - Khối Định chế Tài chính",
+  "company": "SHB"
+ }
+]

@@ -21,3 +21,11 @@ Nhãn: v2 (Intent×Reach, min), IDCG chung per-profile, pool 2026-07-14, 40 prof
 | C1 | 07-15 | `sen_mult × years_mult` → `min(sen,years)` (bỏ double-penalty) | 0.710 | 0.863 | +0.153 | +0.000 | 0 | KEEP (principled, eval-NEUTRAL — trigger hiếm) | (pending) |
 
 **Ghi chú C1**: đây là điểm 1 critique gốc. Eval KHÔNG đổi vì `years_mult` phần lớn=1.0 (regex required-years ít bắt) → `min(sen,1)=sen=sen×1`, hai vế chỉ khác khi CẢ HAI bắn, ca đó hiếm trong pool. `min ≤ product` nên chỉ nới phạt kép, không thể làm tệ hơn (0 regression xác nhận). Giữ vì đúng nguyên tắc + vô hại; sẽ có ích khi years-extraction tốt hơn hoặc data đa dạng hơn. FINDING PHỤ: trục years-fit đang gần như bất động (regex JD yếu) — đáng cải thiện extraction trước khi tin trục này.
+
+## Seniority-band eval (senior_eval.py, 120 unique title, stratified 60 fired / 60 None)
+
+**classify_seniority(title) — precision 97% (exact), 100% ±1, 0% false-fire; recall 87%→92% sau fix.** Thuần title, KHÔNG JD, KHÔNG LLM. Trả lời câu "seniority axis có mong manh không": KHÔNG — band (tín hiệu chủ lực của sen_mult) sống trên title, adapter chết vẫn có. Phần mong manh (years) là refinement thứ cấp + bị JD-vắng bỏ đói (70% job JD rỗng, median 0 char).
+
+| S1 | 07-15 | seniority vocab: +trưởng ca/trưởng ban/CVC/CVCC (từ 6 miss của senior_eval) | 0.713 | 0.859 | +0.145 | +0.003 | 0 | ACCEPT (recall 87→92%, precision giữ 97%; NDCG neutral) | (pending) |
+
+**Ghi chú S1**: fix từ đo cô lập, KHÔNG phải chase NDCG. 6 miss → 3 fix clean (trưởng ca→Lead, trưởng ban→Director, CVC/CVCC→Senior), 3 ca mơ hồ để None đúng (bare quản lý/executive = bẫy như bare manager). Pool false-fire check: 43 title dính token mới đều senior/lead/director thật. NDCG neutral (+0.003 facet) + label-drift che vài per-profile — bằng chứng chính = phép đo cô lập. FEED FIELD seniority của ATS vẫn CHƯA harvest (stored=classify_seniority(title) thuần) — đòn bẩy coverage lớn nhất còn lại, 0 LLM.

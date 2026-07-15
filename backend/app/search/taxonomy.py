@@ -229,12 +229,15 @@ _LEVEL_INDEX = {lv: i for i, lv in enumerate(SENIORITY_LEVELS)}
 # move the level. Titles with no signal return None (→ no seniority penalty).
 _SENIORITY_RULES: list[tuple[str, str]] = [
     ("Intern/Fresher", r"\bintern(ship)?\b|fresher|thuc tap|sinh vien|\btts\b"),
-    ("Director/Head+", r"director|head of|\bhead\b|chief|\bc[efimot]o\b|\bvp\b|svp|evp|vice president|giam doc|truong phong|truong bo phan|pho phong"),
-    # Mid-management band: leader/supervisor/giám sát/trưởng nhóm/deputy are
-    # genuine Lead/Manager roles in the VN market. (Bare "manager" stays OFF —
-    # a "Product Manager" is a mid IC — but "Deputy Manager" carries the signal.)
-    ("Lead/Manager",   r"\blead\b|leader|principal|\bstaff\b|supervisor|giam sat|truong nhom|\bdeputy\b"),
-    ("Senior",         r"\bsenior\b|\bsr\b|cao cap|chuyen gia|chuyen vien cao cap"),
+    ("Director/Head+", r"director|head of|\bhead\b|chief|\bc[efimot]o\b|\bvp\b|svp|evp|vice president|giam doc|truong phong|truong ban|truong bo phan|pho phong"),
+    # Mid-management band: leader/supervisor/giám sát/trưởng nhóm/trưởng ca/deputy
+    # are genuine Lead/Manager roles in the VN market. (Bare "manager"/"quản lý"
+    # stay OFF — a "Product Manager"/"Quản lý sản phẩm" is a mid IC — but "Deputy
+    # Manager" / "Trưởng ca" carry the signal.)
+    ("Lead/Manager",   r"\blead\b|leader|principal|\bstaff\b|supervisor|giam sat|truong nhom|truong ca|\bdeputy\b"),
+    # cvcc/cvc = chuyên viên cao cấp / chuyên viên chính (VN senior-IC abbrevs);
+    # bare "cv" (chuyên viên) is a generic grade, intentionally NOT a signal.
+    ("Senior",         r"\bsenior\b|\bsr\b|cao cap|chuyen gia|chuyen vien cao cap|\bcvcc\b|\bcvc\b"),
     ("Junior",         r"\bjunior\b|\bjr\b|entry[ -]?level|moi ra truong|tap su"),
 ]
 _SENIORITY_COMPILED = [(lv, re.compile(rx, re.I)) for lv, rx in _SENIORITY_RULES]
