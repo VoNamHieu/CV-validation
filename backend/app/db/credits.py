@@ -31,6 +31,14 @@ async def _ensure(conn, user_id: str) -> None:
 async def get_balance(user_id: str) -> int:
     pool = await get_pool()
     async with pool.acquire() as conn:
+        # Hot, client-polled endpoint — READ FIRST. A plain SELECT is MVCC (no
+        # lock), so an existing user's balance check never waits on the credits
+        # row's lock. The old path always ran _ensure's INSERT-ON-CONFLICT, which
+        # blocks on that lock when a concurrent spend/grant holds it → statement
+        # timeout. Lazily create (the signup grant) only when the row is missing.
+        bal = await conn.fetchval("SELECT balance FROM credits WHERE user_id = $1", user_id)
+        if bal is not None:
+            return bal
         async with conn.transaction():
             await _ensure(conn, user_id)
             return await conn.fetchval("SELECT balance FROM credits WHERE user_id = $1", user_id)
