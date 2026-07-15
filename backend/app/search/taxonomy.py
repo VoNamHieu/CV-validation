@@ -121,17 +121,18 @@ _RULES: list[tuple[str, str]] = [
     ("Manufacturing & Technician", r"cong nhan|cn |van hanh may|lo hoi|technician|ky thuat vien|operator|assembl|machinist|qa\b.*line|cong nhan dien|\bchef\b|sous chef|bep truong|housekeep|cong nghe thuc pham"),
     # Explicit Product roles — checked BEFORE Data&AI so "AI Product Owner" /
     # "Data Product Manager" resolve to the role (Product), not the specialization.
-    ("Product", r"product (owner|manager|management|lead|director|head|supervisor|executive|associate|specialist|intern|develop)|head of product|quan ly san pham|phat trien san pham|go.?to.?market|\bgtm\b"),
+    ("Product", r"product (owner|manager|management|lead|director|head|supervisor|executive|associate|specialist|intern|develop)|head of product|quan ly san pham|phat trien san pham|truong nhom san pham|giam doc san pham|go.?to.?market|\bgtm\b"),
     # Data & AI  (business analyst lives here, NOT Product — it's analytics/
     # requirements work, adjacent to Product but a distinct, lower tier)
-    ("Data & AI", r"data scien|data engineer|machine learn|\bml\b|\bai\b|data analyst|business analyst|business intelligence|analytics|data steward|big data|\bmis\b|phan tich nghiep vu|(commercial|market|insights|claim|chargeback|costing) analyst"),
+    ("Data & AI", r"data scien|data engineer|machine learn|\bml\b|\bai\b|data analyst|business analyst|business intelligence|analytics|data steward|big data|\bmis\b|phan tich nghiep vu|phan tich du lieu|khoa hoc du lieu|data intern|(commercial|market|insights|claim|chargeback|costing) analyst"),
     # Engineering / software (incl. semiconductor: VLSI / ASIC / IC & chip design
     # / verification / layout — checked before Design & Finance so "Analog IC
     # Design" / "Memory Controller Verification" land here, not on Design's
     # "design" or Finance's "controller"). Bare "kỹ thuật" deliberately NOT a
     # signal: it collides with "kỹ thuật số" (digital), "kỹ thuật SEO" (mktg) and
-    # maintenance/construction technicians (→ Manufacturing).
-    ("Engineering", r"software|developer|\bdev\b|engineer|lap trinh|backend|frontend|full.?stack|devops|\bsre\b|\bqa\b|tester|mobile|android|ios|embedded|firmware|system|infra|cloud|\bit\b.*(engineer|developer|support|operation)|ky su(?!.*ban)|semiconductor|\bvlsi\b|\basic\b|\bfpga\b|\brtl\b|verilog|silicon|\bic design|chip verification|functional verification|ip verification|design verification|memory controller|\blayout\b|\bcntt\b|an toan thong tin|kiem thu|platform (specialist|manager|lead)"),
+    # maintenance/construction technicians (→ Manufacturing). The full phrase
+    # "trưởng nhóm kỹ thuật" (tech lead) IS safe — lookahead keeps "…kỹ thuật số".
+    ("Engineering", r"software|developer|\bdev\b|engineer|lap trinh|backend|frontend|full.?stack|devops|\bsre\b|\bqa\b|tester|mobile|android|ios|embedded|firmware|system|infra|cloud|\bit\b.*(engineer|developer|support|operation)|ky su(?!.*ban)|truong nhom ky thuat(?!\s*(so|seo|bao hanh)\b)|semiconductor|\bvlsi\b|\basic\b|\bfpga\b|\brtl\b|verilog|silicon|\bic design|chip verification|functional verification|ip verification|design verification|memory controller|\blayout\b|\bcntt\b|an toan thong tin|kiem thu|platform (specialist|manager|lead)"),
     # Product  (business analyst moved to Data & AI; bare \bba\b dropped — it
     # false-matches VN "Bà"/"Ba")
     ("Product", r"product manage|product owner|product lead|product assistant|product specialist|product analyst|quan ly san pham|tech product"),
@@ -188,9 +189,16 @@ FULL_CONFIDENCE = 0.8
 FALLBACK_CONFIDENCE = 0.3
 
 
+# A LEADING hiring verb is a recruitment AD, not a recruiter role: the real
+# role is what follows. "TUYỂN DỤNG Dược sĩ" is a pharmacist job, not HR;
+# "Nhân viên Tuyển dụng" (verb NOT leading) IS a recruiter role — left intact.
+# Strips an optional [TAG] then the leading verb, so classification sees the role.
+_HIRING_PREFIX = re.compile(r'^\s*(?:\[[^\]]*\]\s*)?(?:tuyen dung|tuyen gap|can tuyen|now hiring|hiring)\s+')
+
+
 def classify_title(title: str) -> tuple[str, float]:
     """(role_family, confidence). Falls back to General & Management @0.3."""
-    n = _norm(title)
+    n = _HIRING_PREFIX.sub("", _norm(title))
     for fam, rx in _COMPILED:
         if rx.search(n):
             return fam, FULL_CONFIDENCE

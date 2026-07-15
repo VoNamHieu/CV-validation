@@ -24,11 +24,18 @@ _LEVELS = SENIORITY_LEVELS
 # vocab, but explicit-field API callers pass loose terms ("fintech", "tech"); map
 # them so the industry filter isn't silently dropped. Keys are _norm'd at lookup.
 _DOMAIN_ALIASES = {
+    # NB: _norm keeps hyphens, so the hyphenated spelling needs its own key —
+    # "E-commerce" (the most common form) was silently dropped without it.
     "ecommerce": "E-commerce & Marketplace", "e commerce": "E-commerce & Marketplace",
+    "e-commerce": "E-commerce & Marketplace",
     "marketplace": "E-commerce & Marketplace", "retail tech": "E-commerce & Marketplace",
     "saas": "Technology Platform / SaaS", "tech": "Technology Platform / SaaS",
     "technology": "Technology Platform / SaaS", "software": "Technology Platform / SaaS",
     "platform": "Technology Platform / SaaS", "internet": "Technology Platform / SaaS",
+    "ai": "Technology Platform / SaaS", "consumer apps": "Technology Platform / SaaS",
+    "enterprise software": "Technology Platform / SaaS",
+    "beauty": "FMCG & Consumer Goods",
+    "financial services": "Banking",
     "fintech": "Fintech & Payments", "payments": "Fintech & Payments",
     "payment": "Fintech & Payments",
     "it services": "IT Services / Outsourcing", "outsourcing": "IT Services / Outsourcing",

@@ -1,0 +1,801 @@
+[
+ {
+  "profile": {
+   "id": "pm-senior-saas-en",
+   "target_roles": [
+    "Senior Product Manager"
+   ],
+   "cv_roles": [
+    "Product Manager"
+   ],
+   "domains": [
+    "SaaS"
+   ],
+   "level": "Senior",
+   "years_of_experience": 7
+  },
+  "jobs": [
+   {
+    "job_id": "https://careers.onemount.com/jobs/994",
+    "title": "Senior Product Owner (Sales Platform)",
+    "company": "One Mount Group"
+   },
+   {
+    "job_id": "https://careers.onemount.com/jobs/1076",
+    "title": "Product Owner (Healthcare)",
+    "company": "One Mount Group"
+   },
+   {
+    "job_id": "https://cake.vn/tuyen-dung/jobs/94",
+    "title": "Card Product Manager",
+    "company": "Cake"
+   },
+   {
+    "job_id": "https://cake.vn/tuyen-dung/jobs/74",
+    "title": "Tech Product Manager (Payment)",
+    "company": "Cake"
+   },
+   {
+    "job_id": "https://cake.vn/tuyen-dung/jobs/160",
+    "title": "Product Manager (MSME Merchant & Cross-Border Payments)",
+    "company": "Cake"
+   },
+   {
+    "job_id": "https://cake.vn/tuyen-dung/jobs/14",
+    "title": "Tech Product Manager (Growth)",
+    "company": "Cake"
+   },
+   {
+    "job_id": "https://cake.vn/tuyen-dung/jobs/138",
+    "title": "Product Assistant Manager (Merchant)",
+    "company": "Cake"
+   },
+   {
+    "job_id": "https://247express.vn/tuyen-dung/product-owner-hrm",
+    "title": "Product Owner - HRM",
+    "company": "247Express"
+   },
+   {
+    "job_id": "https://247express.vn/tuyen-dung/senior-product-owner-crm-domain",
+    "title": "Senior Product Owner - CRM Domain",
+    "company": "247Express"
+   },
+   {
+    "job_id": "https://247express.vn/tuyen-dung/senior-product-owner-hrm-domain",
+    "title": "Senior Product Owner - HRM Domain",
+    "company": "247Express"
+   },
+   {
+    "job_id": "https://tuyendung.pnj.com.vn/viec-lam/ai-product-manager.35abef1c.html",
+    "title": "AI Product Manager",
+    "company": "PNJ"
+   },
+   {
+    "job_id": "https://tuyendung.vnpt.vn/tim-viec-lam/chuyen-vien-quan-ly-san-pham-jid5372.html",
+    "title": "Chuyên viên Quản lý sản phẩm",
+    "company": "VNPT"
+   },
+   {
+    "job_id": "https://247express.vn/tuyen-dung/product-manager-tms",
+    "title": "Product Manager - TMS",
+    "company": "247Express"
+   },
+   {
+    "job_id": "https://careers.shopee.vn/job-detail/127554/",
+    "title": "Senior Associate, Product Management (Traffic, Revenue Growth & Marketing Effici",
+    "company": "Shopee"
+   },
+   {
+    "job_id": "https://careers.shopee.vn/job-detail/125257/",
+    "title": "[ShopeeFood] Associate, Product Management",
+    "company": "Shopee"
+   },
+   {
+    "job_id": "https://careers.shopee.vn/job-detail/133125/",
+    "title": "[SPX Express] Senior Associate, Business Product Management (AI Solutions)",
+    "company": "Shopee"
+   }
+  ]
+ },
+ {
+  "profile": {
+   "id": "swe-mobile-senior-en",
+   "target_roles": [
+    "Senior Mobile Engineer"
+   ],
+   "cv_roles": [
+    "Mobile Developer"
+   ],
+   "domains": [
+    "Consumer Apps"
+   ],
+   "level": "Senior",
+   "years_of_experience": 7
+  },
+  "jobs": [
+   {
+    "job_id": "https://career.vng.com.vn/vi/co-hoi-nghe-nghiep/6692-senior-qc-engineer-vnggames-vi",
+    "title": "Senior QC Engineer, VNGGames",
+    "company": "VNG"
+   },
+   {
+    "job_id": "https://careers.onemount.com/jobs/968",
+    "title": "Senior Backend Engineer (Java/ Spring Boot)",
+    "company": "One Mount Group"
+   },
+   {
+    "job_id": "https://careers.onemount.com/jobs/868",
+    "title": "Senior Frontend Engineer",
+    "company": "One Mount Group"
+   },
+   {
+    "job_id": "https://about.kiotviet.vn/jobs/site-reliability-engineering/#apply-form",
+    "title": "Site Reliability Engineering",
+    "company": "KiotViet"
+   },
+   {
+    "job_id": "https://career.sea.com/position/J02128336",
+    "title": "Strategy & Commercial Specialist, Infrastructure (Cloud Services)",
+    "company": "Sea"
+   },
+   {
+    "job_id": "https://careers.onemount.com/jobs/1078",
+    "title": "Expert Performance Tester",
+    "company": "One Mount Group"
+   },
+   {
+    "job_id": "https://about.kiotviet.vn/jobs/test-engineer-auto-exploring-testing/#apply-form",
+    "title": "Test Engineer (Auto + Exploring Testing)",
+    "company": "KiotViet"
+   },
+   {
+    "job_id": "https://careers.onemount.com/jobs/1020",
+    "title": "Senior QC Engineer (Fintech/Financial)",
+    "company": "One Mount Group"
+   },
+   {
+    "job_id": "https://careers.onemount.com/jobs/1075",
+    "title": "IT Service Operation Manager",
+    "company": "One Mount Group"
+   },
+   {
+    "job_id": "https://career.sea.com/position/J01990482",
+    "title": "Backend Engineer",
+    "company": "Sea"
+   },
+   {
+    "job_id": "https://career.sea.com/position/J02158671",
+    "title": "Senior Backend Engineer",
+    "company": "Sea"
+   }
+  ]
+ },
+ {
+  "profile": {
+   "id": "data-scientist-senior-vn",
+   "target_roles": [
+    "Nhà khoa học dữ liệu"
+   ],
+   "cv_roles": [
+    "Data Scientist"
+   ],
+   "domains": [
+    "AI"
+   ],
+   "level": "Senior",
+   "years_of_experience": 7
+  },
+  "jobs": [
+   {
+    "job_id": "https://careers.servicenow.com/jobs/744000137509420/forward-deployed-solution-engineer-applied-ai-fde/",
+    "title": "Forward Deployed Solution Engineer – Applied AI FDE",
+    "company": "ServiceNow"
+   },
+   {
+    "job_id": "https://talent.urbox.vn/job/4141",
+    "title": "Senior Business Intelligence Specialist",
+    "company": "UrBox"
+   },
+   {
+    "job_id": "https://apply.careers.microsoft.com/careers/job/1970393556921508",
+    "title": "Partner Solution Architect: Data & AI",
+    "company": "Microsoft"
+   },
+   {
+    "job_id": "https://cake.vn/tuyen-dung/jobs/170",
+    "title": "Data Scientist (Middle - Senior)",
+    "company": "Cake"
+   },
+   {
+    "job_id": "https://cake.vn/tuyen-dung/jobs/168",
+    "title": "Data Analyst – BI Team",
+    "company": "Cake"
+   },
+   {
+    "job_id": "https://cake.vn/tuyen-dung/jobs/163",
+    "title": "AI Engineer (Platform Engineering)",
+    "company": "Cake"
+   },
+   {
+    "job_id": "https://cake.vn/tuyen-dung/jobs/142",
+    "title": "Senior Analytics Engineer (Data Platform)",
+    "company": "Cake"
+   },
+   {
+    "job_id": "https://cake.vn/tuyen-dung/jobs/97",
+    "title": "Chuyên viên Cao cấp Quản trị Dữ liệu Vận hành (Senior Data Steward)",
+    "company": "Cake"
+   },
+   {
+    "job_id": "https://cake.vn/tuyen-dung/jobs/162",
+    "title": "Sr. AI Engineer (Generative Models — LLM & Foundation Models)",
+    "company": "Cake"
+   },
+   {
+    "job_id": "https://jobs.smartrecruiters.com/BoschGroup/744000113709267",
+    "title": "[SO] Senior IT Business Analyst and IT Consultant",
+    "company": "Bosch"
+   },
+   {
+    "job_id": "https://corp.pharmacity.vn/career/data-science-engineer/",
+    "title": "[SSC] Senior Data Scientist",
+    "company": "Pharmacity"
+   },
+   {
+    "job_id": "https://tuyendung.shb.com.vn/viec-lam/ai-engineer-du-an-cntt.35abe890.html",
+    "title": "AI Engineer - Dự án CNTT",
+    "company": "SHB"
+   },
+   {
+    "job_id": "https://career.fpt-software.com/co-hoi-viec-lam/ai-engineer-1782894059377",
+    "title": "AI Engineer",
+    "company": "FPT Software"
+   },
+   {
+    "job_id": "https://careers.vib.com.vn/careers/job/32106",
+    "title": "AI Engineer",
+    "company": "VIB"
+   },
+   {
+    "job_id": "https://tuyendung.pnj.com.vn/viec-lam/senior-ai-engineer.35abef19.html",
+    "title": "Senior AI Engineer",
+    "company": "PNJ"
+   },
+   {
+    "job_id": "https://career.fpt-software.com/co-hoi-viec-lam/senior-ai-engineer",
+    "title": "Senior AI Engineer",
+    "company": "FPT Software"
+   }
+  ]
+ },
+ {
+  "profile": {
+   "id": "marketing-brand-senior-vn",
+   "target_roles": [
+    "Quản lý thương hiệu"
+   ],
+   "cv_roles": [
+    "Brand Manager"
+   ],
+   "domains": [
+    "FMCG"
+   ],
+   "level": "Senior",
+   "years_of_experience": 7
+  },
+  "jobs": [
+   {
+    "job_id": "https://careers.suntorybeverageandfood.com/job/Assistant-Brand-Manager/1360366855/",
+    "title": "Assistant Brand Manager",
+    "company": "Suntory PepsiCo Vietnam"
+   },
+   {
+    "job_id": "https://careers.theheinekencompany.com/job/heineken-vietnam/vietnam/business-control-manager-marketing",
+    "title": "Business Control Manager - Marketing",
+    "company": "Heineken Vietnam"
+   },
+   {
+    "job_id": "https://wd3.myworkdaysite.com/recruiting/mdlz/External/job/Ho-Chi-Minh-Vietnam/Brand-Manager--Chocolate---Pastry_R-169168",
+    "title": "Brand Manager, Chocolate & Pastry",
+    "company": "Mondelez Kinh Do"
+   },
+   {
+    "job_id": "https://wd3.myworkdaysite.com/recruiting/mdlz/External/job/Ho-Chi-Minh-Vietnam/Brand-Manager--AFC_R-172088",
+    "title": "Brand Manager, AFC",
+    "company": "Mondelez Kinh Do"
+   },
+   {
+    "job_id": "https://wd3.myworkdaysite.com/recruiting/mdlz/External/job/Ho-Chi-Minh-Vietnam/Senior-Brand-Manager--Tet_R-168321",
+    "title": "Senior Brand Manager, Tet",
+    "company": "Mondelez Kinh Do"
+   },
+   {
+    "job_id": "https://careers.masanconsumer.com/job/Shopper-Marketing-Assistant-Manager-Vending-Machine/1712-en_GB",
+    "title": "Shopper Marketing Assistant Manager Vending Machine",
+    "company": "Masan Group"
+   },
+   {
+    "job_id": "https://globalcareers-pepsico.icims.com/jobs/463786",
+    "title": "Assistant Brand Manager - Cambodia market (Hochiminh based)",
+    "company": "PepsiCo"
+   },
+   {
+    "job_id": "https://careers.masanconsumer.com/job/Shopper-Marketing-Manager-HPC/1724-en_GB",
+    "title": "Shopper Marketing Manager HPC",
+    "company": "Masan Group"
+   },
+   {
+    "job_id": "https://careers.masanconsumer.com/job/Shopper-Marketing-Assistant-Manager-HORECA/1711-en_GB",
+    "title": "Shopper Marketing Assistant Manager HORECA",
+    "company": "Masan Group"
+   },
+   {
+    "job_id": "https://careers.masanconsumer.com/job/Shopper-Marketing-Assistant-Manager-MT-channel-HPC/1708-en_GB",
+    "title": "Shopper Marketing Assistant Manager MT channel HPC",
+    "company": "Masan Group"
+   },
+   {
+    "job_id": "https://jobs.thgroupglobal.com/THFC/job/Ha-Noi-Chuy%C3%AAn-vi%C3%AAn-ph%C3%A1t-tri%E1%BB%83n-nh%C3%A3n-hi%E1%BB%87u-Brand-Executive-H%C3%A0-N/1358873666/",
+    "title": "Chuyên viên phát triển nhãn hiệu/ Brand Executive",
+    "company": "TH Group"
+   },
+   {
+    "job_id": "https://careers.masanconsumer.com/job/Brand-Manager/1563-en_GB",
+    "title": "Brand Manager",
+    "company": "Masan Group"
+   },
+   {
+    "job_id": "https://careers.masanconsumer.com/job/Assistant-Brand-Manager/1579-en_GB",
+    "title": "Assistant Brand Manager",
+    "company": "Masan Group"
+   },
+   {
+    "job_id": "https://www.vinamilk.com.vn/vi/recruitment/career-opportunities/chuyen-vien-nhan-vien-to-chuc-su-kien-va-kich-hoat-thuong-hieu",
+    "title": "Chuyên viên/ Nhân viên Tổ chức sự kiện và Kích hoạt thương hiệu",
+    "company": "Vinamilk"
+   },
+   {
+    "job_id": "https://acecookcareer.com/viec-lam/nhan-vien-trade-marketing-kenh-gt.35abe746.html",
+    "title": "NHÂN VIÊN TRADE MARKETING - KÊNH GT",
+    "company": "Acecook Vietnam"
+   }
+  ]
+ },
+ {
+  "profile": {
+   "id": "sales-manager-senior-vn",
+   "target_roles": [
+    "Trưởng phòng kinh doanh"
+   ],
+   "cv_roles": [
+    "Sales Manager"
+   ],
+   "domains": [
+    "FMCG"
+   ],
+   "level": "Senior",
+   "years_of_experience": 8
+  },
+  "jobs": [
+   {
+    "job_id": "https://wd3.myworkdaysite.com/recruiting/mdlz/External/job/Ho-Chi-Minh-Vietnam/Sales-Force-Effectiveness-Specialist_R-169176-1",
+    "title": "Sales Force Effectiveness Specialist",
+    "company": "Mondelez Kinh Do"
+   },
+   {
+    "job_id": "https://wd3.myworkdaysite.com/recruiting/mdlz/External/job/Ho-Chi-Minh-Vietnam/Sales-Analyst--CPA_R-172196",
+    "title": "Sales Analyst, CPA",
+    "company": "Mondelez Kinh Do"
+   },
+   {
+    "job_id": "https://careers.bat.com/en/job/ninh-binh/north-area-sales-manager-based-in-ninh-binh/1045/39959544768",
+    "title": "North Area Sales Manager (Based in Ninh Binh)",
+    "company": "BAT"
+   },
+   {
+    "job_id": "https://careers.bat.com/en/job/viet-tri/north-area-sales-manager-based-in-phu-tho/1045/39998924928",
+    "title": "North Area Sales Manager (Based in Phu Tho)",
+    "company": "BAT"
+   },
+   {
+    "job_id": "https://careers.bat.com/en/job/ho-chi-minh-city/key-account-manager/1045/40003207296",
+    "title": "Key Account Manager",
+    "company": "BAT"
+   },
+   {
+    "job_id": "https://orion.vn/tuyen-dung/viec-lam/sales-planning-executive-bac-ninh/",
+    "title": "Sales Planning Executive (Bắc Ninh)",
+    "company": "Orion Vietnam"
+   },
+   {
+    "job_id": "https://orion.vn/tuyen-dung/viec-lam/sales-planning-executive-hai-phong/",
+    "title": "Sales Planning Executive (Hai Phong)",
+    "company": "Orion Vietnam"
+   },
+   {
+    "job_id": "https://careersvn.app.swirecocacola.com/job/Account-Executive/1489-en_US",
+    "title": "Account Executive",
+    "company": "Coca-Cola"
+   },
+   {
+    "job_id": "https://jobdetails.nestle.com/job/Ho-Chi-Minh-Sales-Performance-Development-Executive-70000/1414098533/",
+    "title": "Sales Performance Development Executive",
+    "company": "Nestlé Vietnam"
+   },
+   {
+    "job_id": "https://careersvn.app.swirecocacola.com/job/Area-Sales-Manager-%28ASM%29-General-Trade-%28GT%29-Channel/1511-en_US",
+    "title": "Area Sales Manager (ASM) - General Trade (GT) Channel",
+    "company": "Coca-Cola"
+   },
+   {
+    "job_id": "https://jobs.thgroupglobal.com/THFC/job/Thanh-pho-Ho-Chi-Minh-Nh%C3%A2n-Vi%C3%AAn-Kinh-Doanh-Th%E1%BB%8B-Tr%C6%B0%E1%BB%9Dng_Mi%E1%BB%81n-Nam-H%E1%BB%93-C/1363596866/",
+    "title": "Nhân Viên Kinh Doanh Thị Trường_Miền Nam",
+    "company": "TH Group"
+   },
+   {
+    "job_id": "https://www.vinamilk.com.vn/vi/recruitment/career-opportunities/chuyen-vien-phat-trien-thi-truong-va-doi-tac",
+    "title": "Chuyên viên Phát triển thị trường và Đối tác",
+    "company": "Vinamilk"
+   },
+   {
+    "job_id": "https://pg.wd5.myworkdayjobs.com/1000/job/Ho-Chi-Minh-City/Key-Account-Manager_R000155109",
+    "title": "Key Account Manager",
+    "company": "P&G Vietnam"
+   },
+   {
+    "job_id": "https://www.vinamilk.com.vn/vi/recruitment/career-opportunities/truong-ban-van-hanh-ban-hang-kenh-sieu-thi",
+    "title": "Trưởng ban Vận hành Bán hàng (Kênh Siêu thị)",
+    "company": "Vinamilk"
+   },
+   {
+    "job_id": "https://jobs.thgroupglobal.com/THFC/job/Ha-Noi-Nh%C3%A2n-Vi%C3%AAn-B%C3%A1n-H%C3%A0ng-TH-Truemart-H%C3%A0-N%E1%BB%99i-H%C3%A0-N/1210267001/",
+    "title": "Nhân Viên Bán Hàng TH Truemart Hà Nội",
+    "company": "TH Group"
+   },
+   {
+    "job_id": "https://www.vinamilk.com.vn/vi/recruitment/career-opportunities/nhan-vien-ban-hang-cua-hang-vinamilk",
+    "title": "Nhân viên bán hàng (Cửa hàng Vinamilk)",
+    "company": "Vinamilk"
+   },
+   {
+    "job_id": "https://www.vinamilk.com.vn/vi/recruitment/career-opportunities/truong-ban-hang-vung-khach-hang-dac-biet-mien-hcm",
+    "title": "Trưởng bán hàng Vùng Khách hàng đặc biệt - Miền HCM",
+    "company": "Vinamilk"
+   },
+   {
+    "job_id": "https://www.vinamilk.com.vn/vi/recruitment/career-opportunities/truong-ban-phat-trien-nang-luc-ban-hang",
+    "title": "Trưởng Ban Phát Triển Năng Lực Bán Hàng",
+    "company": "Vinamilk"
+   }
+  ]
+ },
+ {
+  "profile": {
+   "id": "finance-manager-senior-en",
+   "target_roles": [
+    "Finance Manager"
+   ],
+   "cv_roles": [
+    "Senior Financial Analyst"
+   ],
+   "domains": [
+    "Manufacturing"
+   ],
+   "level": "Senior",
+   "years_of_experience": 7
+  },
+  "jobs": [
+   {
+    "job_id": "https://cake.vn/tuyen-dung/jobs/172",
+    "title": "Chuyên viên cao cấp Kế toán",
+    "company": "Cake"
+   },
+   {
+    "job_id": "https://cake.vn/tuyen-dung/jobs/20",
+    "title": "CV/CVC Thu Hồi Nợ Qua Điện Thoại",
+    "company": "Cake"
+   },
+   {
+    "job_id": "https://cake.vn/tuyen-dung/jobs/108",
+    "title": "Chuyên Viên Admin Hỗ Trợ Thu Hồi Nợ",
+    "company": "Cake"
+   },
+   {
+    "job_id": "https://cake.vn/tuyen-dung/jobs/166",
+    "title": "General Accountant",
+    "company": "Cake"
+   },
+   {
+    "job_id": "https://cake.vn/tuyen-dung/jobs/123",
+    "title": "Chuyên viên/Chuyên viên Chính Xử Lý Nợ (Tố Tụng)",
+    "company": "Cake"
+   },
+   {
+    "job_id": "https://cake.vn/tuyen-dung/jobs/132",
+    "title": "CV Quản lý chất lượng Thu hồi nợ (Collection QC)",
+    "company": "Cake"
+   },
+   {
+    "job_id": "https://jobs.smartrecruiters.com/AccorHotel/744000122203422",
+    "title": "Finance Manager (Vietnamese Local)",
+    "company": "Accor"
+   },
+   {
+    "job_id": "https://prudential.wd3.myworkdayjobs.com/prudential/job/Thnh-ph-H-Ch-Minh/Financial-Reporting-Senior-Actuarial-Manager--Qun-L-Cp-Cao-Bo-Co-Ti-Chnh-_26070077",
+    "title": "Financial Reporting Senior Actuarial Manager (Quản Lý Cấp Cao Báo Cáo Tài Chính)",
+    "company": "Prudential"
+   },
+   {
+    "job_id": "https://jobs.standardchartered.com/job/Credit-Analyst%2C-CIB/57235-en_GB",
+    "title": "Credit Analyst, CIB",
+    "company": "Standard Chartered"
+   },
+   {
+    "job_id": "https://jobs.smartrecruiters.com/AccorHotel/744000134693150",
+    "title": "FINANCIAL CONTROLLER",
+    "company": "Accor"
+   },
+   {
+    "job_id": "https://jobs.siemens.com/en_US/externaljobs/JobDetail/513887",
+    "title": "Financial Controller",
+    "company": "Siemens"
+   },
+   {
+    "job_id": "https://acecookcareer.com/viec-lam/nhan-vien-tai-chinh.35abf3ed.html",
+    "title": "NHÂN VIÊN TÀI CHÍNH",
+    "company": "Acecook Vietnam"
+   },
+   {
+    "job_id": "https://careers.bat.com/en/job/bien-hoa/financial-accounting-officer/1045/39258586560",
+    "title": "Financial Accounting Officer",
+    "company": "BAT"
+   },
+   {
+    "job_id": "https://www.vpbanks.com.vn/chuyen-vien-cao-cap-tai-chinh-quan-tri",
+    "title": "Chuyên Viên Cao Cấp Tài Chính Quản Trị",
+    "company": "VPBank Securities"
+   },
+   {
+    "job_id": "https://www.vpbanks.com.vn/chuyen-vien-chinhchuyen-vien-cao-cap-dich-vu-tai-chinh",
+    "title": "Chuyên viên chính/Chuyên viên cao cấp Dịch vụ tài chính",
+    "company": "VPBank Securities"
+   },
+   {
+    "job_id": "https://jobs.siemens.com/en_US/externaljobs/JobDetail/508359",
+    "title": "Senior Financial Analyst",
+    "company": "Siemens"
+   },
+   {
+    "job_id": "https://www.vpbanks.com.vn/chuyen-vien-cao-capch-uyen-gia-tu-van-tai-chinh-doanh-nghiep",
+    "title": "Chuyên viên cao cấp/Chuyên gia Tư vấn Tài chính doanh nghiệp",
+    "company": "VPBank Securities"
+   },
+   {
+    "job_id": "https://jobs.smartrecruiters.com/Grab/744000137363369",
+    "title": "Senior Program Manager, Tech Financial Operations & Automation",
+    "company": "Grab"
+   }
+  ]
+ },
+ {
+  "profile": {
+   "id": "hr-manager-senior-vn",
+   "target_roles": [
+    "Trưởng phòng nhân sự"
+   ],
+   "cv_roles": [
+    "HR Manager"
+   ],
+   "domains": [
+    "Manufacturing"
+   ],
+   "level": "Senior",
+   "years_of_experience": 8
+  },
+  "jobs": [
+   {
+    "job_id": "https://sec.wd3.myworkdayjobs.com/Samsung_Careers/job/BITEXCO-Financial-Tower-Ho-Chi-Minh-Vietnam/L-D-Manager_R118474",
+    "title": "L&D Manager",
+    "company": "Samsung"
+   },
+   {
+    "job_id": "https://cake.vn/tuyen-dung/jobs/173",
+    "title": "(Senior) C&B Executive",
+    "company": "Cake"
+   },
+   {
+    "job_id": "https://jobs.smartrecruiters.com/AccorHotel/744000124083100",
+    "title": "Assistant Recruitment Manager (Vietnamese Local)",
+    "company": "Accor"
+   },
+   {
+    "job_id": "https://jobs.smartrecruiters.com/AccorHotel/744000129608167",
+    "title": "Assistant Learning and Development Manager",
+    "company": "Accor"
+   },
+   {
+    "job_id": "https://jobs.smartrecruiters.com/AccorHotel/744000129929270",
+    "title": "Learning & Development Manager",
+    "company": "Accor"
+   },
+   {
+    "job_id": "https://tuyendung.aeon.com.vn/vi/job-detail/tuyen-dung-nhan-vien-cua-hang-glam-beautique-lam-viec-tai-giga-mall-Cc",
+    "title": "TUYỂN DỤNG NHÂN VIÊN CỬA HÀNG GLAM BEAUTIQUE LÀM VIỆC TẠI GIGA MALL",
+    "company": "AEON Việt Nam"
+   },
+   {
+    "job_id": "https://jobs.smartrecruiters.com/AccorHotel/744000132550239",
+    "title": "Learning & Development Officer",
+    "company": "Accor"
+   },
+   {
+    "job_id": "https://tuyendung.ghn.vn/recruit/detail/645d9a91df81605b211a5737",
+    "title": "C&B Executive - Nhân viên Tiền lương và phúc lợi",
+    "company": "GHN"
+   },
+   {
+    "job_id": "https://appota.com/careers/jobs/5211",
+    "title": "Cộng Tác Viên Đào Tạo",
+    "company": "Appota"
+   },
+   {
+    "job_id": "https://pwc.wd3.myworkdayjobs.com/Global_Experienced_Careers/job/Hanoi/Associate---Learning---Development_744157WD",
+    "title": "Associate - Learning & Development",
+    "company": "PwC"
+   },
+   {
+    "job_id": "https://corp.pharmacity.vn/career/dc-chuyen-vien-nhan-su/",
+    "title": "[DC] Chuyên viên Nhân sự",
+    "company": "Pharmacity"
+   },
+   {
+    "job_id": "https://tuyendung.pnj.com.vn/viec-lam/nhan-vien-nhan-su-da-nang.35abe02c.html",
+    "title": "Nhân viên nhân sự (Đà Nẵng)",
+    "company": "PNJ"
+   },
+   {
+    "job_id": "https://tuyendung.pnj.com.vn/viec-lam/chuyen-vien-van-hanh-nhan-su.35aac0fb.html",
+    "title": "Chuyên viên - Vận hành Nhân sự",
+    "company": "PNJ"
+   },
+   {
+    "job_id": "https://hoasenjobs.com/viec-lam/chuyen-vien-nhan-vien-nhan-su-tien-luong.35abf356.html",
+    "title": "Chuyên viên/Nhân viên Nhân sự - Tiền lương",
+    "company": "Hoa Sen Group"
+   },
+   {
+    "job_id": "https://tuyendung.shb.com.vn/viec-lam/chuyen-vien-chinh-chuyen-vien-cao-cap-quan-ly-nang-luc-van-hanh-mang-nhan-su.35abf402.html",
+    "title": "Chuyên viên chính/Chuyên viên cao cấp Quản lý năng lực Vận hành (Mảng Nhân sự)",
+    "company": "SHB"
+   },
+   {
+    "job_id": "https://jobs.thgroupglobal.com/THFC/job/Ha-Noi-Nh%C3%A2n-Vi%C3%AAn-Tuy%E1%BB%83n-D%E1%BB%A5ng-H%C3%A0-N/1363529766/",
+    "title": "Nhân Viên Tuyển Dụng",
+    "company": "TH Group"
+   },
+   {
+    "job_id": "https://jobs.thgroupglobal.com/THFC/job/Thanh-pho-Ho-Chi-Minh-Chuy%C3%AAn-Vi%C3%AAn-Tuy%E1%BB%83n-D%E1%BB%A5ng-H%E1%BB%93-C/1363724666/",
+    "title": "Chuyên Viên Tuyển Dụng",
+    "company": "TH Group"
+   },
+   {
+    "job_id": "https://tuyendung.shb.com.vn/viec-lam/chuyen-vien-cao-cap-chinh-sach-nhan-su.35abed75.html",
+    "title": "Chuyên viên cao cấp Chính sách Nhân sự",
+    "company": "SHB"
+   }
+  ]
+ },
+ {
+  "profile": {
+   "id": "ops-manager-senior-en",
+   "target_roles": [
+    "Senior Operations Manager"
+   ],
+   "cv_roles": [
+    "Operations Manager"
+   ],
+   "domains": [
+    "Logistics"
+   ],
+   "level": "Senior",
+   "years_of_experience": 8
+  },
+  "jobs": [
+   {
+    "job_id": "https://247express.vn/tuyen-dung/nhan-vien-giao-nhan-part-time-thu-nhap-len-den-10-trieuthang",
+    "title": "Nhân viên giao nhận Part-time (thu nhập lên đến 10 triệu/tháng)",
+    "company": "247Express"
+   },
+   {
+    "job_id": "https://247express.vn/tuyen-dung/giao-nhan-partime-cu-jut",
+    "title": "Giao nhận Partime (Cư Jut)",
+    "company": "247Express"
+   },
+   {
+    "job_id": "https://247express.vn/tuyen-dung/nhan-vien-giao-nhan-kim-bang",
+    "title": "Nhân viên giao nhận (Kim Bảng)",
+    "company": "247Express"
+   },
+   {
+    "job_id": "https://247express.vn/tuyen-dung/nhan-vien-giao-nhan-an-duong",
+    "title": "Nhân viên giao nhận (An Dương)",
+    "company": "247Express"
+   },
+   {
+    "job_id": "https://247express.vn/tuyen-dung/giao-nhan-part-time-duc-hoa",
+    "title": "Giao nhận Part-time (Đức Hòa)",
+    "company": "247Express"
+   },
+   {
+    "job_id": "https://247express.vn/tuyen-dung/nhan-vien-giao-nhan-quang-ninh",
+    "title": "Nhân viên giao nhận (Quảng Ninh)",
+    "company": "247Express"
+   },
+   {
+    "job_id": "https://247express.vn/tuyen-dung/nhan-vien-giao-nhan-tp-ho-chi-minh-phuong-binh-duong-phuong-di-an",
+    "title": "Nhân viên giao nhận (TP. Hồ Chí Minh - Phường Bình Dương, Phường Dĩ An...)",
+    "company": "247Express"
+   },
+   {
+    "job_id": "https://247express.vn/tuyen-dung/nhan-vien-giao-nhan-ninh-binh",
+    "title": "Nhân viên giao nhận (Ninh Bình)",
+    "company": "247Express"
+   },
+   {
+    "job_id": "https://247express.vn/tuyen-dung/nhan-vien-giao-nhan-vinh",
+    "title": "Nhân viên giao nhận (Vinh)",
+    "company": "247Express"
+   },
+   {
+    "job_id": "https://247express.vn/tuyen-dung/nhan-vien-giao-nhan-bac-ninh",
+    "title": "Nhân viên giao nhận (Bắc Ninh)",
+    "company": "247Express"
+   },
+   {
+    "job_id": "https://careers.dhl.com/global/en/job/VN0101434/warehouse-assistant-manager-hung-yen",
+    "title": "Warehouse Assistant Manager (Hung Yen)",
+    "company": "DHL"
+   },
+   {
+    "job_id": "https://careers.dhl.com/global/en/job/AV-361185/customs-clearance-documentation-specialist-hcmc",
+    "title": "Customs Clearance Documentation Specialist - HCMC",
+    "company": "DHL"
+   },
+   {
+    "job_id": "https://careers.dhl.com/global/en/job/AV-361957/pricing-solutions-assistant-manager-customs-brokerage-trucking-ho-chi-minh-city",
+    "title": "Pricing & Solutions Assistant Manager (Customs Brokerage & Trucking) - Ho Chi Mi",
+    "company": "DHL"
+   },
+   {
+    "job_id": "https://tuyendung.ghn.vn/recruit/detail/6a4f5a68c6a7e1590275ecac",
+    "title": "[Văn Chung - Tân Bình] - Nhân Viên Lấy Hàng",
+    "company": "GHN"
+   },
+   {
+    "job_id": "https://247express.vn/tuyen-dung/nhan-vien-giao-nhan-da-nang",
+    "title": "Nhân viên giao nhận (Đà Nẵng)",
+    "company": "247Express"
+   },
+   {
+    "job_id": "https://247express.vn/tuyen-dung/nhan-vien-giao-nhan-long-an",
+    "title": "Nhân viên giao nhận Long An",
+    "company": "247Express"
+   },
+   {
+    "job_id": "https://247express.vn/tuyen-dung/nhan-vien-giao-nhan-pho-yen-thai-nguyen",
+    "title": "Nhân viên giao nhận (Phổ Yên - Thái Nguyên)",
+    "company": "247Express"
+   },
+   {
+    "job_id": "https://247express.vn/tuyen-dung/nhan-vien-giao-nhan-dong-nai",
+    "title": "Nhân viên giao nhận Đồng Nai",
+    "company": "247Express"
+   },
+   {
+    "job_id": "https://247express.vn/tuyen-dung/nhan-vien-giao-nhan-toan-quoc-luong-len-den-18-trieu-thang",
+    "title": "Nhân viên giao nhận (Toàn Quốc) lương lên đến 18 triệu/ tháng",
+    "company": "247Express"
+   }
+  ]
+ }
+]

@@ -1,0 +1,43 @@
+[
+  {
+    "id": "pm-fintech-mid",
+    "target_roles": ["Product Manager"],
+    "cv_roles": ["Product Manager", "Business Analyst"],
+    "domains": ["Fintech & Payments"],
+    "level": "Mid",
+    "years_of_experience": 4
+  },
+  {
+    "id": "swe-backend-senior",
+    "target_roles": ["Backend Engineer"],
+    "cv_roles": ["Software Engineer"],
+    "domains": ["Technology Platform / SaaS"],
+    "level": "Senior",
+    "years_of_experience": 6
+  },
+  {
+    "id": "data-analyst-junior",
+    "target_roles": ["Data Analyst"],
+    "cv_roles": ["Data Analyst"],
+    "domains": ["E-commerce & Marketplace"],
+    "level": "Junior",
+    "years_of_experience": 1
+  },
+  {
+    "id": "eng-to-data-pivot-mid",
+    "target_roles": ["Data Engineer"],
+    "cv_roles": ["Backend Engineer"],
+    "domains": [],
+    "level": "Mid",
+    "years_of_experience": 3,
+    "query_text": "Data Engineer pipeline ETL"
+  },
+  {
+    "id": "marketing-lead",
+    "target_roles": ["Marketing Manager"],
+    "cv_roles": ["Digital Marketing", "Brand Manager"],
+    "domains": ["E-commerce & Marketplace"],
+    "level": "Lead/Manager",
+    "years_of_experience": 8
+  }
+]

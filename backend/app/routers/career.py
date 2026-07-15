@@ -411,7 +411,8 @@ class SearchRequest(BaseModel):
 # a crawl-quality fix, NOT taxonomy (the classifier shouldn't learn garbage).
 _GARBAGE_EMOJI = re.compile(r'^\W*[\U0001F300-\U0001FAFF]')
 _GARBAGE_UI = {"find jobs", "see jobs", "privacy notice", "trang chủ", "home",
-               "apply now", "view all jobs", "language selector", "cookie policy", "terms of use"}
+               "apply now", "view all jobs", "language selector", "cookie policy", "terms of use",
+               "skip to main content", "skip to content", "main content"}
 
 
 def _is_garbage_title(title: str) -> bool:
@@ -456,10 +457,14 @@ _CATALOG_SOURCE = os.getenv("CATALOG_SOURCE", "featured").lower()
 
 async def _db_pool() -> list[dict]:
     """Active jobs from the store, reshaped for the facet engine. Best-effort:
-    any DB error degrades to an empty list so search never hard-fails on it."""
+    any DB error degrades to an empty list so search never hard-fails on it.
+    Crawl-garbage titles are dropped here too — the featured path filters them in
+    _flatten_featured, but the DB path had no equivalent gate (nav labels like
+    'Skip to main content' scraped into the store would otherwise reach ranking)."""
     try:
         from app.db import jobs as jobs_repo
-        return await jobs_repo.list_for_facet(limit=1000)
+        jobs = await jobs_repo.list_for_facet(limit=1000)
+        return [j for j in jobs if not _is_garbage_title(j.get("title", ""))]
     except Exception as e:  # noqa: BLE001
         logger.warning("DB candidate pool unavailable, falling back: %s", e)
         return []
