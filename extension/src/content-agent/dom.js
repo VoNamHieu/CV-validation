@@ -184,6 +184,34 @@ export async function simulateTyping(el, text) {
 }
 
 /**
+ * Overlay-aware click. Some ATS (Workday) cover a button with a transparent
+ * "click_filter" <div> that OWNS the click handler — clicking the <button>
+ * underneath is silently swallowed. So click the TOPMOST element at the button's
+ * centre (elementFromPoint) with a full pointer/mouse sequence at real
+ * coordinates. On a normal page this just clicks the button (or a harmless child
+ * that bubbles to it), so it's safe to use for every click. Returns false only if
+ * `el` is missing.
+ */
+export function overlayClick(el) {
+    if (!el) return false;
+    let r = el.getBoundingClientRect();
+    // elementFromPoint needs the element in the viewport.
+    if (r.bottom < 0 || r.top > innerHeight || r.width === 0) {
+        try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch { /* ignore */ }
+        r = el.getBoundingClientRect();
+    }
+    const cx = Math.round(r.left + r.width / 2);
+    const cy = Math.round(r.top + r.height / 2);
+    const target = document.elementFromPoint(cx, cy) || el;   // the overlay, if any
+    const opts = { bubbles: true, cancelable: true, composed: true, view: window, clientX: cx, clientY: cy, button: 0, buttons: 1 };
+    for (const type of ['pointerover', 'pointerenter', 'pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+        try { target.dispatchEvent(type.startsWith('pointer') ? new PointerEvent(type, opts) : new MouseEvent(type, opts)); } catch { /* ignore */ }
+    }
+    try { target.click(); } catch { /* already dispatched */ }
+    return true;
+}
+
+/**
  * Set a file on an input[type=file] using DataTransfer.
  */
 export function setFileOnInput(el, base64Data, fileName, mimeType = 'application/pdf') {

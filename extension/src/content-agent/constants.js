@@ -8,7 +8,7 @@ export const SCROLL_PAUSE_MS = 300;
 
 export const POST_ACTION_WAIT_MS = 1000;
 
-export const LLM_TIMEOUT = 30000;
+export const LLM_TIMEOUT = 65000;   // backstop; the background fetch's own 60s timeout fires first
 
 export const JOB_PAGE_DETECT_TIMEOUT_MS = 8000;
 

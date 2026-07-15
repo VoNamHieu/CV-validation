@@ -53,3 +53,117 @@ export function loginAtsSummary(urls: (string | null | undefined)[]): { label: s
         .map(([label, count]) => ({ label, count }))
         .sort((a, b) => b.count - a.count);
 }
+
+// ─────────────────────────── Form recipes ───────────────────────────
+// A per-ATS "recipe" tells the agent how a platform's application form is laid
+// out so it fills DETERMINISTICALLY instead of the LLM guessing. Because
+// international ATS are dominated by ~10 platforms whose DOM is standardized
+// (Workday keys every field with a stable data-automation-id), one recipe per
+// ATS covers every company on it. Recipes are code here, served to the extension
+// via /api/apply-recipes, so a broken selector is a Vercel deploy away — no
+// Chrome Web Store review. `verified:false` = derived from known selectors,
+// pending a live-capture check.
+
+export interface RecipeField {
+    label: string;
+    selector: string;
+    profileKey: string;   // key in the synced ExtensionProfile
+    type?: 'text' | 'select' | 'custom-select' | 'date' | 'file' | 'radio' | 'checkbox';
+    required?: boolean;
+}
+export interface RecipeStep {
+    name: string;
+    detect?: string;      // selector present when this step is on screen
+    fields: RecipeField[];
+    advance?: string;     // "Next"/"Continue" button selector
+}
+// A non-form gateway the agent must click to reach the form (e.g. Workday's
+// "Start Your Application" modal, rendered as <a role="button"> the generic scan
+// misses). `needsCV` restricts it to when a CV is available (Autofill w/ Resume).
+export interface RecipeGateway {
+    label: string;
+    detect: string;       // selector present when the gateway is on screen
+    click?: string;       // element to click (defaults to `detect`)
+    needsCV?: boolean;
+}
+export interface ApplyRecipe {
+    ats: string;
+    label: string;
+    version: number;
+    verified: boolean;
+    hostPattern: string;  // RegExp source matched against the apply-page host
+    login?: { emailSelector?: string; passwordSelector?: string; signInSelector?: string; createAccountSelector?: string };
+    gateways?: RecipeGateway[];
+    steps: RecipeStep[];
+    fileUploadSelector?: string;
+    submitSelector?: string;
+    finalStepSelector?: string;  // present when the ATS's final review step is on screen → agent stops (never auto-submits)
+    thirdPartySkip?: string[];
+}
+
+// VERIFIED 2026-07-15 against a real 3M Workday capture (My Information + Sign-In
+// steps). The key correction over the guessed selectors: Workday puts the
+// data-automation-id on the FIELD WRAPPER (`formField-<fieldId>`), and the actual
+// control inside has only a plain `id` — so every field selector is the wrapper
+// plus its inner `input` (text) or `button` (custom dropdown). Field IDs
+// (legalName--firstName, phoneNumber, addressLine1, city, country…) are Workday's
+// standard candidate-data model, stable across tenants.
+const WORKDAY: ApplyRecipe = {
+    ats: 'workday',
+    label: 'Workday',
+    version: 2,
+    verified: true,
+    hostPattern: '\\.myworkdayjobs\\.com|\\.myworkdaysite\\.com',
+    login: {
+        emailSelector: '[data-automation-id="email"]',
+        passwordSelector: '[data-automation-id="password"]',
+        signInSelector: '[data-automation-id="signInSubmitButton"]',
+        createAccountSelector: '[data-automation-id="createAccountLink"]',
+    },
+    // "Start Your Application" modal (<a role="button">) — prefer Autofill with
+    // Resume when a CV is present (Workday parses it → pre-fills the required
+    // dropdowns), else Apply Manually.
+    gateways: [
+        { label: 'Autofill with Resume', detect: '[data-automation-id="autofillWithResume"]', needsCV: true },
+        { label: 'Apply Manually', detect: '[data-automation-id="applyManually"]' },
+    ],
+    steps: [
+        {
+            name: 'My Information',
+            detect: '[data-automation-id="formField-legalName--firstName"]',
+            fields: [
+                // Western-script name — the required, always-present pair (a tenant
+                // that also enables local-script names adds *--firstNameLocal, which
+                // we leave to the LLM since we have no romanization-split for it).
+                { label: 'First name', selector: '[data-automation-id="formField-legalName--firstName"] input', profileKey: 'firstName', type: 'text', required: true },
+                { label: 'Last name', selector: '[data-automation-id="formField-legalName--lastName"] input', profileKey: 'lastName', type: 'text', required: true },
+                { label: 'Address line 1', selector: '[data-automation-id="formField-addressLine1"] input', profileKey: 'addressStreet', type: 'text' },
+                { label: 'District or Town', selector: '[data-automation-id="formField-city"] input', profileKey: 'addressDistrict', type: 'text' },
+                { label: 'Phone number', selector: '[data-automation-id="formField-phoneNumber"] input', profileKey: 'phone', type: 'text', required: true },
+                // Custom Workday dropdowns: click the button → a listbox opens →
+                // type-to-filter → pick the option. The agent's custom-select
+                // handler drives these; the recipe just names them + the value key.
+                { label: 'Country', selector: '[data-automation-id="formField-country"] button', profileKey: 'nationality', type: 'custom-select', required: true },
+                { label: 'Province or City', selector: '[data-automation-id="formField-countryRegion"] button', profileKey: 'addressProvince', type: 'custom-select' },
+            ],
+            advance: '[data-automation-id="pageFooterNextButton"]',
+        },
+    ],
+    // Resume upload lives on the earlier "Autofill with Resume" step (not captured
+    // here) — this is Workday's stable upload input; unverified against a live DOM.
+    fileUploadSelector: '[data-automation-id="file-upload-input-ref"]',
+    submitSelector: '[data-automation-id="pageFooterSubmitButton"]',
+    // Final Review step (its "Submit" reuses pageFooterNextButton) → agent stops here.
+    finalStepSelector: '[data-automation-id="applyFlowReviewPage"]',
+    thirdPartySkip: ['indeed', 'linkedin'],
+};
+
+export const APPLY_RECIPES: ApplyRecipe[] = [WORKDAY];
+
+/** The recipe whose hostPattern matches this apply/job URL, or null. */
+export function recipeForUrl(url?: string | null): ApplyRecipe | null {
+    if (!url) return null;
+    let host = '';
+    try { host = new URL(url).host.toLowerCase(); } catch { host = String(url).toLowerCase(); }
+    return APPLY_RECIPES.find(r => new RegExp(r.hostPattern, 'i').test(host)) || null;
+}

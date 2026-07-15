@@ -1,0 +1,176 @@
+// AUTO-APPLY RECIPES (extension side). Part of the Copo apply agent.
+//
+// A per-ATS "recipe" gives the agent exact, verified field selectors so it fills
+// the standardized parts of an international apply form DETERMINISTICALLY instead
+// of the LLM guessing selectors. The source of truth is the web app
+// (/api/apply-recipes, generated from frontend/src/lib/applyRecipes.ts); the
+// bundled FALLBACK_RECIPES below is a safety net used when that fetch fails or
+// hasn't happened yet — so the agent still works offline / before a deploy.
+//
+// Scope on purpose: the recipe fills reliable TEXT inputs (name, phone, address)
+// with exact wrapper→input selectors. Custom dropdowns, validation recovery and
+// step navigation stay with the LLM planner, which re-observes after each pass.
+
+import { overlayClick, setFileOnInput, setNativeValue, sleep } from './dom.js';
+
+// Keep in sync with frontend/src/lib/applyRecipes.ts (WORKDAY). Verified against
+// a real 3M Workday capture on 2026-07-15.
+const FALLBACK_RECIPES = [
+    {
+        ats: 'workday',
+        label: 'Workday',
+        version: 2,
+        verified: true,
+        hostPattern: '\\.myworkdayjobs\\.com|\\.myworkdaysite\\.com',
+        login: {
+            emailSelector: '[data-automation-id="email"]',
+            passwordSelector: '[data-automation-id="password"]',
+            signInSelector: '[data-automation-id="signInSubmitButton"]',
+            createAccountSelector: '[data-automation-id="createAccountLink"]',
+        },
+        // Non-form gateways the agent must click through to reach the form. The
+        // "Start Your Application" modal renders its options as <a role="button">
+        // (not <button>), which the generic scan misses — so drive them by exact
+        // selector. Prefer "Autofill with Resume" when we have a CV (Workday parses
+        // it and pre-fills the tricky required dropdowns), else "Apply Manually".
+        gateways: [
+            { label: 'Autofill with Resume', detect: '[data-automation-id="autofillWithResume"]', needsCV: true },
+            { label: 'Apply Manually', detect: '[data-automation-id="applyManually"]' },
+        ],
+        steps: [
+            {
+                name: 'My Information',
+                detect: '[data-automation-id="formField-legalName--firstName"]',
+                fields: [
+                    { label: 'First name', selector: '[data-automation-id="formField-legalName--firstName"] input', profileKey: 'firstName', type: 'text', required: true },
+                    { label: 'Last name', selector: '[data-automation-id="formField-legalName--lastName"] input', profileKey: 'lastName', type: 'text', required: true },
+                    { label: 'Address line 1', selector: '[data-automation-id="formField-addressLine1"] input', profileKey: 'addressStreet', type: 'text' },
+                    { label: 'District or Town', selector: '[data-automation-id="formField-city"] input', profileKey: 'addressDistrict', type: 'text' },
+                    { label: 'Phone number', selector: '[data-automation-id="formField-phoneNumber"] input', profileKey: 'phone', type: 'text', required: true },
+                    { label: 'Country', selector: '[data-automation-id="formField-country"] button', profileKey: 'nationality', type: 'custom-select', required: true },
+                    { label: 'Province or City', selector: '[data-automation-id="formField-countryRegion"] button', profileKey: 'addressProvince', type: 'custom-select' },
+                ],
+                advance: '[data-automation-id="pageFooterNextButton"]',
+            },
+        ],
+        fileUploadSelector: '[data-automation-id="file-upload-input-ref"]',
+        submitSelector: '[data-automation-id="pageFooterSubmitButton"]',
+        // The final Review step (its "Submit" reuses pageFooterNextButton). When
+        // this is on screen the agent STOPS and hands off — it never submits.
+        finalStepSelector: '[data-automation-id="applyFlowReviewPage"]',
+        thirdPartySkip: ['indeed', 'linkedin'],
+    },
+];
+
+let _recipes = null; // in-memory cache for this page's lifetime
+
+/**
+ * Load the recipe list: background-fetched (cached in storage) if available,
+ * otherwise the bundled fallback. Cached in-module so we only ask once per page.
+ */
+export async function loadRecipes() {
+    if (_recipes) return _recipes;
+    try {
+        const resp = await chrome.runtime.sendMessage({ type: 'GET_APPLY_RECIPES' });
+        if (resp?.success && Array.isArray(resp.data?.recipes) && resp.data.recipes.length) {
+            _recipes = resp.data.recipes;
+            console.log(`[Copo Recipe] loaded ${_recipes.length} recipe(s) from web app${resp.stale ? ' (stale cache)' : ''}`);
+            return _recipes;
+        }
+    } catch (e) {
+        console.warn('[Copo Recipe] fetch failed, using bundled fallback:', e?.message);
+    }
+    _recipes = FALLBACK_RECIPES;
+    console.log(`[Copo Recipe] using bundled fallback (${_recipes.length} recipe(s))`);
+    return _recipes;
+}
+
+/**
+ * Click through a non-form gateway (the "Start Your Application" modal, an
+ * interstitial "Continue" screen…) that the agent must pass to reach the form.
+ * Clicks at most one per call and records it in `clickedCounts` so a gateway that
+ * doesn't dismiss can't loop forever (capped at 2). Returns { clicked, label }.
+ */
+export function clickRecipeGateway(recipe, hasCV, clickedCounts) {
+    for (const g of recipe?.gateways || []) {
+        if (g.needsCV && !hasCV) continue;
+        if ((clickedCounts.get(g.label) || 0) >= 2) continue; // don't loop on a stuck gateway
+        let el;
+        try { el = document.querySelector(g.detect); } catch { el = null; }
+        if (!el || el.offsetParent === null) continue;
+        const target = g.click ? document.querySelector(g.click) : el;
+        if (!target || target.offsetParent === null) continue;
+        overlayClick(target);   // Workday's modal buttons sit under a click_filter overlay
+        clickedCounts.set(g.label, (clickedCounts.get(g.label) || 0) + 1);
+        console.log(`[Copo Recipe] gateway: clicked "${g.label}"`);
+        return { clicked: true, label: g.label };
+    }
+    return { clicked: false };
+}
+
+/** True if the ATS's final review/submit step is on screen — the agent must
+ * stop here and let the user submit (never auto-submit an application). */
+export function atFinalStep(recipe) {
+    if (!recipe?.finalStepSelector) return false;
+    try { return !!document.querySelector(recipe.finalStepSelector); } catch { return false; }
+}
+
+/** The recipe whose hostPattern matches `url`'s host, or null. */
+export function recipeForUrl(recipes, url) {
+    if (!Array.isArray(recipes) || !recipes.length) return null;
+    let host = '';
+    try { host = new URL(url).host.toLowerCase(); } catch { host = String(url || '').toLowerCase(); }
+    return recipes.find(r => {
+        try { return new RegExp(r.hostPattern, 'i').test(host); } catch { return false; }
+    }) || null;
+}
+
+/**
+ * Deterministically fill the recipe fields for whichever step is on screen.
+ *
+ * - Idempotent: skips inputs that already hold a value, so it can run every
+ *   iteration and naturally goes quiet once the step is filled (returns 0).
+ * - TEXT inputs only. Custom dropdowns (Workday's button→listbox) are left to
+ *   the LLM — they need type-to-filter and are brittle to drive blindly.
+ * - NEVER touches a password field and NEVER clicks the final submit; it does
+ *   not advance the wizard (the planner owns navigation).
+ * - Opportunistically uploads the CV if the step exposes the recipe's file input.
+ *
+ * @returns {{matched:boolean, filled:number, step?:string}}
+ */
+export async function applyRecipeFields(recipe, profile, cvData) {
+    if (!recipe || !profile) return { matched: false, filled: 0 };
+    const step = (recipe.steps || []).find(s => s.detect && document.querySelector(s.detect));
+    if (!step) return { matched: false, filled: 0 };
+
+    let filled = 0;
+
+    // Opportunistic CV upload (resume step or any step that renders the input).
+    if (cvData?.base64 && cvData?.fileName && recipe.fileUploadSelector) {
+        const fileEl = document.querySelector(recipe.fileUploadSelector);
+        if (fileEl && fileEl.type === 'file' && !(fileEl.files && fileEl.files.length)) {
+            try { if (setFileOnInput(fileEl, cvData.base64, cvData.fileName)) filled++; } catch { /* best effort */ }
+        }
+    }
+
+    for (const f of step.fields || []) {
+        if (f.type === 'custom-select') continue; // defer dropdowns to the LLM
+        const val = profile[f.profileKey];
+        if (val == null || String(val).trim() === '') continue;
+        const el = document.querySelector(f.selector);
+        if (!el || el.offsetParent === null) continue;
+        if (el.type === 'password') continue;                 // never
+        if (String(el.value ?? '').trim() !== '') continue;   // already filled → idempotent
+        try {
+            setNativeValue(el, String(val));
+            await sleep(120);
+            if (String(el.value ?? '').trim() !== '') {
+                filled++;
+                console.log(`[Copo Recipe] filled ${f.label} (${f.selector})`);
+            }
+        } catch { /* best effort — LLM will retry */ }
+        await sleep(120);
+    }
+
+    return { matched: true, filled, step: step.name };
+}
