@@ -17,3 +17,7 @@ Nhãn: v2 (Intent×Reach, min), IDCG chung per-profile, pool 2026-07-14, 40 prof
 | B1 | 07-15 | facility-engineer → Operations (positive-routing, TRƯỚC Engineering) | 0.710 | 0.864 | +0.154 | +0.014 | 0 | ACCEPT (swe-backend 0.234→0.276; correctness, 0 regression) | (pending) |
 
 **Ghi chú B1**: chỉ demote facility/building/HVAC/chief-engineer (Accor, Shopee). Semiconductor/FPGA/hardware-validation/SRE **cố ý giữ Engineering** — quyết định của user. +3 nhãn (2 job software thật TPBank/FPT trồi lên = grade 2, 1 Bosch Facility Intern → Ops). swe-backend VẪN 0.276 (tệ nhất) do hardware NVIDIA/Amazon Ring còn lại — đây là bằng chứng "engineer là generic term, hardware↔software split cần embedding sub-family, KHÔNG regex". Nguyên tắc đã ghi vào tuning_plan §B. aggregate +0.014 vs baseline gốc là tổng A+B1.
+
+| C1 | 07-15 | `sen_mult × years_mult` → `min(sen,years)` (bỏ double-penalty) | 0.710 | 0.863 | +0.153 | +0.000 | 0 | KEEP (principled, eval-NEUTRAL — trigger hiếm) | (pending) |
+
+**Ghi chú C1**: đây là điểm 1 critique gốc. Eval KHÔNG đổi vì `years_mult` phần lớn=1.0 (regex required-years ít bắt) → `min(sen,1)=sen=sen×1`, hai vế chỉ khác khi CẢ HAI bắn, ca đó hiếm trong pool. `min ≤ product` nên chỉ nới phạt kép, không thể làm tệ hơn (0 regression xác nhận). Giữ vì đúng nguyên tắc + vô hại; sẽ có ích khi years-extraction tốt hơn hoặc data đa dạng hơn. FINDING PHỤ: trục years-fit đang gần như bất động (regex JD yếu) — đáng cải thiện extraction trước khi tin trục này.

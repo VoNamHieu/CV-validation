@@ -268,6 +268,13 @@ def score_job(job: dict, profile: SearchProfile, role_weights: dict[str, float],
     req_years = _required_years(job)
     years_mult = _years_fit(req_years, profile.candidate_years)
 
+    # Seniority-band and years-required measure the SAME construct ("is this job
+    # out of the candidate's experience range?") from two correlated signals.
+    # Multiplying them double-penalizes a single fact (a slightly-too-senior job
+    # got sen 0.75 × years 0.5 = 0.375, harsher than either constraint alone).
+    # Fold to the BINDING constraint instead — count the mismatch once.
+    exp_mult = min(sen_mult, years_mult)
+
     # Primary = the candidate's OWN role family (e.g. Product). Adjacent families
     # (Analyst/BA, Consultant…) are reachable but must rank as a separate, lower
     # tier — we only widen to them after the primary pool is exhausted, not mix
@@ -275,7 +282,7 @@ def score_job(job: dict, profile: SearchProfile, role_weights: dict[str, float],
     is_primary = fam in profile.role_families
 
     return {
-        "score": round(role_w * ind_mult * conf_mult * sen_mult * fit_mult * years_mult, 3),
+        "score": round(role_w * ind_mult * conf_mult * fit_mult * exp_mult, 3),
         "role_family": fam, "industry": ind, "is_primary": is_primary,
         "role_w": role_w, "in_domain": in_domain, "reachable": reachable,
         "confidence": conf, "seniority": job_level, "seniority_mult": sen_mult,
