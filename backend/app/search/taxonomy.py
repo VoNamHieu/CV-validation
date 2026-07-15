@@ -128,6 +128,15 @@ _RULES: list[tuple[str, str]] = [
     # Engineering / software (incl. semiconductor: VLSI / ASIC / IC & chip design
     # / verification / layout — checked before Design & Finance so "Analog IC
     # Design" / "Memory Controller Verification" land here, not on Design's
+    # Facility / building engineering (hotel, property, plant maintenance) — a
+    # DIFFERENT profession from software; "engineer" here is the building-services
+    # sense (Accor "Chief Engineer", Shopee "Engineering & Maintenance"). Checked
+    # BEFORE Engineering so bare "engineer" doesn't grab it as software.
+    # NB: "engineer" is a generic term like "chuyên viên" — the family lives in the
+    # QUALIFIER. Hardware/semiconductor "engineer" is intentionally LEFT to
+    # Engineering; the software-vs-hardware split is embedding sub-family work
+    # (see search-design), NOT a regex blocklist.
+    ("Operations", r"facilit(y|ies)|engineering (&|and) maintenance|building services|\bhvac\b|bao tri toa nha|chief engineer|building engineer"),
     # "design" or Finance's "controller"). Bare "kỹ thuật" deliberately NOT a
     # signal: it collides with "kỹ thuật số" (digital), "kỹ thuật SEO" (mktg) and
     # maintenance/construction technicians (→ Manufacturing). The full phrase

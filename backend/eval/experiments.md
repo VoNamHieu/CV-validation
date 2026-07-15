@@ -13,3 +13,7 @@ Nhãn: v2 (Intent×Reach, min), IDCG chung per-profile, pool 2026-07-14, 40 prof
 **Ghi chú A1**: +1 nhãn mới (Infineon Digital Verification cho swe-tech-lead) chấm INLINE bởi main agent (không mù với score) — intent=2/reach=1/grade=1. Ảnh hưởng: 1 dòng, rerank #9. Đã đóng coverage về 0.
 
 **Ghi chú A2**: gỡ grade-0 pollution (2 keyword-trap "TUYỂN DỤNG X" khỏi 4 profile HR + "Skip to main content" khỏi 2 profile mkt/sales). +8 nhãn mới (HR/recruiter thật trồi lên thay trap) chấm bởi 1 judge agent MÙ, 2 chiều. Facet gain khu trú đúng profile bị bẩn; hr-recruiter vẫn 0.378 (thấp) vì còn lỗi bare `engineer`/khác — để Phase B. Lưu ý: aggregate +0.013 đo trên label set +8 (drift nhẹ), bằng chứng chính = per-profile ↑ đồng hướng.
+
+| B1 | 07-15 | facility-engineer → Operations (positive-routing, TRƯỚC Engineering) | 0.710 | 0.864 | +0.154 | +0.014 | 0 | ACCEPT (swe-backend 0.234→0.276; correctness, 0 regression) | (pending) |
+
+**Ghi chú B1**: chỉ demote facility/building/HVAC/chief-engineer (Accor, Shopee). Semiconductor/FPGA/hardware-validation/SRE **cố ý giữ Engineering** — quyết định của user. +3 nhãn (2 job software thật TPBank/FPT trồi lên = grade 2, 1 Bosch Facility Intern → Ops). swe-backend VẪN 0.276 (tệ nhất) do hardware NVIDIA/Amazon Ring còn lại — đây là bằng chứng "engineer là generic term, hardware↔software split cần embedding sub-family, KHÔNG regex". Nguyên tắc đã ghi vào tuning_plan §B. aggregate +0.014 vs baseline gốc là tổng A+B1.

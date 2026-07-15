@@ -1,7 +1,6 @@
-# Tài liệu audit — nhãn 2 chiều (Intent × Reachability) — cập nhật sau A1+A2
+# Audit — nhãn 2 chiều (Intent×Reach, grade=min) — sau A1+A2+B1
 
-grade = min(intent, reach). Judge KHÔNG thấy facet/cos. Sửa nhãn: đổi `grade` trong to_label.csv → `score`.
-633 rows. Raw: eval/judge_raw/. v1 backup: eval/to_label_v1.csv.
+636 rows. Sửa `grade` trong to_label.csv → `score`. Raw: eval/judge_raw/.
 
 
 ### `pm-apm-entry-en`
@@ -136,6 +135,8 @@ grade = min(intent, reach). Judge KHÔNG thấy facet/cos. Sửa nhãn: đổi `
 | **2** | 2 | 2 | 2 | Lập trình viên tích hợp - Khối Công nghệ thông tin | TPBank | 0.6 | — |
 | **2** | 2 | 3 | 2 | Backend Developer - Ngân hàng số | SHB | 0.6 | 0.7499 |
 | **2** | 2 | 2 | 2 | Java Developer (ENG Basic) | FPT Software | 0.6 | 0.676 |
+| **2** | 2 | 2 |  | Lập trình viên đối soát, tra soát - Khối Công nghệ thông tin | TPBank |  | — |
+| **2** | 2 | 2 |  | Full-Stack Developer (ReactJS/NodeJS) | FPT Software |  | — |
 | **1** | 2 | 1 | 1 | Backend Techlead - Khối Ngân hàng Số | SHB | 0.6 | 0.7187 |
 | **1** | 1 | 2 | 1 | Design Engineer | Cake | 0.6 | — |
 | **1** | 1 | 2 | 1 | [EMC] Embedded Android Developer (1 year contract) | Bosch | 0.6 | — |
@@ -808,6 +809,7 @@ grade = min(intent, reach). Judge KHÔNG thấy facet/cos. Sửa nhãn: đổi `
 | **1** | 1 | 2 | 1 | [Bosch HcP - Internship] Spare Part Planning Intern | Bosch | 0.27 | — |
 | **1** | 1 | 2 | 1 | Business Planner Intern | Vietcetera | 0.27 | — |
 | **1** | 1 | 2 | 1 | [Internship] Indirect Purchasing Intern | Bosch | 0.27 | — |
+| **1** | 1 | 1 |  | [Bosch HcP - Internship] Facility Intern | Bosch |  | — |
 
 ### `pm-to-ops-pivot-mid`
 - target **Business Operations Manager** | CV Product Manager | Mid 5y | dom SaaS
