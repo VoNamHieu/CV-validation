@@ -106,6 +106,15 @@
             }, 'JOBFIT_SYNC_CV_FILE_RESPONSE');
         }
 
+        // ─── Sync login credentials for account-gated ATS (Workday…) ───
+        if (event.data?.type === 'JOBFIT_SYNC_CREDENTIALS') {
+            relay({
+                type: 'SAVE_CREDENTIALS',
+                email: event.data.email,
+                password: event.data.password,
+            }, 'JOBFIT_SYNC_CREDENTIALS_RESPONSE');
+        }
+
         // ─── Sync profile JSON into extension storage ───
         if (event.data?.type === 'JOBFIT_EXPORT_PROFILE'
             || event.data?.type === 'JOBFIT_SYNC_PROFILE') {

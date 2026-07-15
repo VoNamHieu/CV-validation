@@ -1,0 +1,14 @@
+{
+  "name": "copo-extension",
+  "private": true,
+  "version": "2.7.0",
+  "description": "Copo — Auto Apply extension. Source in src/ (ES modules), bundled to dist/ with esbuild.",
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "zip": "node build.mjs && cd dist && zip -rq ../copo-extension.zip . -x '*.DS_Store'"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.2"
+  }
+}

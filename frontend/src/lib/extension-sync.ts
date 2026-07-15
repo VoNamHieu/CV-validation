@@ -87,6 +87,22 @@ export function syncCvFileToExtension(
     );
 }
 
+/**
+ * Sync the login credentials the auto-apply agent reuses to sign in / create an
+ * account on ATS that gate their apply behind a login (Workday, SuccessFactors…).
+ * Collected by LoginCredentialsBanner; the agent fills them ONLY into a genuine
+ * login/signup form's own email + password fields.
+ */
+export function syncApplyCredentialsToExtension(
+    email: string,
+    password: string,
+): Promise<SyncResult> {
+    return postAndAwait(
+        { type: "JOBFIT_SYNC_CREDENTIALS", email, password },
+        "JOBFIT_SYNC_CREDENTIALS_RESPONSE",
+    );
+}
+
 // ─────────────────────────────── Mode 1 ───────────────────────────────
 
 /**

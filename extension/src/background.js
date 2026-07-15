@@ -176,7 +176,7 @@ async function ensureAgentInjected(tabId, url) {
         if (already) return;
         await chrome.scripting.executeScript({ target: { tabId }, func: () => { window.__copoAgentInjected = true; } });
         await chrome.scripting.insertCSS({ target: { tabId }, files: ['content.css'] }).catch(() => { });
-        await chrome.scripting.executeScript({ target: { tabId }, files: ['utils.js', 'content-agent.js'] });
+        await chrome.scripting.executeScript({ target: { tabId }, files: ['content-agent.js'] });
     } catch (e) {
         console.warn('[Copo] ensureAgentInjected failed:', e?.message || e);
     }
@@ -347,6 +347,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 chrome.runtime.sendMessage({ type: 'PROFILE_UPDATED', syncedAt }).catch(() => { });
             },
         );
+        return true;
+    }
+
+    // Save the login credentials the agent reuses to sign in / create an account
+    // on account-gated ATS (Workday…). Stored locally only; never sent anywhere.
+    if (message.type === 'SAVE_CREDENTIALS') {
+        chrome.storage.local.set({
+            jobfitApplyCredentials: {
+                email: message.email || '',
+                password: message.password || '',
+                savedAt: Date.now(),
+            },
+        }, () => sendResponse({ success: true }));
         return true;
     }
 
