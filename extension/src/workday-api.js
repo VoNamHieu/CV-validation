@@ -14,6 +14,7 @@
 // the extension. Field mapping for the rest (address/phone/source/experience/
 // questionnaire, with GUID resolution) is milestone 2+.
 
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const CX = (tenant) => `/wday/calypso/cxs/jobapplication/${tenant}`;       // application path
 const COMMON = (tenant) => `/wday/calypso/cxs/common/${tenant}`;          // reference data path
 
@@ -128,10 +129,10 @@ function pickWid(list, wants) {
     return list[0] ? { id: list[0].id, descriptor: list[0].descriptor } : null;
 }
 
-// Email — plain string, no GUID.
+// Email — plain string, no GUID. Field is "emailAddress" (per the UI's own POST).
 export async function postEmail({ origin, tenant }, appId, profile) {
     const r = await wdFetch(origin, `${CX(tenant)}/jobapplication/${appId}/emailaddress`,
-        { method: 'POST', body: { email: profile.email || '' } });
+        { method: 'POST', body: { emailAddress: profile.email || '' } });
     return { status: r.status, ok: r.ok, detail: r.ok ? 'ok' : snip(r) };
 }
 
@@ -169,21 +170,17 @@ export async function postAddress({ origin, tenant }, appId, profile) {
 export async function postPhone({ origin, tenant }, appId, profile) {
     if (!profile.phone) return { status: 0, ok: true, skipped: true, reason: 'no phone in profile' };
     const country = COUNTRY.VN;
-    const types = await getRef(origin, `${CX(tenant)}/values/phone/deviceTypes`);
-    const type = pickWid(types, ['Mobile', 'Cell', 'Cellular', 'Landline']);
     const codes = await getRef(origin, `${COMMON(tenant)}/countries/${country}/countryphonecode`);
     const code = pickWid(codes, ['+84', '84', 'Vietnam', 'Viet']);
-    const number = String(profile.phone).replace(/[^\d]/g, '').replace(/^840?|^0/, '');   // strip +84 / leading 0
+    // Match the UI's own POST: countryPhoneCode + extension + raw phoneNumber
+    // (leading 0 kept); no phoneType field.
     const body = {
-        phoneNumber: number || String(profile.phone),
-        ...(type ? { phoneType: type } : {}),
+        phoneNumber: String(profile.phone),
+        extension: '',
         ...(code ? { countryPhoneCode: code } : {}),
     };
     const r = await wdFetch(origin, `${CX(tenant)}/jobapplication/${appId}/phonenumber`, { method: 'POST', body });
-    return {
-        status: r.status, ok: r.ok, type: type && type.descriptor, code: code && code.descriptor,
-        typesCount: types.length, codesCount: codes.length, detail: r.ok ? 'ok' : snip(r),
-    };
+    return { status: r.status, ok: r.ok, code: code && code.descriptor, codesCount: codes.length, detail: r.ok ? 'ok' : snip(r) };
 }
 
 // Write the My Information "name" section — proves an authenticated write works.
@@ -259,22 +256,40 @@ export async function readForm(jobUrl, opts = {}) {
 // Resume upload — Workday parses it to auto-fill My Experience. It's a multipart
 // scan-then-attach flow; diagnostic here to learn the exact shape (scanfile
 // response → then POST resumeattachments). cv = { base64, fileName }.
+const PDF_CONTENT_TYPE = { id: 'd9ae3cc8446c11de98360015c5e6daf6', descriptor: 'application/pdf - mime_pdf' };
+
 export async function postResume({ origin, tenant }, appId, cv) {
     if (!cv || !cv.base64) return { skipped: true, reason: 'no CV synced (cvFileBase64)' };
     try {
         const bytes = Uint8Array.from(atob(cv.base64), c => c.charCodeAt(0));
-        const blob = new Blob([bytes], { type: 'application/pdf' });
-        const fd = new FormData();
-        fd.append('file', blob, cv.fileName || 'resume.pdf');
         const csrf = await getCsrf(origin);
-        const scan = await fetch(`${origin}${COMMON(tenant)}/scanfile`, {
-            method: 'POST', credentials: 'include',
-            headers: csrf ? { 'X-CALYPSO-CSRF-TOKEN': csrf } : {},   // multipart → let the browser set Content-Type
-            body: fd,
-        });
-        const scanTxt = await scan.text();
-        let scanJson = null; try { scanJson = JSON.parse(scanTxt); } catch { /* html */ }
-        return { scanStatus: scan.status, scanHead: scanTxt.slice(0, 300), scanJson };
+        const hdr = csrf ? { 'X-CALYPSO-CSRF-TOKEN': csrf } : {};   // multipart → browser sets Content-Type
+        const mkFd = () => {
+            const fd = new FormData();
+            fd.append('body', new Blob([bytes], { type: 'application/pdf' }), cv.fileName || 'resume.pdf');   // field is "body"
+            return fd;
+        };
+        // 1) virus scan (returns {diagnosis:"clean"}, no token)
+        const scanR = await fetch(`${origin}${COMMON(tenant)}/scanfile`, { method: 'POST', credentials: 'include', headers: hdr, body: mkFd() });
+        const scan = await scanR.json().catch(() => null);
+        if (scan && scan.diagnosis && scan.diagnosis !== 'clean') return { step: 'scanfile', diagnosis: scan.diagnosis };
+        // 2) upload the file → returns the oms-attachments token
+        const upR = await fetch(`${origin}${CX(tenant)}/jobapplication/${appId}/resume`, { method: 'POST', credentials: 'include', headers: hdr, body: mkFd() });
+        const upTxt = await upR.text();
+        let up = null; try { up = JSON.parse(upTxt); } catch { /* html */ }
+        // /resume returns { experiences, educations, skills, …, file: { id, fileName, fileLength, contentType } }
+        const f = up && up.file;
+        const fileToken = f && f.id;   // "oms-attachments/<uuid>"
+        if (!fileToken || typeof fileToken !== 'string') return { step: 'resume-upload', status: upR.status, up, head: upTxt.slice(0, 200) };
+        await sleep(300);   // let the upload settle server-side
+        // 3) register the attachment — exact values from up.file.
+        const attBody = { attachments: [{ file: f.id, fileName: f.fileName, fileLength: f.fileLength, contentType: f.contentType }] };
+        const att = await wdFetch(origin, `${CX(tenant)}/jobapplication/${appId}/resumeattachments`, { method: 'POST', body: attBody });
+        return {
+            scanStatus: scanR.status, fileToken, attachStatus: att.status, ok: att.ok,
+            parsed: { experiences: (up.experiences || []).length, educations: (up.educations || []).length, skills: (up.skills || []).length },
+            detail: att.ok ? 'ok' : snip(att),
+        };
     } catch (e) {
         return { error: e.message };
     }
