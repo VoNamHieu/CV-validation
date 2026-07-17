@@ -79,16 +79,38 @@ async def _log_unhandled(request: Request, exc: Exception):
 
 # ── Rate Limiting Middleware (H2) ──
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    """Simple in-memory IP-based rate limiter."""
+    """In-memory per-caller rate limiter.
+
+    The caller key is the **verified** JWT ``sub`` when a valid bearer token is
+    present, else the client IP. Keying authenticated traffic on the user (not
+    the IP) is essential behind the Vercel→Railway proxy: the browser never hits
+    Railway directly, so every user's request arrives from one of a few Vercel
+    egress IPs. Pure IP-keying collapsed the WHOLE product into a single
+    per-egress-IP bucket, so one busy user (or the extension) could 429 everyone
+    else — the intermittent "Không kiểm tra được quyền" on /admin. Per-user
+    buckets are also egress-IP- and NAT-proof, and can't be gamed: the sub is
+    signature-verified, so a caller can't mint fake identities to get extra
+    buckets (an unverified/invalid token falls back to the IP bucket).
+
+    Two caps: ``user_max`` per authenticated user, and a higher ``ip_max`` for
+    the IP bucket — that bucket is *shared* by every anonymous visitor behind an
+    egress IP, so it must be far larger than a single user's budget."""
 
     # Sweep idle buckets once the dict grows past this many keys.
     _SWEEP_AT = 10_000
+    # Re-verify a given bearer token at most this often (signature check + the
+    # occasional JWKS fetch are amortised across a token's ~1h life). Caches the
+    # None result too, so a repeated garbage token isn't re-verified each hit.
+    _TOKEN_TTL = 300
 
-    def __init__(self, app, max_requests: int = 30, window_seconds: int = 60):
+    def __init__(self, app, user_max: int = 60, ip_max: int = 600, window_seconds: int = 60):
         super().__init__(app)
-        self.max_requests = max_requests
+        self.user_max = user_max
+        self.ip_max = ip_max
         self.window = window_seconds
         self.clients: dict[str, list[float]] = defaultdict(list)
+        # token -> (verified_sub_or_None, cached_at)
+        self._token_subs: dict[str, tuple[str | None, float]] = {}
 
     # How many trusted proxy hops sit in front of the app. The real client IP
     # is the Nth-from-last X-Forwarded-For entry. Default 1 = the single hop
@@ -111,6 +133,30 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 return parts[idx] if idx >= 0 else parts[0]
         return request.client.host if request.client else "unknown"
 
+    def _verified_sub(self, token: str) -> str | None:
+        """Verified JWT ``sub`` for a bearer token, cached ``_TOKEN_TTL`` seconds
+        (positive AND negative) so the hot path doesn't re-verify every request."""
+        now = time.time()
+        cached = self._token_subs.get(token)
+        if cached and now - cached[1] < self._TOKEN_TTL:
+            return cached[0]
+        from app.services.auth import verify_bearer_sub  # lazy — avoid import cycle
+        sub = verify_bearer_sub(token)
+        self._token_subs[token] = (sub, now)
+        if len(self._token_subs) > self._SWEEP_AT:
+            for k in [k for k, (_, ts) in self._token_subs.items() if now - ts >= self._TOKEN_TTL]:
+                del self._token_subs[k]
+        return sub
+
+    def _identity(self, request: Request, client_ip: str) -> tuple[str, int]:
+        """(bucket key, its cap). Authenticated → per-user bucket; else IP."""
+        auth = request.headers.get("authorization", "")
+        if auth[:7].lower() == "bearer ":
+            sub = self._verified_sub(auth[7:].strip())
+            if sub:
+                return f"u:{sub}", self.user_max
+        return f"ip:{client_ip}", self.ip_max
+
     @staticmethod
     def _is_exempt(key: str) -> bool:
         """Never throttle loopback/private clients. Behind the Railway edge the
@@ -129,14 +175,22 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         return addr.is_loopback or addr.is_private
 
     async def dispatch(self, request: Request, call_next):
-        key = self._client_key(request)
-        if self._is_exempt(key):
+        client_ip = self._client_key(request)
+        if self._is_exempt(client_ip):
             return await call_next(request)
+        key, limit = self._identity(request, client_ip)
         now = time.time()
         stamps = [t for t in self.clients[key] if now - t < self.window]
-        if len(stamps) >= self.max_requests:
+        if len(stamps) >= limit:
             self.clients[key] = stamps
-            return JSONResponse({"detail": "Too many requests. Please wait."}, status_code=429)
+            # Tell the client when the window frees up, so it backs off instead
+            # of hammering (the admin check retried 4× inside the same window).
+            retry_after = max(1, int(self.window - (now - stamps[0])))
+            return JSONResponse(
+                {"detail": "Too many requests. Please wait."},
+                status_code=429,
+                headers={"Retry-After": str(retry_after)},
+            )
         stamps.append(now)
         self.clients[key] = stamps
         if len(self.clients) > self._SWEEP_AT:
@@ -146,12 +200,16 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
-# Cap is env-tunable so ops can raise it without a code change. 30/min is tight
-# for a real SPA session (one dashboard load = a dozen+ calls); loopback/private
-# clients (local dev) are exempt entirely — see RateLimitMiddleware._is_exempt.
+# Caps are env-tunable so ops can raise them without a code change.
+# RATE_LIMIT_MAX = per authenticated user (60/min covers a heavy dashboard
+# load — a dozen+ calls — with headroom). RATE_LIMIT_IP_MAX = the anonymous IP
+# bucket, which behind the Vercel egress is shared by ALL logged-out visitors,
+# so it's set much higher. Loopback/private clients (local dev) are exempt
+# entirely — see RateLimitMiddleware._is_exempt.
 app.add_middleware(
     RateLimitMiddleware,
-    max_requests=int(os.getenv("RATE_LIMIT_MAX", "30")),
+    user_max=int(os.getenv("RATE_LIMIT_MAX", "60")),
+    ip_max=int(os.getenv("RATE_LIMIT_IP_MAX", "600")),
     window_seconds=int(os.getenv("RATE_LIMIT_WINDOW", "60")),
 )
 
