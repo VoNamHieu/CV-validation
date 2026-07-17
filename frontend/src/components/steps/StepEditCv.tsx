@@ -29,10 +29,12 @@ import {
 } from '@/lib/types';
 import { promptInstallExtension, promptGrantPermission, isPermissionError } from '@/lib/extension-install';
 import { cvToExtensionProfile } from '@/lib/extension-profile';
-import { syncProfileToExtension, syncCvFileToExtension, syncCvDataToExtension } from '@/lib/extension-sync';
+import { syncProfileToExtension, syncCvFileToExtension, syncCvDataToExtension, syncApplyCredentialsToExtension } from '@/lib/extension-sync';
 import { renderCvHtml, getTemplate, DEFAULT_TEMPLATE_ID } from '@/lib/cv-templates';
 import type { CvTemplateId } from '@/lib/cv-templates';
 import { resizeAvatarToDataUrl } from '@/lib/avatar';
+import LoginCredentialsBanner, { type ApplyCredentials } from '@/components/LoginCredentialsBanner';
+import { loginAtsSummary } from '@/lib/applyRecipes';
 
 type AutoApplyStatus = 'idle' | 'checking' | 'sending' | 'opened' | 'error' | 'no-extension';
 type FullAutoStatus = 'idle' | 'rendering' | 'syncing' | 'launching' | 'error';
@@ -114,6 +116,16 @@ export default function StepEditCv() {
             .filter(e => e.optimizedCv)
             .sort((a, b) => (b.matchResult?.overall_score ?? 0) - (a.matchResult?.overall_score ?? 0));
     }, [jdEntries]);
+
+    // ATS in this job list that gate apply behind a login / account creation
+    // (Workday, SuccessFactors…) → collect credentials upfront. Email pre-fills
+    // from the CV; held in a ref (not persisted) until the agent path uses it.
+    const cvEmail = cvData?.contact?.email ?? '';
+    const loginAts = useMemo(
+        () => loginAtsSummary(sortedEntries.map(e => e.applyUrl || e.source)),
+        [sortedEntries],
+    );
+    const applyCredsRef = useRef<ApplyCredentials>({ email: '', password: '' });
 
     // Jobs are still crawling/scoring/optimizing — the editor opens on the first
     // scored job before its CV is tailored, so `sortedEntries` is briefly empty
@@ -628,6 +640,13 @@ export default function StepEditCv() {
             return;
         }
 
+        // Hand the extension the login credentials for account-gated ATS (Workday…)
+        // so the agent can sign in / create an account when it hits a login wall.
+        const creds = applyCredsRef.current;
+        if (creds.email || creds.password) {
+            syncApplyCredentialsToExtension(creds.email, creds.password).catch(() => { });
+        }
+
         // Build jobs array from all optimized entries that have a source URL.
         // Attach THIS job's cached PDF so file-upload fields get the right CV
         // (job A → CV A). The PDF is cached at Optimize time; if it's missing
@@ -1100,6 +1119,13 @@ export default function StepEditCv() {
                     )}
                 </div>
             </div>
+
+            {/* ── Login-required ATS → collect credentials (email pre-filled from CV) ── */}
+            <LoginCredentialsBanner
+                atsSummary={loginAts}
+                defaultEmail={cvEmail}
+                onChange={(c) => { applyCredsRef.current = c; }}
+            />
 
             {/* ── Fully Auto error banner ── */}
             {fullAutoError && (
