@@ -88,6 +88,27 @@ def _verify_jwt(token: str) -> str | None:
     return None
 
 
+def verify_bearer_sub(token: str) -> Optional[str]:
+    """Best-effort → the token's verified ``sub``, or ``None`` when it's
+    missing / invalid / unverifiable. Never raises.
+
+    For non-auth consumers (the rate limiter) that want a *trustworthy* per-user
+    key without failing the request — an unverified sub can't be trusted as a
+    key because a caller could mint distinct fake subs to get unlimited buckets.
+    The endpoint's own ``get_current_user_id`` dependency still enforces
+    validity, so returning ``None`` here only changes the rate-limit bucket, not
+    the auth outcome."""
+    if not token:
+        return None
+    try:
+        return _verify_jwt(token)
+    except HTTPException:
+        return None  # present-but-invalid token → fall back to IP bucket
+    except Exception:  # noqa: BLE001 — verification must never break the request
+        logger.debug("verify_bearer_sub failed", exc_info=True)
+        return None
+
+
 def _auth_configured() -> bool:
     return bool(os.getenv("SUPABASE_URL") or os.getenv("SUPABASE_JWT_SECRET"))
 

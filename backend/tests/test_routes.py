@@ -70,9 +70,70 @@ class TestCrawlRoutes:
         assert response.status_code == 400
 
 
+def _rate_limiter():
+    """Reach the in-process RateLimitMiddleware instance to tweak/clear it."""
+    from app.main import app, RateLimitMiddleware
+    if app.middleware_stack is None:
+        app.middleware_stack = app.build_middleware_stack()
+    node = app.middleware_stack
+    for _ in range(20):
+        if node is None:
+            break
+        if isinstance(node, RateLimitMiddleware):
+            return node
+        node = getattr(node, "app", None)
+    return None
+
+
 class TestRateLimiting:
     def test_rate_limit_not_triggered_on_normal_use(self, client):
         """Normal usage should not trigger rate limit."""
         for _ in range(5):
             response = client.get("/health")
             assert response.status_code == 200
+
+    def test_per_user_buckets_are_independent_on_shared_ip(self, client, monkeypatch):
+        """The core fix: two authenticated users behind the SAME IP (as they are
+        behind the Vercel egress) must get independent buckets — one heavy user
+        must not 429 another. Keying is on the verified JWT sub, not the IP."""
+        import app.services.auth as authmod
+        monkeypatch.setattr(
+            authmod, "verify_bearer_sub",
+            lambda tok: {"tok-a": "user-a", "tok-b": "user-b"}.get(tok),
+        )
+        rl = _rate_limiter()
+        assert rl is not None
+        rl.clients.clear(); rl._token_subs.clear()
+        monkeypatch.setattr(rl, "user_max", 3)
+
+        def hit(tok):
+            return client.get("/health", headers={"Authorization": f"Bearer {tok}"}).status_code
+
+        # user-a exhausts its own budget…
+        assert [hit("tok-a") for _ in range(5)] == [200, 200, 200, 429, 429]
+        # …but user-b, same IP, is untouched.
+        assert [hit("tok-b") for _ in range(3)] == [200, 200, 200]
+
+    def test_invalid_token_cannot_mint_fresh_buckets(self, client, monkeypatch):
+        """A present-but-invalid token falls back to the IP bucket, so a flood of
+        distinct garbage tokens can't bypass the limit by minting new buckets."""
+        import app.services.auth as authmod
+        monkeypatch.setattr(authmod, "verify_bearer_sub", lambda tok: None)
+        rl = _rate_limiter()
+        rl.clients.clear(); rl._token_subs.clear()
+        monkeypatch.setattr(rl, "ip_max", 2)
+
+        codes = [
+            client.get("/health", headers={"Authorization": f"Bearer junk-{i}"}).status_code
+            for i in range(4)
+        ]
+        assert codes == [200, 200, 429, 429]
+
+    def test_429_carries_retry_after(self, client, monkeypatch):
+        rl = _rate_limiter()
+        rl.clients.clear(); rl._token_subs.clear()
+        monkeypatch.setattr(rl, "ip_max", 1)
+        assert client.get("/health").status_code == 200
+        blocked = client.get("/health")
+        assert blocked.status_code == 429
+        assert int(blocked.headers["Retry-After"]) >= 1
