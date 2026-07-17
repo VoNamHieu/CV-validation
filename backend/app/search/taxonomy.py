@@ -243,12 +243,72 @@ _SENIORITY_RULES: list[tuple[str, str]] = [
 _SENIORITY_COMPILED = [(lv, re.compile(rx, re.I)) for lv, rx in _SENIORITY_RULES]
 
 
-def classify_seniority(title: str) -> str | None:
-    """Seniority level label for a title, or None when it carries no signal."""
+# ── Description-derived seniority (fallback when the TITLE has no level word) ──
+# Titles alone classify <50% of VN postings — "Nhân viên kinh doanh", "Chuyên
+# viên …" carry no level token. The description sometimes states the level, but
+# it's a NOISY, often-incompletely-scraped field, so this path is precision-
+# first: a wrong band is worse than None. Two tiers:
+#   1) an explicitly LABELED level field ("Cấp bậc: Senior") is trusted;
+#   2) a loose mention counts only when it sits next to a self-referential cue
+#      (vị trí / ứng viên / yêu cầu…) AND not in a context that points at ANOTHER
+#      role — a reporting line ("báo cáo cho Senior Manager"), a mentor ("hỗ trợ
+#      Senior"), or an advancement path ("thăng tiến lên Senior").
+_SEN_LABEL_RE = re.compile(
+    r"(?:cap bac|cap do|chuc danh|chuc vu|trinh do|vi tri|level|seniority|position|rank)"
+    r"\s*[:\-]\s*([^\n.;|]{0,40})"
+)
+# Self-referential cues: the level word is describing THIS posting.
+_SEN_POS_CTX_RE = re.compile(
+    r"vi tri|ung vien|yeu cau|can tuyen|tuyen dung|cap bac|kinh nghiem|uu tien|trinh do|level|position"
+)
+# The level word describes a DIFFERENT role (reporting line / mentor / team) or a
+# future aspiration, not the posting's own level → reject.
+_SEN_NEG_CTX_RE = re.compile(
+    r"bao cao|report(?:ing)? to|truc thuoc|duoi (?:su )?quyen|duoi su quan ly|"
+    r"ho tro|phoi hop|lam viec (?:voi|cung)|hop tac|tro ly|assistant to|thanh vien|"
+    r"thuoc (?:nhom|team|phong|bo phan)|cung cac|thang tien|tro thanh|len vi tri|"
+    r"len chuc|len cap|phat trien len"
+)
+_SEN_CTX_WINDOW = 30
+
+
+def _seniority_from_desc(description: str) -> str | None:
+    n = _norm(description)
+    # 1) An explicitly labeled level field wins (unless the value itself points
+    #    at another role, e.g. "Vị trí: hỗ trợ Senior Manager").
+    for m in _SEN_LABEL_RE.finditer(n):
+        val = m.group(1)
+        if _SEN_NEG_CTX_RE.search(val):
+            continue
+        for lv, rx in _SENIORITY_COMPILED:
+            if rx.search(val):
+                return lv
+    # 2) Loose mention — first (highest-priority) rule with a match that has a
+    #    self-referential cue nearby and no "another role / aspiration" cue.
+    for lv, rx in _SENIORITY_COMPILED:
+        for mm in rx.finditer(n):
+            win = n[max(0, mm.start() - _SEN_CTX_WINDOW):mm.end() + _SEN_CTX_WINDOW]
+            if _SEN_NEG_CTX_RE.search(win):
+                continue
+            if _SEN_POS_CTX_RE.search(win):
+                return lv
+    return None
+
+
+def classify_seniority(title: str, description: str | None = None) -> str | None:
+    """Seniority label for a posting, or None when it carries no signal.
+
+    The TITLE is the primary, highest-precision signal (unchanged). Only when the
+    title has no level word do we consult the DESCRIPTION — guarded, because that
+    field is noisy and often incompletely scraped, so a wrong label is worse than
+    None (see _seniority_from_desc). A missing/empty description yields the same
+    None as before → no regression for postings we can't read."""
     n = _norm(title)
     for lv, rx in _SENIORITY_COMPILED:
         if rx.search(n):
             return lv
+    if description:
+        return _seniority_from_desc(description)
     return None
 
 

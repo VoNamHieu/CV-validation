@@ -313,6 +313,28 @@ async def set_embedding(job_id: str, embedding: Sequence[float]) -> None:
     )
 
 
+async def list_missing_seniority(*, limit: int = 2000) -> list[dict]:
+    """Active jobs with no seniority band but WITH a description — the queue the
+    seniority backfill can actually improve (a null-description row can't be
+    reclassified from the body, so it's skipped). Title-only rows already
+    resolved to null once and won't change."""
+    pool = await get_pool()
+    rows = await pool.fetch(
+        "SELECT id, title, description FROM jobs "
+        "WHERE is_active AND seniority IS NULL AND description IS NOT NULL "
+        "ORDER BY created_at DESC LIMIT $1",
+        limit,
+    )
+    return rows_to_dicts(rows)
+
+
+async def set_seniority(job_id: str, level: str) -> None:
+    pool = await get_pool()
+    await pool.execute(
+        "UPDATE jobs SET seniority = $2 WHERE id = $1", job_id, level,
+    )
+
+
 async def facet_values() -> dict:
     """Distinct facet values actually present in the store — feeds the admin
     search filters so dropdowns never offer an empty facet."""

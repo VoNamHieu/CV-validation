@@ -142,6 +142,45 @@ def test_garbage_title_filter():
     assert not _is_garbage_title("Nhân viên Phục vụ")
 
 
+def test_classify_seniority_title_primary_and_desc_absent():
+    from app.search.taxonomy import classify_seniority
+    # Title keyword stays the primary signal (unchanged).
+    assert classify_seniority("Senior Backend Engineer") == "Senior"
+    assert classify_seniority("Trưởng phòng Kinh doanh") == "Director/Head+"
+    assert classify_seniority("Intern Marketing") == "Intern/Fresher"
+    # No level word in title AND no usable description → None (no regression).
+    assert classify_seniority("Nhân viên kinh doanh") is None
+    assert classify_seniority("Kế toán tổng hợp", None) is None
+    assert classify_seniority("Chuyên viên tuyển dụng", "") is None
+
+
+def test_classify_seniority_from_labeled_field():
+    from app.search.taxonomy import classify_seniority
+    assert classify_seniority("Nhân viên kinh doanh", "Cấp bậc: Senior. Mô tả công việc…") == "Senior"
+    assert classify_seniority("Accountant", "Level - Junior") == "Junior"
+    assert classify_seniority("Nhân viên", "Chức danh: Trưởng nhóm bán hàng") == "Lead/Manager"
+    # Labeled value is a bare grade with no level word → stays None (no forced Mid).
+    assert classify_seniority("Nhân viên", "Vị trí: Nhân viên kinh doanh") is None
+
+
+def test_classify_seniority_loose_mention_needs_self_ref_context():
+    from app.search.taxonomy import classify_seniority
+    # Self-referential requirement context → accepted.
+    assert classify_seniority("Kỹ sư phần mềm", "Yêu cầu: ưu tiên ứng viên Senior có 3 năm kinh nghiệm.") == "Senior"
+    # A level word only in company/culture fluff, no self-ref cue → not enough → None.
+    assert classify_seniority("Kỹ sư phần mềm", "Chúng tôi là công ty công nghệ, đội ngũ gồm nhiều Senior giỏi.") is None
+
+
+def test_classify_seniority_rejects_other_role_context():
+    from app.search.taxonomy import classify_seniority
+    # Reporting line — the level belongs to the boss, not this posting.
+    assert classify_seniority("Nhân viên kinh doanh", "Bạn sẽ báo cáo trực tiếp cho Senior Manager của phòng.") is None
+    # Mentor / support context.
+    assert classify_seniority("Lập trình viên", "Hỗ trợ các Senior Developer trong nhóm.") is None
+    # Advancement path — an aspiration, not the current level.
+    assert classify_seniority("Nhân viên", "Cơ hội thăng tiến lên vị trí Senior sau 2 năm.") is None
+
+
 # ─────────────────────────── facet.score_job ───────────────────────────
 
 def test_score_job_soft_floors_unreachable_family():

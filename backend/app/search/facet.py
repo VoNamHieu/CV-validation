@@ -257,7 +257,7 @@ def score_job(job: dict, profile: SearchProfile, role_weights: dict[str, float],
     # over re-classifying the bare title — a title like "Product Manager" carries
     # no level word and would otherwise default to Mid. Fall back to the title
     # classifier when nothing is stored.
-    job_level = canon_level(str(job.get("seniority") or "")) or classify_seniority(title)
+    job_level = canon_level(str(job.get("seniority") or "")) or classify_seniority(title, job.get("description"))
     eff_level = _effective_level(profile.level, fit_mult)
     sen_mult = _seniority_mult(job_level, eff_level)
 

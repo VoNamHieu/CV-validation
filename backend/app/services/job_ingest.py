@@ -342,7 +342,7 @@ async def _upsert_company_jobs(c, jobs_list: list[dict]) -> dict | None:
                 description=j.get("description") or None,
                 role_family=fam,
                 industry=industry,
-                seniority=classify_seniority(title),
+                seniority=classify_seniority(title, j.get("description")),
                 required_years_min=_required_years(j),  # regex on title+description
                 source_url=url,
             )
