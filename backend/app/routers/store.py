@@ -277,9 +277,19 @@ async def get_promoted_public(slug: str, preview: Optional[str] = None):
     is_preview = bool(preview) and preview == str(row.get("id"))
     if row.get("status") != "published" and not is_preview:
         raise HTTPException(status_code=404, detail="Page not found")
-    if not is_preview:
-        await promoted.increment_view(slug)
+    # View counting moved to a client beacon (POST /promoted/{slug}/view): the /j
+    # page is now cached/prerendered, so a per-read increment here would either be
+    # skipped (cache hit) or, worse, count every no-JS crawler. The beacon only
+    # fires from a real browser.
     return promoted.public_view(row)
+
+
+@router.post("/promoted/{slug}/view")
+async def count_promoted_view(slug: str):
+    """PUBLIC — count one human view, fired by a client beacon on /j/<slug>.
+    Best-effort: an unknown/draft slug just no-ops (0 rows updated)."""
+    await promoted.increment_view(slug)
+    return {"ok": True}
 
 
 @router.get("/promoted/related/{slug}")
