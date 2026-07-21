@@ -1,0 +1,859 @@
+[
+ {
+  "profile": {
+   "id": "sales-rep-entry-en",
+   "target_roles": [
+    "Sales Representative"
+   ],
+   "cv_roles": [
+    "Sales Intern"
+   ],
+   "domains": [],
+   "level": "Entry",
+   "years_of_experience": 0
+  },
+  "jobs": [
+   {
+    "job_id": "https://careers.suntorybeverageandfood.com/job/Ha-Noi-city-Area-Sales-Manager-North/1360149955/",
+    "title": "Area Sales Manager - North",
+    "company": "Suntory PepsiCo Vietnam"
+   }
+  ]
+ },
+ {
+  "profile": {
+   "id": "data-analyst-entry-vn",
+   "target_roles": [
+    "Chuyên viên phân tích dữ liệu"
+   ],
+   "cv_roles": [
+    "Data Intern"
+   ],
+   "domains": [],
+   "level": "Entry",
+   "years_of_experience": 0
+  },
+  "jobs": [
+   {
+    "job_id": "https://careers.servicenow.com/jobs/744000137509420/forward-deployed-solution-engineer-applied-ai-fde/",
+    "title": "Forward Deployed Solution Engineer – Applied AI FDE",
+    "company": "ServiceNow"
+   }
+  ]
+ },
+ {
+  "profile": {
+   "id": "finance-analyst-entry-en",
+   "target_roles": [
+    "Financial Analyst"
+   ],
+   "cv_roles": [
+    "Finance Intern"
+   ],
+   "domains": [],
+   "level": "Entry",
+   "years_of_experience": 0
+  },
+  "jobs": [
+   {
+    "job_id": "https://tuyendung.shb.com.vn/viec-lam/chuyen-vien-tu-van-tai-chinh-ca-nhan.35abf433.html",
+    "title": "Chuyên viên Tư vấn Tài chính Cá nhân",
+    "company": "SHB"
+   },
+   {
+    "job_id": "https://tuyendung.tpb.vn/vi/jobs/yQaMoy",
+    "title": "[Hà Nội] CVC/CVCC Phân tích và Quản lý tín dụng - Khối KHDNL",
+    "company": "TPBank"
+   }
+  ]
+ },
+ {
+  "profile": {
+   "id": "pm-apm-entry-en",
+   "target_roles": [
+    "Associate Product Manager"
+   ],
+   "cv_roles": [
+    "Product Intern"
+   ],
+   "domains": [],
+   "level": "Entry",
+   "years_of_experience": 0
+  },
+  "jobs": [
+   {
+    "job_id": "https://careers.shopee.vn/job-detail/125257/",
+    "title": "[ShopeeFood] Associate, Product Management",
+    "company": "Shopee"
+   },
+   {
+    "job_id": "https://careers.loreal.com/en_US/jobs/JobDetail/Assistant-Product-Manager-L-Or-al-Professionnel/243549",
+    "title": "Assistant Product Manager - L'Oréal Professionnel",
+    "company": "L'Oréal Vietnam"
+   }
+  ]
+ },
+ {
+  "profile": {
+   "id": "swe-frontend-entry-en",
+   "target_roles": [
+    "Frontend Developer"
+   ],
+   "cv_roles": [
+    "Software Engineering Intern"
+   ],
+   "domains": [],
+   "level": "Entry",
+   "years_of_experience": 0
+  },
+  "jobs": [
+   {
+    "job_id": "https://tuyendung.tpb.vn/vi/jobs/P83xDy",
+    "title": "Lập trình viên tích hợp - Khối Công nghệ thông tin",
+    "company": "TPBank"
+   },
+   {
+    "job_id": "https://vieclam.thegioididong.com/tuyen-dung/frontend-developer-reactjs-441",
+    "title": "Frontend Developer (HTML/CSS/ReactJS)",
+    "company": "Thế Giới Di Động"
+   },
+   {
+    "job_id": "https://cake.vn/tuyen-dung/jobs/125",
+    "title": "Design Engineer",
+    "company": "Cake"
+   }
+  ]
+ },
+ {
+  "profile": {
+   "id": "ops-coordinator-entry-en",
+   "target_roles": [
+    "Operations Coordinator"
+   ],
+   "cv_roles": [
+    "Operations Intern"
+   ],
+   "domains": [],
+   "level": "Entry",
+   "years_of_experience": 0
+  },
+  "jobs": [
+   {
+    "job_id": "https://careers.shopee.vn/job-detail/128635/",
+    "title": "Fulfillment Ops Key Account Management - Operations, Shopee",
+    "company": "Shopee"
+   },
+   {
+    "job_id": "https://247express.vn/tuyen-dung/nhan-vien-giao-nhan-bac-ninh",
+    "title": "Nhân viên giao nhận (Bắc Ninh)",
+    "company": "247Express"
+   }
+  ]
+ },
+ {
+  "profile": {
+   "id": "marketing-content-entry-vn",
+   "target_roles": [
+    "Nhân viên Content Marketing"
+   ],
+   "cv_roles": [
+    "Marketing Intern"
+   ],
+   "domains": [],
+   "level": "Entry",
+   "years_of_experience": 0
+  },
+  "jobs": [
+   {
+    "job_id": "https://www.mckinsey.com/careers/search-jobs?countries=Vietnam#skipToMain",
+    "title": "Skip to main content",
+    "company": "McKinsey"
+   }
+  ]
+ },
+ {
+  "profile": {
+   "id": "pm-po-junior-vn",
+   "target_roles": [
+    "Product Owner"
+   ],
+   "cv_roles": [
+    "Chuyên viên phân tích nghiệp vụ"
+   ],
+   "domains": [
+    "E-commerce"
+   ],
+   "level": "Junior",
+   "years_of_experience": 2
+  },
+  "jobs": [
+   {
+    "job_id": "https://tuyendung.shb.com.vn/viec-lam/product-owner-khach-hang-ca-nhan-khoi-ngan-hang-so.35abe89e.html",
+    "title": "Product owner Khách hàng Cá nhân – Khối Ngân hàng Số",
+    "company": "SHB"
+   },
+   {
+    "job_id": "https://cake.vn/tuyen-dung/jobs/171",
+    "title": "Liability Product Supervisor (Payment, Merchant Solution)",
+    "company": "Cake"
+   },
+   {
+    "job_id": "https://careers.shopee.vn/job-detail/133125/",
+    "title": "[SPX Express] Senior Associate, Business Product Management (AI Solutions)",
+    "company": "Shopee"
+   }
+  ]
+ },
+ {
+  "profile": {
+   "id": "sales-b2b-junior-vn",
+   "target_roles": [
+    "Nhân viên kinh doanh B2B"
+   ],
+   "cv_roles": [
+    "Telesales Executive"
+   ],
+   "domains": [
+    "SaaS"
+   ],
+   "level": "Junior",
+   "years_of_experience": 2
+  },
+  "jobs": [
+   {
+    "job_id": "https://trustingsocial.com/careers/openings/associate-partnership-manager-fintech-701228",
+    "title": "Associate Partnership Manager (Fintech)",
+    "company": "Trusting Social"
+   },
+   {
+    "job_id": "https://baseinc.talent.vn/job/55352",
+    "title": "[Đà Nẵng] Sales Admin",
+    "company": "Base Inc"
+   },
+   {
+    "job_id": "https://hire-r1.mokahr.com/job/1de695cb-36f3-4037-a2c2-1f46af4d0757",
+    "title": "Manager, Business Development",
+    "company": "Klook"
+   }
+  ]
+ },
+ {
+  "profile": {
+   "id": "data-bi-junior-en",
+   "target_roles": [
+    "Business Intelligence Analyst"
+   ],
+   "cv_roles": [
+    "Data Analyst"
+   ],
+   "domains": [
+    "Retail"
+   ],
+   "level": "Junior",
+   "years_of_experience": 2
+  },
+  "jobs": [
+   {
+    "job_id": "https://tuyendung.winmart.vn/job/55333",
+    "title": "[HN] Finance Business Analyst",
+    "company": "WinMart"
+   },
+   {
+    "job_id": "https://vieclam.thegioididong.com/tuyen-dung/junior-data-engineer-592",
+    "title": "Junior Data Engineer",
+    "company": "Thế Giới Di Động"
+   }
+  ]
+ },
+ {
+  "profile": {
+   "id": "finance-accounting-junior-vn",
+   "target_roles": [
+    "Chuyên viên tài chính"
+   ],
+   "cv_roles": [
+    "Kế toán viên"
+   ],
+   "domains": [
+    "Banking"
+   ],
+   "level": "Junior",
+   "years_of_experience": 2
+  },
+  "jobs": [
+   {
+    "job_id": "https://www.techcombankjobs.com/job/TP_-Ha-Noi-Accountant-%28Techcom-Insurance%29/57813744/",
+    "title": "Accountant (Techcom Insurance)",
+    "company": "Techcombank"
+   },
+   {
+    "job_id": "https://tuyendung.shb.com.vn/viec-lam/giao-dich-vien-ngan-hang-shb-lao.35abf42f.html",
+    "title": "Giao dịch viên - Ngân hàng SHB Lào",
+    "company": "SHB"
+   }
+  ]
+ },
+ {
+  "profile": {
+   "id": "ops-specialist-junior-vn",
+   "target_roles": [
+    "Chuyên viên vận hành"
+   ],
+   "cv_roles": [
+    "Customer Service Executive"
+   ],
+   "domains": [
+    "E-commerce"
+   ],
+   "level": "Junior",
+   "years_of_experience": 2
+  },
+  "jobs": [
+   {
+    "job_id": "https://careers.shopee.vn/job-detail/133092/",
+    "title": "Hub Team Lead (Trưởng nhóm Trạm giao nhận) - Hub Operations, SPX Express (HCM)",
+    "company": "Shopee"
+   }
+  ]
+ },
+ {
+  "profile": {
+   "id": "swe-backend-junior-vn",
+   "target_roles": [
+    "Kỹ sư Backend"
+   ],
+   "cv_roles": [
+    "Lập trình viên Python"
+   ],
+   "domains": [
+    "E-commerce"
+   ],
+   "level": "Junior",
+   "years_of_experience": 2
+  },
+  "jobs": [
+   {
+    "job_id": "https://www.amazon.jobs/en/jobs/10469613/hardware-development-engineer-amazon-ring-vietnam-design-center",
+    "title": "Hardware Development Engineer, Amazon Ring Vietnam Design Center",
+    "company": "Amazon"
+   }
+  ]
+ },
+ {
+  "profile": {
+   "id": "qa-to-backend-pivot-mid",
+   "target_roles": [
+    "Backend Engineer"
+   ],
+   "cv_roles": [
+    "QA Engineer"
+   ],
+   "domains": [],
+   "level": "Mid",
+   "years_of_experience": 3
+  },
+  "jobs": [
+   {
+    "job_id": "https://jobs.smartrecruiters.com/AccorHotel/744000132772969",
+    "title": "Engineering Coordinator",
+    "company": "Accor"
+   },
+   {
+    "job_id": "https://tuyendung.viettelidc.com.vn/viec-lam/software-engineer-golang-python-java-net.35abf371.html",
+    "title": "Software Engineer (Golang/Python/Java/.NET)",
+    "company": "Viettel IDC"
+   }
+  ]
+ },
+ {
+  "profile": {
+   "id": "ops-to-hrbp-pivot-mid",
+   "target_roles": [
+    "HR Business Partner"
+   ],
+   "cv_roles": [
+    "Operations Executive"
+   ],
+   "domains": [],
+   "level": "Mid",
+   "years_of_experience": 4
+  },
+  "jobs": [
+   {
+    "job_id": "https://jobs.smartrecruiters.com/AccorHotel/744000129929270",
+    "title": "Learning & Development Manager",
+    "company": "Accor"
+   },
+   {
+    "job_id": "https://appota.com/careers/jobs/6209",
+    "title": "Learning & Development Specialist",
+    "company": "Appota"
+   }
+  ]
+ },
+ {
+  "profile": {
+   "id": "ba-to-pm-pivot-mid",
+   "target_roles": [
+    "Quản lý sản phẩm"
+   ],
+   "cv_roles": [
+    "Business Analyst"
+   ],
+   "domains": [
+    "Fintech"
+   ],
+   "level": "Mid",
+   "years_of_experience": 4
+  },
+  "jobs": [
+   {
+    "job_id": "https://careers.shopee.vn/job-detail/125257/",
+    "title": "[ShopeeFood] Associate, Product Management",
+    "company": "Shopee"
+   },
+   {
+    "job_id": "https://tuyendung.shb.com.vn/viec-lam/product-owner-khach-hang-ca-nhan-khoi-ngan-hang-so.35abe89e.html",
+    "title": "Product owner Khách hàng Cá nhân – Khối Ngân hàng Số",
+    "company": "SHB"
+   }
+  ]
+ },
+ {
+  "profile": {
+   "id": "sales-to-growth-pivot-mid",
+   "target_roles": [
+    "Growth Marketing Manager"
+   ],
+   "cv_roles": [
+    "Sales Executive"
+   ],
+   "domains": [
+    "SaaS"
+   ],
+   "level": "Mid",
+   "years_of_experience": 4
+  },
+  "jobs": [
+   {
+    "job_id": "https://jobs.smartrecruiters.com/AccorHotel/744000129608409",
+    "title": "Content Creator Hotel Activity (Vietnamese Local)",
+    "company": "Accor"
+   }
+  ]
+ },
+ {
+  "profile": {
+   "id": "eng-to-data-pivot-mid",
+   "target_roles": [
+    "Data Engineer"
+   ],
+   "cv_roles": [
+    "Backend Engineer"
+   ],
+   "domains": [],
+   "level": "Mid",
+   "years_of_experience": 3
+  },
+  "jobs": [
+   {
+    "job_id": "https://cake.vn/tuyen-dung/jobs/168",
+    "title": "Data Analyst – BI Team",
+    "company": "Cake"
+   },
+   {
+    "job_id": "https://jobs.smartrecruiters.com/BoschGroup/744000116529467",
+    "title": "[SO] SAP Analytics Cloud & Datasphere Expert",
+    "company": "Bosch"
+   },
+   {
+    "job_id": "https://career.fpt-software.com/co-hoi-viec-lam/senior-data-engineer-exp-gcp-up-to-70m",
+    "title": "Senior Data Engineer (exp. GCP)-Up to 70M",
+    "company": "FPT Software"
+   }
+  ]
+ },
+ {
+  "profile": {
+   "id": "cs-to-account-pivot-mid",
+   "target_roles": [
+    "Account Manager"
+   ],
+   "cv_roles": [
+    "Customer Success Specialist"
+   ],
+   "domains": [
+    "Technology"
+   ],
+   "level": "Mid",
+   "years_of_experience": 4
+  },
+  "jobs": [
+   {
+    "job_id": "https://cake.vn/tuyen-dung/jobs/147",
+    "title": "Chuyên viên Vận hành Khách hàng Doanh nghiệp",
+    "company": "Cake"
+   },
+   {
+    "job_id": "https://careersvn.app.swirecocacola.com/job/Account-Executive/1489-en_US",
+    "title": "Account Executive",
+    "company": "Coca-Cola"
+   }
+  ]
+ },
+ {
+  "profile": {
+   "id": "swe-mobile-senior-en",
+   "target_roles": [
+    "Senior Mobile Engineer"
+   ],
+   "cv_roles": [
+    "Mobile Developer"
+   ],
+   "domains": [
+    "Consumer Apps"
+   ],
+   "level": "Senior",
+   "years_of_experience": 7
+  },
+  "jobs": [
+   {
+    "job_id": "https://career.sea.com/position/J02158671",
+    "title": "Senior Backend Engineer",
+    "company": "Sea"
+   },
+   {
+    "job_id": "https://careers.onemount.com/jobs/1075",
+    "title": "IT Service Operation Manager",
+    "company": "One Mount Group"
+   },
+   {
+    "job_id": "https://career.vng.com.vn/vi/co-hoi-nghe-nghiep/6692-senior-qc-engineer-vnggames-vi",
+    "title": "Senior QC Engineer, VNGGames",
+    "company": "VNG"
+   }
+  ]
+ },
+ {
+  "profile": {
+   "id": "marketing-brand-senior-vn",
+   "target_roles": [
+    "Quản lý thương hiệu"
+   ],
+   "cv_roles": [
+    "Brand Manager"
+   ],
+   "domains": [
+    "FMCG"
+   ],
+   "level": "Senior",
+   "years_of_experience": 7
+  },
+  "jobs": [
+   {
+    "job_id": "https://careers.masanconsumer.com/job/Shopper-Marketing-Assistant-Manager-Vending-Machine/1712-en_GB",
+    "title": "Shopper Marketing Assistant Manager Vending Machine",
+    "company": "Masan Group"
+   },
+   {
+    "job_id": "https://careers.masanconsumer.com/job/Shopper-Marketing-Assistant-Manager-MT-channel-HPC/1708-en_GB",
+    "title": "Shopper Marketing Assistant Manager MT channel HPC",
+    "company": "Masan Group"
+   }
+  ]
+ },
+ {
+  "profile": {
+   "id": "hr-manager-senior-vn",
+   "target_roles": [
+    "Trưởng phòng nhân sự"
+   ],
+   "cv_roles": [
+    "HR Manager"
+   ],
+   "domains": [
+    "Manufacturing"
+   ],
+   "level": "Senior",
+   "years_of_experience": 8
+  },
+  "jobs": [
+   {
+    "job_id": "https://cake.vn/tuyen-dung/jobs/173",
+    "title": "(Senior) C&B Executive",
+    "company": "Cake"
+   },
+   {
+    "job_id": "https://jobs.thgroupglobal.com/THFC/job/Ha-Noi-Nh%C3%A2n-Vi%C3%AAn-Tuy%E1%BB%83n-D%E1%BB%A5ng-H%C3%A0-N/1363529766/",
+    "title": "Nhân Viên Tuyển Dụng",
+    "company": "TH Group"
+   }
+  ]
+ },
+ {
+  "profile": {
+   "id": "pm-senior-saas-en",
+   "target_roles": [
+    "Senior Product Manager"
+   ],
+   "cv_roles": [
+    "Product Manager"
+   ],
+   "domains": [
+    "SaaS"
+   ],
+   "level": "Senior",
+   "years_of_experience": 7
+  },
+  "jobs": [
+   {
+    "job_id": "https://careers.shopee.vn/job-detail/133125/",
+    "title": "[SPX Express] Senior Associate, Business Product Management (AI Solutions)",
+    "company": "Shopee"
+   }
+  ]
+ },
+ {
+  "profile": {
+   "id": "ops-manager-senior-en",
+   "target_roles": [
+    "Senior Operations Manager"
+   ],
+   "cv_roles": [
+    "Operations Manager"
+   ],
+   "domains": [
+    "Logistics"
+   ],
+   "level": "Senior",
+   "years_of_experience": 8
+  },
+  "jobs": [
+   {
+    "job_id": "https://247express.vn/tuyen-dung/nhan-vien-giao-nhan-long-an",
+    "title": "Nhân viên giao nhận Long An",
+    "company": "247Express"
+   },
+   {
+    "job_id": "https://247express.vn/tuyen-dung/nhan-vien-giao-nhan-ninh-binh",
+    "title": "Nhân viên giao nhận (Ninh Bình)",
+    "company": "247Express"
+   },
+   {
+    "job_id": "https://247express.vn/tuyen-dung/giao-nhan-part-time-duc-hoa",
+    "title": "Giao nhận Part-time (Đức Hòa)",
+    "company": "247Express"
+   }
+  ]
+ },
+ {
+  "profile": {
+   "id": "finance-manager-senior-en",
+   "target_roles": [
+    "Finance Manager"
+   ],
+   "cv_roles": [
+    "Senior Financial Analyst"
+   ],
+   "domains": [
+    "Manufacturing"
+   ],
+   "level": "Senior",
+   "years_of_experience": 7
+  },
+  "jobs": [
+   {
+    "job_id": "https://cake.vn/tuyen-dung/jobs/123",
+    "title": "Chuyên viên/Chuyên viên Chính Xử Lý Nợ (Tố Tụng)",
+    "company": "Cake"
+   }
+  ]
+ },
+ {
+  "profile": {
+   "id": "marketing-head-en",
+   "target_roles": [
+    "Head of Marketing"
+   ],
+   "cv_roles": [
+    "Senior Marketing Manager"
+   ],
+   "domains": [
+    "E-commerce"
+   ],
+   "level": "Lead",
+   "years_of_experience": 11
+  },
+  "jobs": [
+   {
+    "job_id": "https://careers.shopee.vn/job-detail/133393/",
+    "title": "Senior Growth Community Engagement (User Acquisition) - Marketing, Shopee",
+    "company": "Shopee"
+   },
+   {
+    "job_id": "https://careers.shopee.vn/job-detail/133886/",
+    "title": "Growth Projects Lead - Marketing, Shopee",
+    "company": "Shopee"
+   },
+   {
+    "job_id": "https://careers.shopee.vn/job-detail/133287/",
+    "title": "Senior Seller Content PMO Associate - Business Development, Shopee",
+    "company": "Shopee"
+   }
+  ]
+ },
+ {
+  "profile": {
+   "id": "data-lead-en",
+   "target_roles": [
+    "Lead Data Engineer"
+   ],
+   "cv_roles": [
+    "Senior Data Engineer"
+   ],
+   "domains": [
+    "Fintech"
+   ],
+   "level": "Lead",
+   "years_of_experience": 9
+  },
+  "jobs": [
+   {
+    "job_id": "https://careers.fptis.com/vi/jobs/y4zA5R",
+    "title": "Business Analyst Team Leader .TM",
+    "company": "FPT IS"
+   }
+  ]
+ },
+ {
+  "profile": {
+   "id": "swe-tech-lead-vn",
+   "target_roles": [
+    "Trưởng nhóm kỹ thuật"
+   ],
+   "cv_roles": [
+    "Senior Software Engineer"
+   ],
+   "domains": [
+    "Fintech"
+   ],
+   "level": "Lead",
+   "years_of_experience": 10
+  },
+  "jobs": [
+   {
+    "job_id": "https://jobs.infineon.com/careers/job/563808961449920",
+    "title": "Senior/Staff Engineer - Hardware Validation",
+    "company": "Infineon"
+   }
+  ]
+ },
+ {
+  "profile": {
+   "id": "ops-director-lead-vn",
+   "target_roles": [
+    "Giám đốc vận hành"
+   ],
+   "cv_roles": [
+    "Trưởng phòng vận hành"
+   ],
+   "domains": [
+    "Retail"
+   ],
+   "level": "Lead",
+   "years_of_experience": 12
+  },
+  "jobs": [
+   {
+    "job_id": "https://vieclam.thegioididong.com/tuyen-dung/chuyen-vien-truong-nhom-phan-tich-giai-phap-logistics-477",
+    "title": "Chuyên viên/Trưởng nhóm Phân Tích Giải Pháp Logistics",
+    "company": "Thế Giới Di Động"
+   },
+   {
+    "job_id": "https://careers.shopee.vn/job-detail/133137/",
+    "title": "Trưởng Nhóm Kho (Warehouse Team Lead) - Operations, Shopee (Long An)",
+    "company": "Shopee"
+   },
+   {
+    "job_id": "https://tuyendung.pnj.com.vn/viec-lam/retail-planning-policy-senior-specialist.35abe1b8.html",
+    "title": "Retail Planning & Policy Senior Specialist",
+    "company": "PNJ"
+   }
+  ]
+ },
+ {
+  "profile": {
+   "id": "pm-group-lead-vn",
+   "target_roles": [
+    "Trưởng nhóm sản phẩm"
+   ],
+   "cv_roles": [
+    "Senior Product Owner"
+   ],
+   "domains": [
+    "AI",
+    "E-commerce"
+   ],
+   "level": "Lead",
+   "years_of_experience": 10
+  },
+  "jobs": [
+   {
+    "job_id": "https://www.vpbanks.com.vn/chuyen-giach-uyen-vien-cao-cap-phat-trien-san-pham-dau-tu",
+    "title": "Chuyên gia/Chuyên viên Cao cấp Phát triển sản phẩm đầu tư",
+    "company": "VPBank Securities"
+   }
+  ]
+ },
+ {
+  "profile": {
+   "id": "finance-controller-lead-vn",
+   "target_roles": [
+    "Giám đốc kiểm soát tài chính"
+   ],
+   "cv_roles": [
+    "Finance Manager"
+   ],
+   "domains": [
+    "Retail"
+   ],
+   "level": "Lead",
+   "years_of_experience": 11
+  },
+  "jobs": [
+   {
+    "job_id": "https://tuyendung.seabank.com.vn/jobs/gdvgdv-cao-cap---chi-nhanh-thanh-hoa.2204",
+    "title": "GDV/GDV Cao cấp - Chi nhánh Thanh Hóa",
+    "company": "SeABank"
+   },
+   {
+    "job_id": "https://www.honda.com.vn/tuyen-dung/cv/truong-nhom-thue-thu-nhap-doanh-nghiep-adm-facc-9-0-6a55ca83d1731",
+    "title": "Trưởng nhóm thuế thu nhập doanh nghiệp (ADM_FACC_9_0)",
+    "company": "Honda Vietnam"
+   }
+  ]
+ },
+ {
+  "profile": {
+   "id": "sales-director-en",
+   "target_roles": [
+    "Sales Director"
+   ],
+   "cv_roles": [
+    "Regional Sales Manager"
+   ],
+   "domains": [
+    "Enterprise Software"
+   ],
+   "level": "Lead",
+   "years_of_experience": 12
+  },
+  "jobs": [
+   {
+    "job_id": "https://orion.vn/tuyen-dung/viec-lam/sales-leader-gt-can-tho-binh-thuy-phong-dien/",
+    "title": "Sales Leader GT Cần Thơ (Bình Thủy - Phong Điền)",
+    "company": "Orion Vietnam"
+   }
+  ]
+ }
+]

@@ -217,11 +217,13 @@ async def _run_ingest(render: bool) -> None:
     _ingest_last = {"at": t0, "phase": "crawling", "stats": None, "error": None}
     try:
         from app.services.embed_backfill import embed_backfill
+        from app.services.seniority_backfill import seniority_backfill
         from app.services.job_ingest import ingest_featured_ats
 
         stats = await ingest_featured_ats(render=render)
         _ingest_last["phase"] = "embedding"
         stats["jobs_embedded"] = await embed_backfill()
+        stats["seniority_filled"] = await seniority_backfill()
         _ingest_last.update(phase="done", stats=stats)
     except Exception as e:  # noqa: BLE001
         logger.exception("admin ingest failed")

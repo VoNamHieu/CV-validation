@@ -172,6 +172,15 @@ async def _run() -> None:
         await incidents_svc.report("cron_error", module="cron.embed_backfill", error=e)
 
     try:
+        from app.services.seniority_backfill import seniority_backfill
+        logger.info("[cron] seniority backfill starting…")
+        filled = await seniority_backfill()
+        logger.info("[cron] seniority backfill done: %d job(s) classified", filled)
+    except Exception as e:
+        logger.exception("[cron] seniority backfill failed — continuing with remaining steps")
+        await incidents_svc.report("cron_error", module="cron.seniority_backfill", error=e)
+
+    try:
         logger.info("[cron] link scan starting (limit=%s)…", _SCAN_LIMIT)
         scan = await _link_scan()
         logger.info("[cron] link scan done: %s", scan)

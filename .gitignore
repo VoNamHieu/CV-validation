@@ -34,3 +34,6 @@ copo-section*.html
 
 # Versioned extension build artifacts (rebuild from extension/)
 copo-extension-*.zip
+
+# search eval — regenerable embedding cache (~$0.02 via `dump`+`score`)
+backend/eval/emb_cache.json

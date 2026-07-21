@@ -1,0 +1,602 @@
+[
+ {
+  "title": "Digital Marketing",
+  "company": "TMA Solutions",
+  "band": null
+ },
+ {
+  "title": "TSM - KA",
+  "company": "Coca-Cola",
+  "band": null
+ },
+ {
+  "title": "Chuyên viên Mô hình Quản trị Rủi ro Tín dụng",
+  "company": "SHB",
+  "band": null
+ },
+ {
+  "title": "Chuyên viên Cao cấp Phát triển Ứng dụng Nền tảng (Core Development)",
+  "company": "VPBank Securities",
+  "band": "Senior"
+ },
+ {
+  "title": "Giao nhận Partime (Cư Jut)",
+  "company": "247Express",
+  "band": null
+ },
+ {
+  "title": "Director of Engineering",
+  "company": "Accor",
+  "band": "Director/Head+"
+ },
+ {
+  "title": "Senior Performance Management - FBS",
+  "company": "Shopee",
+  "band": "Senior"
+ },
+ {
+  "title": "Sales Performance Development Executive",
+  "company": "Nestlé Vietnam",
+  "band": null
+ },
+ {
+  "title": "NMSG_Nhân Viên Lái Xe",
+  "company": "Biti's",
+  "band": null
+ },
+ {
+  "title": "Chuyên Viên Cao Cấp/ Chuyên Viên Giao Dịch Chứng Khoán Môi Giới KHTC (ưu tiên nam)",
+  "company": "VPBank Securities",
+  "band": "Senior"
+ },
+ {
+  "title": "[2026_PTKSĐT]_Chuyên viên Phát triển mô hình hợp tác",
+  "company": "Vietcombank",
+  "band": null
+ },
+ {
+  "title": "HO - CV/NV Thu hồi nợ qua điện thoại",
+  "company": "OCB",
+  "band": null
+ },
+ {
+  "title": "IFRS17 Finance Intern (Thực tập sinh Giải pháp Tài chính Dự án Chuẩn mực Báo cáo Tài chính Quốc tế 17)",
+  "company": "Prudential",
+  "band": "Intern/Fresher"
+ },
+ {
+  "title": "Quản lý Trung tâm Thức ăn (Quảng Ngãi)",
+  "company": "TH Group",
+  "band": null
+ },
+ {
+  "title": "Mechanical On-Site Engineer, Foxconn Vietnam",
+  "company": "NVIDIA",
+  "band": null
+ },
+ {
+  "title": "Operational Excellence Manager",
+  "company": "PNJ",
+  "band": null
+ },
+ {
+  "title": "Business Analyst .TM",
+  "company": "FPT IS",
+  "band": null
+ },
+ {
+  "title": "[Hà Nội] Kiểm tra viên cao cấp Kiểm soát nội bộ và tuân thủ Tín dụng",
+  "company": "TPBank",
+  "band": "Senior"
+ },
+ {
+  "title": "Senior Administrative Assistant",
+  "company": "NVIDIA",
+  "band": "Senior"
+ },
+ {
+  "title": "Giám đốc Phòng giao dịch Đồng Đăng - Chi nhánh Lạng Sơn",
+  "company": "SHB",
+  "band": "Director/Head+"
+ },
+ {
+  "title": "Tư Vấn Viên Bán Hàng",
+  "company": "PNJ",
+  "band": null
+ },
+ {
+  "title": "Senior Relationship Manager, Priority",
+  "company": "Standard Chartered",
+  "band": "Senior"
+ },
+ {
+  "title": "CVCC/Chuyên gia Quản trị Hiệu suất Vận hành DVKH",
+  "company": "SHB",
+  "band": "Senior"
+ },
+ {
+  "title": "Data Rater (Russian) - Nhân Viên Nhập Liệu Tiếng Nga",
+  "company": "NashTech",
+  "band": null
+ },
+ {
+  "title": "Chuyên viên cao cấp/Chuyên gia Quản lý Nghiệp vụ Dịch vụ Khách hàng",
+  "company": "SHB",
+  "band": "Senior"
+ },
+ {
+  "title": "Brand Management - Business Development, Shopee",
+  "company": "Shopee",
+  "band": null
+ },
+ {
+  "title": "Senior QC Engineer, VNGGames",
+  "company": "VNG",
+  "band": "Senior"
+ },
+ {
+  "title": "Trưởng ban Vận hành Siêu thị (Miền Bắc)",
+  "company": "Vinamilk",
+  "band": null
+ },
+ {
+  "title": "Senior Trade Marketing Specialist (Promotion)",
+  "company": "PNJ",
+  "band": "Senior"
+ },
+ {
+  "title": "[SSC] Senior Data Scientist",
+  "company": "Pharmacity",
+  "band": "Senior"
+ },
+ {
+  "title": "QA Senior Specialist",
+  "company": "VPBank Securities",
+  "band": "Senior"
+ },
+ {
+  "title": "Executive Pastry Chef",
+  "company": "Accor",
+  "band": null
+ },
+ {
+  "title": "Sales Analyst, CPA",
+  "company": "Mondelez Kinh Do",
+  "band": null
+ },
+ {
+  "title": "[HCM] Penetration Tester (Security)",
+  "company": "CMC Telecom",
+  "band": null
+ },
+ {
+  "title": "Account Executive",
+  "company": "Coca-Cola",
+  "band": null
+ },
+ {
+  "title": "AI Solution Architect - Offer Up to $3500",
+  "company": "FPT Software",
+  "band": null
+ },
+ {
+  "title": "Nhân viên giao nhận Chí Linh (Hải Dương Cũ)",
+  "company": "247Express",
+  "band": null
+ },
+ {
+  "title": "Manager, Trade Product & Processing Ops - Open Account",
+  "company": "Standard Chartered",
+  "band": null
+ },
+ {
+  "title": "Chuyên gia Phát triển Giải pháp Thanh toán Hộ Kinh doanh",
+  "company": "VIB",
+  "band": "Senior"
+ },
+ {
+  "title": "Giám sát Thú y (Quảng Ngãi)",
+  "company": "TH Group",
+  "band": "Lead/Manager"
+ },
+ {
+  "title": "Chuyên viên Tập sự Khách hàng Cá nhân - Phòng giao dịch Nam Thái Nguyên - CN. Thái Nguyên - Phường Phan Đình Phùng, Thái Nguyên",
+  "company": "MB Bank",
+  "band": "Junior"
+ },
+ {
+  "title": "Chuyên gia ALM – Phòng Nguồn Vốn và Kinh Doanh Tài Chính",
+  "company": "VPBank Securities",
+  "band": "Senior"
+ },
+ {
+  "title": "[HCM] IDC Engineer",
+  "company": "CMC Telecom",
+  "band": null
+ },
+ {
+  "title": "Data Scientist (Middle - Senior)",
+  "company": "Cake",
+  "band": "Senior"
+ },
+ {
+  "title": "Chuyên viên Quản lý thông tin Cơ sở dữ liệu về giá",
+  "company": "SHB",
+  "band": null
+ },
+ {
+  "title": "Claim & Compensation - SPX Express",
+  "company": "Shopee",
+  "band": null
+ },
+ {
+  "title": "Giao dịch viên Vận hành - Khu vực Hà Nội",
+  "company": "SHB",
+  "band": null
+ },
+ {
+  "title": "[SO] Product Legal Analyst",
+  "company": "Bosch",
+  "band": null
+ },
+ {
+  "title": "Quản trị viên Dự nguồn - Mảng Sản xuất",
+  "company": "Hoa Sen Group",
+  "band": null
+ },
+ {
+  "title": "Hub Team Lead (Trưởng Nhóm Trạm Giao Nhận) Miền Bắc - Hub Operations, SPX Express",
+  "company": "Shopee",
+  "band": "Lead/Manager"
+ },
+ {
+  "title": "Internship - Secretary, Tax Advisory Services Line  - Hanoi Office",
+  "company": "EY",
+  "band": "Intern/Fresher"
+ },
+ {
+  "title": "Nhân viên bán thời gian siêu thị Bách Hóa Xanh (Quầy hàng khô)",
+  "company": "Thế Giới Di Động",
+  "band": null
+ },
+ {
+  "title": "Giám đốc Ban quản lý rủi ro tích hợp",
+  "company": "SHB",
+  "band": "Director/Head+"
+ },
+ {
+  "title": "Chuyên viên cao cấp Quản trị dữ liệu EDA",
+  "company": "VPBank Securities",
+  "band": "Senior"
+ },
+ {
+  "title": "TRƯỞNG CA SẢN XUẤT",
+  "company": "Acecook Vietnam",
+  "band": null
+ },
+ {
+  "title": "Intern, Partnerships, Singapore",
+  "company": "Klook",
+  "band": "Intern/Fresher"
+ },
+ {
+  "title": "Trưởng Nhóm Admin Dịch Vụ Xây Dựng Bảo Trì",
+  "company": "Thế Giới Di Động",
+  "band": "Lead/Manager"
+ },
+ {
+  "title": "Duty Manager",
+  "company": "Accor",
+  "band": null
+ },
+ {
+  "title": "Chuyên viên Tập sự Tư vấn Khách hàng Cá nhân (Tập sự UB) - Phòng giao dịch Lâm Thao - CN. Việt Trì - Phường Việt Trì, Phú Thọ",
+  "company": "MB Bank",
+  "band": "Junior"
+ },
+ {
+  "title": "Chuyên viên Tập sự Khách hàng Cá nhân - CN. Phúc Yên - Phường Phúc Yên, Phú Thọ",
+  "company": "MB Bank",
+  "band": "Junior"
+ },
+ {
+  "title": "NSO Manager",
+  "company": "MM Mega Market",
+  "band": null
+ },
+ {
+  "title": "NHÂN VIÊN TÀI CHÍNH",
+  "company": "Acecook Vietnam",
+  "band": null
+ },
+ {
+  "title": "Tối Ưu Vận Hành Logistics Bách Hóa Xanh",
+  "company": "Thế Giới Di Động",
+  "band": null
+ },
+ {
+  "title": "Cộng tác viên Hậu kiểm eKYC",
+  "company": "SHB",
+  "band": null
+ },
+ {
+  "title": "Dược sĩ Bán hàng (Hà Nội)",
+  "company": "Pharmacity",
+  "band": null
+ },
+ {
+  "title": "Tư vấn viên (Tam Kỳ)",
+  "company": "PNJ",
+  "band": null
+ },
+ {
+  "title": "Senior Production Manager",
+  "company": "BAT",
+  "band": "Senior"
+ },
+ {
+  "title": "Giám đốc kênh kinh doanh",
+  "company": "247Express",
+  "band": "Director/Head+"
+ },
+ {
+  "title": "Chuyên viên Quản trị Tuân thủ cao cấp",
+  "company": "Vingroup",
+  "band": "Senior"
+ },
+ {
+  "title": "Commercial Insights Associate - SPX Express",
+  "company": "Shopee",
+  "band": null
+ },
+ {
+  "title": "Senior Java Developer - Signing bonus upto 30M",
+  "company": "FPT Software",
+  "band": "Senior"
+ },
+ {
+  "title": "Nhân viên giao nhận (Vinh)",
+  "company": "247Express",
+  "band": null
+ },
+ {
+  "title": "SR - KA On",
+  "company": "Coca-Cola",
+  "band": "Senior"
+ },
+ {
+  "title": "Trưởng bộ phận Tư vấn Sản phẩm đầu tư",
+  "company": "VPBank Securities",
+  "band": "Director/Head+"
+ },
+ {
+  "title": "Chuyên viên Tập sự Tư vấn Khách hàng Cá nhân (Tập sự UB) - Phòng giao dịch Hoài Nhơn - CN. Bình Định - Phường Quy Nhơn Nam, Gia Lai",
+  "company": "MB Bank",
+  "band": "Junior"
+ },
+ {
+  "title": "Chuyên viên/CVCC/Chuyên gia Quản Lý Thay Đổi (Change Management) - Khối Ngân hàng số",
+  "company": "SHB",
+  "band": "Senior"
+ },
+ {
+  "title": "Nhân viên Hành chính kho (Warehouse Admin) - Operations, Shopee (Bình Dương)",
+  "company": "Shopee",
+  "band": null
+ },
+ {
+  "title": "Trưởng bưu cục (Hưng Yên)",
+  "company": "247Express",
+  "band": null
+ },
+ {
+  "title": "Senior C&B Executive (Warehouse) - People Team, Shopee",
+  "company": "Shopee",
+  "band": "Senior"
+ },
+ {
+  "title": "Search Recommendation & Traffic Quality Assurance Analyst - Vietnam",
+  "company": "TikTok",
+  "band": null
+ },
+ {
+  "title": "Giám đốc Phòng giao dịch Hồng Ngự - Chi nhánh Đồng Tháp",
+  "company": "SHB",
+  "band": "Director/Head+"
+ },
+ {
+  "title": "Trưởng phòng/ Phó Trưởng phòng Phát triển thương hiệu - Khối Marcom",
+  "company": "SHB",
+  "band": "Director/Head+"
+ },
+ {
+  "title": "[HCM] Kỹ sư cơ điện Vận hành Data Center",
+  "company": "CMC Telecom",
+  "band": null
+ },
+ {
+  "title": "Fraud Risk Analyst",
+  "company": "Cake",
+  "band": null
+ },
+ {
+  "title": "Trưởng Phòng Quản lý cải tiến vận hành - Khối Vận hành",
+  "company": "SHB",
+  "band": "Director/Head+"
+ },
+ {
+  "title": "Chuyên viên Tập sự Khách hàng Doanh nghiệp - Phòng giao dịch Nam Vĩ Dạ - CN. Huế - Phường Thuận Hóa, Huế",
+  "company": "MB Bank",
+  "band": "Junior"
+ },
+ {
+  "title": "Growth Projects Lead - Marketing, Shopee",
+  "company": "Shopee",
+  "band": "Lead/Manager"
+ },
+ {
+  "title": "[Aeon Mall Thanh Hóa] - Kế toán Cửa hàng",
+  "company": "PNJ",
+  "band": null
+ },
+ {
+  "title": "Consumer Technical Insight Senior Executive (CF)",
+  "company": "Masan Group",
+  "band": "Senior"
+ },
+ {
+  "title": "Chuyên Viên Điều Phối Mảng Tác Nghiệp Xuất Khẩu (International Business)",
+  "company": "Vinamilk",
+  "band": null
+ },
+ {
+  "title": "Senior Officer, Priority Relationship Management - Gold",
+  "company": "Techcombank",
+  "band": "Senior"
+ },
+ {
+  "title": "CV/CVC Thu Hồi Nợ Qua Điện Thoại",
+  "company": "Cake",
+  "band": null
+ },
+ {
+  "title": "[SSC]  HR Project Manager",
+  "company": "Pharmacity",
+  "band": null
+ },
+ {
+  "title": "Nhân viên phòng Chất lượng Dịch vụ (CUS_SQ_T2_0726_0)",
+  "company": "Honda Vietnam",
+  "band": null
+ },
+ {
+  "title": "Chuyên viên/Chuyên viên cao cấp Phát triển ứng dụng BackEnd",
+  "company": "VPBank Securities",
+  "band": "Senior"
+ },
+ {
+  "title": "Chuyên gia/Chuyên viên Cao cấp Phát triển sản phẩm đầu tư",
+  "company": "VPBank Securities",
+  "band": "Senior"
+ },
+ {
+  "title": "CÔNG NHÂN SẢN XUẤT - BD",
+  "company": "Acecook Vietnam",
+  "band": null
+ },
+ {
+  "title": "Sales Account Orchestrator 9",
+  "company": "Siemens",
+  "band": null
+ },
+ {
+  "title": "Senior Staff Engineer Elect Design(Location：Tokyo)",
+  "company": "Infineon",
+  "band": "Lead/Manager"
+ },
+ {
+  "title": "Sports Academy Manager",
+  "company": "Accor",
+  "band": null
+ },
+ {
+  "title": "Nhân viên kinh doanh (Toàn Quốc)",
+  "company": "247Express",
+  "band": null
+ },
+ {
+  "title": "Trưởng Nhóm Vận Hành Kinh Doanh Quốc Tế",
+  "company": "TH Group",
+  "band": "Lead/Manager"
+ },
+ {
+  "title": "[EMC] Embedded Android Developer (1 year contract)",
+  "company": "Bosch",
+  "band": null
+ },
+ {
+  "title": "NHÂN VIÊN KẾ HOẠCH NGUYÊN VẬT LIỆU",
+  "company": "Acecook Vietnam",
+  "band": null
+ },
+ {
+  "title": "Chuyên viên chính/Chuyên viên cao cấp Kế toán Tổng hợp và Báo cáo Tài chính",
+  "company": "SHB",
+  "band": "Senior"
+ },
+ {
+  "title": "Chuyên viên Cao cấp Quản lý Bảng Cân đối Kế toán",
+  "company": "SHB",
+  "band": "Senior"
+ },
+ {
+  "title": "Kỹ Thuật Viên Bảo Trì Chiết Rót",
+  "company": "TH Group",
+  "band": null
+ },
+ {
+  "title": "Giám đốc Phòng giao dịch",
+  "company": "SHB",
+  "band": "Director/Head+"
+ },
+ {
+  "title": "Growth Senior Senior Associate - Program & Marketing, SPX Express",
+  "company": "Shopee",
+  "band": "Senior"
+ },
+ {
+  "title": "Spa Supervisor (Vietnamese local)",
+  "company": "Accor",
+  "band": "Lead/Manager"
+ },
+ {
+  "title": "[Aeon Mall Hải Dương] - Kế toán Cửa hàng",
+  "company": "PNJ",
+  "band": null
+ },
+ {
+  "title": "Chuyên viên cao cấp dịch vụ Ngân hàng đầu tư",
+  "company": "VPBank Securities",
+  "band": "Senior"
+ },
+ {
+  "title": "[2026_BP KHDNL phía Nam] Chuyên viên quản lý quan hệ khách hàng (RM)",
+  "company": "Vietcombank",
+  "band": null
+ },
+ {
+  "title": "Giao dịch viên",
+  "company": "SHB",
+  "band": null
+ },
+ {
+  "title": "Retail Planning & Policy Senior Specialist",
+  "company": "PNJ",
+  "band": "Senior"
+ },
+ {
+  "title": "AV Supervisor (Vietnamese Local Only)",
+  "company": "Accor",
+  "band": "Lead/Manager"
+ },
+ {
+  "title": "Business Planner Intern",
+  "company": "Vietcetera",
+  "band": "Intern/Fresher"
+ },
+ {
+  "title": "Chuyên viên chính/Chuyên viên cao cấp Thẩm định tài sản",
+  "company": "SHB",
+  "band": "Senior"
+ },
+ {
+  "title": "Business Analyst Team Leader .TM",
+  "company": "FPT IS",
+  "band": "Lead/Manager"
+ },
+ {
+  "title": "Chuyên viên cao cấp Nghiên cứu Thị trường - Khối Định chế Tài chính",
+  "company": "SHB",
+  "band": "Senior"
+ }
+]

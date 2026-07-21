@@ -3,6 +3,25 @@
  * Handles: single apply, batch apply queue, extension communication
  */
 
+import { mvpApply, readForm } from './workday-api.js';
+
+// Dev triggers (run in the service-worker console against your live session):
+//   copoWdApi('<apply url>')        — create/fill an application (uses jobfitProfile)
+//   copoWdReadForm('<apply url>')   — dump the WHOLE form (all sections + questionnaire)
+//   copoWdReadForm('<apply url>', '<existing appId>')  — read an existing application
+self.copoWdApi = async (jobUrl) => {
+    const { jobfitProfile, cvFileBase64, cvFileName } = await chrome.storage.local.get(['jobfitProfile', 'cvFileBase64', 'cvFileName']);
+    const cv = cvFileBase64 ? { base64: cvFileBase64, fileName: cvFileName } : null;
+    const report = await mvpApply(jobUrl, jobfitProfile || {}, cv);
+    console.log('[Copo WD-API] report:', JSON.stringify(report, null, 2));
+    return report;
+};
+self.copoWdReadForm = async (jobUrl, appId) => {
+    const form = await readForm(jobUrl, appId ? { appId } : {});
+    console.log('[Copo WD-API] FORM:', JSON.stringify(form, null, 2));
+    return form;
+};
+
 // ─── Job Queue State ───
 let applyQueue = [];       // [{jobUrl, profile, jobTitle, company}, ...]
 let currentJobIndex = -1;
@@ -381,6 +400,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         chrome.storage.local.get('jobfitAppUrl', (data) => {
             sendResponse({ url: data.jobfitAppUrl || 'https://copoai.net' });
         });
+        return true;
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // ── WORKDAY API (MVP) — POST the application straight to Workday's REST API
+    // instead of driving the UI. Auth = the user's session cookie + CSRF token
+    // (read here via chrome.cookies). Reads jobfitProfile from storage. Never
+    // submits — milestone 1 just creates/resumes the app + writes the name.
+    // ══════════════════════════════════════════════════════════════
+    if (message.type === 'WORKDAY_API_MVP') {
+        (async () => {
+            try {
+                const { jobfitProfile, cvFileBase64, cvFileName } = await chrome.storage.local.get(['jobfitProfile', 'cvFileBase64', 'cvFileName']);
+                const cv = cvFileBase64 ? { base64: cvFileBase64, fileName: cvFileName } : null;
+                const report = await mvpApply(message.jobUrl, jobfitProfile || {}, cv);
+                console.log('[Copo WD-API] report:', report);
+                sendResponse({ success: true, report });
+            } catch (e) {
+                console.warn('[Copo WD-API] error:', e);
+                sendResponse({ success: false, error: e.message });
+            }
+        })();
         return true;
     }
 

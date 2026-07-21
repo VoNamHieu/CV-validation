@@ -44,6 +44,139 @@ const CARD_LOGO: { re: RegExp; src: string }[] = [
 const cardLogo = (co: string): string | undefined =>
     CARD_LOGO.find((m) => m.re.test(co))?.src;
 
+const ABOUT_COPY = {
+    vi: {
+        eyebrow: 'Về Copo',
+        title: 'Tìm đúng cơ hội không nên phụ thuộc vào may mắn.',
+        intro: [
+            'Tại Copo, chúng tôi tin rằng việc tìm được một cơ hội nghề nghiệp phù hợp không nên phụ thuộc vào may mắn, việc lướt hàng giờ trên các nền tảng tuyển dụng hay phải tự tìm kiếm trên hàng trăm nguồn thông tin rời rạc.',
+            'Chúng tôi đang xây dựng một nền tảng nghề nghiệp ứng dụng AI, giúp mọi người khám phá các cơ hội phù hợp, hiểu rõ mức độ tương thích của bản thân, cải thiện hồ sơ và ứng tuyển hiệu quả hơn.',
+            'Copo tập hợp các cơ hội việc làm quốc tế từ những tập đoàn đa quốc gia và nhà tuyển dụng uy tín vào một nơi. Bằng cách liên tục tìm kiếm và cập nhật các vị trí mới, chúng tôi giúp ứng viên tiếp cận cơ hội sớm hơn thay vì phải chờ chúng xuất hiện trên mạng xã hội hoặc các trang tuyển dụng truyền thống.',
+            'Mục tiêu của Copo không chỉ là giúp người dùng nộp nhiều hồ sơ hơn. Chúng tôi muốn giúp họ tạo ra những hồ sơ tốt hơn, tiếp cận đúng nhà tuyển dụng hơn và nhận được nhiều lời mời phỏng vấn hơn.',
+        ],
+        principlesTitle: 'Những điều chúng tôi tin tưởng và theo đuổi',
+        principles: [
+            {
+                title: 'Mở rộng khả năng tiếp cận cơ hội toàn cầu.',
+                body: 'Những cơ hội nghề nghiệp tốt nhất thường nằm rải rác trên hàng nghìn trang tuyển dụng của doanh nghiệp và các nền tảng việc làm khác nhau. Copo tập hợp chúng vào một nơi để ứng viên dễ dàng tiếp cận các vị trí quốc tế từ những doanh nghiệp hàng đầu.',
+            },
+            {
+                title: 'Giúp ứng viên tiếp cận cơ hội sớm hơn.',
+                body: 'Thời điểm ứng tuyển có thể tạo ra khác biệt. Copo liên tục tìm kiếm và cập nhật các vị trí mới để ứng viên có thể phát hiện và ứng tuyển ngay khi cơ hội xuất hiện.',
+            },
+            {
+                title: 'Tối ưu cho ATS trước khi đến tay nhà tuyển dụng.',
+                body: 'Nhiều CV được hệ thống Applicant Tracking System sàng lọc trước khi nhà tuyển dụng đọc. Copo giúp tăng khả năng tương thích với ATS, đồng thời đảm bảo hồ sơ vẫn trung thực và phù hợp với từng vị trí.',
+            },
+            {
+                title: 'Ưu tiên chất lượng thay vì số lượng.',
+                body: 'Ứng tuyển hàng trăm công việc không phải là một chiến lược hiệu quả. Copo ưu tiên những vị trí mà ứng viên có mức độ phù hợp cao và khả năng thành công tốt hơn.',
+            },
+            {
+                title: 'Tự động hóa những công việc lặp lại.',
+                body: 'Tìm việc, so sánh mô tả công việc, điều chỉnh CV và nộp hồ sơ đều tốn nhiều thời gian. Copo tự động hóa những công việc này để ứng viên có thể tập trung vào phỏng vấn, phát triển kỹ năng và đưa ra quyết định nghề nghiệp tốt hơn.',
+            },
+            {
+                title: 'Đo lường thành công bằng cơ hội phỏng vấn.',
+                body: 'Chúng tôi không tối ưu cho số lượng hồ sơ được gửi đi. Chúng tôi tối ưu để hồ sơ được nhìn thấy nhiều hơn, phù hợp hơn và tạo ra nhiều cơ hội phỏng vấn hơn.',
+            },
+        ],
+    },
+    en: {
+        eyebrow: 'About Copo',
+        title: 'Finding the right opportunity should not depend on luck.',
+        intro: [
+            'At Copo, we believe finding the right career opportunity should not depend on luck, endless scrolling, or searching across hundreds of disconnected platforms.',
+            'We are building an AI-powered career platform that helps people discover relevant opportunities, understand where they have the strongest fit, improve their applications, and apply more efficiently.',
+            'Copo brings together international job opportunities from leading multinational companies and trusted employers in one place. By continuously discovering and updating new openings, we help candidates access opportunities earlier instead of waiting for them to appear on social media or traditional job boards.',
+            'Our goal is not simply to help people apply to more jobs. It is to help them make better applications, reach more relevant employers, and earn more interviews.',
+        ],
+        principlesTitle: 'What we believe in and pursue',
+        principles: [
+            {
+                title: 'Discover global opportunities without limits.',
+                body: 'The best career opportunities are scattered across thousands of company career pages and job platforms. Copo brings them together in one place, giving candidates broader access to international roles from leading companies.',
+            },
+            {
+                title: 'See opportunities earlier.',
+                body: 'Timing matters. We continuously discover and update new openings so candidates can find and apply for relevant roles as early as possible.',
+            },
+            {
+                title: 'Optimize for ATS before recruiters.',
+                body: 'Many resumes are screened by Applicant Tracking Systems before a recruiter reads them. Copo helps improve ATS compatibility while keeping each application truthful and relevant to the role.',
+            },
+            {
+                title: 'Focus on quality, not quantity.',
+                body: 'Applying to hundreds of jobs is not an effective strategy. We prioritize opportunities where candidates have the strongest fit and the highest potential for success.',
+            },
+            {
+                title: 'Automate repetitive work.',
+                body: 'Searching, comparing roles, tailoring resumes, and submitting applications take time. Copo automates these repetitive tasks so candidates can focus on interviews, skills, and better career decisions.',
+            },
+            {
+                title: 'Measure success by interviews.',
+                body: 'We do not optimize for the number of applications sent. We optimize for better visibility, stronger applications, and more interview opportunities.',
+            },
+        ],
+    },
+} as const;
+
+function AboutUsSection() {
+    const [lang, setLang] = useState<'vi' | 'en'>('vi');
+    const copy = ABOUT_COPY[lang];
+
+    return (
+        <section className="lp-about" id="about">
+            <div className="lp-about-head">
+                <div>
+                    <span className="lp-about-eyebrow">{copy.eyebrow}</span>
+                    <h2 className="lp-about-title">{copy.title}</h2>
+                </div>
+                <div className="lp-lang-switch" role="group" aria-label="Chọn ngôn ngữ">
+                    <button
+                        type="button"
+                        className={`lp-lang-option${lang === 'vi' ? ' is-active' : ''}`}
+                        onClick={() => setLang('vi')}
+                        aria-pressed={lang === 'vi'}
+                    >
+                        Tiếng Việt
+                    </button>
+                    <button
+                        type="button"
+                        className={`lp-lang-option${lang === 'en' ? ' is-active' : ''}`}
+                        onClick={() => setLang('en')}
+                        aria-pressed={lang === 'en'}
+                    >
+                        English
+                    </button>
+                </div>
+            </div>
+
+            <div className="lp-about-grid">
+                <div className="lp-about-copy">
+                    {copy.intro.map((paragraph) => (
+                        <p key={paragraph}>{paragraph}</p>
+                    ))}
+                </div>
+                <div className="lp-principles">
+                    <h3>{copy.principlesTitle}</h3>
+                    <div className="lp-principle-list">
+                        {copy.principles.map((principle, index) => (
+                            <details className="lp-principle" key={principle.title} open={index === 0}>
+                                <summary>
+                                    <span>{String(index + 1).padStart(2, '0')}</span>
+                                    <h4>{principle.title}</h4>
+                                </summary>
+                                <p>{principle.body}</p>
+                            </details>
+                        ))}
+                    </div>
+                </div>
+            </div>
+        </section>
+    );
+}
+
 export default function Landing() {
     const enterApp = useAppStore((s) => s.enterApp);
     const setView = useAppStore((s) => s.setView);
@@ -87,7 +220,7 @@ export default function Landing() {
     // Scroll-spy: track the section currently in view. A thin activation band
     // near the viewport middle (rootMargin) makes exactly one section active as
     // you scroll. Defaults to 'top' (homepage/hero) so the pill starts there.
-    const NAV_IDS = ['top', 'featured', 'how', 'lien-he'];
+    const NAV_IDS = ['top', 'featured', 'about', 'how', 'lien-he'];
     const [activeSection, setActiveSection] = useState('top');
     useEffect(() => {
         const els = NAV_IDS.map((id) => document.getElementById(id)).filter(Boolean) as HTMLElement[];
@@ -180,6 +313,7 @@ export default function Landing() {
                     <span className="lp-nav-pill" aria-hidden style={{ left: pill.left, top: pill.top, width: pill.width, height: pill.height, opacity: pill.opacity }} />
                     <a href="#top" data-section="top" className={activeSection === 'top' ? 'is-active' : undefined} aria-current={activeSection === 'top' ? 'true' : undefined}>Trang chủ</a>
                     <a href="#featured" data-section="featured" className={activeSection === 'featured' ? 'is-active' : undefined} aria-current={activeSection === 'featured' ? 'true' : undefined}>Cơ hội</a>
+                    <a href="#about" data-section="about" className={activeSection === 'about' ? 'is-active' : undefined} aria-current={activeSection === 'about' ? 'true' : undefined}>Về Copo</a>
                     <a href="#how" data-section="how" className={activeSection === 'how' ? 'is-active' : undefined} aria-current={activeSection === 'how' ? 'true' : undefined}>Cách hoạt động</a>
                     <a href="#lien-he" data-section="lien-he" className={activeSection === 'lien-he' ? 'is-active' : undefined} aria-current={activeSection === 'lien-he' ? 'true' : undefined}>Liên hệ</a>
                 </nav>
@@ -189,9 +323,6 @@ export default function Landing() {
                             <SignIn size={15} weight="duotone" /> Đăng nhập
                         </button>
                     )}
-                    <button className="lp-btn-primary lp-nav-cta" onClick={onStart}>
-                        Vào app <ArrowRight size={15} weight="bold" />
-                    </button>
                 </div>
             </header>
 
@@ -385,6 +516,8 @@ export default function Landing() {
                 </div>
             </section>
 
+            <AboutUsSection />
+
             {/* How it works — self-contained animated section (shadow-DOM isolated) */}
             <HowItWorks />
 
@@ -418,4 +551,3 @@ export default function Landing() {
         </div>
     );
 }
-
