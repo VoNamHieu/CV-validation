@@ -29,14 +29,26 @@ logger = logging.getLogger(__name__)
 _pool: Optional[asyncpg.Pool] = None
 
 
+def _jsonb_dumps(value) -> str:
+    """Serialize to JSON, stripping NUL (``\\u0000``) from string values.
+
+    Postgres ``text``/``jsonb`` cannot store the NUL byte, so a NUL anywhere in
+    the payload makes the whole INSERT fail with 22P05 ("unsupported Unicode
+    escape sequence … \\u0000 cannot be converted to text"). PDF-extracted CV
+    text routinely carries stray NULs, which blew up ``POST /me/cv-profiles``.
+    ``json.dumps`` always escapes NUL as the lowercase ``\\u0000``, so dropping
+    that literal from the serialized string is a safe, total sanitize."""
+    return json.dumps(value).replace("\\u0000", "")
+
+
 async def _init_connection(conn: asyncpg.Connection) -> None:
     """Per-connection setup: vector + jsonb codecs."""
     await register_vector(conn)
     await conn.set_type_codec(
-        "jsonb", encoder=json.dumps, decoder=json.loads, schema="pg_catalog"
+        "jsonb", encoder=_jsonb_dumps, decoder=json.loads, schema="pg_catalog"
     )
     await conn.set_type_codec(
-        "json", encoder=json.dumps, decoder=json.loads, schema="pg_catalog"
+        "json", encoder=_jsonb_dumps, decoder=json.loads, schema="pg_catalog"
     )
 
 
