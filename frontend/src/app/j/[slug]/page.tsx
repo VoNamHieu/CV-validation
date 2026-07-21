@@ -6,6 +6,7 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { MapPin, Buildings, ChartLineUp } from '@phosphor-icons/react/dist/ssr';
 import PromotedJobCta from '@/components/PromotedJobCta';
+import PromotedViewBeacon from '@/components/PromotedViewBeacon';
 import { renderJd } from '@/lib/renderJd';
 import { SITE_URL } from '@/lib/site';
 import styles from './promoted.module.css';
@@ -82,7 +83,9 @@ async function fetchPage(slug: string, preview?: string): Promise<PromotedPage |
     try {
         const res = await fetch(
             `${backendUrl}/store/promoted/by-slug/${encodeURIComponent(slug)}${qs}`,
-            { cache: 'no-store' }, // count each view; snapshot is tiny
+            // Published pages are cached (views counted via a client beacon now);
+            // an admin preview must always be fresh.
+            preview ? { cache: 'no-store' } : { next: { revalidate: 300 } },
         );
         if (!res.ok) return null;
         return (await res.json()) as PromotedPage;
@@ -203,6 +206,8 @@ export default async function PromotedJobPage(
                 type="application/ld+json"
                 dangerouslySetInnerHTML={{ __html: jobPostingJsonLd(page) }}
             />
+            {/* Count a real (browser) view; skip admin drafts */}
+            {!preview && <PromotedViewBeacon slug={slug} />}
             {/* Top bar */}
             <div className={styles.topbar}>
                 <a href="/" className={styles.brand}>

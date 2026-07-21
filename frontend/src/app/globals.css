@@ -89,10 +89,10 @@
   --quiet: #5C6159;          /* muted ink */
   --ink-quiet: #8A9088;      /* muted text on ink backgrounds */
 
-  --font-display: 'Bricolage Grotesque', 'Be Vietnam Pro', system-ui, sans-serif;
-  --font-editorial: 'Be Vietnam Pro', system-ui, sans-serif;
-  --font-letter: 'Lora', Georgia, serif;
-  --font-mono-editorial: 'IBM Plex Mono', ui-monospace, monospace;
+  --font-display: var(--font-bricolage), var(--font-be-vietnam), system-ui, sans-serif;
+  --font-editorial: var(--font-be-vietnam), system-ui, sans-serif;
+  --font-letter: var(--font-lora), Georgia, serif;
+  --font-mono-editorial: var(--font-plex-mono), ui-monospace, monospace;
 }
 
 [data-theme="dark"] {

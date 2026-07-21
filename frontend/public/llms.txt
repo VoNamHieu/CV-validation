@@ -1,0 +1,22 @@
+# Copo
+
+> Copo (copoai.net) là nền tảng nghề nghiệp ứng dụng AI cho thị trường Việt Nam:
+> tải CV lên, AI tìm cơ hội việc làm phù hợp từ trang tuyển dụng chính thức của
+> doanh nghiệp, chấm điểm độ khớp CV ↔ mô tả công việc, và gợi ý tối ưu CV. Cam
+> kết không bịa nội dung — AI chỉ viết lại dựa trên dữ kiện có thật trong CV gốc.
+
+## Sản phẩm
+- Khám phá việc làm khớp với CV (miễn phí xem danh sách khớp).
+- Chấm điểm độ phù hợp và báo cáo khoảng cách kỹ năng.
+- Tối ưu CV theo từng vị trí, tối ưu tương thích ATS.
+- Luyện phỏng vấn theo mô tả công việc.
+- Việc làm lấy trực tiếp từ trang tuyển dụng chính thức của công ty, làm mới mỗi 24 giờ.
+
+## Trang chính
+- [Trang chủ](https://copoai.net/): giới thiệu sản phẩm và cơ hội nổi bật.
+- [Việc làm](https://copoai.net/j/): các trang tin tuyển dụng được tuyển chọn (mỗi việc một URL /j/<slug>).
+- [Quyền riêng tư](https://copoai.net/privacy): cách Copo thu thập, dùng và bảo vệ dữ liệu.
+- [Điều khoản sử dụng](https://copoai.net/terms).
+
+## Liên hệ
+- Email: charles@copoai.net
