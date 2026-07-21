@@ -75,6 +75,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         useAppStore.getState().claimOwnership(userId);
         void useAppStore.getState().loadJobHistory();
         void useAppStore.getState().syncActiveCvProfile();
+        // Non-secret hint cookie so the SERVER render of `/` knows whether this
+        // visitor is logged in — lets it skip the landing (no flash) for members
+        // while still shipping full landing HTML to anonymous/crawler requests
+        // (which carry no cookie). Carries no token; it's a boolean signal only.
+        try {
+            document.cookie = userId
+                ? 'copo-authed=1; path=/; max-age=31536000; SameSite=Lax'
+                : 'copo-authed=; path=/; max-age=0; SameSite=Lax';
+        } catch { /* SSR / cookies disabled — degrade to the client gate */ }
     }, [loading, userId]);
 
     const signIn = useCallback(async (email: string, password: string): Promise<AuthResult> => {

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter, Geist_Mono } from "next/font/google";
+import { SITE_URL } from "@/lib/site";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth";
 import { CreditsProvider } from "@/lib/credits-context";
@@ -21,8 +22,25 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE_URL),
+  // Plain string (not a template): pages that set their own title already
+  // include "Copo" (privacy/terms/j), so a "%s | Copo" template would double it.
   title: "Copo | Trợ lý tìm việc & tối ưu CV",
   description: "Tải CV lên, để AI tìm việc phù hợp, chấm điểm độ khớp và gợi ý tối ưu CV. Cam kết không bịa nội dung.",
+  applicationName: "Copo",
+  openGraph: {
+    type: "website",
+    siteName: "Copo",
+    locale: "vi_VN",
+    url: SITE_URL,
+    title: "Copo | Trợ lý tìm việc & tối ưu CV",
+    description: "Tải CV lên, để AI tìm việc phù hợp, chấm điểm độ khớp và gợi ý tối ưu CV. Cam kết không bịa nội dung.",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Copo | Trợ lý tìm việc & tối ưu CV",
+    description: "Tải CV lên, để AI tìm việc phù hợp, chấm điểm độ khớp và gợi ý tối ưu CV.",
+  },
 };
 
 export default function RootLayout({
