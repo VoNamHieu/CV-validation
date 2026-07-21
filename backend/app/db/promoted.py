@@ -70,6 +70,9 @@ def public_view(row: dict) -> dict:
         "template": row.get("template") or "default",
         "og_image_url": row.get("og_image_url"),
         "has_logo": bool(snap.get("logo_b64")),
+        # When the page was published on Copo — source for schema.org datePosted.
+        # (No dedicated published_at column; created_at is the publish moment.)
+        "published_at": row.get("created_at"),
         "job": {k: snap.get(k, "") for k in _PUBLIC_SNAPSHOT_KEYS},
     }
 
@@ -151,6 +154,16 @@ async def list_featured(*, limit: int = 12) -> list[dict]:
         "(snapshot ? 'logo_b64') AS has_logo "
         "FROM promoted_jobs WHERE status = 'published' "
         "ORDER BY created_at DESC LIMIT $1", limit,
+    ))
+
+
+async def list_sitemap(*, limit: int = 5000) -> list[dict]:
+    """PUBLIC — slug + last-modified of every PUBLISHED page, for the frontend
+    sitemap.xml. No snapshot fields, so this is cheap and leaks nothing."""
+    pool = await get_pool()
+    return rows_to_dicts(await pool.fetch(
+        "SELECT slug, updated_at FROM promoted_jobs WHERE status = 'published' "
+        "ORDER BY updated_at DESC LIMIT $1", limit,
     ))
 
 

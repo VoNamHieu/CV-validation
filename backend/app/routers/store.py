@@ -258,6 +258,12 @@ async def list_promoted_featured(limit: int = Query(12, le=24)):
     return await promoted.list_featured(limit=limit)
 
 
+@router.get("/promoted/sitemap")
+async def promoted_sitemap():
+    """PUBLIC — slug + updated_at of published pages, for the frontend sitemap.xml."""
+    return await promoted.list_sitemap()
+
+
 @router.get("/promoted/by-slug/{slug}")
 async def get_promoted_public(slug: str, preview: Optional[str] = None):
     """PUBLIC — the landing page read. Only PUBLISHED pages are served, EXCEPT
