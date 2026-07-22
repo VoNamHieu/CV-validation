@@ -219,7 +219,7 @@ def classify_title(title: str) -> tuple[str, float]:
 # share a family but not a level. Used to demote jobs BELOW the candidate's
 # level (an intern role for a mid/senior candidate).
 SENIORITY_LEVELS = (
-    "Intern/Fresher", "Junior", "Mid", "Senior", "Lead/Manager", "Director/Head+",
+    "Intern", "Fresher", "Junior", "Mid", "Senior", "Lead/Manager", "Director/Head+",
 )
 _LEVEL_INDEX = {lv: i for i, lv in enumerate(SENIORITY_LEVELS)}
 
@@ -228,17 +228,37 @@ _LEVEL_INDEX = {lv: i for i, lv in enumerate(SENIORITY_LEVELS)}
 # role, not Lead — only explicit lead/principal/head/senior/junior/intern words
 # move the level. Titles with no signal return None (→ no seniority penalty).
 _SENIORITY_RULES: list[tuple[str, str]] = [
-    ("Intern/Fresher", r"\bintern(ship)?\b|fresher|thuc tap|sinh vien|\btts\b"),
+    # Intern = student/temporary (internship, thực tập sinh, sinh viên); Fresher =
+    # graduate entry (fresher, "tập sự" — VN banks' fresh-grad probation track like
+    # "Chuyên viên Tập sự" / "Lãnh đạo Tập sự / Management Associate"). Two bands:
+    # a Fresher sits ABOVE an Intern, both below Junior.
+    ("Intern",   r"\bintern(ship)?\b|thuc tap|sinh vien|\btts\b"),
+    ("Fresher",  r"fresher|tap su"),
     ("Director/Head+", r"director|head of|\bhead\b|chief|\bc[efimot]o\b|\bvp\b|svp|evp|vice president|giam doc|truong phong|truong ban|truong bo phan|pho phong"),
     # Mid-management band: leader/supervisor/giám sát/trưởng nhóm/trưởng ca/deputy
     # are genuine Lead/Manager roles in the VN market. (Bare "manager"/"quản lý"
     # stay OFF — a "Product Manager"/"Quản lý sản phẩm" is a mid IC — but "Deputy
     # Manager" / "Trưởng ca" carry the signal.)
     ("Lead/Manager",   r"\blead\b|leader|principal|\bstaff\b|supervisor|giam sat|truong nhom|truong ca|\bdeputy\b"),
-    # cvcc/cvc = chuyên viên cao cấp / chuyên viên chính (VN senior-IC abbrevs);
-    # bare "cv" (chuyên viên) is a generic grade, intentionally NOT a signal.
-    ("Senior",         r"\bsenior\b|\bsr\b|cao cap|chuyen gia|chuyen vien cao cap|\bcvcc\b|\bcvc\b"),
-    ("Junior",         r"\bjunior\b|\bjr\b|entry[ -]?level|moi ra truong|tap su"),
+    # cvcc/cvc = chuyên viên cao cấp / chuyên viên chính (VN senior-IC grades);
+    # bare "cv" (chuyên viên) is a generic grade, intentionally NOT a signal. Both
+    # the ABBREV (cvc/cvcc) and the SPELLED-OUT form ("chuyên viên chính"/"…cao
+    # cấp") count — the spelled-out "chính" was previously missed. Runs before the
+    # generic-officer fallback below so a "Chuyên viên chính …" resolves here.
+    ("Senior",         r"\bsenior\b|\bsr\b|cao cap|cap cao|chuyen gia|chuyen vien cao cap|chuyen vien chinh|\bcvcc\b|\bcvc\b"),
+    ("Junior",         r"\bjunior\b|\bjr\b|entry[ -]?level|moi ra truong"),
+    # Domain/engagement fallbacks (LAST, lowest priority): a bare role carries no
+    # level word but its segment implies a level in the VN market. Placed after
+    # every explicit-level rule so those still win ("CVCC KHCN"→Senior, "Tập sự
+    # KHCN"→Fresher, "Giám đốc KHDN"→Director).
+    #   CTV (cộng tác viên) = collaborator/part-time/freelance = entry (Fresher).
+    #     First here so a "Tư vấn viên (CTV Inbound)" reads as the CTV engagement.
+    #   Tư vấn viên / giao dịch viên (teller) = entry front-line IC (Junior).
+    #   Khách hàng Cá nhân (retail RM) = Junior, Khách hàng Doanh nghiệp (corp RM) = Mid.
+    ("Fresher",        r"cong tac vien|\bctv\b"),
+    ("Junior",         r"tu van vien|giao dich vien"),
+    ("Mid",            r"khach hang doanh nghiep|\bkhdn\b"),
+    ("Junior",         r"khach hang ca nhan|\bkhcn\b"),
 ]
 _SENIORITY_COMPILED = [(lv, re.compile(rx, re.I)) for lv, rx in _SENIORITY_RULES]
 
@@ -295,6 +315,90 @@ def _seniority_from_desc(description: str) -> str | None:
     return None
 
 
+# ── Generic "Chuyên viên" (officer IC) evidence scorer ───────────────────────
+# A bare "Chuyên viên X" with no grade word is base-undetermined: the same title
+# is Junior at one firm and Mid at a bank (hierarchy Nhân viên→Chuyên viên→Chuyên
+# viên chính). Rather than HARD-LABEL by domain keyword, we weigh EVIDENCE in
+# priority order — explicit entry cue → required years → work-scope cues — and use
+# a soft domain prior only as a tie-breaker. When nothing is decisive we return
+# None: a controlled UNKNOWN beats a plausible-but-wrong Junior.
+_OFFICER_ENTRY_RE = re.compile(          # explicit "no experience" / new-grad → Junior
+    r"khong yeu cau kinh nghiem|khong can kinh nghiem|chua co kinh nghiem|"
+    r"khong yeu cau kn|chua yeu cau kinh nghiem|sinh vien moi ra truong|"
+    r"moi tot nghiep|moi ra truong")
+_OFFICER_JR_SCOPE = re.compile(          # execution / front-line / support
+    r"ho tro|nhap lieu|theo doi|cap nhat|goi dien|telesale|tim kiem khach hang|"
+    r"chot sale|chot don|cham soc khach hang|dich vu khach hang|hanh chinh|"
+    r"le tan|tong dai|xu ly ho so|xu ly giao dich|dieu phoi|thu hoi no|thu ngan")
+_OFFICER_MID_SCOPE = re.compile(         # analysis / ownership / cross-functional
+    r"phan tich|kiem soat|kiem toan|quan tri rui ro|\brui ro\b|giai phap|"
+    r"quan ly du an|quan ly chi phi|quan ly hop dong|quan ly du lieu|"
+    r"khai thac tai san|quan ly tai san|ke toan tong hop|nghien cuu thi truong|"
+    r"xay dung quy trinh|xay dung khung|business case|go to market|"
+    r"phat trien kenh|phat trien doi tac|dam phan hop dong|phoi hop lien|chu tri")
+_OFFICER_SR_SCOPE = re.compile(          # strategy / lead / approve
+    r"chien luoc|dan dat|mentoring|phe duyet|dinh huong chien luoc")
+# Soft domain priors (tie-breaker ONLY). Ambiguous domains (BD, HR, design,
+# training, generic operations) are deliberately absent → they stay UNKNOWN.
+_OFFICER_JR_PRIOR = re.compile(
+    r"kinh doanh|tu van|dich vu|cham soc|ho tro|tuyen dung|hanh chinh|dieu phoi|thu hoi")
+_OFFICER_MID_PRIOR = re.compile(
+    r"phan tich|kiem soat|quan tri|giai phap|ke toan|khai thac")
+# Genuinely ambiguous domains — level swings on scope, not the word. If no
+# entry/years/scope evidence lifted them, DON'T fall through to a domain prior
+# (e.g. "Phát triển Kinh doanh" contains "kinh doanh" but BD ≠ front-line sales):
+# leave UNKNOWN. Checked AFTER scope so "Phát triển kênh/đối tác" (a Mid scope
+# cue) still resolves to Mid.
+_OFFICER_AMBIG = re.compile(r"phat trien|thiet ke|dao tao|nhan su|hrbp|van hanh")
+
+
+def _req_years(title: str, description: str | None) -> int | None:
+    """Explicit years-of-experience the posting asks for (title+description), or
+    None. Reuses the facet extractor (context-guarded); lazy import breaks the
+    taxonomy↔facet cycle."""
+    from app.search.facet import _required_years
+    return _required_years({"title": title, "description": description or ""})
+
+
+def _years_band(yrs: int | None) -> str | None:
+    """Experience requirement → seniority band: ≤1 yr Junior, 2–4 Mid, 5+ Senior.
+    None when no positive year count (0/unstated carries no signal here)."""
+    if not yrs:
+        return None
+    return "Junior" if yrs <= 1 else "Mid" if yrs <= 4 else "Senior"
+
+
+def _officer_level(title: str, description: str | None) -> str | None:
+    """Junior/Mid/Senior for a generic 'Chuyên viên X' by evidence, else None
+    (UNKNOWN). Priority: explicit entry cue → required years → work-scope cues →
+    soft domain prior. Domain is only a tie-breaker so no label is manufactured
+    from a keyword alone."""
+    n = _norm(title)
+    text = _norm(f"{title} \n {description or ''}")
+    if _OFFICER_ENTRY_RE.search(text):
+        return "Junior"
+    yb = _years_band(_req_years(title, description))
+    if yb:
+        return yb
+    sr = len(_OFFICER_SR_SCOPE.findall(text))
+    md = len(_OFFICER_MID_SCOPE.findall(text))
+    jr = len(_OFFICER_JR_SCOPE.findall(text))
+    if sr and sr >= md and sr >= jr:
+        return "Senior"
+    if md > jr:
+        return "Mid"
+    if jr > md:
+        return "Junior"
+    if _OFFICER_AMBIG.search(n):   # scope-dependent domain, no evidence → UNKNOWN
+        return None
+    mid_p, jr_p = _OFFICER_MID_PRIOR.search(n), _OFFICER_JR_PRIOR.search(n)
+    if mid_p and not jr_p:
+        return "Mid"
+    if jr_p and not mid_p:
+        return "Junior"
+    return None  # controlled UNKNOWN — leave NULL rather than guess
+
+
 def classify_seniority(title: str, description: str | None = None) -> str | None:
     """Seniority label for a posting, or None when it carries no signal.
 
@@ -304,12 +408,25 @@ def classify_seniority(title: str, description: str | None = None) -> str | None
     None (see _seniority_from_desc). A missing/empty description yields the same
     None as before → no regression for postings we can't read."""
     n = _norm(title)
+    # 1. Explicit TITLE level word — primary, highest precision.
     for lv, rx in _SENIORITY_COMPILED:
         if rx.search(n):
             return lv
+    # 2. Explicit DESCRIPTION label ("Cấp bậc: X" / guarded self-ref mention) — a
+    #    stated level outranks any inference below (see _seniority_from_desc).
     if description:
-        return _seniority_from_desc(description)
-    return None
+        d = _seniority_from_desc(description)
+        if d:
+            return d
+    # 3. Generic "Chuyên viên X" with no grade word: evidence, not domain
+    #    (entry cue → years → work-scope → soft domain prior).
+    if "chuyen vien" in n:
+        lv = _officer_level(title, description)
+        if lv:
+            return lv
+    # 4. Any role with an explicit years-of-experience requirement → band. A
+    #    strong signal for titles that carry no level word (nhân viên, kỹ sư, …).
+    return _years_band(_req_years(title, description))
 
 
 def level_index(level: str) -> int | None:
@@ -321,11 +438,12 @@ def level_index(level: str) -> int | None:
 # SENIORITY_LEVELS. Lets the seniority signal engage even when the input isn't
 # already vocab-exact ("Lead", "Mid-level", "thực tập" → canonical).
 _LEVEL_ALIASES: list[tuple[str, str]] = [
-    (r"intern|fresher|thuc tap|sinh vien", "Intern/Fresher"),
+    (r"intern|thuc tap|sinh vien", "Intern"),
+    (r"fresher|tap su", "Fresher"),
     (r"director|head|chief|\bc[efimot]o\b|\bvp\b|svp|evp|giam doc|truong phong", "Director/Head+"),
     (r"lead|principal|manager|\bstaff\b|quan ly|truong nhom", "Lead/Manager"),
     (r"senior|\bsr\b|cao cap", "Senior"),
-    (r"junior|\bjr\b|entry|moi ra truong|tap su", "Junior"),
+    (r"junior|\bjr\b|entry|moi ra truong", "Junior"),
     (r"mid|middle|intermediate|trung cap", "Mid"),
 ]
 _LEVEL_ALIAS_COMPILED = [(re.compile(rx, re.I), lv) for rx, lv in _LEVEL_ALIASES]

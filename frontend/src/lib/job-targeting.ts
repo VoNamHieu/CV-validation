@@ -36,8 +36,9 @@ export interface SeniorityOption {
 
 // Order = display order of the chips on the upload step (low → high).
 export const SENIORITY_OPTIONS: SeniorityOption[] = [
-    { key: 'Intern/Fresher', label: 'Intern / Fresher', match: /intern|fresher|thực tập|thuc tap|sinh viên|sinh vien/i },
-    { key: 'Junior', label: 'Junior', match: /junior|\bjr\b|entry|mới ra trường|moi ra truong|tập sự|tap su/i },
+    { key: 'Intern', label: 'Intern', match: /intern|thực tập|thuc tap|sinh viên|sinh vien|\btts\b/i },
+    { key: 'Fresher', label: 'Fresher', match: /fresher|tập sự|tap su/i },
+    { key: 'Junior', label: 'Junior', match: /junior|\bjr\b|entry|mới ra trường|moi ra truong/i },
     { key: 'Mid', label: 'Mid', match: /\bmid\b|middle|intermediate|trung cấp|trung cap/i },
     { key: 'Senior', label: 'Senior', match: /senior|\bsr\b|cao cấp|cao cap/i },
     { key: 'Lead/Manager', label: 'Lead / Manager', match: /lead|principal|manager|\bstaff\b|quản lý|quan ly|trưởng nhóm|truong nhom/i },

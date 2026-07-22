@@ -28,7 +28,7 @@ Return ONLY valid JSON matching this exact schema:
 
 required_years_min = the MINIMUM years of professional experience the JD asks for, as a plain integer:
 - "3+ years", "at least 3 years", "ít nhất 3 năm", "3-5 years" → 3 (take the lower bound).
-- If no number is stated, infer from seniority: Intern/Fresher → 0, Junior → 1, Mid-level → 3, Senior → 5, Lead/Manager → 7.
+- If no number is stated, infer from seniority: Intern → 0, Fresher → 0, Junior → 1, Mid-level → 3, Senior → 5, Lead/Manager → 7.
 - If experience is not mentioned and seniority is unclear, use 0.
 
 LANGUAGE: Write every human-readable string (must_have, nice_to_have, responsibilities, domain) in Vietnamese, even when the source JD is in English. Keep technology/tool/framework/certification names and established job-title terms in their ORIGINAL form (e.g. React, SQL, Google Analytics, Figma, Product Manager, AWS). Do not translate proper nouns or brand/tech terms.`;

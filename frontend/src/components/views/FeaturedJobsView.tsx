@@ -53,10 +53,12 @@ function seniorityBadge(sen?: string): string {
 // entry-level → executive so the menu reads top-down. Filtering matches the raw
 // `seniority` value exactly (keyword match, no embedding) — the label is display
 // only. Unknown values fall through to their raw string.
-const LEVEL_ORDER = ['Intern/Fresher', 'Junior', 'Senior', 'Lead/Manager', 'Director/Head+'];
+const LEVEL_ORDER = ['Intern', 'Fresher', 'Junior', 'Mid', 'Senior', 'Lead/Manager', 'Director/Head+'];
 const LEVEL_LABEL: Record<string, string> = {
-    'Intern/Fresher': 'Thực tập / Fresher',
+    'Intern': 'Thực tập',
+    'Fresher': 'Fresher',
     'Junior': 'Junior',
+    'Mid': 'Mid',
     'Senior': 'Senior',
     'Lead/Manager': 'Quản lý',
     'Director/Head+': 'Giám đốc / Head',
