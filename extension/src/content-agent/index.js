@@ -103,6 +103,7 @@ async function runAgentLoop(profile) {
         await scrollAndCollect();
 
         let sameStateCount = 0;
+        let emptyStreak = 0;   // consecutive empty/error observes → triggers a recovery reload
 
         for (let i = 0; i < AGENT_MAX_ITERATIONS; i++) {
             // Keep the background watchdog alive — an iteration can legitimately
@@ -137,6 +138,33 @@ async function runAgentLoop(profile) {
                     });
                 }
             } catch { /* diagnostics must never break the loop */ }
+
+            // ── RECOVERY: reload a broken / empty page instead of giving up. A
+            // recipe'd ATS often lands on Workday's "Something went wrong" (an
+            // undefined appId after a mid-flow login) or a blank apply shell; both
+            // self-heal on a fresh authenticated load (Workday literally says
+            // "refresh"). The agent has no reload action otherwise, so it used to
+            // stall here. Guarded via sessionStorage (survives the reload) so a page
+            // that stays broken can't reload-loop forever.
+            {
+                const bt = document.body?.innerText || '';
+                const errCard = /something went wrong|refresh the page and (?:then )?try again/i.test(bt);
+                const emptyShell = state.formFields.length === 0 && state.buttons.length === 0 && !state.blockers.length;
+                if (errCard || emptyShell) emptyStreak++; else emptyStreak = 0;
+                // Error card → reload now; a bare empty shell → wait 2 observes first
+                // (it may still be mid-bootstrap, not actually broken).
+                const wantReload = errCard || emptyStreak >= 2;
+                let reloads = 0;
+                try { reloads = parseInt(sessionStorage.getItem('copoApplyReloads') || '0', 10) || 0; } catch { /* ignore */ }
+                if (wantReload && reloads < 2) {
+                    try { sessionStorage.setItem('copoApplyReloads', String(reloads + 1)); } catch { /* ignore */ }
+                    console.warn(`[Copo Apply] recovery: ${errCard ? 'error card' : 'empty page'} → reload ${reloads + 1}/2`, location.href);
+                    showProgress(i + 1, AGENT_MAX_ITERATIONS, 'Trang lỗi/rỗng — tải lại…');
+                    await sleep(600);
+                    location.reload();
+                    return;   // the reload re-injects the agent on a fresh load
+                }
+            }
 
             // ── 2. CHECK TERMINATION ──
             if (baselineSignals === null) baselineSignals = new Set(state.completionSignals);
