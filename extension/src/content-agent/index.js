@@ -114,6 +114,30 @@ async function runAgentLoop(profile) {
             showProgress(i + 1, AGENT_MAX_ITERATIONS, 'Đang phân tích trang...');
             const state = await observePageState();
 
+            // ── DIAG: surface WHY a recipe'd ATS breaks ("Something went wrong").
+            // From the isolated world we can't read fetch bodies, but Resource Timing
+            // exposes request URLs — and the usual Workday cause (an undefined
+            // application id) shows right in the CXS path. Fires only on the error
+            // card or a bad CXS URL, so it's quiet on a healthy page.
+            try {
+                const _bt = document.body?.innerText || '';
+                const _cxs = performance.getEntriesByType('resource').map(e => e.name)
+                    .filter(u => /\/wday\/.*\/(jobapplication|package)\//.test(u));
+                const _undef = _cxs.filter(u => /\/undefined(\/|$|\?)/.test(u));
+                const _err = /something went wrong|refresh the page and (?:then )?try again/i.test(_bt);
+                if (_err || _undef.length) {
+                    console.warn('[Copo Apply][DIAG]', _err ? 'ATS error card shown' : 'undefined-appId CXS call', {
+                        url: location.href,
+                        step: state.stepIndicator,
+                        fields: state.formFields.length,
+                        unfilledRequired: state.unfilledRequired,
+                        badCxsUrls: _undef.slice(-8),
+                        recentCxs: _cxs.slice(-8),
+                        recentActions: history.slice(-6).map(h => ({ it: h.iteration, act: h.plan?.action, reason: h.plan?.reason, filled: h.result?.filled })),
+                    });
+                }
+            } catch { /* diagnostics must never break the loop */ }
+
             // ── 2. CHECK TERMINATION ──
             if (baselineSignals === null) baselineSignals = new Set(state.completionSignals);
             const newSignals = state.completionSignals.filter(s => !baselineSignals.has(s));
