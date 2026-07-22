@@ -19,7 +19,7 @@ const orgJsonLd = JSON.stringify({
   name: 'Copo',
   url: SITE_URL,
   logo: `${SITE_URL}/copo-logo.png`,
-  description: 'Nền tảng nghề nghiệp ứng dụng AI: khám phá cơ hội phù hợp, chấm điểm độ khớp CV và tối ưu hồ sơ, cam kết không bịa nội dung.',
+  description: 'Copo là nền tảng nghề nghiệp ứng dụng AI cho thị trường Việt Nam, lo trọn quy trình xin việc: tải CV lên, AI tìm việc phù hợp từ trang tuyển dụng chính thức của doanh nghiệp và chấm điểm độ khớp, tối ưu CV theo từng vị trí mà không bịa nội dung, rồi tự động điền form và nộp hồ sơ ứng tuyển thay bạn.',
   contactPoint: {
     '@type': 'ContactPoint',
     email: 'charles@copoai.net',

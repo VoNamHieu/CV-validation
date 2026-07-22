@@ -4,7 +4,7 @@ import { beVietnamFont, OG } from './_og/og';
 // Default social card for every route without its own og:image (homepage,
 // privacy, terms). Node runtime so we can read the font off disk.
 export const runtime = 'nodejs';
-export const alt = 'Copo — Trợ lý tìm việc & tối ưu CV bằng AI';
+export const alt = 'Copo, trợ lý AI tìm việc, tối ưu CV và tự động ứng tuyển';
 export const size = { width: 1200, height: 630 };
 export const contentType = 'image/png';
 
@@ -28,8 +28,8 @@ export default async function Image() {
         <div style={{ display: 'flex', fontSize: 150, fontWeight: 600, color: OG.ink, letterSpacing: '-0.04em' }}>
           Copo<span style={{ color: OG.brand }}>.</span>
         </div>
-        <div style={{ display: 'flex', marginTop: 12, fontSize: 46, color: OG.muted, maxWidth: 900 }}>
-          Trợ lý tìm việc &amp; tối ưu CV bằng AI
+        <div style={{ display: 'flex', marginTop: 12, fontSize: 44, color: OG.muted, maxWidth: 980 }}>
+          Tìm việc · Tối ưu CV · Tự động ứng tuyển bằng AI
         </div>
         <div style={{ display: 'flex', marginTop: 40, fontSize: 30, color: OG.brand }}>
           Cam kết không bịa nội dung

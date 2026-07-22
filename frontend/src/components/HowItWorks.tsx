@@ -28,7 +28,25 @@ export default function HowItWorks() {
         };
     }, []);
 
-    // id="how" keeps the nav scroll-spy anchor working; z-index lifts the dark
-    // band above the landing's fixed background layer (.lp-bg).
-    return <div id="how" ref={hostRef} style={{ position: 'relative', zIndex: 1 }} />;
+    // The animation below lives in a shadow root, so its narration is invisible to
+    // search/answer engines and screen readers. This sr-only block is the crawlable,
+    // accessible text alternative (a real-DOM sibling, NOT a child of the shadow
+    // host — children of a shadow host aren't rendered/exposed). id="how-it-works"
+    // keeps the nav scroll-spy anchor working; z-index lifts the dark band above the
+    // landing's fixed background layer (.lp-bg).
+    return (
+        <>
+            <div className="sr-only">
+                <h2>Copo hoạt động thế nào</h2>
+                <ol>
+                    <li>Kéo CV bạn đang có vào Copo, không cần chỉnh sửa gì trước.</li>
+                    <li>Copo quét việc làm từ trang tuyển dụng chính thức của doanh nghiệp và chấm điểm độ khớp với hồ sơ của bạn.</li>
+                    <li>Copo giữ lại những vị trí thật sự hợp và xếp theo mức độ khớp, thay vì hàng trăm tin.</li>
+                    <li>Copo viết lại CV cho khớp từng vị trí mà vẫn không bịa nội dung.</li>
+                    <li>Copo tự động mở trang tuyển dụng, điền form, đính CV và nộp hồ sơ ứng tuyển thay bạn.</li>
+                </ol>
+            </div>
+            <div id="how-it-works" ref={hostRef} style={{ position: 'relative', zIndex: 1 }} />
+        </>
+    );
 }

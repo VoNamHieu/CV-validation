@@ -51,21 +51,23 @@ export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   // Plain string (not a template): pages that set their own title already
   // include "Copo" (privacy/terms/j), so a "%s | Copo" template would double it.
-  title: "Copo | Trợ lý tìm việc & tối ưu CV",
-  description: "Tải CV lên, để AI tìm việc phù hợp, chấm điểm độ khớp và gợi ý tối ưu CV. Cam kết không bịa nội dung.",
+  // The description spells out the full loop incl. auto-apply — it's the field
+  // AI answer engines extract most, and auto-apply is the key differentiator.
+  title: "Copo | Tìm việc, tối ưu CV & tự động ứng tuyển bằng AI",
+  description: "Copo là trợ lý AI lo trọn khâu xin việc: tải CV lên, AI tìm việc khớp từ trang tuyển dụng chính thức, tối ưu CV theo từng vị trí (không bịa nội dung), rồi tự động điền form và nộp hồ sơ giúp bạn.",
   applicationName: "Copo",
   openGraph: {
     type: "website",
     siteName: "Copo",
     locale: "vi_VN",
     url: SITE_URL,
-    title: "Copo | Trợ lý tìm việc & tối ưu CV",
-    description: "Tải CV lên, để AI tìm việc phù hợp, chấm điểm độ khớp và gợi ý tối ưu CV. Cam kết không bịa nội dung.",
+    title: "Copo | Tìm việc, tối ưu CV & tự động ứng tuyển bằng AI",
+    description: "Trợ lý AI lo trọn khâu xin việc: tìm việc khớp từ trang tuyển dụng chính thức, tối ưu CV không bịa nội dung, rồi tự động điền form và nộp hồ sơ giúp bạn.",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Copo | Trợ lý tìm việc & tối ưu CV",
-    description: "Tải CV lên, để AI tìm việc phù hợp, chấm điểm độ khớp và gợi ý tối ưu CV.",
+    title: "Copo | Tìm việc, tối ưu CV & tự động ứng tuyển bằng AI",
+    description: "Trợ lý AI lo trọn khâu xin việc: tìm việc khớp, tối ưu CV không bịa nội dung, và tự động nộp hồ sơ giúp bạn.",
   },
 };
 

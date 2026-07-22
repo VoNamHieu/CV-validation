@@ -181,7 +181,7 @@ function AboutUsSection() {
 const FAQ_ITEMS: { q: string; a: string }[] = [
     {
         q: 'CV của tôi được lưu ở đâu và ai đọc được?',
-        a: 'CV của bạn được mã hoá và chỉ dùng để phân tích cho chính bạn. Chúng tôi không bán, không chia sẻ hồ sơ cho nhà tuyển dụng hay bên thứ ba. Bạn có thể xoá tài khoản cùng toàn bộ dữ liệu bất cứ lúc nào — xoá là xoá thật.',
+        a: 'CV của bạn được mã hoá và chỉ dùng để phân tích cho chính bạn. Chúng tôi không bán, không chia sẻ hồ sơ cho nhà tuyển dụng hay bên thứ ba. Bạn có thể xoá tài khoản cùng toàn bộ dữ liệu bất cứ lúc nào, và xoá là xoá thật.',
     },
     {
         q: '"Không bịa nội dung" hoạt động thế nào?',
@@ -193,7 +193,7 @@ const FAQ_ITEMS: { q: string; a: string }[] = [
     },
     {
         q: 'Hết 50 credit miễn phí thì sao?',
-        a: 'Bạn vẫn xem được việc khớp với CV của mình — phần đó miễn phí vĩnh viễn. Chỉ các thao tác AI chuyên sâu (chấm điểm chi tiết, tối ưu CV, luyện phỏng vấn) mới dùng credit, và bạn nạp thêm khi cần. Không gói tháng bắt buộc, không tự động trừ tiền.',
+        a: 'Bạn vẫn xem được việc khớp với CV của mình, phần đó miễn phí vĩnh viễn. Chỉ các thao tác AI chuyên sâu (chấm điểm chi tiết, tối ưu CV, luyện phỏng vấn) mới dùng credit, và bạn nạp thêm khi cần. Không gói tháng bắt buộc, không tự động trừ tiền.',
     },
 ];
 
@@ -275,7 +275,7 @@ export default function Landing() {
     // Scroll-spy: track the section currently in view. A thin activation band
     // near the viewport middle (rootMargin) makes exactly one section active as
     // you scroll. Defaults to 'top' (homepage/hero) so the pill starts there.
-    const NAV_IDS = ['top', 'featured', 'about', 'how', 'lien-he'];
+    const NAV_IDS = ['top', 'featured', 'about', 'how-it-works', 'contact'];
     const [activeSection, setActiveSection] = useState('top');
     useEffect(() => {
         const els = NAV_IDS.map((id) => document.getElementById(id)).filter(Boolean) as HTMLElement[];
@@ -369,8 +369,8 @@ export default function Landing() {
                     <a href="#top" data-section="top" className={activeSection === 'top' ? 'is-active' : undefined} aria-current={activeSection === 'top' ? 'true' : undefined}>Trang chủ</a>
                     <a href="#featured" data-section="featured" className={activeSection === 'featured' ? 'is-active' : undefined} aria-current={activeSection === 'featured' ? 'true' : undefined}>Cơ hội</a>
                     <a href="#about" data-section="about" className={activeSection === 'about' ? 'is-active' : undefined} aria-current={activeSection === 'about' ? 'true' : undefined}>Về Copo</a>
-                    <a href="#how" data-section="how" className={activeSection === 'how' ? 'is-active' : undefined} aria-current={activeSection === 'how' ? 'true' : undefined}>Cách hoạt động</a>
-                    <a href="#lien-he" data-section="lien-he" className={activeSection === 'lien-he' ? 'is-active' : undefined} aria-current={activeSection === 'lien-he' ? 'true' : undefined}>Liên hệ</a>
+                    <a href="#how-it-works" data-section="how-it-works" className={activeSection === 'how-it-works' ? 'is-active' : undefined} aria-current={activeSection === 'how-it-works' ? 'true' : undefined}>Cách hoạt động</a>
+                    <a href="#contact" data-section="contact" className={activeSection === 'contact' ? 'is-active' : undefined} aria-current={activeSection === 'contact' ? 'true' : undefined}>Liên hệ</a>
                 </nav>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     {enabled && !user && (
@@ -602,7 +602,7 @@ export default function Landing() {
                     <span>·</span>
                     <a href="/terms">Điều khoản sử dụng</a>
                     <span>·</span>
-                    <a href="#lien-he">Liên hệ</a>
+                    <a href="#contact">Liên hệ</a>
                 </div>
             </footer>
         </div>

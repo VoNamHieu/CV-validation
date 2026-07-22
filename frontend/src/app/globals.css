@@ -95,6 +95,21 @@
   --font-mono-editorial: var(--font-plex-mono), ui-monospace, monospace;
 }
 
+/* Visually hidden but present in the DOM + accessibility tree — used as the text
+   alternative for content that's otherwise only in a canvas/shadow-DOM animation
+   (crawlable by search + answer engines, read by screen readers). */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 [data-theme="dark"] {
   color-scheme: dark;
 
