@@ -140,18 +140,24 @@ export function recipeForUrl(recipes, url) {
  */
 export async function applyRecipeFields(recipe, profile, cvData) {
     if (!recipe || !profile) return { matched: false, filled: 0 };
-    const step = (recipe.steps || []).find(s => s.detect && document.querySelector(s.detect));
-    if (!step) return { matched: false, filled: 0 };
 
     let filled = 0;
 
-    // Opportunistic CV upload (resume step or any step that renders the input).
+    // Opportunistic CV upload — BEFORE the step check, so it runs on ANY page that
+    // renders the recipe's file input, even one with no text-field step. Workday's
+    // "Autofill with Resume" page (applyFlowAutoFillPage) has the file input
+    // (file-upload-input-ref) but no text step; uploading here lets Workday parse
+    // the résumé and pre-fill the later sections. Idempotent: skips an input that
+    // already holds a file, so it's safe to re-run every iteration.
     if (cvData?.base64 && cvData?.fileName && recipe.fileUploadSelector) {
         const fileEl = document.querySelector(recipe.fileUploadSelector);
         if (fileEl && fileEl.type === 'file' && !(fileEl.files && fileEl.files.length)) {
             try { if (setFileOnInput(fileEl, cvData.base64, cvData.fileName)) filled++; } catch { /* best effort */ }
         }
     }
+
+    const step = (recipe.steps || []).find(s => s.detect && document.querySelector(s.detect));
+    if (!step) return { matched: filled > 0, filled };  // e.g. the autofill upload page: uploaded, no text step
 
     for (const f of step.fields || []) {
         if (f.type === 'custom-select') continue; // defer dropdowns to the LLM
