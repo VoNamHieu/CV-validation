@@ -14,6 +14,7 @@ import { ArrowSquareOut, ArrowsClockwise, TestTube, PaperPlaneTilt, CheckCircle,
 import { admin, type TestJob } from '@/lib/db';
 import { useAppStore } from '@/store/useAppStore';
 import { cvToExtensionProfile } from '@/lib/extension-profile';
+import { buildCvPdfCache } from '@/lib/cv-pdf-cache';
 import { isExtensionAvailable } from '@/lib/api';
 
 type ApplyStatus = { state: 'sending' | 'opened' | 'error'; msg: string };
@@ -59,9 +60,10 @@ export default function TestApplyPanel() {
     const setStatus = (id: string, s: ApplyStatus) => setApplyState((m) => ({ ...m, [id]: s }));
 
     // Fire the same single-apply message the app uses (StepEditCv): the extension
-    // opens the job URL and auto-fills with the operator's synced profile. Skips
-    // the CV-file upload (no rendered PDF on /admin) — text-only apply is enough
-    // to test whether the form-fill reaches the site.
+    // opens the job URL and auto-fills with the operator's synced profile. Renders
+    // the structured CV to a PDF and syncs it FIRST, so account-gated ATS that
+    // upload a resume (Workday "Autofill with Resume") get a real file — without it
+    // hasCV=false and the agent falls back to "Apply Manually".
     const apply = async (job: TestJob) => {
         if (!isExtensionAvailable()) {
             setStatus(job.job_id, { state: 'error', msg: 'Extension chưa sẵn sàng — mở trang này trên copoai.net, cài extension rồi F5.' });
@@ -72,6 +74,14 @@ export default function TestApplyPanel() {
             return;
         }
         const profile = cvToExtensionProfile(cvData);
+
+        // Render structured CV → PDF and sync into extension storage so hasCV=true
+        // (Workday Autofill needs the file). Non-fatal: on render failure we still
+        // fire a text-only apply.
+        setStatus(job.job_id, { state: 'sending', msg: 'Đang tạo CV PDF…' });
+        const { optimizedCvPdfBase64, optimizedCvFileName } = await buildCvPdfCache(cvData, { jobTitle: job.title });
+        if (!optimizedCvPdfBase64) console.warn('[TestApply] CV PDF render/sync failed — applying text-only');
+
         setStatus(job.job_id, { state: 'sending', msg: 'Đang gửi lệnh ứng tuyển…' });
         try {
             const res = await new Promise<{ success?: boolean; error?: string }>((resolve, reject) => {
@@ -86,7 +96,13 @@ export default function TestApplyPanel() {
                     reject(new Error('Extension không phản hồi (timeout).'));
                 }, 12000);
                 window.addEventListener('message', handler);
-                window.postMessage({ type: 'JOBFIT_AUTO_APPLY', jobUrl: job.url, profile }, '*');
+                window.postMessage({
+                    type: 'JOBFIT_AUTO_APPLY',
+                    jobUrl: job.url,
+                    profile,
+                    cvFileBase64: optimizedCvPdfBase64,
+                    cvFileName: optimizedCvFileName,
+                }, '*');
             });
             if (res?.success) setStatus(job.job_id, { state: 'opened', msg: 'Tab đã mở — agent đang phân tích & điền form.' });
             else setStatus(job.job_id, { state: 'error', msg: res?.error || 'Extension báo lỗi không rõ.' });
