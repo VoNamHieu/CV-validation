@@ -51,7 +51,7 @@ export default function LandingContact() {
     };
 
     return (
-        <section className="lp-contact" id="lien-he">
+        <section className="lp-contact" id="contact">
             <div className="lp-contact-inner">
                 <div className="lp-contact-intro">
                     <span className="lp-contact-eyebrow">Liên hệ</span>

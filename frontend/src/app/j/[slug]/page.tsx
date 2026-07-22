@@ -6,8 +6,41 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { MapPin, Buildings, ChartLineUp } from '@phosphor-icons/react/dist/ssr';
 import PromotedJobCta from '@/components/PromotedJobCta';
+import PromotedViewBeacon from '@/components/PromotedViewBeacon';
 import { renderJd } from '@/lib/renderJd';
+import { SITE_URL } from '@/lib/site';
 import styles from './promoted.module.css';
+
+// schema.org JobPosting for Google Jobs + answer engines. Only the fields we
+// actually have — Google warns (not errors) on missing optional ones like
+// validThrough/baseSalary. `<` is escaped so the JSON can't break out of the
+// <script> tag.
+function jobPostingJsonLd(page: PromotedPage): string {
+    const { title, company_name, location, description } = page.job;
+    const ld: Record<string, unknown> = {
+        '@context': 'https://schema.org/',
+        '@type': 'JobPosting',
+        title,
+        description: description || title,
+        datePosted: page.published_at || undefined,
+        url: `${SITE_URL}/j/${page.slug}`,
+        identifier: { '@type': 'PropertyValue', name: company_name || 'Copo', value: page.slug },
+        hiringOrganization: {
+            '@type': 'Organization',
+            name: company_name || 'Copo',
+            ...(page.has_logo ? { logo: logoUrl(page.slug) } : {}),
+        },
+        jobLocation: {
+            '@type': 'Place',
+            address: {
+                '@type': 'PostalAddress',
+                ...(location ? { addressLocality: location } : {}),
+                addressCountry: 'VN',
+            },
+        },
+    };
+    return JSON.stringify(ld).replace(/</g, '\\u003c');
+}
 
 type PublicJob = {
     title: string;
@@ -23,6 +56,7 @@ type PromotedPage = {
     template: string;
     og_image_url: string | null;
     has_logo?: boolean;
+    published_at?: string | null;  // ISO — when published on Copo (schema.org datePosted)
     job: PublicJob;
 };
 type RelatedItem = {
@@ -49,7 +83,9 @@ async function fetchPage(slug: string, preview?: string): Promise<PromotedPage |
     try {
         const res = await fetch(
             `${backendUrl}/store/promoted/by-slug/${encodeURIComponent(slug)}${qs}`,
-            { cache: 'no-store' }, // count each view; snapshot is tiny
+            // Published pages are cached (views counted via a client beacon now);
+            // an admin preview must always be fresh.
+            preview ? { cache: 'no-store' } : { next: { revalidate: 300 } },
         );
         if (!res.ok) return null;
         return (await res.json()) as PromotedPage;
@@ -126,15 +162,15 @@ export async function generateMetadata(
     return {
         title: `${heading} | Copo`,
         description: summary,
+        alternates: { canonical: `/j/${slug}` },
         openGraph: {
             title: heading,
             description: summary,
             type: 'website',
-            // Prefer an explicit og_image_url; else the uploaded company logo
-            // (real URL from the logo endpoint) so social cards show the brand.
-            ...(page.og_image_url
-                ? { images: [{ url: page.og_image_url }] }
-                : page.has_logo ? { images: [{ url: logoUrl(slug) }] } : {}),
+            // An explicit admin-set og_image_url wins; otherwise fall through to
+            // the generated opengraph-image.tsx card (a proper 1200×630 banner
+            // beats the square company logo we used to send).
+            ...(page.og_image_url ? { images: [{ url: page.og_image_url }] } : {}),
         },
     };
 }
@@ -165,6 +201,13 @@ export default async function PromotedJobPage(
 
     return (
         <main className={styles.page}>
+            {/* JobPosting structured data — Google Jobs + AEO */}
+            <script
+                type="application/ld+json"
+                dangerouslySetInnerHTML={{ __html: jobPostingJsonLd(page) }}
+            />
+            {/* Count a real (browser) view; skip admin drafts */}
+            {!preview && <PromotedViewBeacon slug={slug} />}
             {/* Top bar */}
             <div className={styles.topbar}>
                 <a href="/" className={styles.brand}>
