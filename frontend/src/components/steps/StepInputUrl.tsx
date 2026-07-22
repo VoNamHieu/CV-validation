@@ -210,6 +210,9 @@ export default function StepInputUrl() {
                 url: string; applyUrl: string; title: string; company: string;
                 careerUrl: string; location: string; description: string;
                 roleFamily?: string; logoDomain?: string;
+                // Province union when the backend collapsed several per-branch
+                // postings of this role into one card (len > 1 ⇒ "+N nơi").
+                locations?: string[];
             };
 
             // City pairing: keep in-city matches; if none, keep the (still
@@ -403,6 +406,7 @@ export default function StepInputUrl() {
                         description: job.description || '',
                         roleFamily: job.roleFamily,
                         locationNote: off ? `Khác ${cityName}` : undefined,
+                        locations: job.locations,
                         logoDomain: job.logoDomain,
                     };
                 };

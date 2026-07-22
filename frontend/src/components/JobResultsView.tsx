@@ -208,6 +208,14 @@ function JobCard({ c, busy, onRemove }: { c: CandidateJob; busy: boolean; onRemo
                         {c.location && (
                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                                 <MapPin size={14} weight="duotone" /> {c.location}
+                                {c.locations && c.locations.length > 1 && (
+                                    <span
+                                        title={c.locations.join(' · ')}
+                                        style={{ opacity: 0.7, fontWeight: 600 }}
+                                    >
+                                        +{c.locations.length - 1} nơi
+                                    </span>
+                                )}
                             </span>
                         )}
                         {c.locationNote && (
