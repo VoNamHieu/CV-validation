@@ -26,6 +26,7 @@ from app.services import cache
 from app.services import capture_jobs
 from app.search.profile import build_profile, distill_from_cv, families_from_roles
 from app.search.facet import rank_jobs
+from app.search.location import canon_provinces, _fold as _fold_loc
 from app.search.company_industry import classify_company
 from app.search.semantic import rerank_bucket
 from app.services.gemini_client import discover_jobs_for_profile
@@ -446,6 +447,66 @@ def _flatten_featured(companies: list[dict]) -> list[dict]:
     return flat
 
 
+# ── Per-site variant collapse ────────────────────────────────────────────────
+# Banks/retailers post the SAME role once per branch (chi nhánh / phòng giao
+# dịch), so a search returns 30–46 near-identical rows that differ only by
+# location — flooding the results. We collapse them into ONE card whose location
+# is the UNION of the branches' provinces ("Hà Nội +11 nơi"), keeping the
+# highest-ranked row as the representative. Non-destructive: every underlying row
+# still exists in the store with its own apply URL; this is a display-layer fold.
+_BRANCH_MARK = re.compile(
+    r"\b(cn|chi nhanh|phong giao dich|pgd|khu vuc|so giao dich)\b")
+
+
+def _base_title_key(title: str) -> str:
+    """Grouping key for postings that differ only by site: drop a leading
+    "[Hà Nội]" location tag, fold accents, cut at the first branch/office marker,
+    then strip a trailing province name. Empty when the title is only a
+    location/branch (nothing to merge)."""
+    t = re.sub(r"^\s*\[[^\]]*\]\s*", "", (title or "").strip())
+    provs = canon_provinces(t)
+    f = _fold_loc(t)
+    m = _BRANCH_MARK.search(f)
+    if m and m.start() > 0:
+        f = f[: m.start()].strip()
+    for p in provs:  # a title-trailing province ("Trưởng ca (Tuyên Quang)")
+        f = re.sub(rf"\b{re.escape(_fold_loc(p))}\b\s*$", "", f).strip()
+    return f.strip(" -")
+
+
+def _collapse_variants(ranked: list[dict]) -> list[dict]:
+    """Fold per-branch duplicates of the same role@company into one card, ranked
+    order preserved (first occurrence = highest-ranked = representative). Sets on
+    the representative: ``location`` (primary province, clean), ``locations`` (all
+    provinces across the merged rows), ``variant_count`` (# rows folded in)."""
+    groups: dict[tuple, dict] = {}
+    order: list[tuple] = []
+    for j in ranked:
+        base = _base_title_key(j.get("title", ""))
+        company = _fold_loc(j.get("company", "") or "")
+        key = (company, base) if base else ("\0solo", id(j))  # unkeyable → passthrough
+        rep = groups.get(key)
+        provs = canon_provinces(j.get("location"))
+        if rep is None:
+            rep = {**j, "_prov": list(provs), "variant_count": 1}
+            groups[key] = rep
+            order.append(key)
+        else:
+            rep["variant_count"] += 1
+            for p in provs:
+                if p not in rep["_prov"]:
+                    rep["_prov"].append(p)
+    out: list[dict] = []
+    for key in order:
+        rep = groups.pop(key)
+        provs = rep.pop("_prov")
+        if provs:
+            rep["location"] = provs[0]      # clean primary (keeps matchesCity working)
+            rep["locations"] = provs        # full spread for the "+N nơi" badge
+        out.append(rep)
+    return out
+
+
 # ── DB-backed candidate pool (opt-in) ────────────────────────────────────────
 # CATALOG_SOURCE controls where /search pulls its candidate pool from:
 #   "featured" (default) → in-memory crawl cache only — current behaviour, no change
@@ -542,6 +603,11 @@ async def search(req: SearchRequest):
             (req.target_roles or []) + profile.domains)
         if query_text:
             ranked = await rerank_bucket(ranked, query_text, top=60)
+
+    # Collapse per-branch duplicates (same role@company, many sites) into one
+    # card with a province-union location, so a bank's 40 branch postings don't
+    # flood the list. Ranked order is preserved (top row stays representative).
+    ranked = _collapse_variants(ranked)
 
     out = ranked[: max(1, min(req.limit, 200))]
     logger.info(

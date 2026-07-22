@@ -147,11 +147,60 @@ def test_classify_seniority_title_primary_and_desc_absent():
     # Title keyword stays the primary signal (unchanged).
     assert classify_seniority("Senior Backend Engineer") == "Senior"
     assert classify_seniority("Trưởng phòng Kinh doanh") == "Director/Head+"
-    assert classify_seniority("Intern Marketing") == "Intern/Fresher"
+    assert classify_seniority("Intern Marketing") == "Intern"
+    assert classify_seniority("Fresher Java Developer") == "Fresher"
+    assert classify_seniority("Chuyên viên Tập sự Khách hàng") == "Fresher"
+    # Domain fallback: bare bank customer-relations roles imply a level (KHCN =
+    # retail → Junior, KHDN = corporate → Mid), but only when no explicit level
+    # word is present — those still win.
+    assert classify_seniority("Chuyên viên Khách hàng Cá nhân") == "Junior"
+    assert classify_seniority("Chuyên viên Khách hàng Doanh nghiệp") == "Mid"
+    assert classify_seniority("CVCC Khách hàng Cá nhân") == "Senior"          # explicit wins
+    # "cấp cao" (senior) — both word orders, cao cấp / cấp cao.
+    assert classify_seniority("Chuyên viên cấp cao Pháp chế") == "Senior"
+    assert classify_seniority("Chuyên viên Mua hàng Cấp cao") == "Senior"
+    assert classify_seniority("Giám đốc Khách hàng Doanh nghiệp") == "Director/Head+"
+    # Engagement/role fallbacks: CTV (collaborator) = Fresher, tư vấn viên / giao
+    # dịch viên (teller) = Junior; explicit level words still win.
+    assert classify_seniority("Cộng tác viên Kinh doanh (B2B)") == "Fresher"
+    assert classify_seniority("Tư vấn viên Hỗ trợ khách hàng (CTV Inbound)") == "Fresher"  # CTV wins
+    assert classify_seniority("Tư vấn viên Bán hàng") == "Junior"
+    assert classify_seniority("Giao dịch viên") == "Junior"
     # No level word in title AND no usable description → None (no regression).
     assert classify_seniority("Nhân viên kinh doanh") is None
     assert classify_seniority("Kế toán tổng hợp", None) is None
-    assert classify_seniority("Chuyên viên tuyển dụng", "") is None
+    # A generic "Chuyên viên X" in an ambiguous domain stays UNKNOWN (None).
+    assert classify_seniority("Chuyên viên Thiết kế", "") is None
+
+
+def test_officer_evidence_scorer():
+    """Generic 'Chuyên viên X' resolves by EVIDENCE (entry cue → years → scope),
+    domain only a tie-breaker; ambiguous domains stay UNKNOWN not mislabelled."""
+    from app.search.taxonomy import classify_seniority as cs
+    assert cs("Chuyên viên chính Vận hành") == "Senior"                       # spelled-out CVC
+    assert cs("Chuyên viên Quản lý khách hàng không yêu cầu kinh nghiệm") == "Junior"  # entry cue
+    assert cs("Chuyên viên Kinh doanh", "Yêu cầu 3 năm kinh nghiệm") == "Mid"  # years
+    assert cs("Chuyên viên Vận hành", "Tối thiểu 5 năm kinh nghiệm") == "Senior"
+    assert cs("Chuyên viên Phân tích nghiệp vụ (BA)") == "Mid"                # mid scope
+    assert cs("Chuyên viên Kinh doanh") == "Junior"                          # jr prior
+    assert cs("Chuyên viên Tuyển dụng") == "Junior"
+    # Ambiguous domains → UNKNOWN unless evidence (BD ≠ front-line sales).
+    assert cs("Chuyên viên Phát triển Kinh doanh") is None
+    assert cs("Chuyên viên Thiết kế UI/UX") is None
+    assert cs("Chuyên viên Đào tạo") is None
+    assert cs("Chuyên viên Phát triển Kênh đại lý") == "Mid"                  # mid scope lifts BD
+
+
+def test_years_of_experience_maps_to_band():
+    """An explicit years requirement bands ANY role with no title level word
+    (≤1 Junior, 2–4 Mid, 5+ Senior); an explicit desc LABEL still outranks it."""
+    from app.search.taxonomy import classify_seniority as cs
+    assert cs("Nhân viên Kinh doanh", "Yêu cầu 3 năm kinh nghiệm bán hàng") == "Mid"
+    assert cs("Kỹ sư phần mềm", "Tối thiểu 5 năm kinh nghiệm lập trình") == "Senior"
+    assert cs("Nhân viên Kế toán", "Ưu tiên có 1 năm kinh nghiệm") == "Junior"
+    assert cs("Nhân viên kinh doanh") is None                       # no years → NULL
+    # An explicit stated level in the description outranks the years band.
+    assert cs("Kỹ sư phần mềm", "Yêu cầu: ứng viên Senior, có 3 năm kinh nghiệm.") == "Senior"
 
 
 def test_classify_seniority_from_labeled_field():
@@ -226,7 +275,7 @@ def test_effective_level_discounts_pivot_never_raises():
     assert _effective_level("Senior", 0.4) == "Mid"                 # pivot → discounted down
     # 0.75 is a real edge weight (Eng↔Data); round-half-UP → drop 1, not 0.
     assert _effective_level("Senior", 0.75) == "Mid"
-    assert _effective_level("Intern/Fresher", 0.4) == "Intern/Fresher"  # never raised
+    assert _effective_level("Intern", 0.4) == "Intern"              # floored, never raised
     assert _effective_level("", 0.4) == ""                          # no level → neutral
 
 

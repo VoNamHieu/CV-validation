@@ -79,7 +79,7 @@ def test_seniority_intentional_signals_unaffected():
     assert classify_seniority("Product Manager") is None      # bare manager = no signal (by design)
     assert classify_seniority("Team Lead") == "Lead/Manager"  # already works via \\blead\\b
     assert classify_seniority("Senior Data Analyst") == "Senior"
-    assert classify_seniority("Data Intern") == "Intern/Fresher"
+    assert classify_seniority("Data Intern") == "Intern"
     assert classify_seniority("Head of Marketing") == "Director/Head+"
 
 

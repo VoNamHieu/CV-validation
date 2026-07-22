@@ -173,6 +173,9 @@ export interface CandidateJob {
   description: string;    // JD text the search layer already fetched (prefetch)
   roleFamily?: string;
   locationNote?: string;  // "Khác <city>" when off the chosen city
+  // Province union when the backend folded several per-branch postings of this
+  // role into one card. len > 1 ⇒ the card shows "+N nơi" next to the primary.
+  locations?: string[];
   logoDomain?: string;    // company domain WITH an uploaded logo → results card shows the brand
 }
 

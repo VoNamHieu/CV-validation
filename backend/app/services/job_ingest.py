@@ -296,6 +296,7 @@ async def _upsert_company_jobs(c, jobs_list: list[dict]) -> dict | None:
     from app.search.taxonomy import classify_title, classify_seniority
     from app.search.company_industry import classify_company
     from app.search.facet import _required_years
+    from app.search.location import clean_location
     from app.db import companies as companies_repo, jobs as jobs_repo
 
     industry = classify_company(c.name, c.career_url)
@@ -338,7 +339,9 @@ async def _upsert_company_jobs(c, jobs_list: list[dict]) -> dict | None:
                 company_id=cid,
                 external_id=ext,
                 title=title,
-                location=j.get("location") or None,
+                # Province-normalize the scraped location to a clean signal; keep
+                # the raw string when no VN province is recognised (Remote, foreign).
+                location=clean_location(j.get("location")) or j.get("location") or None,
                 description=j.get("description") or None,
                 role_family=fam,
                 industry=industry,
