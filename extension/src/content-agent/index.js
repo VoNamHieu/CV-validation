@@ -117,8 +117,13 @@ async function runAgentLoop(profile) {
             // ── 2. CHECK TERMINATION ──
             if (baselineSignals === null) baselineSignals = new Set(state.completionSignals);
             const newSignals = state.completionSignals.filter(s => !baselineSignals.has(s));
-            // Success = a NEW signal appeared after at least one real action.
-            if (newSignals.length > 0 && actionsTaken > 0) {
+            // Success = a NEW signal appeared after at least one real action. But a
+            // recipe'd multi-step ATS (Workday…) never auto-submits — the agent hands
+            // off at the review step — so a completion signal BEFORE the final step is
+            // a false positive (e.g. "Successfully uploaded" on the Autofill-with-Resume
+            // step reading as the whole application being done). Trust atFinalStep there.
+            const midRecipeFlow = !!recipe?.finalStepSelector && !atFinalStep(recipe);
+            if (newSignals.length > 0 && actionsTaken > 0 && !midRecipeFlow) {
                 showProgress(i + 1, AGENT_MAX_ITERATIONS, 'Phát hiện ứng tuyển thành công!');
                 removeProgress();
                 reportResult(true, `Success detected: ${newSignals[0]}`, 'submitted');
