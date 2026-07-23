@@ -115,6 +115,16 @@ async function runAgentLoop(profile) {
             showProgress(i + 1, AGENT_MAX_ITERATIONS, 'Đang phân tích trang...');
             const state = await observePageState();
 
+            // ── TRACE: per-iteration snapshot of what the scanner sees — so it's
+            // obvious whether the page has the fields and whether they're already
+            // filled (recipe + LLM act on this). ──
+            const _step = state.stepIndicator ? `${state.stepIndicator.current}/${state.stepIndicator.total}` : '?';
+            console.log(`[Copo Apply] ══ iter ${i + 1}/${AGENT_MAX_ITERATIONS} ══ …${location.pathname.slice(-42)} · step ${_step} · fields=${state.formFields.length} buttons=${state.buttons.length} errors=${state.errors.length} blockers=${state.blockers.length}`);
+            if (state.formFields.length) {
+                console.log('[Copo Apply]   fields:', state.formFields.map(f =>
+                    `${(f.label || f.name || f.placeholder || f.ariaLabel || '?').trim().slice(0, 22)}[${f.componentType || f.type}${f.value ? '=✓' : ''}${f.required ? ',req' : ''}]`).join('   '));
+            }
+
             // ── DIAG: surface WHY a recipe'd ATS breaks ("Something went wrong").
             // From the isolated world we can't read fetch bodies, but Resource Timing
             // exposes request URLs — and the usual Workday cause (an undefined
@@ -260,6 +270,7 @@ async function runAgentLoop(profile) {
             // sees the pre-filled state and only handles the rest (dropdowns, Next).
             if (recipe) {
                 const rf = await applyRecipeFields(recipe, profile, cvData);
+                console.log(`[Copo Apply] recipe(${recipe.ats} v${recipe.version}): ${rf.matched ? `step="${rf.step || '—'}" filled=${rf.filled}` : 'no step matched → LLM handles'}`);
                 if (rf.filled > 0) {
                     actionsTaken++;
                     history.push({
@@ -332,9 +343,12 @@ async function runAgentLoop(profile) {
             showProgress(i + 1, AGENT_MAX_ITERATIONS, `AI đang lên kế hoạch (iteration ${i + 1})...`);
 
             let plan;
+            const _planT0 = Date.now();
+            console.log(`[Copo Apply] → LLM plan request (fields=${state.formFields.length}, unfilledRequired=${state.unfilledRequired.length})…`);
             try {
                 plan = await callAgentPlan(state, profile, history.slice(-8), hasCV);
             } catch (err) {
+                console.warn(`[Copo Apply] ✖ LLM plan FAILED in ${Date.now() - _planT0}ms: ${err.message}`);
                 // Fallback: use simple map-form for the first iteration
                 if (i === 0 && state.formFields.length > 0) {
                     console.warn('[Copo Agent] Agent plan failed, falling back to map-form:', err.message);
@@ -360,8 +374,8 @@ async function runAgentLoop(profile) {
                 }
             }
 
-            console.log(`[Copo Apply] iter ${i + 1}/${AGENT_MAX_ITERATIONS}: fields=${state.formFields.length} → action=${plan.action}` +
-                (plan.reason ? ` (${String(plan.reason).slice(0, 50)})` : '') +
+            console.log(`[Copo Apply] ← LLM plan in ${Date.now() - _planT0}ms: action=${plan.action}` +
+                (plan.reason ? ` (${String(plan.reason).slice(0, 60)})` : '') +
                 (Array.isArray(plan.instructions) ? ` [${plan.instructions.length} instr]` : ''));
 
             // ── 4. CHECK ACTION ──
@@ -424,6 +438,8 @@ async function runAgentLoop(profile) {
                 // Just wait
                 actionResult = { waited: true };
             }
+
+            console.log(`[Copo Apply] exec ${plan.action} →`, actionResult);
 
             // ── 6. RECORD HISTORY ──
             history.push({
