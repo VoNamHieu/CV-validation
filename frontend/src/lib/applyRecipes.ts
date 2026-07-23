@@ -67,7 +67,10 @@ export function loginAtsSummary(urls: (string | null | undefined)[]): { label: s
 export interface RecipeField {
     label: string;
     selector: string;
-    profileKey: string;   // key in the synced ExtensionProfile
+    profileKey?: string;  // key in the synced ExtensionProfile (omit for a fixed `value`)
+    value?: string;       // fixed value (e.g. Postal "100000") — wins over profileKey
+    default?: string;     // fallback when the profile key is empty (e.g. Country → "Vietnam")
+    pickAny?: boolean;    // required-but-arbitrary dropdown: any option satisfies it
     type?: 'text' | 'select' | 'custom-select' | 'date' | 'file' | 'radio' | 'checkbox';
     required?: boolean;
 }
@@ -111,7 +114,7 @@ export interface ApplyRecipe {
 const WORKDAY: ApplyRecipe = {
     ats: 'workday',
     label: 'Workday',
-    version: 2,
+    version: 3,
     verified: true,
     hostPattern: '\\.myworkdayjobs\\.com|\\.myworkdaysite\\.com',
     login: {
@@ -120,12 +123,12 @@ const WORKDAY: ApplyRecipe = {
         signInSelector: '[data-automation-id="signInSubmitButton"]',
         createAccountSelector: '[data-automation-id="createAccountLink"]',
     },
-    // "Start Your Application" modal (<a role="button">) — prefer Autofill with
-    // Resume when a CV is present (Workday parses it → pre-fills the required
-    // dropdowns), else Apply Manually.
+    // "Start Your Application" modal (<a role="button">). ONLY "Autofill with
+    // Resume": the flow always syncs a CV PDF first, and Workday's résumé parse
+    // pre-fills the tricky required dropdowns (Country/source). "Apply Manually"
+    // is intentionally omitted — it skips that pre-fill.
     gateways: [
         { label: 'Autofill with Resume', detect: '[data-automation-id="autofillWithResume"]', needsCV: true },
-        { label: 'Apply Manually', detect: '[data-automation-id="applyManually"]' },
     ],
     steps: [
         {
@@ -139,12 +142,20 @@ const WORKDAY: ApplyRecipe = {
                 { label: 'Last name', selector: '[data-automation-id="formField-legalName--lastName"] input', profileKey: 'lastName', type: 'text', required: true },
                 { label: 'Address line 1', selector: '[data-automation-id="formField-addressLine1"] input', profileKey: 'addressStreet', type: 'text' },
                 { label: 'District or Town', selector: '[data-automation-id="formField-city"] input', profileKey: 'addressDistrict', type: 'text' },
+                // Required text input a résumé never carries → autofill leaves it blank
+                // and Next validation blocks. Default to the VN generic postal code.
+                { label: 'Postal Code', selector: '[data-automation-id="formField-postalCode"] input', value: '100000', type: 'text', required: true },
                 { label: 'Phone number', selector: '[data-automation-id="formField-phoneNumber"] input', profileKey: 'phone', type: 'text', required: true },
-                // Custom Workday dropdowns: click the button → a listbox opens →
-                // type-to-filter → pick the option. The agent's custom-select
-                // handler drives these; the recipe just names them + the value key.
-                { label: 'Country', selector: '[data-automation-id="formField-country"] button', profileKey: 'nationality', type: 'custom-select', required: true },
+                // Custom Workday dropdowns (button→listbox): click → listbox opens →
+                // type-to-filter → pick the option. The agent's custom-select handler
+                // drives these deterministically. Country FIRST (it re-renders the
+                // region/postal fields), then Province. `value`/pickAny satisfy the
+                // required-but-arbitrary dropdowns so the step no longer relies on the
+                // LLM landing them — the cause of the flaky My-Information step.
+                { label: 'Country', selector: '[data-automation-id="formField-country"] button', profileKey: 'nationality', default: 'Vietnam', type: 'custom-select', required: true },
                 { label: 'Province or City', selector: '[data-automation-id="formField-countryRegion"] button', profileKey: 'addressProvince', type: 'custom-select' },
+                { label: 'How did you hear', selector: '[data-automation-id="formField-source"] button', value: 'Website', pickAny: true, type: 'custom-select', required: true },
+                { label: 'Phone type', selector: '[data-automation-id="formField-phoneType"] button', value: 'Mobile', type: 'custom-select' },
             ],
             advance: '[data-automation-id="pageFooterNextButton"]',
         },

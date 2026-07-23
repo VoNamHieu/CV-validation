@@ -7,19 +7,23 @@
 // bundled FALLBACK_RECIPES below is a safety net used when that fetch fails or
 // hasn't happened yet — so the agent still works offline / before a deploy.
 //
-// Scope on purpose: the recipe fills reliable TEXT inputs (name, phone, address)
-// with exact wrapper→input selectors. Custom dropdowns, validation recovery and
-// step navigation stay with the LLM planner, which re-observes after each pass.
+// Scope on purpose: the recipe fills the standardized fields — TEXT inputs AND
+// Workday's custom dropdowns (button→listbox) — deterministically. Validation
+// recovery and step navigation stay with the LLM planner, which re-observes each
+// pass; the recipe re-runs every iteration and is idempotent, so partial progress
+// accumulates and already-filled fields are skipped.
 
-import { overlayClick, setFileOnInput, setNativeValue, sleep } from './dom.js';
+import { overlayClick, setFileOnInput, setNativeValue, simulateTyping, sleep, waitForElement } from './dom.js';
 
-// Keep in sync with frontend/src/lib/applyRecipes.ts (WORKDAY). Verified against
-// a real 3M Workday capture on 2026-07-15.
+// Keep in sync with frontend/src/lib/applyRecipes.ts (WORKDAY). Fields verified
+// against real 3M Workday captures (My Information, 2026-07-15 / -22). The
+// custom-select handler is grounded in the captured widget markup (button[value]
+// + promptOption) but PENDING a live-fill verification.
 const FALLBACK_RECIPES = [
     {
         ats: 'workday',
         label: 'Workday',
-        version: 2,
+        version: 3,
         verified: true,
         hostPattern: '\\.myworkdayjobs\\.com|\\.myworkdaysite\\.com',
         login: {
@@ -28,14 +32,15 @@ const FALLBACK_RECIPES = [
             signInSelector: '[data-automation-id="signInSubmitButton"]',
             createAccountSelector: '[data-automation-id="createAccountLink"]',
         },
-        // Non-form gateways the agent must click through to reach the form. The
-        // "Start Your Application" modal renders its options as <a role="button">
-        // (not <button>), which the generic scan misses — so drive them by exact
-        // selector. Prefer "Autofill with Resume" when we have a CV (Workday parses
-        // it and pre-fills the tricky required dropdowns), else "Apply Manually".
+        // Non-form gateway the agent clicks to reach the form. The "Start Your
+        // Application" modal renders its options as <a role="button"> (not
+        // <button>), which the generic scan misses — so drive it by exact selector.
+        // ONLY "Autofill with Resume": the flow always syncs a CV PDF first, and
+        // letting Workday parse the résumé pre-fills the tricky required dropdowns
+        // (Country/source). "Apply Manually" is intentionally omitted — it skips
+        // that pre-fill and leaves every required field to fill by hand.
         gateways: [
             { label: 'Autofill with Resume', detect: '[data-automation-id="autofillWithResume"]', needsCV: true },
-            { label: 'Apply Manually', detect: '[data-automation-id="applyManually"]' },
         ],
         steps: [
             {
@@ -46,9 +51,19 @@ const FALLBACK_RECIPES = [
                     { label: 'Last name', selector: '[data-automation-id="formField-legalName--lastName"] input', profileKey: 'lastName', type: 'text', required: true },
                     { label: 'Address line 1', selector: '[data-automation-id="formField-addressLine1"] input', profileKey: 'addressStreet', type: 'text' },
                     { label: 'District or Town', selector: '[data-automation-id="formField-city"] input', profileKey: 'addressDistrict', type: 'text' },
+                    // Required text input; a résumé never carries it, so autofill leaves
+                    // it blank and the step's Next validation blocks. Default to the VN
+                    // generic postal code.
+                    { label: 'Postal Code', selector: '[data-automation-id="formField-postalCode"] input', value: '100000', type: 'text', required: true },
                     { label: 'Phone number', selector: '[data-automation-id="formField-phoneNumber"] input', profileKey: 'phone', type: 'text', required: true },
-                    { label: 'Country', selector: '[data-automation-id="formField-country"] button', profileKey: 'nationality', type: 'custom-select', required: true },
+                    // Custom Workday dropdowns (button→listbox). Country FIRST — picking it
+                    // re-renders the region/postal fields — then Province. `value`/pickAny
+                    // satisfy the two required-but-arbitrary dropdowns deterministically so
+                    // the step stops depending on the LLM landing them.
+                    { label: 'Country', selector: '[data-automation-id="formField-country"] button', profileKey: 'nationality', default: 'Vietnam', type: 'custom-select', required: true },
                     { label: 'Province or City', selector: '[data-automation-id="formField-countryRegion"] button', profileKey: 'addressProvince', type: 'custom-select' },
+                    { label: 'How did you hear', selector: '[data-automation-id="formField-source"] button', value: 'Website', pickAny: true, type: 'custom-select', required: true },
+                    { label: 'Phone type', selector: '[data-automation-id="formField-phoneType"] button', value: 'Mobile', type: 'custom-select' },
                 ],
                 advance: '[data-automation-id="pageFooterNextButton"]',
             },
@@ -130,8 +145,9 @@ export function recipeForUrl(recipes, url) {
  *
  * - Idempotent: skips inputs that already hold a value, so it can run every
  *   iteration and naturally goes quiet once the step is filled (returns 0).
- * - TEXT inputs only. Custom dropdowns (Workday's button→listbox) are left to
- *   the LLM — they need type-to-filter and are brittle to drive blindly.
+ * - Fills TEXT inputs AND Workday's custom dropdowns (button→listbox) — the
+ *   required-but-arbitrary ones (Country, "How did you hear", Postal Code) were
+ *   the source of the flaky My-Information step when left to the LLM.
  * - NEVER touches a password field and NEVER clicks the final submit; it does
  *   not advance the wizard (the planner owns navigation).
  * - Opportunistically uploads the CV if the step exposes the recipe's file input.
@@ -159,24 +175,77 @@ export async function applyRecipeFields(recipe, profile, cvData) {
     const step = (recipe.steps || []).find(s => s.detect && document.querySelector(s.detect));
     if (!step) return { matched: filled > 0, filled };  // e.g. the autofill upload page: uploaded, no text step
 
+    // Fields are filled in array order (Country BEFORE Province — picking Country
+    // re-renders the region field). Custom-selects re-query fresh each pass, so a
+    // field that isn't rendered yet is simply retried next iteration.
     for (const f of step.fields || []) {
-        if (f.type === 'custom-select') continue; // defer dropdowns to the LLM
-        const val = profile[f.profileKey];
-        if (val == null || String(val).trim() === '') continue;
-        const el = document.querySelector(f.selector);
-        if (!el || el.offsetParent === null) continue;
-        if (el.type === 'password') continue;                 // never
-        if (String(el.value ?? '').trim() !== '') continue;   // already filled → idempotent
+        const val = recipeFieldValue(f, profile);
+        if ((val == null || String(val).trim() === '') && !f.pickAny) continue;
         try {
-            setNativeValue(el, String(val));
-            await sleep(120);
-            if (String(el.value ?? '').trim() !== '') {
-                filled++;
-                console.log(`[Copo Recipe] filled ${f.label} (${f.selector})`);
+            if (f.type === 'custom-select') {
+                if (await fillCustomSelect(f, val)) {
+                    filled++;
+                    console.log(`[Copo Recipe] selected ${f.label} = ${val || '(any)'}`);
+                }
+            } else {
+                const el = document.querySelector(f.selector);
+                if (!el || el.offsetParent === null) continue;
+                if (el.type === 'password') continue;                 // never
+                if (String(el.value ?? '').trim() !== '') continue;   // already filled → idempotent
+                setNativeValue(el, String(val));
+                await sleep(120);
+                if (String(el.value ?? '').trim() !== '') {
+                    filled++;
+                    console.log(`[Copo Recipe] filled ${f.label} (${f.selector})`);
+                }
             }
         } catch { /* best effort — LLM will retry */ }
         await sleep(120);
     }
 
     return { matched: true, filled, step: step.name };
+}
+
+/** Resolve a field's value: an explicit fixed `value`, else the synced profile
+ *  key, else the recipe `default`. (Postal/how-did-you-hear use fixed values;
+ *  Country uses profile.nationality with a "Vietnam" default.) */
+function recipeFieldValue(f, profile) {
+    if (f.value != null && f.value !== '') return f.value;
+    const p = profile[f.profileKey];
+    if (p != null && String(p).trim() !== '') return p;
+    return f.default ?? '';
+}
+
+/**
+ * Fill one Workday custom dropdown (button→listbox) deterministically.
+ * Idempotent: Workday stores the chosen option's id in the button's `value`
+ * attribute, so a non-empty value (incl. an "Autofill with Resume" pre-fill) is
+ * skipped. Opens the listbox, type-filters when the field has a search input,
+ * then clicks the option matching `value` (exact → contains → first when
+ * `f.pickAny`). Leaves the popup CLOSED on a miss so it can't block the next field.
+ */
+async function fillCustomSelect(f, value) {
+    const btn = document.querySelector(f.selector);
+    if (!btn || btn.offsetParent === null) return false;
+    if ((btn.getAttribute('value') || '').trim()) return false;   // already selected → idempotent
+    overlayClick(btn);
+    if (!(await waitForElement('[data-automation-id="promptOption"]', 4000))) return false;
+    await sleep(150);
+    const want = String(value || '').trim().toLowerCase();
+    // Long lists (Country) render a type-to-filter input beside the button.
+    const filter = btn.parentElement?.querySelector('input[type="text"]');
+    if (filter && want) { await simulateTyping(filter, String(value)); await sleep(450); }
+    const opts = [...document.querySelectorAll('[data-automation-id="promptOption"]')]
+        .filter(o => o.offsetParent !== null);
+    const txt = (o) => (o.textContent || '').trim().toLowerCase();
+    const opt = (want && opts.find(o => txt(o) === want))
+        || (want && opts.find(o => txt(o).includes(want)))
+        || (f.pickAny ? opts[0] : null);
+    if (!opt) {
+        btn.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); // close, don't block
+        return false;
+    }
+    overlayClick(opt);
+    await sleep(250);
+    return true;
 }
