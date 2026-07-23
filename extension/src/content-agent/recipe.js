@@ -178,29 +178,40 @@ export async function applyRecipeFields(recipe, profile, cvData) {
     // Fields are filled in array order (Country BEFORE Province — picking Country
     // re-renders the region field). Custom-selects re-query fresh each pass, so a
     // field that isn't rendered yet is simply retried next iteration.
+    const outcomes = [];   // [label, status, note] per field → debug summary below
     for (const f of step.fields || []) {
         const val = recipeFieldValue(f, profile);
-        if ((val == null || String(val).trim() === '') && !f.pickAny) continue;
+        if ((val == null || String(val).trim() === '') && !f.pickAny) { outcomes.push([f.label, 'skip', 'no value']); continue; }
         try {
             if (f.type === 'custom-select') {
-                if (await fillCustomSelect(f, val)) {
-                    filled++;
-                    console.log(`[Copo Recipe] selected ${f.label} = ${val || '(any)'}`);
-                }
+                const r = await fillCustomSelect(f, val);
+                if (r.ok) { filled++; outcomes.push([f.label, 'OK', String(val || '(any)')]); }
+                else if (r.reason === 'already-selected') outcomes.push([f.label, 'done', 'already selected']);
+                else if (r.reason === 'button-absent') outcomes.push([f.label, 'absent', 'not rendered yet']);
+                else outcomes.push([f.label, 'FAIL', r.reason]);
             } else {
                 const el = document.querySelector(f.selector);
-                if (!el || el.offsetParent === null) continue;
-                if (el.type === 'password') continue;                 // never
-                if (String(el.value ?? '').trim() !== '') continue;   // already filled → idempotent
+                if (!el || el.offsetParent === null) { outcomes.push([f.label, 'absent', 'not rendered yet']); continue; }
+                if (el.type === 'password') { outcomes.push([f.label, 'skip', 'password']); continue; }   // never
+                if (String(el.value ?? '').trim() !== '') { outcomes.push([f.label, 'done', 'already filled']); continue; }  // idempotent
                 setNativeValue(el, String(val));
                 await sleep(120);
-                if (String(el.value ?? '').trim() !== '') {
-                    filled++;
-                    console.log(`[Copo Recipe] filled ${f.label} (${f.selector})`);
-                }
+                if (String(el.value ?? '').trim() !== '') { filled++; outcomes.push([f.label, 'OK', String(val)]); }
+                else outcomes.push([f.label, 'FAIL', 'value did not stick']);
             }
-        } catch { /* best effort — LLM will retry */ }
+        } catch (e) { outcomes.push([f.label, 'FAIL', (e && e.message) || 'exception']); }
         await sleep(120);
+    }
+
+    // Per-field debug log — only on passes where something was filled or failed
+    // (the recipe re-runs every iteration; skip the idempotent all-"done" passes).
+    const failed = outcomes.filter(([, s]) => s === 'FAIL');
+    if (filled > 0 || failed.length) {
+        console.log(`[Copo Recipe] "${step.name}" fields →`, outcomes.map(([l, s]) => `${l}:${s}`).join('  ·  '));
+        if (failed.length) {
+            console.warn(`[Copo Recipe] ✗ FAILED (${step.name}):`,
+                failed.map(([l, , why]) => `${l} — ${why}`).join('  |  '));
+        }
     }
 
     return { matched: true, filled, step: step.name };
@@ -226,10 +237,10 @@ function recipeFieldValue(f, profile) {
  */
 async function fillCustomSelect(f, value) {
     const btn = document.querySelector(f.selector);
-    if (!btn || btn.offsetParent === null) return false;
-    if ((btn.getAttribute('value') || '').trim()) return false;   // already selected → idempotent
+    if (!btn || btn.offsetParent === null) return { ok: false, reason: 'button-absent' };
+    if ((btn.getAttribute('value') || '').trim()) return { ok: false, reason: 'already-selected' };
     overlayClick(btn);
-    if (!(await waitForElement('[data-automation-id="promptOption"]', 4000))) return false;
+    if (!(await waitForElement('[data-automation-id="promptOption"]', 4000))) return { ok: false, reason: 'listbox-timeout' };
     await sleep(150);
     const want = String(value || '').trim().toLowerCase();
     // Long lists (Country) render a type-to-filter input beside the button.
@@ -243,9 +254,9 @@ async function fillCustomSelect(f, value) {
         || (f.pickAny ? opts[0] : null);
     if (!opt) {
         btn.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); // close, don't block
-        return false;
+        return { ok: false, reason: `option-not-found (${opts.length} shown${want ? `, wanted "${value}"` : ''})` };
     }
     overlayClick(opt);
     await sleep(250);
-    return true;
+    return { ok: true };
 }
