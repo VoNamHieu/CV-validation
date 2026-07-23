@@ -71,6 +71,7 @@ export interface RecipeField {
     value?: string;       // fixed value (e.g. Postal "100000") — wins over profileKey
     default?: string;     // fallback when the profile key is empty (e.g. Country → "Vietnam")
     pickAny?: boolean;    // required-but-arbitrary dropdown: any option satisfies it
+    multi?: boolean;      // input-based multi-select (Country Phone Code): idempotency checks selectedItemList
     type?: 'text' | 'select' | 'custom-select' | 'date' | 'file' | 'radio' | 'checkbox';
     required?: boolean;
 }
@@ -114,7 +115,7 @@ export interface ApplyRecipe {
 const WORKDAY: ApplyRecipe = {
     ats: 'workday',
     label: 'Workday',
-    version: 3,
+    version: 4,
     verified: true,
     hostPattern: '\\.myworkdayjobs\\.com|\\.myworkdaysite\\.com',
     login: {
@@ -156,6 +157,9 @@ const WORKDAY: ApplyRecipe = {
                 { label: 'Province or City', selector: '[data-automation-id="formField-countryRegion"] button', profileKey: 'addressProvince', type: 'custom-select' },
                 { label: 'How did you hear', selector: '[data-automation-id="formField-source"] button', value: 'Website', pickAny: true, type: 'custom-select', required: true },
                 { label: 'Phone type', selector: '[data-automation-id="formField-phoneType"] button', value: 'Mobile', type: 'custom-select' },
+                // Required multi-select (input-based, not a button): the LLM types but never
+                // commits an item, leaving it empty ("0 items selected") and blocking Next.
+                { label: 'Country Phone Code', selector: '[data-automation-id="formField-countryPhoneCode"] input', value: 'Vietnam', type: 'custom-select', multi: true, required: true },
             ],
             advance: '[data-automation-id="pageFooterNextButton"]',
         },
