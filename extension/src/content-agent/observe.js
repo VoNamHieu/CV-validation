@@ -285,30 +285,57 @@ export function scanButtons() {
  */
 export function detectErrors() {
     const errors = [];
+    const seen = new Set();
     const errorSelectors = [
         '.error', '.invalid-feedback', '.field-error', '[class*="error-msg"]',
         '[role="alert"]', '.text-danger', '.has-error', '.ant-form-item-explain-error',
         '.MuiFormHelperText-root.Mui-error', '[class*="validation-error"]',
+        // Workday: a failed field renders an errorMessage node inside its formField
+        // wrapper; page-level issues use errorSummary / alertBanner. Without these the
+        // agent was blind to why "Next" wouldn't advance and looped until it stalled.
+        '[data-automation-id="errorMessage"]', '[data-automation-id="formFieldError"]',
+        '[data-automation-id="errorSummary"]', '[data-automation-id="alertBanner"]',
     ];
 
     for (const sel of errorSelectors) {
-        const elements = document.querySelectorAll(sel);
-        for (const el of elements) {
+        for (const el of document.querySelectorAll(sel)) {
             if (!el.offsetParent) continue;
             const msg = el.textContent?.trim();
-            if (!msg || msg.length > 200) continue;
+            if (!msg || msg.length > 200 || seen.has(msg)) continue;
+            seen.add(msg);
 
-            // Try to find the associated field
+            // Associate with the nearest field — Workday formField wrapper first (so
+            // we can name the field), then a generic form-group.
             let nearFieldSelector = '';
-            const formGroup = el.closest('.form-group, .form-field, [class*="field"], .ant-form-item, .MuiFormControl-root');
-            if (formGroup) {
-                const input = formGroup.querySelector('input, select, textarea');
+            let field = '';
+            const wd = el.closest('[data-automation-id^="formField-"]');
+            if (wd) {
+                nearFieldSelector = `[data-automation-id="${wd.getAttribute('data-automation-id')}"]`;
+                field = findLabelFor(wd.querySelector('input, textarea, button') || wd, document);
+            } else {
+                const formGroup = el.closest('.form-group, .form-field, [class*="field"], .ant-form-item, .MuiFormControl-root');
+                const input = formGroup?.querySelector('input, select, textarea');
                 if (input?.id) nearFieldSelector = `#${CSS.escape(input.id)}`;
                 else if (input?.name) nearFieldSelector = `${input.tagName.toLowerCase()}[name="${CSS.escape(input.name)}"]`;
             }
-
-            errors.push({ message: msg, nearFieldSelector });
+            errors.push({ message: msg, field: field || undefined, nearFieldSelector });
         }
+    }
+
+    // aria-invalid controls whose message node may not match the selectors above —
+    // Workday flips this on the input itself, so surface the field even bare.
+    for (const inv of document.querySelectorAll('[aria-invalid="true"]')) {
+        if (!inv.offsetParent) continue;
+        const wrap = inv.closest('[data-automation-id^="formField-"]');
+        const label = findLabelFor(inv, document) || wrap?.getAttribute('data-automation-id') || 'field';
+        const key = `invalid:${label}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        errors.push({
+            message: `${label}: invalid or required`,
+            field: label,
+            nearFieldSelector: wrap ? `[data-automation-id="${wrap.getAttribute('data-automation-id')}"]` : '',
+        });
     }
 
     return errors;

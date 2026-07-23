@@ -28,7 +28,7 @@ import { applyRecipeFields, atFinalStep, clickRecipeGateway, loadRecipes, recipe
 // you can confirm (in the PAGE / tab console, NOT the service-worker console) that
 // the freshly-built dist is actually loaded. If you don't see this line on the
 // apply tab, the new build isn't injected (reload the extension + refresh the tab).
-const COPO_BUILD = 'trace-2026-07-23a';
+const COPO_BUILD = 'trace-2026-07-23b-errors';
 try { console.log(`%c[Copo] content-agent build ${COPO_BUILD} loaded → ${location.host}`, 'color:#c43b2e;font-weight:700'); } catch { /* noop */ }
 
 /**
@@ -130,6 +130,10 @@ async function runAgentLoop(profile) {
             if (state.formFields.length) {
                 console.log('[Copo Apply]   fields:', state.formFields.map(f =>
                     `${(f.label || f.name || f.placeholder || f.ariaLabel || '?').trim().slice(0, 22)}[${f.componentType || f.type}${f.value ? '=✓' : ''}${f.required ? ',req' : ''}]`).join('   '));
+            }
+            if (state.errors.length) {
+                console.warn('[Copo Apply] ⚠ validation errors:',
+                    state.errors.map(e => `${e.field || e.nearFieldSelector || '?'} — ${e.message}`.slice(0, 90)).join('   |   '));
             }
 
             // ── DIAG: surface WHY a recipe'd ATS breaks ("Something went wrong").
