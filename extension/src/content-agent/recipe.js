@@ -23,7 +23,7 @@ const FALLBACK_RECIPES = [
     {
         ats: 'workday',
         label: 'Workday',
-        version: 3,
+        version: 4,
         verified: true,
         hostPattern: '\\.myworkdayjobs\\.com|\\.myworkdaysite\\.com',
         login: {
@@ -64,6 +64,11 @@ const FALLBACK_RECIPES = [
                     { label: 'Province or City', selector: '[data-automation-id="formField-countryRegion"] button', profileKey: 'addressProvince', type: 'custom-select' },
                     { label: 'How did you hear', selector: '[data-automation-id="formField-source"] button', value: 'Website', pickAny: true, type: 'custom-select', required: true },
                     { label: 'Phone type', selector: '[data-automation-id="formField-phoneType"] button', value: 'Mobile', type: 'custom-select' },
+                    // Country Phone Code is a REQUIRED multi-select (input-based, not a
+                    // button): the LLM types into it but never commits an item, so it
+                    // stays empty ("0 items selected") and silently blocks Next — the
+                    // scanner can't see it's required, so the agent looped until stuck.
+                    { label: 'Country Phone Code', selector: '[data-automation-id="formField-countryPhoneCode"] input', value: 'Vietnam', type: 'custom-select', multi: true, required: true },
                 ],
                 advance: '[data-automation-id="pageFooterNextButton"]',
             },
@@ -206,12 +211,12 @@ export async function applyRecipeFields(recipe, profile, cvData) {
     // Per-field debug log — only on passes where something was filled or failed
     // (the recipe re-runs every iteration; skip the idempotent all-"done" passes).
     const failed = outcomes.filter(([, s]) => s === 'FAIL');
-    if (filled > 0 || failed.length) {
-        console.log(`[Copo Recipe] "${step.name}" fields →`, outcomes.map(([l, s]) => `${l}:${s}`).join('  ·  '));
-        if (failed.length) {
-            console.warn(`[Copo Recipe] ✗ FAILED (${step.name}):`,
-                failed.map(([l, , why]) => `${l} — ${why}`).join('  |  '));
-        }
+    // Always log the per-field verdict while debugging — shows OK/done/absent/skip/
+    // FAIL for every recipe field each pass (why filled=0 etc.).
+    console.log(`[Copo Recipe] "${step.name}" fields →`, outcomes.map(([l, s]) => `${l}:${s}`).join('  ·  '));
+    if (failed.length) {
+        console.warn(`[Copo Recipe] ✗ FAILED (${step.name}):`,
+            failed.map(([l, , why]) => `${l} — ${why}`).join('  |  '));
     }
 
     return { matched: true, filled, step: step.name };
@@ -236,16 +241,25 @@ function recipeFieldValue(f, profile) {
  * `f.pickAny`). Leaves the popup CLOSED on a miss so it can't block the next field.
  */
 async function fillCustomSelect(f, value) {
-    const btn = document.querySelector(f.selector);
-    if (!btn || btn.offsetParent === null) return { ok: false, reason: 'button-absent' };
-    if ((btn.getAttribute('value') || '').trim()) return { ok: false, reason: 'already-selected' };
-    overlayClick(btn);
+    const trigger = document.querySelector(f.selector);
+    if (!trigger || trigger.offsetParent === null) return { ok: false, reason: 'trigger-absent' };
+    const wrap = trigger.closest('[data-automation-id^="formField-"]');
+    // Idempotency: a MULTI-select stores its picks in selectedItemList; a single
+    // button-select stores the chosen option's id in the button's `value` attr.
+    if (f.multi) {
+        const chips = wrap?.querySelector('[data-automation-id="selectedItemList"]');
+        if (chips && chips.children.length) return { ok: false, reason: 'already-selected' };
+    } else if ((trigger.getAttribute('value') || '').trim()) {
+        return { ok: false, reason: 'already-selected' };
+    }
+    overlayClick(trigger);
     if (!(await waitForElement('[data-automation-id="promptOption"]', 4000))) return { ok: false, reason: 'listbox-timeout' };
     await sleep(150);
     const want = String(value || '').trim().toLowerCase();
-    // Long lists (Country) render a type-to-filter input beside the button.
-    const filter = btn.parentElement?.querySelector('input[type="text"]');
-    if (filter && want) { await simulateTyping(filter, String(value)); await sleep(450); }
+    // Type-to-filter: the trigger itself when it's an input (multi-select / Country
+    // Phone Code), else a search input beside the button (long lists like Country).
+    const filter = (trigger.tagName === 'INPUT' ? trigger : null) || wrap?.querySelector('input[type="text"]');
+    if (filter && want) { await simulateTyping(filter, String(value)); await sleep(500); }
     const opts = [...document.querySelectorAll('[data-automation-id="promptOption"]')]
         .filter(o => o.offsetParent !== null);
     const txt = (o) => (o.textContent || '').trim().toLowerCase();
@@ -253,7 +267,7 @@ async function fillCustomSelect(f, value) {
         || (want && opts.find(o => txt(o).includes(want)))
         || (f.pickAny ? opts[0] : null);
     if (!opt) {
-        btn.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); // close, don't block
+        trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); // close, don't block
         return { ok: false, reason: `option-not-found (${opts.length} shown${want ? `, wanted "${value}"` : ''})` };
     }
     overlayClick(opt);
