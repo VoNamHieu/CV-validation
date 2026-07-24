@@ -23,7 +23,7 @@ const FALLBACK_RECIPES = [
     {
         ats: 'workday',
         label: 'Workday',
-        version: 4,
+        version: 5,
         verified: true,
         hostPattern: '\\.myworkdayjobs\\.com|\\.myworkdaysite\\.com',
         login: {
@@ -69,6 +69,18 @@ const FALLBACK_RECIPES = [
                     // stays empty ("0 items selected") and silently blocks Next — the
                     // scanner can't see it's required, so the agent looped until stuck.
                     { label: 'Country Phone Code', selector: '[data-automation-id="formField-countryPhoneCode"] input', value: 'Vietnam', type: 'custom-select', multi: true, required: true },
+                ],
+                advance: '[data-automation-id="pageFooterNextButton"]',
+            },
+            {
+                // Application Questions: the Yes/No conflict-of-interest dropdowns
+                // default to "No"; the two required free-text questions have per-job
+                // dynamic ids, so match them by question text (labelMatch).
+                name: 'Application Questions',
+                detect: '[data-automation-id="applyFlowPrimaryQuestionsPage"]',
+                fields: [
+                    { label: 'Notice period', labelMatch: 'notice period', value: '30 days', type: 'text' },
+                    { label: 'Salary expectations', labelMatch: 'salary', profileKey: 'desiredSalary', default: 'Negotiable', type: 'text' },
                 ],
                 advance: '[data-automation-id="pageFooterNextButton"]',
             },
@@ -195,7 +207,7 @@ export async function applyRecipeFields(recipe, profile, cvData) {
                 else if (r.reason === 'button-absent') outcomes.push([f.label, 'absent', 'not rendered yet']);
                 else outcomes.push([f.label, 'FAIL', r.reason]);
             } else {
-                const el = document.querySelector(f.selector);
+                const el = f.labelMatch ? findFieldByLabel(f.labelMatch) : document.querySelector(f.selector);
                 if (!el || el.offsetParent === null) { outcomes.push([f.label, 'absent', 'not rendered yet']); continue; }
                 if (el.type === 'password') { outcomes.push([f.label, 'skip', 'password']); continue; }   // never
                 if (String(el.value ?? '').trim() !== '') { outcomes.push([f.label, 'done', 'already filled']); continue; }  // idempotent
@@ -230,6 +242,18 @@ function recipeFieldValue(f, profile) {
     const p = profile[f.profileKey];
     if (p != null && String(p).trim() !== '') return p;
     return f.default ?? '';
+}
+
+/** Resolve a dynamic-id field (e.g. Workday Application Questions, whose formField
+ *  ids are per-job) by matching its question/label text. Returns the textarea /
+ *  input / button inside the first matching formField wrapper. */
+function findFieldByLabel(labelMatch) {
+    const want = String(labelMatch).toLowerCase();
+    for (const wrap of document.querySelectorAll('[data-automation-id^="formField-"]')) {
+        const lbl = (wrap.querySelector('legend, label')?.textContent || '').toLowerCase();
+        if (lbl.includes(want)) return wrap.querySelector('textarea, input:not([type="hidden"]), button');
+    }
+    return null;
 }
 
 /**
