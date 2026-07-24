@@ -137,6 +137,16 @@ export function extractFieldsFromRoot(root) {
             const singleValue = el.closest('[class*="react-select"]')?.querySelector('[class*="-singleValue"]');
             if (singleValue) value = singleValue.textContent.trim();
         }
+        // Workday multi-select: the input is a search box (always empty), but the
+        // field IS filled when its selectedItemList holds a chip ("× Vietnam (+84)").
+        // Read the chip so the agent doesn't count it as unfilled-required and keep
+        // re-opening the dropdown to "fill" it instead of clicking Next.
+        if (!value) {
+            const sil = el.closest('[data-automation-id^="formField-"]')
+                ?.querySelector('[data-automation-id="selectedItemList"]');
+            const chip = sil ? (sil.textContent || '').replace(/\s+/g, ' ').trim() : '';
+            if (chip) value = chip.slice(0, 60);
+        }
 
         // Get options for select elements
         let options = [];

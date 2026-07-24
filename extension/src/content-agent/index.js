@@ -28,7 +28,7 @@ import { applyRecipeFields, atFinalStep, clickRecipeGateway, loadRecipes, recipe
 // you can confirm (in the PAGE / tab console, NOT the service-worker console) that
 // the freshly-built dist is actually loaded. If you don't see this line on the
 // apply tab, the new build isn't injected (reload the extension + refresh the tab).
-const COPO_BUILD = 'close-dropdown-before-next-2026-07-24e';
+const COPO_BUILD = 'recipe-advance+multiselect-value-2026-07-24f';
 try { console.log(`%c[Copo] content-agent build ${COPO_BUILD} loaded → ${location.host}`, 'color:#c43b2e;font-weight:700'); } catch { /* noop */ }
 
 /**
@@ -292,6 +292,26 @@ async function runAgentLoop(profile) {
                     showProgress(i + 1, AGENT_MAX_ITERATIONS, `Điền tự động (${recipe.label}) — ${rf.filled} trường`);
                     await sleep(600);
                     continue; // re-observe; LLM handles dropdowns / navigation next
+                }
+                // Recipe step fully filled (nothing new this pass) + nothing required
+                // left → ADVANCE deterministically instead of burning a slow/overloaded
+                // LLM call just to click "Save and Continue". Close a leftover dropdown
+                // popup first (it overlays the footer + eats the click).
+                if (rf.matched && state.unfilledRequired.length === 0 && state.errors.length === 0 && !atFinalStep(recipe)) {
+                    const stepNow = (recipe.steps || []).find(s => s.detect && document.querySelector(s.detect));
+                    const adv = stepNow?.advance ? document.querySelector(stepNow.advance) : null;
+                    if (adv && adv.offsetParent !== null) {
+                        if (document.querySelector('[data-automation-id="promptOption"]')) {
+                            (document.activeElement || document.body)?.dispatchEvent?.(
+                                new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+                            await sleep(250);
+                        }
+                        console.log(`[Copo Apply] recipe advance → ${stepNow.advance}`);
+                        overlayClick(adv);
+                        actionsTaken++;
+                        await sleep(1500);
+                        continue;
+                    }
                 }
             }
 
