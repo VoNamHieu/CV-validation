@@ -66,12 +66,13 @@ export function loginAtsSummary(urls: (string | null | undefined)[]): { label: s
 
 export interface RecipeField {
     label: string;
-    selector: string;
+    selector?: string;    // exact CSS selector; omit when using labelMatch (dynamic-id fields)
     profileKey?: string;  // key in the synced ExtensionProfile (omit for a fixed `value`)
     value?: string;       // fixed value (e.g. Postal "100000") — wins over profileKey
     default?: string;     // fallback when the profile key is empty (e.g. Country → "Vietnam")
     pickAny?: boolean;    // required-but-arbitrary dropdown: any option satisfies it
     multi?: boolean;      // input-based multi-select (Country Phone Code): idempotency checks selectedItemList
+    labelMatch?: string;  // match a dynamic-id field by its question/label text (Application Questions)
     type?: 'text' | 'select' | 'custom-select' | 'date' | 'file' | 'radio' | 'checkbox';
     required?: boolean;
 }
@@ -115,7 +116,7 @@ export interface ApplyRecipe {
 const WORKDAY: ApplyRecipe = {
     ats: 'workday',
     label: 'Workday',
-    version: 4,
+    version: 5,
     verified: true,
     hostPattern: '\\.myworkdayjobs\\.com|\\.myworkdaysite\\.com',
     login: {
@@ -160,6 +161,18 @@ const WORKDAY: ApplyRecipe = {
                 // Required multi-select (input-based, not a button): the LLM types but never
                 // commits an item, leaving it empty ("0 items selected") and blocking Next.
                 { label: 'Country Phone Code', selector: '[data-automation-id="formField-countryPhoneCode"] input', value: 'Vietnam', type: 'custom-select', multi: true, required: true },
+            ],
+            advance: '[data-automation-id="pageFooterNextButton"]',
+        },
+        {
+            // Application Questions: Yes/No conflict-of-interest dropdowns default to
+            // "No"; the two required free-text questions have per-job dynamic ids, so
+            // match them by question text.
+            name: 'Application Questions',
+            detect: '[data-automation-id="applyFlowPrimaryQuestionsPage"]',
+            fields: [
+                { label: 'Notice period', labelMatch: 'notice period', value: '30 days', type: 'text' },
+                { label: 'Salary expectations', labelMatch: 'salary', profileKey: 'desiredSalary', default: 'Negotiable', type: 'text' },
             ],
             advance: '[data-automation-id="pageFooterNextButton"]',
         },
