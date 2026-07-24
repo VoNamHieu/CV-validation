@@ -28,7 +28,7 @@ import { applyRecipeFields, atFinalStep, clickRecipeGateway, loadRecipes, recipe
 // you can confirm (in the PAGE / tab console, NOT the service-worker console) that
 // the freshly-built dist is actually loaded. If you don't see this line on the
 // apply tab, the new build isn't injected (reload the extension + refresh the tab).
-const COPO_BUILD = 'v4-countryPhoneCode-2026-07-23c';
+const COPO_BUILD = 'v4-llm-timeout-120s-2026-07-24d';
 try { console.log(`%c[Copo] content-agent build ${COPO_BUILD} loaded → ${location.host}`, 'color:#c43b2e;font-weight:700'); } catch { /* noop */ }
 
 /**

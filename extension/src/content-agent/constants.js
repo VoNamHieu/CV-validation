@@ -8,7 +8,9 @@ export const SCROLL_PAUSE_MS = 300;
 
 export const POST_ACTION_WAIT_MS = 1000;
 
-export const LLM_TIMEOUT = 65000;   // backstop; the background fetch's own 60s timeout fires first
+export const LLM_TIMEOUT = 125000;  // backstop; the background fetch's own 120s timeout fires first
+// (Application Questions sends a big prompt — 14 long legal questions — so the
+//  thinking model can take >60s; give it room instead of failing the apply.)
 
 export const JOB_PAGE_DETECT_TIMEOUT_MS = 8000;
 

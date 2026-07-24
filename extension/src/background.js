@@ -486,7 +486,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json', ...authHeaders },
                             body: JSON.stringify({ formFields, profileData }),
-                            signal: AbortSignal.timeout(60000),   // room for dev cold-compile + thinking model
+                            signal: AbortSignal.timeout(120000),  // room for slow / thinking model (App Questions big prompt)
                         });
                         if (!res.ok) {
                             const err = await res.json().catch(() => ({}));
@@ -535,7 +535,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json', ...authHeaders },
                             body: JSON.stringify({ pageState, profileData, history, hasCV }),
-                            signal: AbortSignal.timeout(60000),   // room for dev cold-compile + thinking model
+                            signal: AbortSignal.timeout(120000),  // room for slow / thinking model (App Questions big prompt)
                         });
                         if (!res.ok) {
                             const err = await res.json().catch(() => ({}));
