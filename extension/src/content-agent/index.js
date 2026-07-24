@@ -28,7 +28,7 @@ import { applyRecipeFields, atFinalStep, clickRecipeGateway, loadRecipes, recipe
 // you can confirm (in the PAGE / tab console, NOT the service-worker console) that
 // the freshly-built dist is actually loaded. If you don't see this line on the
 // apply tab, the new build isn't injected (reload the extension + refresh the tab).
-const COPO_BUILD = 'v4-llm-timeout-120s-2026-07-24d';
+const COPO_BUILD = 'close-dropdown-before-next-2026-07-24e';
 try { console.log(`%c[Copo] content-agent build ${COPO_BUILD} loaded → ${location.host}`, 'color:#c43b2e;font-weight:700'); } catch { /* noop */ }
 
 /**
@@ -433,13 +433,32 @@ async function runAgentLoop(profile) {
             } else if (plan.action === 'CLICK' && plan.clickTarget) {
                 const target = document.querySelector(plan.clickTarget);
                 if (target) {
+                    // Log what we're clicking + whether an open dropdown/popup is
+                    // covering the footer (its promptOptions would swallow a Next click).
+                    const info = {
+                        sel: plan.clickTarget,
+                        aid: target.getAttribute?.('data-automation-id') || null,
+                        text: (target.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 28),
+                        disabled: !!(target.disabled || target.getAttribute?.('aria-disabled') === 'true'),
+                        visible: target.offsetParent !== null,
+                        openDropdownOptions: document.querySelectorAll('[data-automation-id="promptOption"]').length,
+                    };
+                    console.log('[Copo Apply] CLICK →', info);
+                    // A leftover open Workday dropdown popup overlays the page footer
+                    // and eats the Next/Continue click — close it before clicking.
+                    if (info.openDropdownOptions > 0) {
+                        (document.activeElement || document.body)?.dispatchEvent?.(
+                            new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+                        await sleep(250);
+                    }
                     // Overlay-aware: Workday covers Next/Continue/Submit buttons with
                     // a "click_filter" div that owns the handler — a plain .click() on
                     // the button is swallowed, so the agent could never advance a step.
                     overlayClick(target);
-                    actionResult = { clicked: plan.clickTarget };
+                    actionResult = { clicked: plan.clickTarget, ...info };
                     actionsTaken++;
                 } else {
+                    console.warn('[Copo Apply] CLICK target NOT FOUND:', plan.clickTarget);
                     actionResult = { error: `Click target not found: ${plan.clickTarget}` };
                 }
             } else if (plan.action === 'SCROLL') {
