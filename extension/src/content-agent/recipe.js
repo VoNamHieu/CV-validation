@@ -272,5 +272,14 @@ async function fillCustomSelect(f, value) {
     }
     overlayClick(opt);
     await sleep(250);
+    // A MULTI-select stays OPEN after a pick (so you can add more) — and its popup
+    // overlays the page footer, SWALLOWING the agent's later "Next" click, so the
+    // step looks stuck even though the field is filled ("× Vietnam (+84)" is set but
+    // the list is still open). Close it. (Single-selects already close on pick.)
+    if (f.multi) {
+        trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        try { trigger.blur?.(); } catch { /* noop */ }
+        await sleep(150);
+    }
     return { ok: true };
 }
