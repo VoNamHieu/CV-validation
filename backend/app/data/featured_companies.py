@@ -328,7 +328,10 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Axon Active",
         homepage="https://www.axonactive.com",
-        career_url="https://www.axonactive.com/careers",
+        # The real board is a Wix Blog on the separate `careers.` host; the old
+        # www.axonactive.com/careers 302s to the marketing homepage, which the
+        # generic extractor scraped into bogus "jobs" (see axonactive.py).
+        career_url="https://www.careers.axonactive.com/",
     ),
     FeaturedCompany(
         name="TMA Solutions",
