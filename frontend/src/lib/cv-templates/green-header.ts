@@ -1,8 +1,10 @@
 import type { CVData } from '@/lib/types';
 import type { RenderOptions } from './types';
-import { esc, descToBullets, dateRangeLabel, avatarInner, joinAddress } from './types';
+import { esc, descToBullets, dateRangeLabel, avatarInner, joinAddress, entryHead, ENTRY_CSS} from './types';
+import { VI_LABELS } from './labels';
 
 export function greenHeaderTemplate(cv: CVData, opts?: RenderOptions): string {
+    const L = opts?.labels ?? VI_LABELS;
     const c = cv.contact ?? {} as Partial<NonNullable<CVData['contact']>>;
     const p = cv.personal ?? {} as Partial<NonNullable<CVData['personal']>>;
     const emp = cv.employment ?? {} as Partial<NonNullable<CVData['employment']>>;
@@ -22,7 +24,7 @@ export function greenHeaderTemplate(cv: CVData, opts?: RenderOptions): string {
   .contact-row div { display: flex; align-items: center; gap: 5px; }
   .contact-row .dot { width: 5px; height: 5px; background: #2e7d32; border-radius: 50%; flex-shrink: 0; }
   h2 { background: #2e7d32; color: white; padding: 7px 14px; font-size: 11pt; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; border-radius: 4px; margin: 18px 0 12px; }
-  .timeline-row { display: grid; grid-template-columns: 110px 1fr; gap: 16px; margin-bottom: 14px; page-break-inside: avoid; }
+  .timeline-row { display: block; margin-bottom: 14px; page-break-inside: avoid; }
   .timeline-date { color: #2e7d32; font-size: 9.5pt; font-weight: 600; padding-top: 1px; }
   .item-title { font-weight: 700; font-size: 10.5pt; color: #1a1a1a; }
   .item-meta { font-size: 9.5pt; color: #555; margin-bottom: 4px; font-style: italic; }
@@ -32,6 +34,7 @@ export function greenHeaderTemplate(cv: CVData, opts?: RenderOptions): string {
   .skills { display: flex; flex-wrap: wrap; gap: 6px; }
   .skill { background: #e8f5e9; border: 1px solid #c8e6c9; color: #2e7d32; border-radius: 3px; padding: 3px 10px; font-size: 9.5pt; font-weight: 500; }
   .summary { color: #333; font-size: 10pt; line-height: 1.75; padding: 0 4px; }
+  ${ENTRY_CSS}
 </style>
 </head><body>
   <div class="header">
@@ -50,39 +53,35 @@ export function greenHeaderTemplate(cv: CVData, opts?: RenderOptions): string {
     </div>
   </div>
 
-  ${cv.summary ? `<h2>Mục tiêu nghề nghiệp</h2><p class="summary" data-f="summary">${esc(cv.summary)}</p>` : ''}
+  ${cv.summary ? `<h2>${L.summary}</h2><p class="summary" data-f="summary">${esc(cv.summary)}</p>` : ''}
 
   ${cv.education?.length ? `
-    <h2>Học vấn</h2>
+    <h2>${L.education}</h2>
     ${cv.education.map((e, i) => `
       <div class="timeline-row">
-        <div class="timeline-date" data-f="education.${i}.year">${esc(e.year || '')}</div>
         <div>
-          <div class="item-title" data-f="education.${i}.institution">${esc(e.institution || '')}</div>
-          <div class="item-meta" data-f="education.${i}.degree">${esc(e.degree || '')}</div>
+          ${entryHead({ title: e.institution || '', titlePath: `education.${i}.institution`, subtitle: e.degree || '', subPath: `education.${i}.degree`, date: e.year || '', datePath: `education.${i}.year` })}
         </div>
       </div>
     `).join('')}
   ` : ''}
 
   ${cv.experience?.length ? `
-    <h2>Kinh nghiệm làm việc</h2>
+    <h2>${L.experience}</h2>
     ${cv.experience.map((e, i) => `
       <div class="timeline-row">
-        <div class="timeline-date" data-f="experience.${i}.daterange">${esc(dateRangeLabel(e))}</div>
         <div>
-          <div class="item-title" data-f="experience.${i}.title">${esc(e.title)}</div>
-          <div class="item-meta" data-f="experience.${i}.company">${esc(e.company)}</div>
+          ${entryHead({ title: e.title, titlePath: `experience.${i}.title`, subtitle: e.company, subPath: `experience.${i}.company`, date: dateRangeLabel(e, L), datePath: `experience.${i}.daterange` })}
           <div class="item-desc">${descToBullets(e.description, `experience.${i}.description`)}</div>
         </div>
       </div>
     `).join('')}
   ` : ''}
 
-  ${cv.skills?.length ? `<h2>Kỹ năng</h2><div class="skills">${cv.skills.map((s, i) => `<span class="skill" data-f="skills.${i}">${esc(s)}</span>`).join('')}</div>` : ''}
+  ${cv.skills?.length ? `<h2>${L.skills}</h2><div class="skills">${cv.skills.map((s, i) => `<span class="skill" data-f="skills.${i}">${esc(s)}</span>`).join('')}</div>` : ''}
 
   ${cv.projects?.length ? `
-    <h2>Dự án</h2>
+    <h2>${L.projects}</h2>
     ${cv.projects.map((pj, i) => `
       <div class="timeline-row">
         <div class="timeline-date"></div>
@@ -95,7 +94,7 @@ export function greenHeaderTemplate(cv: CVData, opts?: RenderOptions): string {
   ` : ''}
 
   ${cv.certifications?.length ? `
-    <h2>Chứng chỉ</h2>
+    <h2>${L.certifications}</h2>
     ${cv.certifications.map((ct, i) => `
       <div class="timeline-row">
         <div class="timeline-date" data-f="certifications.${i}.year">${esc(ct.year || '')}</div>
@@ -107,10 +106,10 @@ export function greenHeaderTemplate(cv: CVData, opts?: RenderOptions): string {
     `).join('')}
   ` : ''}
 
-  ${cv.languages?.length ? `<h2>Ngoại ngữ</h2><div class="skills">${cv.languages.map((l, i) => `<span class="skill" data-f="languages.${i}">${esc(l.language || '')}${l.level ? `: ${esc(l.level)}` : ''}</span>`).join('')}</div>` : ''}
+  ${cv.languages?.length ? `<h2>${L.languages}</h2><div class="skills">${cv.languages.map((l, i) => `<span class="skill" data-f="languages.${i}">${esc(l.language || '')}${l.level ? `: ${esc(l.level)}` : ''}</span>`).join('')}</div>` : ''}
 
   ${cv.awards?.length ? `
-    <h2>Giải thưởng</h2>
+    <h2>${L.awards}</h2>
     ${cv.awards.map((a, i) => `
       <div class="timeline-row">
         <div class="timeline-date" data-f="awards.${i}.year">${esc(a.year || '')}</div>
@@ -122,7 +121,7 @@ export function greenHeaderTemplate(cv: CVData, opts?: RenderOptions): string {
   ` : ''}
 
   ${cv.activities?.length ? `
-    <h2>Hoạt động</h2>
+    <h2>${L.activities}</h2>
     ${cv.activities.map((ac, i) => `
       <div class="timeline-row">
         <div class="timeline-date"></div>

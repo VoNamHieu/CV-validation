@@ -1,5 +1,6 @@
 import type { CVData } from '@/lib/types';
 import type { CvTemplate, CvTemplateId, RenderOptions } from './types';
+import { getCvLabels } from './labels';
 import { classicTemplate } from './classic';
 import { greenHeaderTemplate } from './green-header';
 import { greenSidebarTemplate } from './green-sidebar';
@@ -105,7 +106,11 @@ export function renderCvHtml(
     templateId?: string | null,
     opts?: RenderOptions,
 ): string {
-    return getTemplate(templateId).render(cv, opts);
+    // Section/contact labels follow the CV's CONTENT language (auto-detected, or
+    // forced via opts.lang) so an English CV renders English headers — required for
+    // ATS résumé parsers to segment it. Templates read opts.labels.
+    const labels = opts?.labels ?? getCvLabels(cv, opts?.lang);
+    return getTemplate(templateId).render(cv, { ...opts, labels });
 }
 
 export type { CvTemplate, CvTemplateId, CvTemplateLayout, RenderOptions } from './types';
