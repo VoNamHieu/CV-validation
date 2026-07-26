@@ -1,4 +1,7 @@
 import type { CVData } from '@/lib/types';
+import type { CvLabels } from './labels';
+
+export type { CvLabels };
 
 export type CvTemplateId =
     | 'classic'
@@ -15,6 +18,11 @@ export type CvTemplateLayout = 'single-col' | 'sidebar-left' | 'sidebar-right';
 
 export interface RenderOptions {
     avatarBase64?: string;
+    // Section + contact labels in the CV's content language. Injected by
+    // renderCvHtml (auto-detected from content, or forced via `lang`). Templates
+    // fall back to Vietnamese labels when omitted.
+    labels?: CvLabels;
+    lang?: 'en' | 'vi';
 }
 
 export interface CvTemplate {
@@ -50,14 +58,16 @@ export function descToBullets(desc: string | undefined | null, path?: string): s
     return `<ul${attr}>${lines.map(l => `<li>${esc(l)}</li>`).join('')}</ul>`;
 }
 
-export function durationLabel(months: number | undefined | null): string {
+export function durationLabel(months: number | undefined | null, L?: CvLabels): string {
     const m = Number(months) || 0;
     if (!m) return '';
     const y = Math.floor(m / 12);
     const rem = m % 12;
-    if (y === 0) return `${rem} tháng`;
-    if (rem === 0) return `${y} năm`;
-    return `${y} năm ${rem} tháng`;
+    const yr = L?.year ?? 'năm';
+    const mo = L?.month ?? 'tháng';
+    if (y === 0) return `${rem} ${mo}`;
+    if (rem === 0) return `${y} ${yr}`;
+    return `${y} ${yr} ${rem} ${mo}`;
 }
 
 /**
@@ -69,17 +79,51 @@ export function dateRangeLabel(e: {
     start_date?: string;
     end_date?: string;
     duration_months?: number | null;
-}): string {
+}, L?: CvLabels): string {
+    const present = L?.present ?? 'Hiện tại';
     const norm = (s: string | undefined) => {
         const t = (s ?? '').trim();
-        return /^(present|current|now|nay|hiện tại)$/i.test(t) ? 'Hiện tại' : t;
+        return /^(present|current|now|nay|hiện tại)$/i.test(t) ? present : t;
     };
     const start = norm(e.start_date);
     const end = norm(e.end_date);
     if (start && end) return `${start} – ${end}`;
     if (start || end) return start || end;
-    return durationLabel(e.duration_months);
+    return durationLabel(e.duration_months, L);
 }
+
+// ATS-safe entry header. Renders TITLE · SUBTITLE on one text line with the DATE
+// after it, in DOM order title → subtitle → date, so a PDF text extractor keeps
+// them on/near one line and associated (a 2-column "date on the left, content on
+// the right" grid makes the extractor emit the date FIRST, in its own block, and
+// wrap long date ranges across lines — which is exactly what dropped "Customer
+// Success" and the university on Chromium-printed, untagged CVs). The date is
+// right-aligned visually via flex but stays LAST in the DOM.
+export function entryHead(o: {
+    title?: string; titlePath?: string;
+    subtitle?: string; subPath?: string;
+    date?: string; datePath?: string;
+}): string {
+    const a = (p?: string) => (p ? ` data-f="${esc(p)}"` : '');
+    const sub = o.subtitle
+        ? ` <span class="entry-sep">·</span> <span class="item-meta"${a(o.subPath)}>${esc(o.subtitle)}</span>`
+        : '';
+    const date = o.date ? `<span class="item-date"${a(o.datePath)}>${esc(o.date)}</span>` : '';
+    return `<div class="entry-head"><div class="entry-titleco"><span class="item-title"${a(o.titlePath)}>${esc(o.title)}</span>${sub}</div>${date}</div>`;
+}
+
+// Shared CSS for the ATS-safe entry header — each template injects ${ENTRY_CSS}
+// into its <style> and inherits its own .item-title / .item-meta / .item-date
+// colors (only layout is defined here).
+export const ENTRY_CSS = `
+  .entry { margin-bottom: 13px; page-break-inside: avoid; }
+  .entry-head { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; margin-bottom: 3px; }
+  .entry-titleco { flex: 1 1 auto; }
+  .entry-sep { opacity: .45; margin: 0 2px; }
+  .entry-head .item-title { display: inline; }
+  .entry-head .item-meta { display: inline; }
+  .item-date { flex: 0 0 auto; white-space: nowrap; }
+`;
 
 export function initials(name: string | undefined | null): string {
     const n = (name ?? '').trim();

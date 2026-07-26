@@ -1,8 +1,10 @@
 import type { CVData } from '@/lib/types';
 import type { RenderOptions } from './types';
-import { esc, descToBullets, dateRangeLabel, avatarInner, joinAddress } from './types';
+import { esc, descToBullets, dateRangeLabel, avatarInner, joinAddress, entryHead, ENTRY_CSS} from './types';
+import { VI_LABELS } from './labels';
 
 export function classicTemplate(cv: CVData, opts?: RenderOptions): string {
+    const L = opts?.labels ?? VI_LABELS;
     const c = cv.contact ?? {} as Partial<NonNullable<CVData['contact']>>;
     const p = cv.personal ?? {} as Partial<NonNullable<CVData['personal']>>;
     const emp = cv.employment ?? {} as Partial<NonNullable<CVData['employment']>>;
@@ -22,7 +24,7 @@ export function classicTemplate(cv: CVData, opts?: RenderOptions): string {
   .contact-grid div { display: flex; gap: 6px; }
   .contact-label { color: #888; min-width: 72px; flex-shrink: 0; }
   h2 { font-size: 11pt; color: #1a1a1a; text-transform: uppercase; letter-spacing: 2px; border-bottom: 1.5px solid #2a2a2a; padding-bottom: 4px; margin: 22px 0 12px; font-weight: 700; }
-  .timeline-row { display: grid; grid-template-columns: 110px 1fr; gap: 16px; margin-bottom: 14px; page-break-inside: avoid; }
+  .timeline-row { display: block; margin-bottom: 14px; page-break-inside: avoid; }
   .timeline-date { color: #666; font-size: 9.5pt; padding-top: 1px; }
   .item-title { font-weight: 700; font-size: 10.5pt; color: #1a1a1a; }
   .item-meta { font-size: 9.5pt; color: #555; margin-bottom: 4px; font-style: italic; }
@@ -32,6 +34,7 @@ export function classicTemplate(cv: CVData, opts?: RenderOptions): string {
   .skills { display: flex; flex-wrap: wrap; gap: 6px; }
   .skill { background: #f3f3f3; border: 1px solid #ddd; border-radius: 3px; padding: 2px 9px; font-size: 9.5pt; color: #333; }
   .summary { color: #333; font-size: 10pt; line-height: 1.7; padding: 0 4px; }
+  ${ENTRY_CSS}
 </style>
 </head><body>
   <div class="header">
@@ -40,44 +43,40 @@ export function classicTemplate(cv: CVData, opts?: RenderOptions): string {
       <div class="name" data-f="name">${esc(cv.name || '')}</div>
       ${emp.current_title ? `<div class="title" data-f="employment.current_title">${esc(emp.current_title)}</div>` : ''}
       <div class="contact-grid">
-        ${p.date_of_birth ? `<div><span class="contact-label">Ngày sinh:</span><span data-f="personal.date_of_birth">${esc(p.date_of_birth)}</span></div>` : ''}
-        ${p.gender ? `<div><span class="contact-label">Giới tính:</span><span data-f="personal.gender">${esc(p.gender)}</span></div>` : ''}
-        ${c.phone ? `<div><span class="contact-label">Số điện thoại:</span><span data-f="contact.phone">${esc(c.phone)}</span></div>` : ''}
-        ${c.email ? `<div><span class="contact-label">Email:</span><span data-f="contact.email">${esc(c.email)}</span></div>` : ''}
-        ${c.linkedin ? `<div><span class="contact-label">LinkedIn:</span><span data-f="contact.linkedin">${esc(c.linkedin)}</span></div>` : ''}
-        ${addr ? `<div><span class="contact-label">Địa chỉ:</span><span>${esc(addr)}</span></div>` : ''}
+        ${p.date_of_birth ? `<div><span class="contact-label">${L.dob}:</span><span data-f="personal.date_of_birth">${esc(p.date_of_birth)}</span></div>` : ''}
+        ${p.gender ? `<div><span class="contact-label">${L.gender}:</span><span data-f="personal.gender">${esc(p.gender)}</span></div>` : ''}
+        ${c.phone ? `<div><span class="contact-label">${L.phone}:</span><span data-f="contact.phone">${esc(c.phone)}</span></div>` : ''}
+        ${c.email ? `<div><span class="contact-label">${L.email}:</span><span data-f="contact.email">${esc(c.email)}</span></div>` : ''}
+        ${c.linkedin ? `<div><span class="contact-label">${L.linkedin}:</span><span data-f="contact.linkedin">${esc(c.linkedin)}</span></div>` : ''}
+        ${addr ? `<div><span class="contact-label">${L.address}:</span><span>${esc(addr)}</span></div>` : ''}
       </div>
     </div>
   </div>
 
-  ${cv.summary ? `<h2>Mục tiêu nghề nghiệp</h2><p class="summary" data-f="summary">${esc(cv.summary)}</p>` : ''}
+  ${cv.summary ? `<h2>${L.summary}</h2><p class="summary" data-f="summary">${esc(cv.summary)}</p>` : ''}
 
   ${cv.education?.length ? `
-    <h2>Học vấn</h2>
+    <h2>${L.education}</h2>
     ${cv.education.map((e, i) => `
       <div class="timeline-row">
-        <div class="timeline-date" data-f="education.${i}.year">${esc(e.year || '')}</div>
         <div>
-          <div class="item-title" data-f="education.${i}.institution">${esc(e.institution || '')}</div>
-          <div class="item-meta" data-f="education.${i}.degree">${esc(e.degree || '')}</div>
+          ${entryHead({ title: e.institution || '', titlePath: `education.${i}.institution`, subtitle: e.degree || '', subPath: `education.${i}.degree`, date: e.year || '', datePath: `education.${i}.year` })}
         </div>
       </div>
     `).join('')}
   ` : ''}
 
   ${cv.skills?.length ? `
-    <h2>Kỹ năng</h2>
+    <h2>${L.skills}</h2>
     <div class="skills">${cv.skills.map((s, i) => `<span class="skill" data-f="skills.${i}">${esc(s)}</span>`).join('')}</div>
   ` : ''}
 
   ${cv.experience?.length ? `
-    <h2>Kinh nghiệm làm việc</h2>
+    <h2>${L.experience}</h2>
     ${cv.experience.map((e, i) => `
       <div class="timeline-row">
-        <div class="timeline-date" data-f="experience.${i}.daterange">${esc(dateRangeLabel(e))}</div>
         <div>
-          <div class="item-title" data-f="experience.${i}.title">${esc(e.title)}</div>
-          <div class="item-meta" data-f="experience.${i}.company">${esc(e.company)}</div>
+          ${entryHead({ title: e.title, titlePath: `experience.${i}.title`, subtitle: e.company, subPath: `experience.${i}.company`, date: dateRangeLabel(e, L), datePath: `experience.${i}.daterange` })}
           <div class="item-desc">${descToBullets(e.description, `experience.${i}.description`)}</div>
         </div>
       </div>
@@ -85,7 +84,7 @@ export function classicTemplate(cv: CVData, opts?: RenderOptions): string {
   ` : ''}
 
   ${cv.projects?.length ? `
-    <h2>Dự án</h2>
+    <h2>${L.projects}</h2>
     ${cv.projects.map((pj, i) => `
       <div class="timeline-row">
         <div class="timeline-date"></div>
@@ -98,7 +97,7 @@ export function classicTemplate(cv: CVData, opts?: RenderOptions): string {
   ` : ''}
 
   ${cv.certifications?.length ? `
-    <h2>Chứng chỉ</h2>
+    <h2>${L.certifications}</h2>
     ${cv.certifications.map((ct, i) => `
       <div class="timeline-row">
         <div class="timeline-date" data-f="certifications.${i}.year">${esc(ct.year || '')}</div>
@@ -111,12 +110,12 @@ export function classicTemplate(cv: CVData, opts?: RenderOptions): string {
   ` : ''}
 
   ${cv.languages?.length ? `
-    <h2>Ngoại ngữ</h2>
+    <h2>${L.languages}</h2>
     <div class="skills">${cv.languages.map((l, i) => `<span class="skill" data-f="languages.${i}">${esc(l.language || '')}${l.level ? `: ${esc(l.level)}` : ''}</span>`).join('')}</div>
   ` : ''}
 
   ${cv.awards?.length ? `
-    <h2>Giải thưởng</h2>
+    <h2>${L.awards}</h2>
     ${cv.awards.map((a, i) => `
       <div class="timeline-row">
         <div class="timeline-date" data-f="awards.${i}.year">${esc(a.year || '')}</div>
@@ -128,7 +127,7 @@ export function classicTemplate(cv: CVData, opts?: RenderOptions): string {
   ` : ''}
 
   ${cv.activities?.length ? `
-    <h2>Hoạt động</h2>
+    <h2>${L.activities}</h2>
     ${cv.activities.map((ac, i) => `
       <div class="timeline-row">
         <div class="timeline-date"></div>

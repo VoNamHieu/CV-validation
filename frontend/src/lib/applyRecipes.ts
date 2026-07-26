@@ -66,14 +66,20 @@ export function loginAtsSummary(urls: (string | null | undefined)[]): { label: s
 
 export interface RecipeField {
     label: string;
-    selector?: string;    // exact CSS selector; omit when using labelMatch (dynamic-id fields)
+    selector?: string;    // exact CSS selector; omit when using labelMatch (dynamic-id fields).
+                          // For shadow-text/autocomplete this is the light-DOM HOST selector
+                          // (the control lives in the host's shadow root — see `control`).
+    control?: string;     // selector for the control INSIDE a shadow host (e.g. 'input[type="tel"]');
+                          // resolved by piercing shadow roots. Defaults to the first text control.
     profileKey?: string;  // key in the synced ExtensionProfile (omit for a fixed `value`)
     value?: string;       // fixed value (e.g. Postal "100000") — wins over profileKey
     default?: string;     // fallback when the profile key is empty (e.g. Country → "Vietnam")
     pickAny?: boolean;    // required-but-arbitrary dropdown: any option satisfies it
     multi?: boolean;      // input-based multi-select (Country Phone Code): idempotency checks selectedItemList
     labelMatch?: string;  // match a dynamic-id field by its question/label text (Application Questions)
-    type?: 'text' | 'select' | 'custom-select' | 'date' | 'file' | 'radio' | 'checkbox';
+    // shadow-text  = text input inside a web-component shadow root (SmartRecruiters spl-input)
+    // autocomplete = type-to-search field that must commit a picked suggestion (SR city)
+    type?: 'text' | 'select' | 'custom-select' | 'shadow-text' | 'autocomplete' | 'date' | 'file' | 'radio' | 'checkbox';
     required?: boolean;
 }
 export interface RecipeStep {
@@ -87,8 +93,10 @@ export interface RecipeStep {
 // misses). `needsCV` restricts it to when a CV is available (Autofill w/ Resume).
 export interface RecipeGateway {
     label: string;
-    detect: string;       // selector present when the gateway is on screen
+    detect?: string;      // selector present when the gateway is on screen
     click?: string;       // element to click (defaults to `detect`)
+    text?: string[];      // match a text-only CTA by its visible label (SmartRecruiters "I'm interested")
+    textDeny?: string[];  // never click a clickable whose label contains one of these ("Refer a friend")
     needsCV?: boolean;
 }
 export interface ApplyRecipe {
@@ -97,10 +105,16 @@ export interface ApplyRecipe {
     version: number;
     verified: boolean;
     hostPattern: string;  // RegExp source matched against the apply-page host
+    singlePage?: boolean; // one-page form (no wizard): fill everything, then hand off for the user to submit
     login?: { emailSelector?: string; passwordSelector?: string; signInSelector?: string; createAccountSelector?: string };
     gateways?: RecipeGateway[];
     steps: RecipeStep[];
     fileUploadSelector?: string;
+    fileUploadHost?: string;     // light-DOM host whose SHADOW root holds <input type=file> (SmartRecruiters dropzone)
+    // Multiple résumé-upload targets in priority order. `host` → deep-find the file
+    // input in its shadow; `selector` → a direct light/shadow input. `once` = upload
+    // only once per page (SR's parser dropzone re-parses on every set).
+    fileUploadHosts?: { host?: string; selector?: string; once?: boolean }[];
     submitSelector?: string;
     finalStepSelector?: string;  // present when the ATS's final review step is on screen → agent stops (never auto-submits)
     thirdPartySkip?: string[];
@@ -186,7 +200,69 @@ const WORKDAY: ApplyRecipe = {
     thirdPartySkip: ['indeed', 'linkedin'],
 };
 
-export const APPLY_RECIPES: ApplyRecipe[] = [WORKDAY];
+// SmartRecruiters "oneclick-ui" easy-apply form. UNVERIFIED against a live fill —
+// derived from a real captured DOM (AccorHotel oneclick, 2026-07-25). SR is an
+// Angular app built from Shadow-DOM web components (spl-input, spl-phone-field,
+// spl-autocomplete, spl-dropzone): each control's real <input> lives INSIDE the
+// custom element's shadow root, so a plain `[data-test=…] input` selector returns
+// null. The agent resolves the light-DOM host by its stable data-test id, then
+// deep-queries the shadow for the input. The whole form is ONE page ending in a
+// required consent checkbox + a single Submit → `singlePage`: fill everything,
+// then hand off (we never auto-submit and never auto-tick a legal-consent box).
+const SMARTRECRUITERS: ApplyRecipe = {
+    ats: 'smartrecruiters',
+    label: 'SmartRecruiters',
+    version: 1,
+    verified: false,
+    singlePage: true,
+    hostPattern: 'smartrecruiters\\.com',
+    // The public job ad opens the apply form only after clicking its CTA — a blue
+    // "I'm interested" button (NOT "Refer a friend" right below it). It's a styled
+    // <a>/<button> with no stable id, so match by visible text; fall back to a link
+    // straight to the /oneclick-ui form. Clicking is capped + no-ops on the form.
+    gateways: [
+        {
+            label: "I'm interested",
+            text: ["i'm interested", 'i am interested', 'apply now', 'apply'],
+            textDeny: ['refer a friend', 'refer'],
+            detect: '[data-test="job-apply-button"], a[data-test="apply-button"], a[href*="/oneclick-ui/"]',
+        },
+    ],
+    steps: [
+        {
+            name: 'Easy Apply',
+            detect: '[data-test="easy-apply-container"], [data-test="personal-information"], [data-test="personal-info-first-name-input"], [data-test="resume-upload"]',
+            fields: [
+                { label: 'First name', selector: '[data-test="personal-info-first-name-input"]', profileKey: 'firstName', type: 'shadow-text', required: true },
+                { label: 'Last name', selector: '[data-test="personal-info-last-name-input"]', profileKey: 'lastName', type: 'shadow-text', required: true },
+                { label: 'Email', selector: '[data-test="personal-info-email-input"]', profileKey: 'email', type: 'shadow-text', required: true },
+                { label: 'Confirm email', selector: '[data-test="personal-info-email-confirm-input"]', profileKey: 'email', type: 'shadow-text' },
+                // Phone: spl-phone-field pre-sets country VN; its FIRST shadow input is
+                // the country-code picker, so target the tel input explicitly.
+                { label: 'Phone', selector: '[data-test="personal-info-phone"]', control: 'input[type="tel"]', profileKey: 'phone', type: 'shadow-text', required: true },
+                // City autocomplete (≥3 chars → async place lookup → pick a match).
+                { label: 'Location', selector: '[data-test="location-autocomplete"]', profileKey: 'addressProvince', default: 'Ho Chi Minh City', type: 'autocomplete', required: true },
+                // Optional free-text note to the hiring manager → use the tailored letter.
+                { label: 'Message', selector: '[data-test="hiring-manager-message-text"], [data-test="hiring-manager-message-container"]', profileKey: 'coverLetter', type: 'shadow-text' },
+            ],
+            // No `advance`: single-page form. The agent stops after filling.
+        },
+    ],
+    // Upload the CV to the "Easy Apply" PARSER dropzone ONLY (once). SR parses it to
+    // auto-fill personal info + experience + education AND propagates the file to the
+    // required "Sơ yếu lý lịch" attachment (user-confirmed). We deliberately do NOT
+    // also upload to resume-upload: its <input> clears after processing so hasFile
+    // stays false → re-uploading every pass triggers a repeated re-parse that WIPES
+    // the auto-filled Experience/Education. One upload is enough. (The file input
+    // lives in the dropzone's own shadow root — resolved host → deep-find.)
+    fileUploadHosts: [
+        { host: '[data-test="apply-with-resume-container"]', once: true },
+    ],
+    submitSelector: '[data-test="footer-submit"]',   // reference only — the user submits
+    thirdPartySkip: ['indeed', 'linkedin'],
+};
+
+export const APPLY_RECIPES: ApplyRecipe[] = [WORKDAY, SMARTRECRUITERS];
 
 /** The recipe whose hostPattern matches this apply/job URL, or null. */
 export function recipeForUrl(url?: string | null): ApplyRecipe | null {

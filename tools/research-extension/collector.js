@@ -101,6 +101,30 @@ function shadowText() {
     return parts.join('\n---\n').slice(0, 120000);
 }
 
+// Serialized HTML of every OPEN shadow root — not just its text. Needed to see
+// the REAL <input> / dropzone structure of web-component form controls (spl-input,
+// spl-dropzone, spl-autocomplete…) that document.outerHTML omits entirely. Each
+// entry names the host (tag + data-test + id) so a specific control is findable.
+// A CLOSED shadow root has a null .shadowRoot and simply won't appear (its absence
+// tells us the control is script-unreachable).
+function shadowHtml() {
+    const out = [];
+    const idOf = (el) => {
+        const dt = el.getAttribute && el.getAttribute('data-test');
+        return el.tagName.toLowerCase() + (dt ? `[data-test="${dt}"]` : '') + (el.id ? `#${el.id}` : '');
+    };
+    const walk = (root) => {
+        for (const el of root.querySelectorAll('*')) {
+            if (el.shadowRoot) {
+                out.push({ host: idOf(el), html: cap(el.shadowRoot.innerHTML, 6000) });
+                if (out.length < 150) walk(el.shadowRoot);
+            }
+        }
+    };
+    try { walk(document); } catch { /* ignore */ }
+    return out.slice(0, 150);
+}
+
 function extras() {
     const metas = {};
     for (const m of document.querySelectorAll('meta[name],meta[property]')) {
@@ -150,7 +174,7 @@ function buildPayload(note) {
         jsonld: jsonLd(),
         apis: apis.slice(0, 200),
         state: embeddedState(),
-        extras: { ...extras(), shadowText: shadowText() },
+        extras: { ...extras(), shadowText: shadowText(), shadowHtml: shadowHtml() },
         note: cap(note || '', 1000),
     };
 }

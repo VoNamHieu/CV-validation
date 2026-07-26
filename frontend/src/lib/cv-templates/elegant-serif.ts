@@ -1,8 +1,10 @@
 import type { CVData } from '@/lib/types';
 import type { RenderOptions } from './types';
-import { esc, descToBullets, dateRangeLabel, avatarInner, joinAddress } from './types';
+import { esc, descToBullets, dateRangeLabel, avatarInner, joinAddress, entryHead, ENTRY_CSS} from './types';
+import { VI_LABELS } from './labels';
 
 export function elegantSerifTemplate(cv: CVData, opts?: RenderOptions): string {
+    const L = opts?.labels ?? VI_LABELS;
     const c = cv.contact ?? {} as Partial<NonNullable<CVData['contact']>>;
     const p = cv.personal ?? {} as Partial<NonNullable<CVData['personal']>>;
     const emp = cv.employment ?? {} as Partial<NonNullable<CVData['employment']>>;
@@ -34,6 +36,7 @@ export function elegantSerifTemplate(cv: CVData, opts?: RenderOptions): string {
   .skills { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 8px; }
   .skill { border: 1px solid #d9cdb8; border-radius: 14px; padding: 3px 12px; font-size: 9.5pt; color: #5a5246; background: #fbf7ef; }
   .summary { color: #3a352c; font-size: 10.5pt; line-height: 1.8; text-align: center; max-width: 86%; margin: 0 auto; font-style: italic; }
+  ${ENTRY_CSS}
 </style>
 </head><body>
   <div class="header">
@@ -51,42 +54,34 @@ export function elegantSerifTemplate(cv: CVData, opts?: RenderOptions): string {
     </div>
   </div>
 
-  ${cv.summary ? `<h2>Mục tiêu nghề nghiệp</h2><div class="h2-deco">◆ ◆ ◆</div><p class="summary" data-f="summary">${esc(cv.summary)}</p>` : ''}
+  ${cv.summary ? `<h2>${L.summary}</h2><div class="h2-deco">◆ ◆ ◆</div><p class="summary" data-f="summary">${esc(cv.summary)}</p>` : ''}
 
   ${cv.experience?.length ? `
-    <h2>Kinh nghiệm làm việc</h2><div class="h2-deco">◆ ◆ ◆</div>
+    <h2>${L.experience}</h2><div class="h2-deco">◆ ◆ ◆</div>
     ${cv.experience.map((e, i) => `
       <div class="item">
-        <div class="item-top">
-          <div class="item-title" data-f="experience.${i}.title">${esc(e.title)}</div>
-          <div class="item-date" data-f="experience.${i}.daterange">${esc(dateRangeLabel(e))}</div>
-        </div>
-        <div class="item-meta" data-f="experience.${i}.company">${esc(e.company)}</div>
+        ${entryHead({ title: e.title, titlePath: `experience.${i}.title`, subtitle: e.company, subPath: `experience.${i}.company`, date: dateRangeLabel(e, L), datePath: `experience.${i}.daterange` })}
         <div class="item-desc">${descToBullets(e.description, `experience.${i}.description`)}</div>
       </div>
     `).join('')}
   ` : ''}
 
   ${cv.education?.length ? `
-    <h2>Học vấn</h2><div class="h2-deco">◆ ◆ ◆</div>
+    <h2>${L.education}</h2><div class="h2-deco">◆ ◆ ◆</div>
     ${cv.education.map((e, i) => `
       <div class="item">
-        <div class="item-top">
-          <div class="item-title" data-f="education.${i}.institution">${esc(e.institution || '')}</div>
-          <div class="item-date" data-f="education.${i}.year">${esc(e.year || '')}</div>
-        </div>
-        <div class="item-meta" data-f="education.${i}.degree">${esc(e.degree || '')}</div>
+        ${entryHead({ title: e.institution || '', titlePath: `education.${i}.institution`, subtitle: e.degree || '', subPath: `education.${i}.degree`, date: e.year || '', datePath: `education.${i}.year` })}
       </div>
     `).join('')}
   ` : ''}
 
   ${cv.skills?.length ? `
-    <h2>Kỹ năng</h2><div class="h2-deco">◆ ◆ ◆</div>
+    <h2>${L.skills}</h2><div class="h2-deco">◆ ◆ ◆</div>
     <div class="skills">${cv.skills.map((s, i) => `<span class="skill" data-f="skills.${i}">${esc(s)}</span>`).join('')}</div>
   ` : ''}
 
   ${cv.projects?.length ? `
-    <h2>Dự án</h2><div class="h2-deco">◆ ◆ ◆</div>
+    <h2>${L.projects}</h2><div class="h2-deco">◆ ◆ ◆</div>
     ${cv.projects.map((pj, i) => `
       <div class="item">
         <div class="item-title" data-f="projects.${i}.name">${esc(pj.name)}</div>
@@ -96,7 +91,7 @@ export function elegantSerifTemplate(cv: CVData, opts?: RenderOptions): string {
   ` : ''}
 
   ${cv.certifications?.length ? `
-    <h2>Chứng chỉ</h2><div class="h2-deco">◆ ◆ ◆</div>
+    <h2>${L.certifications}</h2><div class="h2-deco">◆ ◆ ◆</div>
     ${cv.certifications.map((ct, i) => `
       <div class="item">
         <div class="item-top">
@@ -109,12 +104,12 @@ export function elegantSerifTemplate(cv: CVData, opts?: RenderOptions): string {
   ` : ''}
 
   ${cv.languages?.length ? `
-    <h2>Ngoại ngữ</h2><div class="h2-deco">◆ ◆ ◆</div>
+    <h2>${L.languages}</h2><div class="h2-deco">◆ ◆ ◆</div>
     <div class="skills">${cv.languages.map((l, i) => `<span class="skill" data-f="languages.${i}">${esc(l.language)}${l.level ? `: ${esc(l.level)}` : ''}</span>`).join('')}</div>
   ` : ''}
 
   ${cv.awards?.length ? `
-    <h2>Giải thưởng</h2><div class="h2-deco">◆ ◆ ◆</div>
+    <h2>${L.awards}</h2><div class="h2-deco">◆ ◆ ◆</div>
     ${cv.awards.map((a, i) => `
       <div class="item">
         <div class="item-top">
@@ -126,7 +121,7 @@ export function elegantSerifTemplate(cv: CVData, opts?: RenderOptions): string {
   ` : ''}
 
   ${cv.activities?.length ? `
-    <h2>Hoạt động</h2><div class="h2-deco">◆ ◆ ◆</div>
+    <h2>${L.activities}</h2><div class="h2-deco">◆ ◆ ◆</div>
     ${cv.activities.map((ac, i) => `
       <div class="item">
         <div class="item-title" data-f="activities.${i}.name">${esc(ac.name)}</div>

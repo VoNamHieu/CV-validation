@@ -13,7 +13,8 @@
 // pass; the recipe re-runs every iteration and is idempotent, so partial progress
 // accumulates and already-filled fields are skipped.
 
-import { overlayClick, setFileOnInput, setNativeValue, simulateTyping, sleep, waitForElement } from './dom.js';
+import { deepFindControl, deepQuery, deepQueryAll, dropFileOnZone, overlayClick, setFileOnInput, setNativeValue, simulateTyping, sleep, waitForElement } from './dom.js';
+import { isThirdPartyApply } from './detect.js';
 
 // Keep in sync with frontend/src/lib/applyRecipes.ts (WORKDAY). Fields verified
 // against real 3M Workday captures (My Information, 2026-07-15 / -22). The
@@ -92,9 +93,78 @@ const FALLBACK_RECIPES = [
         finalStepSelector: '[data-automation-id="applyFlowReviewPage"]',
         thirdPartySkip: ['indeed', 'linkedin'],
     },
+    // SmartRecruiters "oneclick-ui" easy-apply form. UNVERIFIED against a live
+    // fill — derived from a real captured DOM (AccorHotel, 2026-07-25). SR is an
+    // Angular app built from Shadow-DOM web components (spl-input, spl-phone-field,
+    // spl-autocomplete, spl-dropzone): the real <input> lives inside each custom
+    // element's shadow root, so every control is resolved by finding the light-DOM
+    // host by its stable data-test id, then deep-querying the shadow for the input.
+    // The whole form is ONE page (no wizard) and ends in a single "Submit" plus a
+    // required consent checkbox — so this is `singlePage`: fill everything, then
+    // hand off for the user to tick consent + Submit (we never auto-submit, and we
+    // never auto-tick a legal-consent box).
+    {
+        ats: 'smartrecruiters',
+        label: 'SmartRecruiters',
+        version: 1,
+        verified: false,
+        singlePage: true,
+        hostPattern: 'smartrecruiters\\.com',
+        // The public job ad opens the apply form only after clicking its CTA — a
+        // blue "I'm interested" button (NOT "Refer a friend" right below it). It's a
+        // styled <a>/<button> with no stable id, so match by visible text; fall back
+        // to a link straight to the /oneclick-ui form. Clicking is capped + no-ops on
+        // the form page itself.
+        gateways: [
+            {
+                label: "I'm interested",
+                text: ["i'm interested", 'i am interested', 'apply now', 'apply'],
+                textDeny: ['refer a friend', 'refer'],
+                detect: '[data-test="job-apply-button"], a[data-test="apply-button"], a[href*="/oneclick-ui/"]',
+            },
+        ],
+        steps: [
+            {
+                name: 'Easy Apply',
+                detect: '[data-test="easy-apply-container"], [data-test="personal-information"], [data-test="personal-info-first-name-input"], [data-test="resume-upload"]',
+                fields: [
+                    { label: 'First name', selector: '[data-test="personal-info-first-name-input"]', profileKey: 'firstName', type: 'shadow-text', required: true },
+                    { label: 'Last name', selector: '[data-test="personal-info-last-name-input"]', profileKey: 'lastName', type: 'shadow-text', required: true },
+                    { label: 'Email', selector: '[data-test="personal-info-email-input"]', profileKey: 'email', type: 'shadow-text', required: true },
+                    { label: 'Confirm email', selector: '[data-test="personal-info-email-confirm-input"]', profileKey: 'email', type: 'shadow-text' },
+                    // Phone: spl-phone-field pre-sets country VN; its FIRST shadow input
+                    // is the country-code picker, so target the tel input explicitly.
+                    { label: 'Phone', selector: '[data-test="personal-info-phone"]', control: 'input[type="tel"]', profileKey: 'phone', type: 'shadow-text', required: true },
+                    // City autocomplete (min 3 chars → async place lookup → pick a match).
+                    { label: 'Location', selector: '[data-test="location-autocomplete"]', profileKey: 'addressProvince', default: 'Ho Chi Minh City', type: 'autocomplete', required: true },
+                    // Optional free-text note to the hiring manager → use the tailored letter.
+                    { label: 'Message', selector: '[data-test="hiring-manager-message-text"], [data-test="hiring-manager-message-container"]', profileKey: 'coverLetter', type: 'shadow-text' },
+                ],
+                // No `advance`: single-page form. The agent stops after filling.
+            },
+        ],
+        // Upload the CV to the "Easy Apply" PARSER dropzone ONLY (once). SR parses it
+        // to auto-fill personal info + experience + education AND propagates the file
+        // to the required "Sơ yếu lý lịch" attachment (user-confirmed). We deliberately
+        // do NOT also upload to resume-upload: its <input> clears after processing so
+        // hasFile stays false → we'd re-upload every pass → repeated re-parse that
+        // WIPED the auto-filled Experience/Education. One upload is enough.
+        fileUploadHosts: [
+            { host: '[data-test="apply-with-resume-container"]', once: true },
+        ],
+        // Consent + Submit are intentionally absent → the user reviews, ticks the
+        // consent box, and submits. `submitSelector` documented for reference only.
+        submitSelector: '[data-test="footer-submit"]',
+        thirdPartySkip: ['indeed', 'linkedin'],
+    },
 ];
 
 let _recipes = null; // in-memory cache for this page's lifetime
+// Résumé-upload targets we've already sent the CV to THIS page load. Guards the
+// SmartRecruiters "apply-with-resume" parser dropzone (hidefilelist → its file
+// input clears after parsing, so an idempotency-by-files check would re-upload +
+// re-parse every iteration). Resets on navigation (module re-injected).
+const _fileUploadedHosts = new Set();
 
 /**
  * Load the recipe list: background-fetched (cached in storage) if available,
@@ -102,18 +172,22 @@ let _recipes = null; // in-memory cache for this page's lifetime
  */
 export async function loadRecipes() {
     if (_recipes) return _recipes;
+    let fetched = [];
     try {
         const resp = await chrome.runtime.sendMessage({ type: 'GET_APPLY_RECIPES' });
-        if (resp?.success && Array.isArray(resp.data?.recipes) && resp.data.recipes.length) {
-            _recipes = resp.data.recipes;
-            console.log(`[Copo Recipe] loaded ${_recipes.length} recipe(s) from web app${resp.stale ? ' (stale cache)' : ''}`);
-            return _recipes;
-        }
+        if (resp?.success && Array.isArray(resp.data?.recipes)) fetched = resp.data.recipes;
     } catch (e) {
-        console.warn('[Copo Recipe] fetch failed, using bundled fallback:', e?.message);
+        console.warn('[Copo Recipe] fetch failed, bundled fallback only:', e?.message);
     }
-    _recipes = FALLBACK_RECIPES;
-    console.log(`[Copo Recipe] using bundled fallback (${_recipes.length} recipe(s))`);
+    // Merge web-app recipes over the bundled FALLBACK by `ats`. The bundle is the
+    // FLOOR — a newly-shipped recipe (e.g. SmartRecruiters) works IMMEDIATELY, even
+    // before the web app redeploys /api/apply-recipes (which currently still serves
+    // only the older set). A fetched recipe with the same `ats` OVERRIDES the bundled
+    // one, so a live selector can still be hotfixed via a Vercel deploy.
+    const byAts = new Map(FALLBACK_RECIPES.map(r => [r.ats, r]));
+    for (const r of fetched) if (r?.ats) byAts.set(r.ats, r);
+    _recipes = [...byAts.values()];
+    console.log(`[Copo Recipe] ${_recipes.length} recipe(s) [${_recipes.map(r => r.ats).join(', ')}] — ${fetched.length} from web app + ${FALLBACK_RECIPES.length} bundled`);
     return _recipes;
 }
 
@@ -127,10 +201,17 @@ export function clickRecipeGateway(recipe, hasCV, clickedCounts) {
     for (const g of recipe?.gateways || []) {
         if (g.needsCV && !hasCV) continue;
         if ((clickedCounts.get(g.label) || 0) >= 2) continue; // don't loop on a stuck gateway
-        let el;
-        try { el = document.querySelector(g.detect); } catch { el = null; }
-        if (!el || el.offsetParent === null) continue;
-        const target = g.click ? document.querySelector(g.click) : el;
+        let target = null;
+        // A text-matched CTA (SmartRecruiters "I'm interested" is a styled <a>/<button>
+        // with no stable id/class) — match its visible text, skipping third-party
+        // shortcuts and a denylist ("Refer a friend" sits right next to it).
+        if (g.text) target = findClickableByText(g.text, g.textDeny);
+        // Fallback / alternative: an exact CSS selector (Workday's autofill modal).
+        if (!target && g.detect) {
+            let el;
+            try { el = document.querySelector(g.detect); } catch { el = null; }
+            if (el && el.offsetParent !== null) target = g.click ? document.querySelector(g.click) : el;
+        }
         if (!target || target.offsetParent === null) continue;
         overlayClick(target);   // Workday's modal buttons sit under a click_filter overlay
         clickedCounts.set(g.label, (clickedCounts.get(g.label) || 0) + 1);
@@ -138,6 +219,29 @@ export function clickRecipeGateway(recipe, hasCV, clickedCounts) {
         return { clicked: true, label: g.label };
     }
     return { clicked: false };
+}
+
+/** Normalize for text matching: lowercase, fold smart apostrophes to a straight
+ *  one (SR renders "I'm" with a curly ’), collapse whitespace. */
+function _normText(s) {
+    return (s || '').toLowerCase().replace(/[‘’ʼ`´]/g, "'").replace(/\s+/g, ' ').trim();
+}
+
+/** First visible clickable whose short label contains one of `wants`, excluding
+ *  third-party "Apply with …" shortcuts and any label containing a `denies` term
+ *  ("refer a friend"). Used for text-only CTAs the CSS-selector gateway can't name. */
+function findClickableByText(wants, denies) {
+    const want = (Array.isArray(wants) ? wants : [wants]).map(_normText).filter(Boolean);
+    const deny = (denies || []).map(_normText);
+    for (const el of document.querySelectorAll('button, a, [role="button"], input[type="submit"]')) {
+        if (el.offsetParent === null) continue;
+        if (isThirdPartyApply(el)) continue;
+        const t = _normText(el.textContent || el.value || '');
+        if (!t || t.length > 40) continue;
+        if (deny.some(d => d && t.includes(d))) continue;
+        if (want.some(w => t.includes(w))) return el;
+    }
+    return null;
 }
 
 /** True if the ATS's final review/submit step is on screen — the agent must
@@ -175,6 +279,7 @@ export async function applyRecipeFields(recipe, profile, cvData) {
     if (!recipe || !profile) return { matched: false, filled: 0 };
 
     let filled = 0;
+    let uploadedParser = false;   // did we upload the CV to a résumé-PARSER this pass?
 
     // Opportunistic CV upload — BEFORE the step check, so it runs on ANY page that
     // renders the recipe's file input, even one with no text-field step. Workday's
@@ -182,12 +287,75 @@ export async function applyRecipeFields(recipe, profile, cvData) {
     // (file-upload-input-ref) but no text step; uploading here lets Workday parse
     // the résumé and pre-fill the later sections. Idempotent: skips an input that
     // already holds a file, so it's safe to re-run every iteration.
-    if (cvData?.base64 && cvData?.fileName && recipe.fileUploadSelector) {
-        const fileEl = document.querySelector(recipe.fileUploadSelector);
-        if (fileEl && fileEl.type === 'file' && !(fileEl.files && fileEl.files.length)) {
-            try { if (setFileOnInput(fileEl, cvData.base64, cvData.fileName)) filled++; } catch { /* best effort */ }
+    if (cvData?.base64 && cvData?.fileName) {
+        // Résumé upload targets, in priority order. SmartRecruiters has TWO
+        // dropzones: the top "Easy Apply" one (apply-with-resume-container) makes SR
+        // PARSE the CV to auto-fill name/experience/education AND propagates it to the
+        // required "Résumé"/"Sơ yếu lý lịch" field (resume-upload) — so ONE upload to
+        // the parser is normally enough. We upload to the parser first (ONCE — it
+        // hides its file list + re-parses on every set) and then BREAK, giving SR a
+        // full iteration to propagate before we look at the required field next pass;
+        // the required-field upload is a FALLBACK that only fires if SR didn't
+        // propagate (idempotent: skipped when the field already holds a file). Each
+        // dropzone keeps its <input type=file> in a SHADOW root — the only light-DOM
+        // file input is the avatar picker — so resolve the host then deep-query.
+        const targets = recipe.fileUploadHosts
+            ? recipe.fileUploadHosts
+            : recipe.fileUploadHost ? [{ host: recipe.fileUploadHost }]
+            : recipe.fileUploadSelector ? [{ selector: recipe.fileUploadSelector }]
+            : [];
+        for (const t of targets) {
+            const key = t.host || t.selector;
+            if (t.once && _fileUploadedHosts.has(key)) continue;
+            let host = null, fileEl = null;
+            if (t.host) {
+                host = document.querySelector(t.host);
+                fileEl = host ? deepQuery('input[type="file"]', host) : null;
+            } else if (t.selector) {
+                fileEl = document.querySelector(t.selector) || deepQuery(t.selector);
+            }
+            const already = !!(fileEl && fileEl.files && fileEl.files.length);
+            // Diagnostic — if the CV still doesn't attach, this tells us exactly why:
+            // shadow open vs closed (a closed shadow root is unreachable → we can't
+            // set the <input>), and how many inputs of any type are reachable.
+            const _sh = host ? (host.shadowRoot ? host.shadowRoot.mode : 'none/closed') : '-';
+            const _anyInputs = host ? deepQueryAll('input', host).length : 0;
+            console.log(`[Copo Recipe] upload "${key}": host=${!!host} shadow=${_sh} fileInput=${!!fileEl} anyInputs=${_anyInputs} hasFile=${already}`);
+            if (already) { if (t.once) _fileUploadedHosts.add(key); continue; }
+            let ok = false;
+            if (t.via === 'drop') {
+                // Deliver the file via a synthetic drag-and-drop. A dropzone often runs
+                // its FULL résumé parser (and auto-saves the parsed entries) on the
+                // 'drop' handler, which — unlike an <input> 'change' — may not be gated
+                // on isTrusted, so this can match a real manual drag-drop.
+                if (host) { try { ok = dropFileOnZone(host, cvData.base64, cvData.fileName); if (ok) console.log(`[Copo Recipe] upload "${key}": via drag-drop`); } catch { /* best effort */ } }
+            } else {
+                if (fileEl && fileEl.type === 'file') {
+                    try { ok = setFileOnInput(fileEl, cvData.base64, cvData.fileName); } catch { /* best effort */ }
+                }
+                // Fallback: a dropzone whose <input> we can't reach (lazy / shadow-hidden).
+                if (!ok && host) {
+                    try { if (dropFileOnZone(host, cvData.base64, cvData.fileName)) { ok = true; console.log(`[Copo Recipe] upload "${key}": used drop fallback`); } } catch { /* best effort */ }
+                }
+            }
+            if (ok) {
+                filled++;
+                if (t.once) {
+                    _fileUploadedHosts.add(key);
+                    uploadedParser = true;
+                    break;
+                }
+            }
         }
     }
+
+    // Just uploaded the CV to SR's résumé PARSER → STOP this pass and let it finish.
+    // SmartRecruiters parses the résumé and populates the WHOLE form (personal info +
+    // Experience + Education). If we start filling/typing fields WHILE it parses, SR
+    // treats the form as user-edited and DISCARDS the parse → the auto-filled
+    // Experience/Education vanish ("AI xóa field"). So return now; the loop waits, and
+    // the next pass fills only whatever the parser left empty.
+    if (uploadedParser) return { matched: true, filled, step: 'résumé-parse', uploadedParser: true };
 
     const step = (recipe.steps || []).find(s => s.detect && document.querySelector(s.detect));
     if (!step) return { matched: filled > 0, filled };  // e.g. the autofill upload page: uploaded, no text step
@@ -206,6 +374,28 @@ export async function applyRecipeFields(recipe, profile, cvData) {
                 else if (r.reason === 'already-selected') outcomes.push([f.label, 'done', 'already selected']);
                 else if (r.reason === 'button-absent') outcomes.push([f.label, 'absent', 'not rendered yet']);
                 else outcomes.push([f.label, 'FAIL', r.reason]);
+            } else if (f.type === 'autocomplete') {
+                // Type-to-search field (SmartRecruiters city) → type then pick a match.
+                const r = await fillAutocomplete(f, val);
+                if (r.ok) { filled++; outcomes.push([f.label, 'OK', String(val)]); }
+                else if (r.reason === 'already-selected') outcomes.push([f.label, 'done', 'already filled']);
+                else if (r.reason === 'host-absent' || r.reason === 'input-absent') outcomes.push([f.label, 'absent', 'not rendered yet']);
+                else outcomes.push([f.label, 'FAIL', r.reason]);
+            } else if (f.type === 'shadow-text') {
+                // Text control living inside a web-component's shadow root: resolve
+                // the light-DOM host by data-test, then deep-find the input inside.
+                // (Don't gate on host.getClientRects() — some spl-* hosts are
+                // display:contents and have no box even though their input is visible.)
+                const host = document.querySelector(f.selector);
+                if (!host) { outcomes.push([f.label, 'absent', 'host not found']); continue; }
+                const el = deepFindControl(host, f.control);
+                if (!el) { outcomes.push([f.label, 'absent', 'no control in shadow']); continue; }
+                if (el.type === 'password') { outcomes.push([f.label, 'skip', 'password']); continue; }   // never
+                if (String(el.value ?? '').trim() !== '') { outcomes.push([f.label, 'done', 'already filled']); continue; }  // idempotent
+                setNativeValue(el, String(val));
+                await sleep(120);
+                if (String(el.value ?? '').trim() !== '') { filled++; outcomes.push([f.label, 'OK', String(val)]); }
+                else outcomes.push([f.label, 'FAIL', 'value did not stick']);
             } else {
                 const el = f.labelMatch ? findFieldByLabel(f.labelMatch) : document.querySelector(f.selector);
                 if (!el || el.offsetParent === null) { outcomes.push([f.label, 'absent', 'not rendered yet']); continue; }
@@ -306,4 +496,72 @@ async function fillCustomSelect(f, value) {
         await sleep(150);
     }
     return { ok: true };
+}
+
+/**
+ * Fill a type-to-search autocomplete (SmartRecruiters city / place lookup).
+ * The input lives in a web-component shadow root and needs ≥3 typed chars to
+ * trigger the async suggestion list, then a click on a suggestion to COMMIT the
+ * value (typing alone leaves it uncommitted and a blur can clear it). We type
+ * char-by-char WITHOUT a trailing blur, wait for suggestions, then click the
+ * best match (or the first). Idempotent: skips when the input already holds text.
+ */
+async function fillAutocomplete(f, value) {
+    // Don't gate on host.getClientRects() — spl-autocomplete can be display:contents
+    // (no box) while its inner input is visible; that made Location read as absent.
+    const host = document.querySelector(f.selector);
+    if (!host) return { ok: false, reason: 'host-absent' };
+    const input = deepFindControl(host, f.control);
+    if (!input) return { ok: false, reason: 'input-absent' };
+    if (String(input.value ?? '').trim() !== '') return { ok: false, reason: 'already-selected' };
+
+    input.focus();
+    input.dispatchEvent(new Event('focus', { bubbles: true }));
+    try { input.value = ''; } catch { /* readonly? */ }
+    for (const ch of String(value)) {
+        input.value += ch;
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: ch, bubbles: true }));
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new KeyboardEvent('keyup', { key: ch, bubbles: true }));
+        await sleep(40);
+    }
+    await sleep(1500);   // wait for the async place-lookup list to render
+
+    // Options render as <spl-dropdown-item> inside the autocomplete's shadow root
+    // (deepQueryAll pierces it). Pick the best text match, else the first suggestion.
+    const optSel = '[role="option"], [data-test*="option"], [data-sr-id*="option"], '
+        + 'spl-dropdown-item, spl-select-option, [class*="dropdown-item"], '
+        + 'li[role="option"], li[class*="option"], .autocomplete-option, .pac-item';
+    // Diacritic-insensitive compare so "Hà Nội" matches a "Hanoi" suggestion.
+    const norm = (s) => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/\s+/g, ' ').trim();
+    // Scope the option search to the autocomplete HOST's own subtree (its dropdown
+    // renders inside its shadow). Searching the whole document risked picking a
+    // stray dropdown-item elsewhere — e.g. inside a résumé-parsed Experience/Education
+    // card — and clicking it, which OPENED that entry's edit form and left it empty.
+    const opts = deepQueryAll(optSel, host).filter(o => o.getClientRects().length && (o.textContent || '').trim());
+    if (opts.length) {
+        const want = norm(value);
+        const match = opts.find(o => norm(o.textContent).includes(want)) || opts[0];
+        console.log(`[Copo Recipe] autocomplete "${f.label}": typed "${value}" → ${opts.length} option(s), picking "${(match.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 40)}"`);
+        // Click the option element DIRECTLY with composed events — overlayClick's
+        // elementFromPoint can't target an element that lives inside a shadow root.
+        try { match.scrollIntoView({ block: 'center' }); } catch { /* ignore */ }
+        for (const type of ['pointerover', 'pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+            try {
+                match.dispatchEvent(type.startsWith('pointer')
+                    ? new PointerEvent(type, { bubbles: true, composed: true, cancelable: true })
+                    : new MouseEvent(type, { bubbles: true, composed: true, cancelable: true }));
+            } catch { /* ignore */ }
+        }
+        try { match.click(); } catch { /* already dispatched */ }
+        await sleep(350);
+        return { ok: true };
+    }
+    // No list rendered → keyboard commit (ArrowDown highlights, Enter picks). Best effort.
+    console.log(`[Copo Recipe] autocomplete "${f.label}": typed "${value}" → 0 options; ArrowDown+Enter fallback`);
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, composed: true }));
+    await sleep(150);
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, composed: true }));
+    await sleep(250);
+    return { ok: String(input.value ?? '').trim() !== '', reason: 'no-list-enter-fallback' };
 }

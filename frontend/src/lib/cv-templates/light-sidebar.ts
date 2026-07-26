@@ -1,8 +1,10 @@
 import type { CVData } from '@/lib/types';
 import type { RenderOptions } from './types';
-import { esc, descToBullets, dateRangeLabel, avatarInner, joinAddress } from './types';
+import { esc, descToBullets, dateRangeLabel, avatarInner, joinAddress, entryHead, ENTRY_CSS} from './types';
+import { VI_LABELS } from './labels';
 
 export function lightSidebarTemplate(cv: CVData, opts?: RenderOptions): string {
+    const L = opts?.labels ?? VI_LABELS;
     const c = cv.contact ?? {} as Partial<NonNullable<CVData['contact']>>;
     const p = cv.personal ?? {} as Partial<NonNullable<CVData['personal']>>;
     const emp = cv.employment ?? {} as Partial<NonNullable<CVData['employment']>>;
@@ -52,6 +54,7 @@ export function lightSidebarTemplate(cv: CVData, opts?: RenderOptions): string {
   .item-desc { font-size: 9.5pt; color: #333; line-height: 1.65; }
   .item-desc ul { padding-left: 16px; }
   .item-desc li { margin-bottom: 2px; }
+  ${ENTRY_CSS}
 </style>
 </head><body>
 <div class="layout">
@@ -61,7 +64,7 @@ export function lightSidebarTemplate(cv: CVData, opts?: RenderOptions): string {
     ${emp.current_title ? `<div class="sb-title" data-f="employment.current_title">${esc(emp.current_title)}</div>` : ''}
 
     <div class="sb-section">
-      <h3>Liên hệ</h3>
+      <h3>${L.contact}</h3>
       <div class="sb-contact">
         ${c.phone ? `<div><span class="ico">☎</span><span data-f="contact.phone">${esc(c.phone)}</span></div>` : ''}
         ${c.email ? `<div><span class="ico">✉</span><span data-f="contact.email">${esc(c.email)}</span></div>` : ''}
@@ -75,7 +78,7 @@ export function lightSidebarTemplate(cv: CVData, opts?: RenderOptions): string {
 
     ${cv.skills?.length ? `
       <div class="sb-section">
-        <h3>Kỹ năng</h3>
+        <h3>${L.skills}</h3>
         <ul class="sb-skills">
           ${cv.skills.map((s, i) => `<li data-f="skills.${i}">${esc(s)}</li>`).join('')}
         </ul>
@@ -84,7 +87,7 @@ export function lightSidebarTemplate(cv: CVData, opts?: RenderOptions): string {
 
     ${cv.education?.length ? `
       <div class="sb-section">
-        <h3>Học vấn</h3>
+        <h3>${L.education}</h3>
         ${cv.education.map((e, i) => `
           <div class="sb-edu">
             <div class="sb-edu-inst" data-f="education.${i}.institution">${esc(e.institution || '')}</div>
@@ -97,7 +100,7 @@ export function lightSidebarTemplate(cv: CVData, opts?: RenderOptions): string {
 
     ${cv.languages?.length ? `
       <div class="sb-section">
-        <h3>Ngoại ngữ</h3>
+        <h3>${L.languages}</h3>
         <ul class="sb-skills">
           ${cv.languages.map((l, i) => `<li data-f="languages.${i}">${esc(l.language)}${l.level ? `: ${esc(l.level)}` : ''}</li>`).join('')}
         </ul>
@@ -106,7 +109,7 @@ export function lightSidebarTemplate(cv: CVData, opts?: RenderOptions): string {
 
     ${cv.certifications?.length ? `
       <div class="sb-section">
-        <h3>Chứng chỉ</h3>
+        <h3>${L.certifications}</h3>
         ${cv.certifications.map((ct, i) => `
           <div class="sb-edu">
             <div class="sb-edu-inst" data-f="certifications.${i}.name">${esc(ct.name || '')}</div>
@@ -119,24 +122,20 @@ export function lightSidebarTemplate(cv: CVData, opts?: RenderOptions): string {
   </div>
 
   <div class="main">
-    ${cv.summary ? `<h2>Mục tiêu nghề nghiệp</h2><div class="summary" data-f="summary">${esc(cv.summary)}</div>` : ''}
+    ${cv.summary ? `<h2>${L.summary}</h2><div class="summary" data-f="summary">${esc(cv.summary)}</div>` : ''}
 
     ${cv.experience?.length ? `
-      <h2>Kinh nghiệm làm việc</h2>
+      <h2>${L.experience}</h2>
       ${cv.experience.map((e, i) => `
         <div class="item">
-          <div class="item-top">
-            <div class="item-title" data-f="experience.${i}.title">${esc(e.title)}</div>
-            <div class="item-date" data-f="experience.${i}.daterange">${esc(dateRangeLabel(e))}</div>
-          </div>
-          <div class="item-meta" data-f="experience.${i}.company">${esc(e.company)}</div>
+          ${entryHead({ title: e.title, titlePath: `experience.${i}.title`, subtitle: e.company, subPath: `experience.${i}.company`, date: dateRangeLabel(e, L), datePath: `experience.${i}.daterange` })}
           <div class="item-desc">${descToBullets(e.description, `experience.${i}.description`)}</div>
         </div>
       `).join('')}
     ` : ''}
 
     ${cv.projects?.length ? `
-      <h2>Dự án</h2>
+      <h2>${L.projects}</h2>
       ${cv.projects.map((pj, i) => `
         <div class="item">
           <div class="item-title" data-f="projects.${i}.name">${esc(pj.name)}</div>
@@ -146,7 +145,7 @@ export function lightSidebarTemplate(cv: CVData, opts?: RenderOptions): string {
     ` : ''}
 
     ${cv.awards?.length ? `
-      <h2>Giải thưởng</h2>
+      <h2>${L.awards}</h2>
       ${cv.awards.map((a, i) => `
         <div class="item">
           <div class="item-top">
@@ -158,7 +157,7 @@ export function lightSidebarTemplate(cv: CVData, opts?: RenderOptions): string {
     ` : ''}
 
     ${cv.activities?.length ? `
-      <h2>Hoạt động</h2>
+      <h2>${L.activities}</h2>
       ${cv.activities.map((ac, i) => `
         <div class="item">
           <div class="item-title" data-f="activities.${i}.name">${esc(ac.name)}</div>
