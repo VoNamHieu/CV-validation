@@ -15,7 +15,10 @@ export function isThirdPartyApply(el) {
     // to say "apply with …": "Apply with CV / resume / profile / your CV / email"
     // is the EMPLOYER's own form and must be clicked — those name no provider.
     const PROVIDER = /indeed|linkedin|glassdoor|ziprecruiter/;
-    if (PROVIDER.test(t) && /(apply|sign\s*in|log\s*in|continue|đăng nhập)/.test(t)) return true;
+    // Include Vietnamese apply/continue verbs — SmartRecruiters localises the
+    // third-party shortcut as "Ứng tuyển bằng Indeed", which the English-only verb
+    // list missed, so the agent clicked it at step 0 and derailed.
+    if (PROVIDER.test(t) && /(apply|sign\s*in|log\s*in|continue|đăng nhập|ứng tuyển|nộp đơn|nộp hồ sơ|tiếp tục)/.test(t)) return true;
     if (/indeed\.com|linkedin\.com\/(oauth|uas|checkpoint)|glassdoor\.com|ziprecruiter\.com/.test(href)) return true;
     return false;
 }

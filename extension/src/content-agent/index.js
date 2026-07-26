@@ -28,7 +28,7 @@ import { applyRecipeFields, atFinalStep, clickRecipeGateway, loadRecipes, recipe
 // you can confirm (in the PAGE / tab console, NOT the service-worker console) that
 // the freshly-built dist is actually loaded. If you don't see this line on the
 // apply tab, the new build isn't injected (reload the extension + refresh the tab).
-const COPO_BUILD = 'appquestions-recipe-v5-2026-07-24g';
+const COPO_BUILD = 'smartrecruiters-recipe-v1-2026-07-26';
 try { console.log(`%c[Copo] content-agent build ${COPO_BUILD} loaded → ${location.host}`, 'color:#c43b2e;font-weight:700'); } catch { /* noop */ }
 
 /**
@@ -111,6 +111,8 @@ async function runAgentLoop(profile) {
 
         let sameStateCount = 0;
         let emptyStreak = 0;   // consecutive empty/error observes → triggers a recovery reload
+        let singlePageIdle = 0;     // single-page recipe: consecutive passes with nothing new to fill → hand off
+        let singlePagePasses = 0;   // single-page recipe: total passes on the matched form → hard cap (never spin)
 
         for (let i = 0; i < AGENT_MAX_ITERATIONS; i++) {
             // Keep the background watchdog alive — an iteration can legitimately
@@ -282,6 +284,20 @@ async function runAgentLoop(profile) {
             if (recipe) {
                 const rf = await applyRecipeFields(recipe, profile, cvData);
                 console.log(`[Copo Apply] recipe(${recipe.ats} v${recipe.version}): ${rf.matched ? `step="${rf.step || '—'}" filled=${rf.filled}` : 'no step matched → LLM handles'}`);
+                // Single-page hard cap: even if a field won't stick and we keep
+                // re-filling it (rf.filled>0 every pass), never spin forever — hand off
+                // after N passes on the form for the user to finish + submit.
+                if (recipe.singlePage && rf.matched) {
+                    singlePagePasses++;
+                    if (singlePagePasses > 6) {
+                        removeProgress();
+                        const miss = (state.unfilledRequired || []).slice(0, 4).join(', ');
+                        showToast(`✅ Đã điền hồ sơ${miss ? ` — kiểm tra lại: ${miss}` : ''}. Tích ô đồng ý điều khoản rồi bấm "Submit" để nộp.`, 10000);
+                        reportResult(true, `${recipe.label} filled (pass cap) — awaiting user consent + submit`, 'filled');
+                        showConfirmation(state.totalFields, state.totalFields, false);
+                        return;
+                    }
+                }
                 if (rf.filled > 0) {
                     actionsTaken++;
                     history.push({
@@ -289,9 +305,47 @@ async function runAgentLoop(profile) {
                         plan: { action: 'RECIPE', reason: `recipe ${recipe.ats}/${rf.step}` },
                         result: { filled: rf.filled },
                     });
-                    showProgress(i + 1, AGENT_MAX_ITERATIONS, `Điền tự động (${recipe.label}) — ${rf.filled} trường`);
-                    await sleep(600);
-                    continue; // re-observe; LLM handles dropdowns / navigation next
+                    if (recipe.singlePage) singlePageIdle = 0;   // progress made → reset idle
+                    showProgress(i + 1, AGENT_MAX_ITERATIONS,
+                        rf.uploadedParser ? '📄 Đã tải CV — chờ hệ thống tự điền hồ sơ…'
+                            : `Điền tự động (${recipe.label}) — ${rf.filled} trường`);
+                    // After uploading the CV to SR's parser, WAIT ~5s so it finishes
+                    // populating the whole form (personal info + experience + education)
+                    // before we touch anything — filling DURING the parse makes SR
+                    // discard it. Otherwise just a short re-scan delay.
+                    await sleep(rf.uploadedParser ? 5000 : (recipe.singlePage ? 1600 : 600));
+                    continue;
+                }
+                // ── SINGLE-PAGE FORM (SmartRecruiters): one page, no wizard. The flow
+                // is: upload the CV to the parser field (done in applyRecipeFields) →
+                // SR auto-fills most fields + attaches the résumé → we fill any still-
+                // empty fields → hand off. The LLM CAN'T reach SR's shadow-DOM inputs,
+                // so we must NOT fall through to the planner here — that just spins on
+                // an unchanging state until the stuck-detector fires. Instead wait a
+                // couple STABLE passes (rf.filled===0, letting the async parser finish)
+                // then hand off for the user to review + tick consent + Submit. Never
+                // auto-submit, never auto-tick consent.
+                if (recipe.singlePage) {
+                    if (rf.matched) {
+                        singlePageIdle++;
+                        if (singlePageIdle < 2) {
+                            showProgress(i + 1, AGENT_MAX_ITERATIONS, 'Rà soát & điền các ô còn trống…');
+                            await sleep(1600);
+                            continue;   // give the parser another pass, then re-scan
+                        }
+                        removeProgress();
+                        const miss = (state.unfilledRequired || []).slice(0, 4).join(', ');
+                        showToast(`✅ Đã điền hồ sơ${miss ? ` — kiểm tra lại: ${miss}` : ''}. Tích ô đồng ý điều khoản rồi bấm "Submit" để nộp.`, 10000);
+                        reportResult(true, `${recipe.label} filled — awaiting user consent + submit`, 'filled');
+                        showConfirmation(state.totalFields, state.totalFields, false);
+                        return;
+                    }
+                    // Host matches but the form isn't on screen yet — wait for it to
+                    // render (or for the "I'm interested" gateway to land us on it)
+                    // rather than handing the empty page to the LLM.
+                    showProgress(i + 1, AGENT_MAX_ITERATIONS, 'Chờ form ứng tuyển…');
+                    await sleep(1500);
+                    continue;
                 }
                 // Recipe step fully filled (nothing new this pass) + nothing required
                 // left → ADVANCE deterministically instead of burning a slow/overloaded
