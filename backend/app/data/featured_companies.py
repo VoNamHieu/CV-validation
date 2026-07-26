@@ -768,7 +768,10 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="DSV",
         homepage="https://www.dsv.com",
-        career_url="https://www.dsv.com/en/careers?q=%2A",
+        # The bare /careers page is marketing chrome (generic scraped a cookie-
+        # banner IE link as a "job"); the Vietnam-filtered job-search is SSR'd
+        # with the real postings — see dsv.py.
+        career_url="https://www.dsv.com/en/careers/job-search?query=&location=Vietnam",
     ),
     FeaturedCompany(
         name="Hellmann",
