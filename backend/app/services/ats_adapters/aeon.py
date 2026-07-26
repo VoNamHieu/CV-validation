@@ -8,17 +8,20 @@ Each item carries `text_deadline` — many postings in the feed are already
 expired ("Hết hạn") but still returned, so that field is the only reliable
 active/expired signal and must be filtered on.
 
-Detail route is /vi/job-detail/{slug} — confirmed live (200, not 404) with
-the API's own `slug` field; the route is client-rendered so a plain fetch
-can't verify per-job content, but it's the real prefix the app itself uses
-(other guessed prefixes 404 outright).
+Detail route is /job-detail/{id} — keyed by the numeric `id`, NOT the slug.
+The app's own detail page loads from `GET /api/hiring/{id}` (confirmed: 200
+with the matching title), so the id is the canonical key. The previously-used
+/vi/job-detail/{slug} form returns a 200 SPA shell but does NOT deep-link to
+the posting (same trap as base.vn — a "live 200" that's the wrong identity).
+`external_id` is the numeric id so the row's identity is stable regardless of
+the URL/prefix the site happens to use.
 """
 from __future__ import annotations
 
 from app.services.ats_adapters._shared import *  # noqa: F401,F403
 
 _API = "https://api-tuyendung.aeon.com.vn/api/hiring/list"
-_DETAIL_BASE = "https://tuyendung.aeon.com.vn/vi/job-detail"
+_DETAIL_BASE = "https://tuyendung.aeon.com.vn/job-detail"
 _MAX_PAGES = 20  # 10/page; caps at _MAX_ATS_JOBS via _finalize anyway
 
 
@@ -42,10 +45,11 @@ def _aeon(career_url: str) -> list[dict]:
                 if it.get("text_deadline") == "Hết hạn":
                     continue  # expired posting still returned by the feed
                 title = (it.get("title") or "").strip()
-                slug = it.get("slug")
-                if not title or not slug:
+                jid = it.get("id")
+                if not title or not jid:
                     continue
-                out.append({"title": title[:200], "url": f"{_DETAIL_BASE}/{slug}",
+                out.append({"title": title[:200], "url": f"{_DETAIL_BASE}/{jid}",
+                            "external_id": str(jid),
                             "location": it.get("address") or "", "description": ""})
             if page >= (data.get("pagination") or {}).get("total_pages", page) or len(out) >= _MAX_ATS_JOBS:
                 break
