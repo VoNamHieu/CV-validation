@@ -1,0 +1,315 @@
+// Tests for the ATS candidate-account logic (node --test, no deps).
+//
+// These three modules decide things that are expensive to get wrong: which
+// account a job belongs to, what an auth failure MEANS, and whether a tenant may
+// be touched again. A misclassification here either locks a user out of a real
+// candidate account or accuses them of a wrong password they never typed.
+
+import { test, describe } from 'node:test';
+import assert from 'node:assert/strict';
+
+import { tenantRefFor, vendorForHost, sortJobsByTenant } from '../src/ats/tenant.js';
+import { classifyDomError, classifyApiResponse, authResult, RETRYABLE } from '../src/ats/classifier.js';
+import { BLOCKING_STATES, OUTCOMES } from '../src/ats/states.js';
+import * as coord from '../src/ats/coordinator.js';
+
+// ── tenant identity ────────────────────────────────────────────────────────
+describe('tenantRefFor', () => {
+    test('keys on the host, not the career site', () => {
+        const a = tenantRefFor('https://aia.wd3.myworkdayjobs.com/en-US/AIA_Careers/job/HCM/Analyst_R-1');
+        const b = tenantRefFor('https://aia.wd3.myworkdayjobs.com/en-US/AIA_Campus/job/HN/Intern_R-2');
+        assert.equal(a.tenantKey, 'aia.wd3.myworkdayjobs.com');
+        assert.equal(a.tenantKey, b.tenantKey,
+            'two career sites on one host must share ONE account, or a per-tenant '
+            + 'password override fragments and the user is asked twice');
+        assert.equal(a.careerSiteKey, 'AIA_Careers');
+        assert.equal(b.careerSiteKey, 'AIA_Campus');
+    });
+
+    test('different tenants are different accounts', () => {
+        const aia = tenantRefFor('https://aia.wd3.myworkdayjobs.com/en-US/X/job/1');
+        const bosch = tenantRefFor('https://bosch.wd3.myworkdayjobs.com/en-US/X/job/1');
+        assert.notEqual(aia.tenantKey, bosch.tenantKey);
+    });
+
+    test('skips the locale segment when finding the career site', () => {
+        assert.equal(tenantRefFor('https://x.wd1.myworkdayjobs.com/en-US/Site/job/1').careerSiteKey, 'Site');
+        assert.equal(tenantRefFor('https://x.wd1.myworkdayjobs.com/fr/Site/job/1').careerSiteKey, 'Site');
+        assert.equal(tenantRefFor('https://x.wd1.myworkdayjobs.com/Site/job/1').careerSiteKey, 'Site');
+    });
+
+    test('no career site in the path is not an error', () => {
+        const ref = tenantRefFor('https://x.wd1.myworkdayjobs.com/job/12345');
+        assert.equal(ref.tenantKey, 'x.wd1.myworkdayjobs.com');
+        assert.equal(ref.careerSiteKey, null);
+    });
+
+    test('covers myworkdaysite.com', () => {
+        // Absent from host_permissions until this change — those tenants had no
+        // cookies and no content script at all.
+        assert.equal(vendorForHost('acme.wd5.myworkdaysite.com'), 'workday');
+        assert.equal(tenantRefFor('https://acme.wd5.myworkdaysite.com/en-US/S/job/1').atsVendor, 'workday');
+    });
+
+    test('returns null for ATS that need no account, and for junk', () => {
+        assert.equal(tenantRefFor('https://boards.greenhouse.io/acme/jobs/1'), null);
+        assert.equal(tenantRefFor('https://jobs.smartrecruiters.com/acme/1'), null);
+        assert.equal(tenantRefFor('not a url'), null);
+        assert.equal(tenantRefFor(null), null);
+        assert.equal(tenantRefFor(undefined), null);
+    });
+
+    test('host matching is anchored — a lookalike domain is not Workday', () => {
+        assert.equal(vendorForHost('myworkdayjobs.com.evil.test'), null);
+    });
+
+    test('tenantSlug gives a usable label', () => {
+        assert.equal(tenantRefFor('https://aia.wd3.myworkdayjobs.com/job/1').tenantSlug, 'aia');
+    });
+});
+
+describe('sortJobsByTenant', () => {
+    test('groups a tenant contiguously and keeps within-tenant order', () => {
+        const jobs = [
+            { id: 1, jobUrl: 'https://aia.wd3.myworkdayjobs.com/job/1' },
+            { id: 2, jobUrl: 'https://bosch.wd3.myworkdayjobs.com/job/2' },
+            { id: 3, jobUrl: 'https://aia.wd3.myworkdayjobs.com/job/3' },
+            { id: 4, jobUrl: 'https://boards.greenhouse.io/x/jobs/4' },
+            { id: 5, jobUrl: 'https://bosch.wd3.myworkdayjobs.com/job/5' },
+        ];
+        assert.deepEqual(sortJobsByTenant(jobs).map(j => j.id), [1, 3, 2, 5, 4]);
+    });
+
+    test('is a permutation — no job is dropped or duplicated', () => {
+        const jobs = Array.from({ length: 20 }, (_, i) => ({
+            id: i,
+            jobUrl: i % 3 === 0
+                ? `https://t${i % 4}.wd3.myworkdayjobs.com/job/${i}`
+                : `https://boards.greenhouse.io/x/jobs/${i}`,
+        }));
+        const sorted = sortJobsByTenant(jobs);
+        assert.equal(sorted.length, jobs.length);
+        assert.deepEqual(sorted.map(j => j.id).sort((a, b) => a - b), jobs.map(j => j.id));
+    });
+
+    test('handles an empty batch', () => {
+        assert.deepEqual(sortJobsByTenant([]), []);
+    });
+});
+
+// ── error classification ───────────────────────────────────────────────────
+/** Minimal document stub: one visible error banner with the given text. */
+function docWith(text, { challenge = false } = {}) {
+    const node = { textContent: text, offsetParent: {} };
+    return {
+        querySelectorAll: (sel) => (sel.includes('error') || sel.includes('alert') ? [node] : []),
+        querySelector: (sel) => (challenge && sel.includes('captcha') ? {} : null),
+    };
+}
+
+describe('classifyDomError', () => {
+    test('nothing on screen → null', () => {
+        assert.equal(classifyDomError(docWith('')), null);
+    });
+
+    const cases = [
+        ['An account with this email already exists.', 'account_exists'],
+        ['Tài khoản đã tồn tại', 'account_exists'],
+        ['Please verify your email to continue', 'verification_required'],
+        ['A verification email has been sent', 'verification_required'],
+        ['Your password has expired', 'password_reset_required'],
+        ['This account is locked', 'temporarily_locked'],
+        ['Too many failed attempts', 'temporarily_locked'],
+        ['Too many requests, try again later', 'rate_limited'],
+        ['The email or password you entered is incorrect', 'invalid_credentials'],
+        ['Invalid password', 'invalid_credentials'],
+        ['Sai mật khẩu', 'invalid_credentials'],
+    ];
+    for (const [text, expected] of cases) {
+        test(`"${text.slice(0, 40)}" → ${expected}`, () => {
+            assert.equal(classifyDomError(docWith(text)).outcome, expected);
+        });
+    }
+
+    test('CRITICAL: a generic failure is NOT invalid_credentials', () => {
+        // This is the rule the whole design leans on. `invalid_credentials`
+        // blocks the tenant and tells the user their password is wrong — it must
+        // never be inferred from "something went wrong".
+        for (const text of [
+            'Sign in failed',
+            'We were unable to process your request',
+            'An error occurred. Please try again.',
+            'Something went wrong',
+        ]) {
+            const got = classifyDomError(docWith(text));
+            assert.equal(got.outcome, 'unknown_error', `"${text}" must stay unknown_error`);
+            assert.equal(got.code, 'unrecognized_error');
+        }
+    });
+
+    test('a password-policy complaint is not a credentials error either', () => {
+        // It means the SIGNUP was rejected, not that the stored password is wrong.
+        assert.equal(
+            classifyDomError(docWith('Password must contain a special character')).outcome,
+            'unknown_error',
+        );
+    });
+
+    test('the banner text is never returned — only a sanitized code', () => {
+        // Error banners can echo the user's email address.
+        const got = classifyDomError(docWith('No account for hieu@example.com'));
+        assert.equal(JSON.stringify(got).includes('hieu@example.com'), false);
+    });
+});
+
+describe('classifyApiResponse', () => {
+    test('2xx is success', () => {
+        assert.equal(classifyApiResponse({ status: 200, json: {} }).outcome, 'success');
+        assert.equal(classifyApiResponse({ status: 204, text: '' }).outcome, 'success');
+    });
+
+    test('429 is rate limited, 5xx is transient — both retryable', () => {
+        const rl = classifyApiResponse({ status: 429, json: {} });
+        const tx = classifyApiResponse({ status: 503, json: {} });
+        assert.equal(rl.outcome, 'rate_limited');
+        assert.equal(tx.outcome, 'transient_error');
+        assert.ok(RETRYABLE.has(rl.outcome) && RETRYABLE.has(tx.outcome));
+    });
+
+    test('401/403 stays vague — unauthenticated is not "wrong password"', () => {
+        // An unverified account and a challenge produce 401 too.
+        assert.equal(classifyApiResponse({ status: 401, json: {} }).outcome, 'unknown_error');
+        assert.equal(classifyApiResponse({ status: 403, json: {} }).outcome, 'unknown_error');
+    });
+
+    test('an explicit body signal still wins over the status code', () => {
+        const got = classifyApiResponse({
+            status: 400, json: { message: 'An account with this email already exists' },
+        });
+        assert.equal(got.outcome, 'account_exists');
+    });
+
+    test('carries the source through for the audit log', () => {
+        assert.equal(classifyApiResponse({ status: 200, json: {} }, { source: 'cxs' }).source, 'cxs');
+    });
+});
+
+describe('authResult', () => {
+    test('emits only outcomes the backend accepts', () => {
+        for (const outcome of OUTCOMES) {
+            assert.equal(authResult('login', outcome, 'dom').outcome, outcome);
+        }
+    });
+
+    test('derives retryable from the outcome', () => {
+        assert.equal(authResult('login', 'transient_error', 'dom').retryable, true);
+        assert.equal(authResult('login', 'invalid_credentials', 'dom').retryable, false);
+        assert.equal(authResult('login', 'verification_required', 'dom').retryable, false);
+    });
+});
+
+// ── coordinator: probe-once + attempt budget ───────────────────────────────
+describe('coordinator', () => {
+    const AIA = { atsVendor: 'workday', tenantKey: 'aia.wd3.myworkdayjobs.com' };
+
+    test('an unseen tenant is probed, signup first', () => {
+        // Signup-first because Workday's signup answers distinguishably
+        // ("account already exists"), while a failed login is ambiguous.
+        coord.beginBatch('b1', {});
+        assert.equal(coord.gateJob(AIA).skip, false);
+        assert.equal(coord.nextOperation(AIA.tenantKey), 'signup');
+    });
+
+    test('a known-ready tenant logs in directly', () => {
+        coord.beginBatch('b1', { [AIA.tenantKey]: { accountState: 'ready' } });
+        assert.equal(coord.gateJob(AIA).skip, false);
+        assert.equal(coord.nextOperation(AIA.tenantKey), 'login');
+    });
+
+    for (const state of BLOCKING_STATES) {
+        test(`'${state}' skips the job without opening a tab`, () => {
+            coord.beginBatch('b1', { [AIA.tenantKey]: { accountState: state } });
+            const gate = coord.gateJob(AIA);
+            assert.equal(gate.skip, true, `${state} must not be retried automatically`);
+            assert.ok(['verification', 'credential', 'manual'].includes(gate.reason));
+        });
+    }
+
+    test('verification and credential blocks map to their own UI reasons', () => {
+        coord.beginBatch('b1', { [AIA.tenantKey]: { accountState: 'verification_required' } });
+        assert.equal(coord.gateJob(AIA).reason, 'verification');
+        coord.beginBatch('b2', { [AIA.tenantKey]: { accountState: 'credential_required' } });
+        assert.equal(coord.gateJob(AIA).reason, 'credential');
+        coord.beginBatch('b3', { [AIA.tenantKey]: { accountState: 'challenge_required' } });
+        assert.equal(coord.gateJob(AIA).reason, 'manual');
+    });
+
+    test('temporarily_locked is honoured until next_retry_at, then released', () => {
+        coord.beginBatch('b1', {
+            [AIA.tenantKey]: {
+                accountState: 'temporarily_locked',
+                nextRetryAt: new Date(Date.now() + 60_000).toISOString(),
+            },
+        });
+        assert.equal(coord.gateJob(AIA).skip, true);
+
+        coord.beginBatch('b2', {
+            [AIA.tenantKey]: {
+                accountState: 'temporarily_locked',
+                nextRetryAt: new Date(Date.now() - 60_000).toISOString(),
+            },
+        });
+        assert.equal(coord.gateJob(AIA).skip, false, 'backoff expired → probe again');
+    });
+
+    test('probe-once: the budget is spent after signup + login, then jobs skip', () => {
+        // Ten jobs at one tenant must cost at most two auth operations — this is
+        // the actual lockout defence, far more than any password choice.
+        coord.beginBatch('b1', {});
+        assert.equal(coord.nextOperation(AIA.tenantKey), 'signup');
+        coord.recordAttempt(AIA.tenantKey, 'signup');
+        assert.equal(coord.nextOperation(AIA.tenantKey), 'login');
+        coord.recordAttempt(AIA.tenantKey, 'login');
+        assert.equal(coord.nextOperation(AIA.tenantKey), null);
+        assert.equal(coord.gateJob(AIA).skip, true, 'budget spent → remaining jobs skip');
+    });
+
+    test('a verdict recorded for the tenant applies to its later jobs', () => {
+        coord.beginBatch('b1', {});
+        assert.equal(coord.gateJob(AIA).skip, false);
+        coord.setState(AIA.tenantKey, { accountState: 'verification_required' });
+        assert.equal(coord.gateJob(AIA).skip, true);
+        assert.equal(coord.gateJob(AIA).reason, 'verification');
+    });
+
+    test('budgets are per tenant, not global', () => {
+        const bosch = { atsVendor: 'workday', tenantKey: 'bosch.wd3.myworkdayjobs.com' };
+        coord.beginBatch('b1', {});
+        coord.recordAttempt(AIA.tenantKey, 'signup');
+        coord.recordAttempt(AIA.tenantKey, 'login');
+        assert.equal(coord.nextOperation(AIA.tenantKey), null);
+        assert.equal(coord.nextOperation(bosch.tenantKey), 'signup');
+        assert.equal(coord.gateJob(bosch).skip, false);
+    });
+
+    test('a job with no tenant (ATS needing no account) is never gated', () => {
+        coord.beginBatch('b1', {});
+        assert.equal(coord.gateJob(null).skip, false);
+    });
+
+    test('beginBatch resets the previous batch\'s budget', () => {
+        coord.beginBatch('b1', {});
+        coord.recordAttempt(AIA.tenantKey, 'signup');
+        coord.recordAttempt(AIA.tenantKey, 'login');
+        assert.equal(coord.nextOperation(AIA.tenantKey), null);
+        coord.beginBatch('b2', {});
+        assert.equal(coord.nextOperation(AIA.tenantKey), 'signup');
+    });
+
+    test('endBatch clears state', () => {
+        coord.beginBatch('b1', { [AIA.tenantKey]: { accountState: 'ready' } });
+        coord.endBatch();
+        assert.equal(coord.currentBatchId(), null);
+        assert.equal(coord.stateFor(AIA.tenantKey), 'unknown');
+    });
+});

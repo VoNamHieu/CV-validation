@@ -25,6 +25,7 @@ if not any(isinstance(h, logging.StreamHandler) for h in _app_logger.handlers):
 _app_logger.propagate = False  # own handler → don't double-log via root
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
@@ -32,7 +33,7 @@ from starlette.responses import JSONResponse
 from app.routers import (
     extract, crawl, smart_crawl, render, career, debug_capture, link_monitor,
     compat_monitor, store, account, credits, admin, feedback, events, interview,
-    incidents, webhooks,
+    incidents, webhooks, ats_accounts,
 )
 from app.services.browser_pool import close_browser
 from app.db.pool import close_pool
@@ -75,6 +76,23 @@ async def _log_unhandled(request: Request, exc: Exception):
         context={"method": request.method, "path": request.url.path},
     )
     return JSONResponse({"detail": "Internal server error"}, status_code=500)
+
+
+# ── Validation errors: report the problem, never the payload ──
+# FastAPI's default 422 body embeds `input` — the offending value verbatim — so a
+# malformed request carrying a secret gets that secret mirrored straight back
+# (and into whatever logs the response). Pydantic's SecretStr does NOT prevent
+# this: the echo happens before the model is ever built. /me/ats-* posts
+# third-party ATS passwords, so we strip `input` (and `ctx`, which can hold the
+# same value) from every error. Callers keep `loc`/`msg`/`type`, which is what
+# actually tells them what to fix.
+@app.exception_handler(RequestValidationError)
+async def _validation_error(request: Request, exc: RequestValidationError):
+    safe = [
+        {k: v for k, v in err.items() if k not in ("input", "ctx")}
+        for err in exc.errors()
+    ]
+    return JSONResponse({"detail": safe}, status_code=422)
 
 
 # ── Rate Limiting Middleware (H2) ──
@@ -260,6 +278,7 @@ app.include_router(link_monitor.router)
 app.include_router(compat_monitor.router)
 app.include_router(store.router)
 app.include_router(account.router)
+app.include_router(ats_accounts.router)
 app.include_router(credits.router)
 app.include_router(admin.router)
 app.include_router(feedback.router)

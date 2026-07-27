@@ -83,8 +83,14 @@ async def delete_account(user_id: str) -> None:
                 "   OR (email IS NOT NULL AND lower(email) = lower($2))",
                 user_id, email or "",
             )
+            # ats_auth_attempts / ats_default_credentials cascade off the tables
+            # below, but list them anyway — this cleanup deliberately does not
+            # rely on every FK being ON DELETE CASCADE, and these rows hold
+            # third-party credentials.
             for table in ("applications", "saved_jobs", "cv_profiles",
-                          "credit_ledger", "credits"):
+                          "credit_ledger", "credits", "ats_auth_attempts",
+                          "ats_tenant_accounts", "ats_default_credentials",
+                          "ats_credentials"):
                 await conn.execute(f"DELETE FROM {table} WHERE user_id = $1", user_id)
             await conn.execute("DELETE FROM profiles WHERE id = $1", user_id)
             await conn.execute("DELETE FROM auth.users WHERE id = $1", user_id)

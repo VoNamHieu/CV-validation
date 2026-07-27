@@ -19,16 +19,16 @@ import { overlayClick, sleep } from './dom.js';
 import { removeProgress, showConfirmation, showProgress, showToast } from './ui.js';
 import { callAgentPlan, callLLMMapping } from './llm.js';
 import { executeFillInstructions } from './fill.js';
-import { observePageState, scrollAndCollect } from './observe.js';
+import { auditRequiredBlockers, observePageState, scrollAndCollect } from './observe.js';
 import { findApplyButton, isApplicationFormPage, summarizeState, waitForJobPageSignal } from './detect.js';
-import { getApplyCredentials, handleLoginWall } from './login.js';
+import { detectLoginWall, handleLoginWall } from './login.js';
 import { applyRecipeFields, atFinalStep, clickRecipeGateway, loadRecipes, recipeForUrl } from './recipe.js';
 
 // Build marker — logs the moment content-agent.js injects on a matched page, so
 // you can confirm (in the PAGE / tab console, NOT the service-worker console) that
 // the freshly-built dist is actually loaded. If you don't see this line on the
 // apply tab, the new build isn't injected (reload the extension + refresh the tab).
-const COPO_BUILD = 'smartrecruiters-recipe-v1-2026-07-26';
+const COPO_BUILD = 'workday-audit-reload-2026-07-26';
 try { console.log(`%c[Copo] content-agent build ${COPO_BUILD} loaded → ${location.host}`, 'color:#c43b2e;font-weight:700'); } catch { /* noop */ }
 
 /**
@@ -47,7 +47,6 @@ async function runAgentLoop(profile) {
     // after we actually did something count as a submitted application.
     let baselineSignals = null;
     let actionsTaken = 0;
-    let loginAttempts = 0;   // cap login-wall retries so a wrong password can't loop forever
     const gatewayClicks = new Map();   // recipe gateway label → click count (loop guard)
 
     // Load CV data if available
@@ -61,7 +60,11 @@ async function runAgentLoop(profile) {
         });
     });
     const hasCV = !!cvData;
-    const applyCreds = await getApplyCredentials();
+    // ATS credentials are NOT read from storage any more: the background fetches
+    // them from the backend just-in-time, per tenant, and hands them over only
+    // when we actually hit a wall (see requestAtsAuth). Nothing here holds a
+    // password until that moment, and nothing writes one back to storage.
+    let atsAuthDone = false;
 
     // Per-ATS recipe for THIS host (Workday…): exact verified selectors for the
     // standardized fields, so the reliable text inputs get filled deterministically
@@ -172,7 +175,20 @@ async function runAgentLoop(profile) {
             {
                 const bt = document.body?.innerText || '';
                 const errCard = /something went wrong|refresh the page and (?:then )?try again/i.test(bt);
-                const emptyShell = state.formFields.length === 0 && state.buttons.length === 0 && !state.blockers.length;
+                // "Empty apply shell" = the form area never rendered (e.g. Workday paints
+                // only its header + footer, blank body). The OLD check required
+                // buttons.length===0, but the persistent header/footer chrome (Sign In,
+                // Careers Page, social links) always leaves buttons > 0 — so a truly empty
+                // form never reloaded. Detect it by the absence of ANY fillable form
+                // content instead (and no recipe step on screen), ignoring nav buttons.
+                const hasFormContent = !!document.querySelector(
+                    'input:not([type="hidden"]):not([type="submit"]):not([type="button"]), textarea, select, '
+                    + '[data-automation-id^="formField-"], [data-automation-id*="applyFlow"], [data-test^="personal-info"]');
+                const recipeStepPresent = !!(recipe && (recipe.steps || []).some(s => {
+                    try { return s.detect && document.querySelector(s.detect); } catch { return false; }
+                }));
+                const emptyShell = state.formFields.length === 0 && !hasFormContent
+                    && !recipeStepPresent && !state.blockers.length;
                 if (errCard || emptyShell) emptyStreak++; else emptyStreak = 0;
                 // Error card → reload now; a bare empty shell → wait 2 observes first
                 // (it may still be mid-bootstrap, not actually broken).
@@ -236,44 +252,61 @@ async function runAgentLoop(profile) {
             // submit the page navigates and the redirect-resume re-injects us on
             // the real form. Guarded to a genuine login/signup page inside
             // handleLoginWall, so it no-ops on a normal application form.
-            if (applyCreds?.password && document.querySelector('input[type="password"]')) {
-                // Fill + submit the sign-in (handleLoginWall clicks the click_filter
-                // overlay over Workday's button — pure JS). Two auto passes.
-                if (loginAttempts < 2) {
-                    loginAttempts++;
-                    await handleLoginWall(applyCreds, recipe?.login);
-                    actionsTaken++;
-                    showProgress(i + 1, AGENT_MAX_ITERATIONS, 'Đăng nhập…');
-                    await sleep(3200);
-                    continue; // re-observe: a successful submit cleared the wall
-                }
-                // Still walled after two auto passes (wrong credentials, or an ATS we
-                // can't submit) → pre-fill so the user clicks "Sign In" once, then
-                // auto-resume when the wall clears. Waits up to 3 min; no burned iters.
-                await handleLoginWall(applyCreds, recipe?.login); // (re)fill + submit
-                showToast('🔐 Đã điền sẵn email + mật khẩu. Nếu chưa tự đăng nhập, hãy bấm nút "Sign In" — '
-                    + 'hệ thống sẽ tự động điền tiếp sau khi bạn đăng nhập.', 0);
-                const waitStart = Date.now();
-                let cleared = false;
-                while (Date.now() - waitStart < 180000) {
-                    sendHeartbeat();
-                    showProgress(i + 1, AGENT_MAX_ITERATIONS, '⏳ Chờ đăng nhập…');
-                    const pwNow = document.querySelector('input[type="password"]');
-                    if (!pwNow) { cleared = true; break; }          // signed in → wall gone
-                    if (!pwNow.value) await handleLoginWall(applyCreds, recipe?.login); // re-render cleared it
-                    await sleep(2000);
-                }
-                document.getElementById('jobfit-toast')?.remove();
-                if (!cleared) {
+            if (!atsAuthDone && detectLoginWall(recipe?.login)) {
+                // Ask the background for this tenant's credential + which operation
+                // it's allowed to run (signup for a tenant we've never authenticated
+                // at, login for one we have). It owns the attempt budget, because a
+                // content script dies on every navigation and can't count.
+                const grant = await requestAtsAuth();
+
+                if (!grant?.ok) {
+                    // No credential we can use, or the budget is spent. Don't sit on
+                    // a wall for three minutes — hand the tenant back so the batch
+                    // moves on and the user gets one actionable row.
                     removeProgress();
-                    showToast('⚠️ Chưa đăng nhập sau 3 phút. Đăng nhập thủ công rồi bấm Auto Apply lại nhé.', 6000);
-                    reportResult(false, 'Manual login timeout');
+                    reportResult(false, grant?.detail || 'Cần tài khoản để ứng tuyển',
+                        'blocked', { blockedReason: grant?.reason || 'manual' });
                     return;
                 }
-                showToast('✅ Đã đăng nhập — tiếp tục điền hồ sơ...', 3000);
-                prevStateHash = ''; fillAttempts.clear(); persistentlyUnfilled.clear();
-                await sleep(1500);
-                continue; // resume on the post-login step
+
+                showProgress(i + 1, AGENT_MAX_ITERATIONS,
+                    grant.operation === 'signup' ? 'Tạo tài khoản…' : 'Đăng nhập…');
+
+                let result = await handleLoginWall(grant.credentials, recipe?.login, grant.operation);
+                // A form switch (sign-in ⇄ create account) isn't an attempt; run the
+                // real one on the form we asked for.
+                if (result?.pending) {
+                    await sleep(1200);
+                    result = await handleLoginWall(grant.credentials, recipe?.login, grant.operation);
+                }
+                actionsTaken++;
+
+                // Report the verdict; the background persists it, so every remaining
+                // job on this tenant inherits it instead of re-probing.
+                const verdict = await reportAtsAuth(result);
+                atsAuthDone = true;
+
+                if (result?.outcome === 'success') {
+                    showToast('✅ Đã đăng nhập — tiếp tục điền hồ sơ...', 3000);
+                    prevStateHash = ''; fillAttempts.clear(); persistentlyUnfilled.clear();
+                    await sleep(1500);
+                    continue;                       // resume on the post-login step
+                }
+                if (result?.outcome === 'account_exists') {
+                    // Expected on signup-first: the account is already there, so sign
+                    // in instead. This is the second (and last) allowed operation.
+                    atsAuthDone = false;
+                    await sleep(1000);
+                    continue;
+                }
+                // Anything else needs the user (verify an email, supply a different
+                // password, solve a challenge). Close out cleanly — the verify wall
+                // sits BEFORE the form, so there is no progress worth preserving and
+                // no reason to keep a tab parked.
+                removeProgress();
+                reportResult(false, ATS_BLOCK_DETAIL[verdict?.reason || 'manual'],
+                    'blocked', { blockedReason: verdict?.reason || 'manual' });
+                return;
             }
 
             // ── RECIPE PRE-FILL: for a known ATS (Workday…), fill the standardized
@@ -414,9 +447,17 @@ async function runAgentLoop(profile) {
             if (stateHash === prevStateHash) {
                 sameStateCount++;
                 if (sameStateCount >= 3) {
+                    // Don't just give up "stuck" — audit WHY the step won't advance
+                    // (which required fields are still empty / what validation errors
+                    // are shown) so the user (and the log) knows what to complete.
+                    const blockers = auditRequiredBlockers();
+                    const miss = blockers.slice(0, 6).map(b => b.kind === 'error' ? b.label : `${b.label} (${b.kind})`).join(', ');
+                    console.warn('[Copo Apply] STUCK — required blockers:', blockers.length ? blockers : '(none detected — likely a captcha / login / unknown widget)');
                     removeProgress();
-                    showToast('⚠️ Agent bị stuck — dừng lại. Vui lòng điền thủ công.', 5000);
-                    reportResult(false, 'Agent stuck — same state 3 iterations');
+                    showToast(miss
+                        ? `⚠️ Không qua được bước này — còn thiếu: ${miss}. Điền nốt rồi bấm tiếp.`
+                        : '⚠️ Agent dừng — không xác định được ô còn thiếu. Vui lòng điền thủ công.', 9000);
+                    reportResult(false, `Stuck — blockers: ${miss || 'unknown'}`);
                     return;
                 }
             } else {
@@ -576,20 +617,58 @@ async function runAgentLoop(profile) {
 // ─── Report result back to background ───
 // outcome: 'submitted' (new success signal seen after our actions)
 //        | 'filled'    (form filled, awaiting the user's review + submit)
+//        | 'blocked'   (waiting on the USER — verify an email, supply a password;
+//                       NOT a failure, and never shown as one)
 //        | 'failed'
-function reportResult(success, detail, outcome) {
+function reportResult(success, detail, outcome, extra = {}) {
     const o = outcome || (success ? 'filled' : 'failed');
     console.log(`[Copo Apply] ■ result: ${success ? '✅' : '✖'} outcome=${o} | ${detail} | ${window.location.hostname}`);
     chrome.runtime.sendMessage({
         type: 'AUTO_APPLY_RESULT',
         result: {
             success,
-            outcome: outcome || (success ? 'filled' : 'failed'),
+            outcome: o,
             site: window.location.hostname,
             url: window.location.href,
             detail,
+            ...extra,
         },
     }).catch(() => { });
+}
+
+// ─── ATS auth (candidate accounts) ───
+// The background owns the credential and the per-tenant attempt budget; the
+// content script only drives the form. Keeping the decision there means a
+// navigation (which kills this script) can't reset the count.
+
+/** User-facing wording per block reason. Blocked ≠ failed. */
+const ATS_BLOCK_DETAIL = {
+    verification: 'Chờ bạn xác minh email của công ty này',
+    credential: 'Cần thông tin đăng nhập riêng cho công ty này',
+    manual: 'Cần bạn xử lý trực tiếp trên trang này',
+};
+
+/** Ask for this tenant's credential + the operation we're allowed to run. */
+async function requestAtsAuth() {
+    try {
+        return await chrome.runtime.sendMessage({
+            type: 'ATS_AUTH_REQUEST', url: window.location.href,
+        });
+    } catch {
+        return { ok: false, reason: 'manual', detail: 'Không liên lạc được với extension' };
+    }
+}
+
+/** Hand the normalized verdict back so it's persisted for the whole tenant. */
+async function reportAtsAuth(result) {
+    if (!result) return null;
+    try {
+        return await chrome.runtime.sendMessage({
+            type: 'ATS_AUTH_RESULT', url: window.location.href, result,
+        });
+    } catch {
+        return null;
+    }
 }
 
 // ─── Heartbeat: tell background this job is still actively working ───

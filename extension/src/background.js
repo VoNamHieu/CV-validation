@@ -3,7 +3,10 @@
  * Handles: single apply, batch apply queue, extension communication
  */
 
-import { mvpApply, readForm } from './workday-api.js';
+import { mvpApply, readForm, reconcileSubmission } from './workday-api.js';
+import { tenantRefFor, sortJobsByTenant } from './ats/tenant.js';
+import * as atsBackend from './ats/backend.js';
+import * as atsCoord from './ats/coordinator.js';
 
 // Dev triggers (run in the service-worker console against your live session):
 //   copoWdApi('<apply url>')        — create/fill an application (uses jobfitProfile)
@@ -90,7 +93,7 @@ function armJobSafetyTimer(timedJobIndex) {
 // the agent programmatically (chrome.scripting) after the tab loads.
 
 // Mirror of manifest content_scripts.matches — these auto-inject, no grant needed.
-const KNOWN_HOST_RE = /(^|\.)(topcv\.vn|vietnamworks\.com|itviec\.com|careerbuilder\.vn|careerlink\.vn|careerviet\.vn|vieclam24h\.vn|linkedin\.com|lever\.co|greenhouse\.io|ashbyhq\.com|myworkdayjobs\.com|smartrecruiters\.com|icims\.com|taleo\.net|jobvite\.com|breezy\.hr|bamboohr\.com|workable\.com|recruitee\.com|teamtailor\.com)$/i;
+const KNOWN_HOST_RE = /(^|\.)(topcv\.vn|vietnamworks\.com|itviec\.com|careerbuilder\.vn|careerlink\.vn|careerviet\.vn|vieclam24h\.vn|linkedin\.com|lever\.co|greenhouse\.io|ashbyhq\.com|myworkdayjobs\.com|myworkdaysite\.com|smartrecruiters\.com|icims\.com|taleo\.net|jobvite\.com|breezy\.hr|bamboohr\.com|workable\.com|recruitee\.com|teamtailor\.com)$/i;
 
 function originPattern(url) {
     try { return `${new URL(url).origin}/*`; } catch (e) { return null; }
@@ -369,16 +372,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return true;
     }
 
-    // Save the login credentials the agent reuses to sign in / create an account
-    // on account-gated ATS (Workday…). Stored locally only; never sent anywhere.
-    if (message.type === 'SAVE_CREDENTIALS') {
-        chrome.storage.local.set({
-            jobfitApplyCredentials: {
-                email: message.email || '',
-                password: message.password || '',
-                savedAt: Date.now(),
-            },
-        }, () => sendResponse({ success: true }));
+    // Refresh the stored JWT without touching the profile. The web app pushes
+    // this on every Supabase auth-state change (incl. the ~hourly token
+    // refresh), which keeps the just-in-time ATS credential fetch alive through
+    // a long batch — and when the user acts on a blocked tenant hours later.
+    if (message.type === 'SAVE_TOKEN') {
+        if (!message.token) { sendResponse({ success: false, error: 'No token' }); return true; }
+        chrome.storage.local.set({ jobfitToken: message.token },
+            () => sendResponse({ success: true }));
         return true;
     }
 
@@ -772,27 +773,97 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         console.log(`[Copo] Batch Apply: starting ${jobs.length} jobs`);
 
-        // Initialize queue
-        applyQueue = jobs.map((job, idx) => ({
-            ...job,
-            index: idx,
-            status: 'pending', // pending | processing | done | error
-            result: null,
-        }));
-        currentJobIndex = -1;
-        isProcessing = true;
+        (async () => {
+            // Load each account-gated tenant's standing verdict BEFORE the first
+            // tab opens, so a tenant already waiting on the user is skipped
+            // instead of re-probed. Fails open: no verdicts → everything reads as
+            // 'unknown' and probes normally.
+            const resolved = await atsBackend.resolveTenants(jobs);
+            atsCoord.beginBatch(`batch-${Date.now()}`, resolved.states);
 
-        // Save queue to storage for persistence
-        persistState();
+            // Group jobs by tenant so one company's jobs run back to back — the
+            // first probes, the rest inherit the verdict.
+            applyQueue = sortJobsByTenant(jobs).map((job, idx) => ({
+                ...job,
+                index: idx,
+                // pending | processing | done | error | blocked
+                status: 'pending',
+                tenantKey: tenantRefFor(job.jobUrl)?.tenantKey || null,
+                result: null,
+            }));
+            currentJobIndex = -1;
+            isProcessing = true;
 
-        // Notify web app
-        broadcastProgress();
-
-        // Start processing first job
-        processNextJob();
+            persistState();
+            broadcastProgress();
+            processNextJob();
+        })();
 
         sendResponse({ success: true, totalJobs: jobs.length });
         return true;
+    }
+
+    // ── ATS candidate account: the agent hit a login wall and needs a credential ──
+    // The background answers because it owns the per-tenant attempt budget and
+    // the backend token; the content script only drives the form.
+    if (message.type === 'ATS_AUTH_REQUEST') {
+        (async () => {
+            const ref = tenantRefFor(message.url);
+            if (!ref) { sendResponse({ ok: false, reason: 'manual', detail: 'Trang này không cần tài khoản' }); return; }
+
+            const operation = atsCoord.nextOperation(ref.tenantKey);
+            if (!operation) {
+                sendResponse({ ok: false, reason: 'manual', detail: 'Đã thử đăng nhập tối đa cho công ty này' });
+                return;
+            }
+
+            const cred = await atsBackend.fetchCredential(ref);
+            if (!cred.ok) {
+                // Distinguish "your session expired" from "this tenant is blocked":
+                // the first is fixable by re-opening the web app, the second isn't.
+                const detail = cred.auth ? 'Phiên đăng nhập hết hạn — mở Copo và đồng bộ lại.'
+                    : cred.missing ? 'Chưa có thông tin đăng nhập cho trang tuyển dụng.'
+                        : cred.revoked ? 'Thông tin đăng nhập đã bị thu hồi — cần nhập lại.'
+                            : cred.disabled ? 'Tính năng tài khoản ATS chưa được bật.'
+                                : 'Không lấy được thông tin đăng nhập.';
+                sendResponse({ ok: false, reason: cred.revoked ? 'credential' : 'manual', detail });
+                return;
+            }
+
+            atsCoord.recordAttempt(ref.tenantKey, operation);
+            // The password lives only in this response and the content script's
+            // local scope for the duration of the fill — never in storage.
+            sendResponse({
+                ok: true,
+                operation,
+                credentials: { email: cred.email, password: cred.password },
+            });
+            // Remember which credential we used, so the result can pin it.
+            pendingAtsCredential[ref.tenantKey] = cred.credentialId;
+        })();
+        return true; // async
+    }
+
+    // ── ATS candidate account: the agent's normalized verdict ──
+    if (message.type === 'ATS_AUTH_RESULT') {
+        (async () => {
+            const ref = tenantRefFor(message.url);
+            if (!ref || !message.result) { sendResponse({ ok: false }); return; }
+
+            const report = await atsBackend.reportAuthResult(ref, message.result, {
+                credentialId: pendingAtsCredential[ref.tenantKey],
+                batchId: atsCoord.currentBatchId(),
+                // Idempotent per (tenant, batch, operation): a network retry of a
+                // report that already landed won't double-count the attempt.
+                idempotencyKey: `${atsCoord.currentBatchId()}:${ref.tenantKey}:${message.result.operation}`,
+                automationVersion: chrome.runtime.getManifest().version,
+            });
+            if (report.ok && report.account) atsCoord.setState(ref.tenantKey, report.account);
+
+            const state = report.account?.accountState || 'unknown';
+            sendResponse({ ok: true, state, reason: atsCoord.blockedReason(state) });
+        })();
+        return true; // async
     }
 
     // ── Cancel batch ──
@@ -802,6 +873,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         applyQueue = [];
         currentJobIndex = -1;
         currentTabId = null;
+        atsCoord.endBatch();
         chrome.storage.local.remove(['applyQueue', 'isProcessing', 'currentJobIndex', 'currentTabId', 'jobStartedAt', 'pendingAutoApply', 'autoApplyJobUrl', 'batchMode']);
         endApplySession();
         broadcastProgress();
@@ -861,7 +933,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             // This job reported back — cancel its safety timeout so it can't fire
             // later against a different job.
             if (jobSafetyTimer) { clearTimeout(jobSafetyTimer); jobSafetyTimer = null; }
-            applyQueue[currentJobIndex].status = message.result?.success ? 'done' : 'error';
+            // 'blocked' is its own terminal state: the agent stopped because the
+            // tenant needs the USER, not because the job failed. Recording it as
+            // an error would put a red row in front of someone who has merely not
+            // clicked a verification link yet.
+            const blocked = message.result?.outcome === 'blocked';
+            applyQueue[currentJobIndex].status = blocked ? 'blocked'
+                : message.result?.success ? 'done' : 'error';
+            if (blocked) {
+                applyQueue[currentJobIndex].blockedReason = message.result?.blockedReason || 'manual';
+            }
             applyQueue[currentJobIndex].result = message.result;
             persistState();
 
@@ -881,6 +962,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 });
 
+/** User-facing wording per block reason — mirrors the content agent's copy. */
+const ATS_BLOCK_DETAIL = {
+    verification: 'Chờ bạn xác minh email của công ty này',
+    credential: 'Cần thông tin đăng nhập riêng cho công ty này',
+    manual: 'Cần bạn xử lý trực tiếp trên trang này',
+};
+
+// Which credential we handed out per tenant this batch, so the auth result can
+// pin it — that pin is what keeps the tenant working after a password rotation.
+const pendingAtsCredential = {};
+
 // ─── Process next job in queue ───
 function processNextJob() {
     if (!isProcessing) return;
@@ -892,6 +984,7 @@ function processNextJob() {
         console.log('[Copo] Batch Apply: all jobs completed!');
         isProcessing = false;
         currentTabId = null;
+        atsCoord.endBatch();
         chrome.storage.local.remove(['pendingAutoApply', 'autoApplyJobUrl', 'batchMode']);
         endApplySession();
         persistState();
@@ -900,6 +993,25 @@ function processNextJob() {
     }
 
     const job = applyQueue[currentJobIndex];
+
+    // ── Tenant gate: skip BEFORE opening a tab ──
+    // If this job's company is already waiting on the user (unverified email, an
+    // account under a different password, a CAPTCHA), there is nothing to try.
+    // Skipping here costs no tab, no credit, and — critically — no extra failed
+    // login against a tenant that may be counting them.
+    const tenantRef = tenantRefFor(job.jobUrl);
+    const gate = atsCoord.gateJob(tenantRef);
+    if (gate.skip) {
+        job.status = 'blocked';
+        job.blockedReason = gate.reason;
+        job.result = { success: false, blocked: true, detail: ATS_BLOCK_DETAIL[gate.reason] };
+        console.log(`[Copo] Batch Apply: job ${currentJobIndex + 1} blocked (${tenantRef?.tenantKey} → ${gate.state})`);
+        persistState();
+        broadcastProgress();
+        processNextJob();
+        return;
+    }
+
     job.status = 'processing';
     persistState();
 
@@ -917,6 +1029,32 @@ function processNextJob() {
         storage.cvFileName = job.cvFileName;
     }
     (async () => {
+        // ── Don't submit twice ──
+        // A retried job (tab closed mid-flow, worker recycled, network died) may
+        // already have a submitted application on the other side. Ask Workday
+        // before opening anything. Only 'submitted' short-circuits: 'unknown'
+        // deliberately proceeds to the UI agent, which never presses Submit
+        // itself — guessing "probably a draft" is what creates duplicates.
+        // Gated on 'ready' — a tenant we've authenticated at before is the only
+        // place a prior application can exist. A brand-new tenant has nothing to
+        // reconcile, so this costs one GET per job only where it can pay off.
+        if (tenantRef?.atsVendor === 'workday' && gate.state === 'ready') {
+            try {
+                const prior = await reconcileSubmission(job.jobUrl);
+                if (prior.state === 'submitted') {
+                    job.status = 'done';
+                    job.result = { success: true, outcome: 'submitted', detail: 'Đã nộp trước đó' };
+                    console.log(`[Copo] Batch Apply: job ${currentJobIndex + 1} already submitted — skipping`);
+                    persistState();
+                    broadcastProgress();
+                    setTimeout(() => processNextJob(), TAB_DELAY_MS);
+                    return;
+                }
+            } catch (e) {
+                console.warn('[Copo] reconcile failed, continuing to the agent:', e?.message || e);
+            }
+        }
+
         // Gate on host access first — an unknown host needs an optional-permission
         // grant before we can drive it; skip the job cleanly if it's not granted.
         const access = await ensureHostAccess(job.jobUrl);
@@ -977,11 +1115,18 @@ function broadcastProgress() {
             company: j.company,
             status: j.status,
             result: j.result,
+            // Lets the web app group blocked jobs under the right company row.
+            tenantKey: j.tenantKey,
+            blockedReason: j.blockedReason,
         })),
         currentIndex: currentJobIndex,
         total: applyQueue.length,
-        completed: applyQueue.filter(j => j.status === 'done' || j.status === 'error').length,
+        completed: applyQueue.filter(
+            j => j.status === 'done' || j.status === 'error' || j.status === 'blocked').length,
         successful: applyQueue.filter(j => j.status === 'done').length,
+        // Waiting on the USER — counted separately from both success and failure
+        // so the web app can present three honest buckets.
+        blocked: applyQueue.filter(j => j.status === 'blocked').length,
         // 'done' splits into two very different outcomes: 'submitted' (a success
         // signal appeared after the agent acted) vs 'filled' (form filled, the
         // tab is open awaiting the user's review + manual submit). The web app

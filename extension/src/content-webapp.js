@@ -106,13 +106,15 @@
             }, 'JOBFIT_SYNC_CV_FILE_RESPONSE');
         }
 
-        // ─── Sync login credentials for account-gated ATS (Workday…) ───
-        if (event.data?.type === 'JOBFIT_SYNC_CREDENTIALS') {
+        // ─── Refresh the auth token on its own ───
+        // ATS candidate-account credentials are fetched from the backend just in
+        // time, so the token has to be live for the whole batch — not just as
+        // fresh as the last profile sync (Supabase tokens expire ~hourly).
+        if (event.data?.type === 'JOBFIT_SYNC_TOKEN') {
             relay({
-                type: 'SAVE_CREDENTIALS',
-                email: event.data.email,
-                password: event.data.password,
-            }, 'JOBFIT_SYNC_CREDENTIALS_RESPONSE');
+                type: 'SAVE_TOKEN',
+                token: event.data.token,
+            }, 'JOBFIT_SYNC_TOKEN_RESPONSE');
         }
 
         // ─── Sync profile JSON into extension storage ───

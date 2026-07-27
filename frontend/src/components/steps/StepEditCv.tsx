@@ -29,12 +29,14 @@ import {
 } from '@/lib/types';
 import { promptInstallExtension, promptGrantPermission, isPermissionError } from '@/lib/extension-install';
 import { cvToExtensionProfile } from '@/lib/extension-profile';
-import { syncProfileToExtension, syncCvFileToExtension, syncCvDataToExtension, syncApplyCredentialsToExtension } from '@/lib/extension-sync';
+import { syncProfileToExtension, syncCvFileToExtension, syncCvDataToExtension } from '@/lib/extension-sync';
 import { renderCvHtml, getTemplate, DEFAULT_TEMPLATE_ID } from '@/lib/cv-templates';
 import type { CvTemplateId } from '@/lib/cv-templates';
 import { resizeAvatarToDataUrl } from '@/lib/avatar';
-import LoginCredentialsBanner, { type ApplyCredentials } from '@/components/LoginCredentialsBanner';
-import { loginAtsSummary } from '@/lib/applyRecipes';
+import PendingActionsSection from '@/components/ats/PendingActionsSection';
+import { summarizeTenants } from '@/lib/atsTenant';
+import { useAtsCredentials } from '@/lib/ats-credentials-context';
+import { atsAccounts as atsAccountsApi, type AtsAccount } from '@/lib/db';
 
 type AutoApplyStatus = 'idle' | 'checking' | 'sending' | 'opened' | 'error' | 'no-extension';
 type FullAutoStatus = 'idle' | 'rendering' | 'syncing' | 'launching' | 'error';
@@ -43,11 +45,25 @@ interface BatchJobStatus {
     jobUrl: string;
     jobTitle: string;
     company: string;
-    status: 'pending' | 'processing' | 'done' | 'error';
+    // 'blocked' is NOT a failure: the job is waiting on the user (verify an
+    // email, supply a password for a pre-existing account) and must never be
+    // rendered in the language of an error.
+    status: 'pending' | 'processing' | 'done' | 'error' | 'blocked';
     // outcome: 'submitted' = success signal seen after the agent acted;
     // 'filled' = form filled, tab left open for the user to review & submit.
     result?: { success: boolean; detail?: string; outcome?: 'submitted' | 'filled' | 'failed' };
+    /** Canonical host of the account-gated tenant, when the job is on one. */
+    tenantKey?: string;
+    /** Why it's waiting, when status === 'blocked'. */
+    blockedReason?: 'verification' | 'credential' | 'manual';
 }
+
+/** Blocked ≠ failed: the wording stays neutral and actionable. */
+const BLOCKED_LABEL: Record<'verification' | 'credential' | 'manual', string> = {
+    verification: 'Chờ bạn xác minh email',
+    credential: 'Chờ bạn nhập mật khẩu',
+    manual: 'Chờ bạn xử lý',
+};
 
 interface BatchProgress {
     isProcessing: boolean;
@@ -58,6 +74,7 @@ interface BatchProgress {
     successful?: number;
     submitted?: number;
     filled?: number;
+    blocked?: number;
 }
 
 /**
@@ -107,6 +124,13 @@ export default function StepEditCv() {
     } = useAppStore();
     const gate = useAuthGate();
     const { ensureAgentConsent } = useConsent();
+    // One shared source for ATS account state (sidebar badge, this panel, the
+    // history board) so the three can't disagree about what's blocked.
+    const {
+        ensureApplyCredentials,
+        accounts: atsAccountsState,
+        refresh: refreshAtsAccounts,
+    } = useAtsCredentials();
     const fullAutoFiredRef = useRef(false);
     const baseApplyFiredRef = useRef(false);
 
@@ -117,15 +141,18 @@ export default function StepEditCv() {
             .sort((a, b) => (b.matchResult?.overall_score ?? 0) - (a.matchResult?.overall_score ?? 0));
     }, [jdEntries]);
 
-    // ATS in this job list that gate apply behind a login / account creation
-    // (Workday, SuccessFactors…) → collect credentials upfront. Email pre-fills
-    // from the CV; held in a ref (not persisted) until the agent path uses it.
+    // Tenants in this job list that gate apply behind a candidate account
+    // (Workday…). Grouped per TENANT, not per ATS: each company is its own
+    // account namespace, so this drives both the credentials modal's "will be
+    // used for" list and the batch-start /resolve call.
     const cvEmail = cvData?.contact?.email ?? '';
-    const loginAts = useMemo(
-        () => loginAtsSummary(sortedEntries.map(e => e.applyUrl || e.source)),
+    const loginTenants = useMemo(
+        () => summarizeTenants(sortedEntries.map(e => ({
+            jobUrl: e.applyUrl || e.source,
+            company: e.company || e.label,
+        }))),
         [sortedEntries],
     );
-    const applyCredsRef = useRef<ApplyCredentials>({ email: '', password: '' });
 
     // Jobs are still crawling/scoring/optimizing — the editor opens on the first
     // scored job before its CV is tailored, so `sortedEntries` is briefly empty
@@ -243,10 +270,14 @@ export default function StepEditCv() {
                     successful: event.data.successful ?? 0,
                     submitted: event.data.submitted ?? 0,
                     filled: event.data.filled ?? 0,
+                    blocked: event.data.blocked ?? 0,
                 });
                 if (!event.data.isProcessing) {
                     setBatchStarting(false);
                 }
+                // A tenant may have just become blocked (needs email verification
+                // / a different password) — pull the fresh verdicts.
+                if (event.data.blocked) void refreshAtsAccounts();
             }
             // Response to batch start
             if (event.data?.type === 'JOBFIT_AUTO_APPLY_ALL_RESPONSE') {
@@ -264,7 +295,21 @@ export default function StepEditCv() {
         };
         window.addEventListener('message', handler);
         return () => window.removeEventListener('message', handler);
-    }, []);
+    }, [refreshAtsAccounts]);
+
+    // Load the blocked-tenant list on mount so "Cần bạn xử lý" survives a reload
+    // — a user who verified their email hours later must still find the retry.
+    useEffect(() => { void refreshAtsAccounts(); }, [refreshAtsAccounts]);
+
+    // Jobs still waiting on each blocked tenant, for the per-row count.
+    const blockedCounts = useMemo(() => {
+        const counts: Record<string, number> = {};
+        for (const job of batchProgress?.queue ?? []) {
+            if (job.status !== 'blocked' || !job.tenantKey) continue;
+            counts[job.tenantKey] = (counts[job.tenantKey] || 0) + 1;
+        }
+        return counts;
+    }, [batchProgress]);
 
     const currentEntry = sortedEntries[selectedIdx];
 
@@ -632,6 +677,9 @@ export default function StepEditCv() {
        ═══════════════════════════════════════════════════════════════ */
     const triggerAutoApplyAll = useCallback(async () => {
         if (!(await ensureAgentConsent())) return;
+        // Account-gated tenants in this batch need a stored credential before the
+        // agent meets its first login wall. No-ops when one already exists.
+        if (!(await ensureApplyCredentials(loginTenants, cvEmail))) return;
         if (!isExtensionAvailable()) {
             setAutoApplyStatus('no-extension');
             setAutoApplyMessage('Extension chưa cài! Vui lòng cài Copo Extension trước.');
@@ -640,13 +688,9 @@ export default function StepEditCv() {
             return;
         }
 
-        // Hand the extension the login credentials for account-gated ATS (Workday…)
-        // so the agent can sign in / create an account when it hits a login wall.
-        const creds = applyCredsRef.current;
-        if (creds.email || creds.password) {
-            syncApplyCredentialsToExtension(creds.email, creds.password).catch(() => { });
-        }
-
+        // Credentials are NOT pushed to the extension here any more: it fetches
+        // them from the backend just-in-time, per tenant, right before it
+        // authenticates (so a password never sits in chrome.storage.local).
         // Build jobs array from all optimized entries that have a source URL.
         // Attach THIS job's cached PDF so file-upload fields get the right CV
         // (job A → CV A). The PDF is cached at Optimize time; if it's missing
@@ -687,7 +731,7 @@ export default function StepEditCv() {
             type: 'JOBFIT_AUTO_APPLY_ALL',
             jobs,
         }, '*');
-    }, [sortedEntries, buildProfile, ensureAgentConsent]);
+    }, [sortedEntries, buildProfile, ensureAgentConsent, ensureApplyCredentials, loginTenants, cvEmail]);
 
     /* ═══════════════════════════════════════════════════════════════
        FULLY AUTONOMOUS APPLY ALL — Generate PDFs + sync + launch batch
@@ -701,6 +745,7 @@ export default function StepEditCv() {
     // doesn't sweep up unrelated jobs already sitting in the list.
     const triggerFullyAutoApply = useCallback(async (onlyIds?: Set<string>) => {
         if (!(await ensureAgentConsent())) return;
+        if (!(await ensureApplyCredentials(loginTenants, cvEmail))) return;
         if (!isExtensionAvailable()) {
             setAutoApplyStatus('no-extension');
             setAutoApplyMessage('Extension chưa cài! Vui lòng cài Copo Extension trước.');
@@ -776,7 +821,8 @@ export default function StepEditCv() {
 
         // Reset status after handoff — batch progress UI takes over from here.
         setTimeout(() => setFullAutoStatus('idle'), 1500);
-    }, [sortedEntries, buildProfile, mergeProfile, userAvatarBase64, ensureAgentConsent]);
+    }, [sortedEntries, buildProfile, mergeProfile, userAvatarBase64, ensureAgentConsent,
+        ensureApplyCredentials, loginTenants, cvEmail]);
 
     const cancelBatchApply = useCallback(() => {
         window.postMessage({ type: 'JOBFIT_AUTO_APPLY_CANCEL' }, '*');
@@ -831,6 +877,8 @@ export default function StepEditCv() {
         j => j.status === 'done' && j.result?.outcome === 'submitted').length ?? 0;
     const batchFilled = batchProgress?.queue.filter(
         j => j.status === 'done' && j.result?.outcome !== 'submitted').length ?? 0;
+    // The third bucket: waiting on the user, not finished and not failed.
+    const batchBlocked = batchProgress?.queue.filter(j => j.status === 'blocked').length ?? 0;
     const isFullAutoBusy = fullAutoStatus !== 'idle';
 
     // Empty state (placed AFTER all hooks to satisfy rules-of-hooks).
@@ -1120,11 +1168,16 @@ export default function StepEditCv() {
                 </div>
             </div>
 
-            {/* ── Login-required ATS → collect credentials (email pre-filled from CV) ── */}
-            <LoginCredentialsBanner
-                atsSummary={loginAts}
-                defaultEmail={cvEmail}
-                onChange={(c) => { applyCredsRef.current = c; }}
+            {/* Account-gated ATS are handled at batch start now (ApplyCredentialsModal
+                via ensureApplyCredentials) rather than by an always-on form here —
+                one prompt, once per user, instead of a banner on every visit. */}
+
+            {/* ── Tenants the agent couldn't resolve on its own ── */}
+            <PendingActionsSection
+                accounts={atsAccountsState}
+                pendingCounts={blockedCounts}
+                onChanged={() => { void refreshAtsAccounts(); }}
+                compact
             />
 
             {/* ── Fully Auto error banner ── */}
@@ -1164,6 +1217,7 @@ export default function StepEditCv() {
                                 {batchProgress.isProcessing
                                     ? `⚡ Ứng tuyển hàng loạt: ${batchProgress.completed}/${batchProgress.total} công việc`
                                     : `✅ Hoàn tất: ${batchSubmitted} đã nộp · ${batchFilled} đã điền (chờ bạn nộp)`
+                                    + (batchBlocked ? ` · ${batchBlocked} chờ bạn xử lý` : '')
                                 }
                             </span>
                         </div>
@@ -1200,9 +1254,11 @@ export default function StepEditCv() {
                                     ? 'rgba(196, 59, 46,0.1)'
                                     : job.status === 'done'
                                         ? 'rgba(34,197,94,0.06)'
-                                        : job.status === 'error'
-                                            ? 'rgba(239,68,68,0.06)'
-                                            : 'rgba(255,255,255,0.02)',
+                                        : job.status === 'blocked'
+                                            ? 'rgba(245,158,11,0.08)'
+                                            : job.status === 'error'
+                                                ? 'rgba(239,68,68,0.06)'
+                                                : 'rgba(255,255,255,0.02)',
                                 borderRadius: 8,
                                 border: job.status === 'processing'
                                     ? '1px solid rgba(196, 59, 46,0.3)'
@@ -1214,6 +1270,7 @@ export default function StepEditCv() {
                                     {job.status === 'pending' && <span style={{ opacity: 0.3, fontSize: '0.75rem' }}>⏳</span>}
                                     {job.status === 'processing' && <CircleNotch size={14} className="spin" style={{ color: '#e27263' }} />}
                                     {job.status === 'done' && <CheckCircle size={14} weight="fill" style={{ color: '#22c55e' }} />}
+                                    {job.status === 'blocked' && <Warning size={14} weight="fill" style={{ color: '#f59e0b' }} />}
                                     {job.status === 'error' && <XCircle size={14} weight="fill" style={{ color: '#ef4444' }} />}
                                 </div>
 
@@ -1236,17 +1293,20 @@ export default function StepEditCv() {
                                     fontSize: '0.65rem', fontWeight: 600, flexShrink: 0,
                                     padding: '2px 8px', borderRadius: 6,
                                     background: job.status === 'done' ? 'rgba(34,197,94,0.15)'
-                                        : job.status === 'error' ? 'rgba(239,68,68,0.15)'
-                                            : job.status === 'processing' ? 'rgba(196, 59, 46,0.15)'
-                                                : 'rgba(255,255,255,0.05)',
+                                        : job.status === 'blocked' ? 'rgba(245,158,11,0.15)'
+                                            : job.status === 'error' ? 'rgba(239,68,68,0.15)'
+                                                : job.status === 'processing' ? 'rgba(196, 59, 46,0.15)'
+                                                    : 'rgba(255,255,255,0.05)',
                                     color: job.status === 'done' ? '#22c55e'
-                                        : job.status === 'error' ? '#ef4444'
-                                            : job.status === 'processing' ? '#e27263'
-                                                : 'var(--text-muted)',
+                                        : job.status === 'blocked' ? '#f59e0b'
+                                            : job.status === 'error' ? '#ef4444'
+                                                : job.status === 'processing' ? '#e27263'
+                                                    : 'var(--text-muted)',
                                 }}>
                                     {job.status === 'pending' && 'Chờ'}
                                     {job.status === 'processing' && 'Đang xử lý...'}
                                     {job.status === 'done' && (job.result?.outcome === 'submitted' ? 'Đã nộp' : 'Đã điền, chờ nộp')}
+                                    {job.status === 'blocked' && BLOCKED_LABEL[job.blockedReason ?? 'manual']}
                                     {job.status === 'error' && (job.result?.detail || 'Lỗi')}
                                 </span>
                             </div>
