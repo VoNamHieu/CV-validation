@@ -83,7 +83,7 @@ _ADAPTERS: list = [
     ("canon",          lambda u, h: _is_canon(u),        lambda u, h: _canon(u)),
     ("momo",           lambda u, h: _is_momo(u),         lambda u, h: _momo(u, h)),
     ("vnpay",          lambda u, h: _is_vnpay_tuyendung(u), lambda u, h: _vnpay_tuyendung(u)),
-    ("be",             lambda u, h: _is_be(u),           lambda u, h: _be(u)),
+    ("be",             lambda u, h: _is_be(u),           lambda u, h: _be(u, h)),
     ("zalo",           lambda u, h: _is_zalo(u),         lambda u, h: _zalo(u)),
     ("iviec",          lambda u, h: _is_iviec(u, h),     lambda u, h: _iviec(u)),
     ("ghn",            lambda u, h: _is_ghn(u),          lambda u, h: _ghn(u)),
