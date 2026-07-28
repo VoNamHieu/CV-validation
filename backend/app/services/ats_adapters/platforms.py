@@ -928,14 +928,19 @@ def _radancy(career_url: str) -> list[dict]:
             loc = d.get("full_location") or d.get("short_location") or d.get("location_name") or ""
             if (d.get("country_code") or "").upper() != "VN" and not _is_vn_loc(loc):
                 continue
-            url = (d.get("apply_url") or "").rstrip("/")
-            if url.endswith("/login"):
-                url = url[: -len("/login")]
-            url = url or f"{origin}/jobs/{d.get('slug') or d.get('req_id')}"
+            # The Radancy `apply_url` points at the raw ATS backend (e.g.
+            # {tenant}.icims.com/jobs/{id}/login), which is anti-bot walled
+            # (405 "Human Verification"). The branded front URL
+            # {origin}/jobs/{req_id} is the real, resolvable public posting.
+            req = d.get("req_id") or d.get("slug")
+            if not req:
+                continue
+            url = f"{origin}/jobs/{req}"
             if not title or url in seen:
                 continue
             seen.add(url)
-            out.append({"title": title[:200], "url": url, "location": str(loc)[:120],
+            out.append({"title": title[:200], "url": url, "external_id": str(req),
+                        "location": str(loc)[:120],
                         "description": _strip_html(d.get("description") or "")[:600]})
         if len(jobs) < 10 or len(out) >= _MAX_ATS_JOBS:
             break
