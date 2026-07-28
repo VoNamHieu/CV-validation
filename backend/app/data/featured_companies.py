@@ -508,11 +508,6 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         career_url="https://hoasenjobs.com/tim-viec-lam/tat-ca-viec-lam/vi",  # talentnet all-jobs path
     ),
     FeaturedCompany(
-        name="Hop Nhat Logistics",
-        homepage="https://hopnhat.com",
-        career_url="https://hopnhat.com/recruitment",
-    ),
-    FeaturedCompany(
         name="UrBox",
         homepage="https://urbox.vn",
         career_url="https://talent.urbox.vn/alljobs?return=1",
@@ -633,11 +628,6 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         name="Masan Group",
         homepage="https://masangroup.com",
         career_url="https://careers.masanconsumer.com/search",
-    ),
-    FeaturedCompany(
-        name="Highlands Coffee",
-        homepage="https://highlandscoffee.com.vn",
-        career_url="https://careers.highlandscoffee.com.vn/vi/viec-lam/",
     ),
     FeaturedCompany(
         name="Pharmacity",
@@ -774,11 +764,6 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         career_url="https://www.dsv.com/en/careers/job-search?query=&location=Vietnam",
     ),
     FeaturedCompany(
-        name="Hellmann",
-        homepage="https://www.hellmann.com",
-        career_url="https://www.hellmann.com/en/career",
-    ),
-    FeaturedCompany(
         name="Gemadept",
         homepage="https://www.gemadept.com.vn",
         career_url="https://www.gemadept.com.vn/tuyen-dung/",
@@ -814,11 +799,6 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         career_url="https://jobs.citi.com/search-jobs/Vietnam/287/2/1562822/16x16667/107x83333/50/2",
     ),
     # ── Insurance ─────────────────────────────────────────────────────
-    FeaturedCompany(
-        name="Sun Life Vietnam",
-        homepage="https://sunlife.com.vn",
-        career_url="https://www.sunlife.com.vn/vn/ve-chung-toi/tro-thanh-nhan-vien/vi-tri-tuyen-dung/",
-    ),
     FeaturedCompany(
         name="Manulife",
         homepage="https://manulife.com.vn",
@@ -1049,11 +1029,6 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         name="ServiceNow",
         homepage="https://servicenow.com",
         career_url="https://careers.servicenow.com",
-    ),
-    FeaturedCompany(
-        name="Atlassian",
-        homepage="https://atlassian.com",
-        career_url="https://www.atlassian.com/company/careers/all-jobs",
     ),
 
     # ── Consulting / Professional Services ───────────────────────────
