@@ -6,22 +6,14 @@ come from a clean HTTP JSON API — no JS gate, no auth:
         ?countryCode=VN&PageIndex=N&PageSize=100[&OrgLv2Id=<subsidiary-code>]
 → a list of {id, title, locationNameVi, orgLv2Id, …} plus a `totalRecord`.
 
-Two quirks this adapter absorbs:
+Detail deep-link is /jobs/{id} — the numeric job id is globally unique across
+subsidiaries, so it needs no companyCode. The portal is a SPA (the route renders
+a shell to plain HTTP), but /jobs/{id} is the real link the site itself uses.
 
-1. **No per-job detail URL.** The portal opens each posting in a MODAL — every
-   route (/job/<id>, /jobs?jobId=<id>, …) just renders the listing shell, so
-   there is no real deep-link (the /job/<code> URLs the old spa_sniff produced
-   were already dead shells landing on the listing). We mint a UNIQUE-but-listing
-   URL `/jobs?companyCode=<org>&jobId=<id>` per posting: distinct enough to keep
-   each job a separate store row (a shared URL would collapse 20 jobs into 1 via
-   the (company_id, external_id) key), and it lands the user on the right
-   subsidiary's listing.
-
-2. **Subsidiary overlap.** career_url carries the subsidiary filter as
-   ?companyCode=<OrgLv2Id> (Vinpearl = 45001013 → its own 20 postings). With no
-   companyCode the UMBRELLA feed returns every subsidiary — but then drops the
-   OrgLv2Ids that are separately featured (Vinpearl), so the "Vingroup" entry and
-   the "Vinpearl" entry never double-list the same posting.
+Consolidated: all subsidiaries (Vinpearl, VinFast, VinMec, …) list under the
+single "Vingroup" featured entry (career_url = tuyendung.vingroup.net/jobs, no
+companyCode → the umbrella feed returns every subsidiary). career_url may still
+carry ?companyCode=<OrgLv2Id> to scope to one subsidiary if ever needed.
 """
 from __future__ import annotations
 
@@ -29,15 +21,18 @@ from app.services.ats_adapters._shared import *  # noqa: F401,F403
 
 _HOST = "tuyendung.vingroup.net"
 _API = "https://api-myvingroup.vingroup.net/prod/v1/app/ehiring/api/JobPosting/searchVGC"
-_JOB_URL = "https://tuyendung.vingroup.net/jobs?companyCode={org}&jobId={jid}"
+# Per-job deep-link is /jobs/{id} (the numeric job id is globally unique across
+# subsidiaries). The portal is a SPA so the route renders a shell to plain HTTP,
+# but it's the real deep-link the site itself uses.
+_JOB_URL = "https://tuyendung.vingroup.net/jobs/{jid}"
 _API_HEADERS = {"User-Agent": _HEADERS["User-Agent"], "Accept": "application/json",
                 "Origin": "https://tuyendung.vingroup.net",
                 "Referer": "https://tuyendung.vingroup.net/"}
 
-# OrgLv2Ids that have their OWN featured entry → excluded from the umbrella feed
-# so the two never double-list the same posting. Keep in sync with career_urls
-# that carry ?companyCode=<code> in featured_companies.py.
-_FEATURED_SUBSIDIARIES = {"45001013"}  # Vinpearl
+# Consolidated: every subsidiary on the portal lists under the single "Vingroup"
+# entry — no subsidiary is carved out separately, so the umbrella feed keeps all
+# of them. (Kept as a hook in case a subsidiary needs splitting out again.)
+_FEATURED_SUBSIDIARIES: set[str] = set()
 
 
 def _is_vingroup(career_url: str) -> bool:
@@ -101,7 +96,8 @@ def _vingroup(career_url: str) -> list[dict]:
             loc = (j.get("locationNameVi") or j.get("locationNameEn") or "").strip()
             out.append({
                 "title": title[:200],
-                "url": _JOB_URL.format(org=oid, jid=jid),
+                "url": _JOB_URL.format(jid=jid),
+                "external_id": str(jid),
                 "location": loc[:120],
                 "description": "",
             })
