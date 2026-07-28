@@ -625,30 +625,35 @@ def _appota(career_url: str) -> list[dict]:
     return out
 
 
-# ── Be (be.com.vn) — WordPress careers listing, static SSR anchors ──────────
-# Jobs are <a href=".../be_recruitment/<slug>">Title</a>; each repeats an
-# "Ứng tuyển ngay" apply link on the same href (+#form) → filter those. VN-only.
+# ── Be (be.com.vn) — JS-rendered careers listing (needs phase-2 render) ──────
+# The listing (/ve-be/tuyen-dung/) is a JS app: the plain/SSR HTML is a shell
+# with NO job cards, and be.com.vn's WordPress REST (/wp-json/wp/v2/…) 500s — so
+# a cheap HTTP pass gets nothing. Be must come through the cron's phase-2 render,
+# which passes the post-JS HTML in via `html`. After render each opening is
+# `<a href="/ve-be/tuyen-dung/{slug}">Title</a>` (title = anchor text). NOTE the
+# URL format changed from the old /be_recruitment/{slug}. The origin is flaky
+# (Cloudflare 502 ~half the time, full page ~16-20s), so the render itself needs
+# retrying — the phase-2 renderer already does that.
+_BE_LIST = "https://be.com.vn/ve-be/tuyen-dung/"
+_BE_TIMEOUT = 30
+
+
 def _is_be(career_url: str) -> bool:
     return (urlparse(career_url or "").netloc or "").lower().removeprefix("www.") == "be.com.vn"
 
 
-def _be(career_url: str) -> list[dict]:
+def _be_parse(html: str) -> list[dict]:
     from bs4 import BeautifulSoup
-    try:
-        r = requests.get("https://be.com.vn/ve-be/tuyen-dung/", headers=_HTML_HEADERS, timeout=_TIMEOUT)
-        if r.status_code != 200:
-            return []
-        soup = BeautifulSoup(r.text, "html.parser")
-    except Exception as e:
-        logger.info(f"[ats] be failed: {str(e)[:80]}")
-        return []
+    soup = BeautifulSoup(html or "", "html.parser")
     out, seen = [], set()
-    for a in soup.select('a[href*="/be_recruitment/"]'):
-        href = (a.get("href") or "").split("#")[0]
-        title = re.sub(r"\s+", " ", a.get_text(" ", strip=True)).strip()
-        if not href or not title or href in seen:
+    # current format /ve-be/tuyen-dung/{slug}; keep legacy /be_recruitment/ too
+    for a in soup.select('a[href*="/ve-be/tuyen-dung/"], a[href*="/be_recruitment/"]'):
+        href = (a.get("href") or "").split("#")[0].rstrip("/")
+        # skip the listing page itself (matches the selector but has no slug)
+        if not href or href.endswith("/ve-be/tuyen-dung") or href in seen:
             continue
-        if title.lower().startswith("ứng tuyển"):
+        title = re.sub(r"\s+", " ", a.get_text(" ", strip=True)).strip()
+        if not title or title.lower().startswith("ứng tuyển"):
             continue
         seen.add(href)
         out.append({"title": title[:200],
@@ -656,7 +661,22 @@ def _be(career_url: str) -> list[dict]:
                     "location": "Vietnam", "description": ""})
         if len(out) >= _MAX_ATS_JOBS:
             break
-    logger.info(f"[ats] be → {len(out)} jobs")
+    return out
+
+
+def _be(career_url: str, html: str | None = None) -> list[dict]:
+    # Phase 2 (rendered html) is the reliable path. Phase 1 (no html) still tries
+    # a plain fetch in case the site serves SSR cards, but usually returns [] —
+    # which routes Be into phase-2 render.
+    if not html:
+        try:
+            r = requests.get(_BE_LIST, headers=_HTML_HEADERS, timeout=_BE_TIMEOUT)
+            html = r.text if r.status_code == 200 else ""
+        except Exception as e:  # noqa: BLE001
+            logger.info(f"[ats] be plain fetch failed: {str(e)[:60]}")
+            html = ""
+    out = _be_parse(html)
+    logger.info(f"[ats] be ({'render' if html else 'empty'}) → {len(out)} jobs")
     return out
 
 
