@@ -18,7 +18,7 @@
 // a future call site that forgets to declare itself gets the safe treatment
 // rather than a silent bypass.
 
-import { isThirdPartyApply } from './detect.js';
+import { isApplicationFormPage, isThirdPartyApply } from './detect.js';
 
 // ── Vocabulary ─────────────────────────────────────────────────────────────
 // Narrow on purpose. A false negative here transmits an application the user
@@ -27,17 +27,35 @@ import { isThirdPartyApply } from './detect.js';
 // unambiguous phrasings win: "apply" alone is NOT here, because on a job page
 // that is the gateway the agent is supposed to click.
 
-/** Sends the application. Bare "submit"/"nộp đơn" count: a control labelled that
- *  way on a form is the real thing, and multi-step wizards say Next/Continue. */
+/**
+ * UNAMBIGUOUSLY sends the application — refused wherever it appears, in any flow
+ * position. Only wording that cannot also mean "open the application" belongs
+ * here; anything that can is in APPLY_RE and resolved by context instead.
+ */
 const SUBMIT_RE = new RegExp([
     'submit',
     'send (my )?application',
     'finish (and|&) submit',
+    'gửi đơn', 'gui don',
+    'hoàn tất ứng tuyển', 'hoan tat ung tuyen',
+].join('|'), 'i');
+
+/**
+ * AMBIGUOUS by design: on a job ad these words open the application, on a generic
+ * ATS with no recipe the same words are frequently the final button. They are
+ * kept out of SUBMIT_RE so the gateway click at step 0 still works, and resolved
+ * by flow context instead (see evaluateClick step 4).
+ */
+const APPLY_RE = new RegExp([
+    '\\bapply\\b', '\\bapply now\\b',
+    'ứng tuyển', 'ung tuyen',
+    // These read as "submit" on a filled form and as "open the application" on a
+    // job ad, and Vietnamese boards use them for BOTH. Treating them as
+    // unambiguous submits meant the agent could never click into an application
+    // on the boards this product exists to serve.
     'nộp đơn', 'nop don',
     'nộp hồ sơ', 'nop ho so',
     'gửi hồ sơ', 'gui ho so',
-    'gửi đơn', 'gui don',
-    'hoàn tất ứng tuyển', 'hoan tat ung tuyen',
 ].join('|'), 'i');
 
 /** Legal acknowledgement. Mirrors the pair login.js used to own privately — the
@@ -199,6 +217,12 @@ export function looksLikeSubmit(d) {
     return SUBMIT_RE.test(labelText(d));
 }
 
+/** Reads as "apply" — which means "open the application" before a form exists and
+ *  "send it" afterwards. Only `evaluateClick` can tell which, using flow context. */
+export function looksLikeApplyVerb(d) {
+    return APPLY_RE.test(labelText(d));
+}
+
 /** Own label only — a "Delete" link elsewhere in the same card must not veto an
  *  unrelated control. */
 export function looksDestructive(d) {
@@ -257,25 +281,26 @@ export function isSensitiveField(d) {
  */
 
 /**
- * May we click this control?
+ * May we activate this control?
  *
- * Order matters: the checks that protect an irreversible outcome run before the
- * ones that merely keep the flow sane.
+ * The boundary this enforces is the FINAL SUBMISSION, not the sensitivity of the
+ * question being answered. The agent is meant to complete the whole application —
+ * every field, every Next, every Continue, right up to the review page — and stop
+ * there so the user checks the lot in one place. So the checks below are about
+ * what an action DOES (sends, destroys, escapes to a third party), never about
+ * what a question asks.
+ *
+ * There are deliberately NO exemptions ahead of the final-step check: a widget
+ * option, a recipe advance and a planner click are all equally capable of being
+ * the control that sends the application once the review page is on screen.
  */
 export function evaluateClick(d, ctx = {}) {
     const source = ctx.source || 'planner';
 
-    // 0. Intra-widget clicks — opening a dropdown, picking one of its options —
-    //    are a VALUE being chosen inside an already-approved fill, not a
-    //    page-level action. Judging them by the action vocabulary would let an
-    //    option that happens to read "Đã nộp hồ sơ" veto a required field, and
-    //    the widget cannot navigate or transmit anything on its own. Callers set
-    //    this only for controls they resolved inside a specific field's markup.
-    if (ctx.widget) return allow();
-
-    // 1. The review step. Workday's "Submit" reuses pageFooterNextButton, so on
-    //    the final page ANY advance sends the application — no vocabulary can
-    //    tell them apart and we must not try.
+    // 1. The review step ends the agent's authority, full stop. Workday's
+    //    "Submit" reuses pageFooterNextButton, so on the final page ANY advance
+    //    sends the application — no vocabulary can tell them apart, and nothing
+    //    (not even a dropdown option) has business being clicked here.
     if (ctx.atFinalStep) return deny(DENY.FINAL_STEP);
 
     // 2. The ATS's own submit control, named by the recipe. Exact and language-
@@ -284,30 +309,37 @@ export function evaluateClick(d, ctx = {}) {
         return deny(DENY.SUBMIT);
     }
 
-    // 3. Anything that reads as "send the application".
-    //
-    //    `openingApplication` is the one exemption, and it exists because the
-    //    vocabularies genuinely collide in Vietnamese: a job ad's button to OPEN
-    //    the form frequently says "Nộp hồ sơ" / "Nộp đơn", the same words a filled
-    //    form uses to send one. Text alone cannot separate them — position in the
-    //    flow can. Callers may set this ONLY when they have established there is
-    //    no application form on screen yet (index.js gates it on
-    //    !isApplicationFormPage(); a recipe gateway is pre-form by definition).
-    if (looksLikeSubmit(d) && !ctx.openingApplication) return deny(DENY.SUBMIT);
-
-    // 4. Destroying existing data.
-    if (looksDestructive(d)) return deny(DENY.DESTRUCTIVE);
-
-    // 5. Handing the flow to Indeed/LinkedIn — a foreign login, not this employer.
+    // 3. Handing the flow to Indeed/LinkedIn — a foreign login, not this employer.
+    //    Checked BEFORE the apply vocabulary because "Apply with Indeed" matches
+    //    both, and the third-party reason is the specific and useful one.
     if (d.isThirdParty || isThirdPartyApplyDescriptor(d)) return deny(DENY.THIRD_PARTY);
 
-    // 6. Account creation outside the controlled login flow. login.js runs under
+    // 4. Wording that means "send the application" — always refused.
+    if (SUBMIT_RE.test(labelText(d))) return deny(DENY.SUBMIT);
+
+    // 4. Wording that is AMBIGUOUS between opening an application and sending
+    //    one: bare "Apply" / "Apply now" / "Ứng tuyển". On a job ad it is the
+    //    gateway; on a generic ATS with no recipe it is frequently the final
+    //    button. Text cannot separate them — only position in the flow can, so
+    //    it is allowed only while we have established no form is on screen yet
+    //    (checkClick re-verifies that against the live DOM rather than trusting
+    //    the caller's claim).
+    if (!ctx.openingApplication && APPLY_RE.test(labelText(d))) {
+        return deny(DENY.SUBMIT, { ambiguous: true });
+    }
+
+    // 6. Destroying existing data.
+    if (looksDestructive(d)) return deny(DENY.DESTRUCTIVE);
+
+    // 7. Account creation outside the controlled login flow. login.js runs under
     //    the background's per-tenant budget (1 signup + 1 login); a planner that
     //    opens an account on its own is outside that accounting entirely.
     if (source !== 'login' && CREATE_ACCOUNT_RE.test(labelText(d))) {
         return deny(DENY.CREATE_ACCOUNT);
     }
 
+    // Everything else — Next, Continue, Save and Continue, a dropdown option, a
+    // radio, a disclosure checkbox — is the agent doing the job it exists for.
     return allow();
 }
 
@@ -347,32 +379,28 @@ export function evaluateConsent(d, ctx = {}) {
 }
 
 /**
- * May the planner SET this checkbox from the answer it derived?
+ * May the agent ANSWER this checkbox?
  *
- * Deliberately more permissive than `evaluateConsent`, because the two questions
- * are not the same one. `evaluateConsent` asks "may we proactively tick a box on
- * the user's behalf?" — a hunt across the form, so its answer must be narrow.
- * This asks "may we answer THIS question?", where the field is one the planner
- * was told to fill from profile data.
+ * Almost always yes — and that is the point. An earlier version of this file
+ * refused personal declarations and undelegated terms, which sounds careful and
+ * is not: a required box the agent will not tick makes the step unadvanceable, so
+ * the application never reaches the review page where the user was going to check
+ * everything anyway. Refusing to answer is not a safer answer, it is an abandoned
+ * application plus a half-filled form.
  *
- * Collapsing them refused every ordinary checkbox question ("Willing to
- * relocate?", "Do you have a driver's licence?"). When such a box is required,
- * refusing it does not make the agent safer — it makes the step unadvanceable,
- * which is the same failure the Voluntary Disclosures case produced one layer up.
+ * So Voluntary Disclosures, demographic self-identification, "I certify…", Yes/No
+ * questions and mandatory acknowledgements are all answerable. What the answer
+ * SHOULD be is a different question, owned by the recipe/planner mapping and
+ * surfaced to the user by provenance — not something an action policy can judge.
  *
- * What stays refused is what cannot be delegated at all: marketing, and any
- * declaration about the person.
+ * The single exception is a marketing opt-in, which is refused under any
+ * circumstance: it is never required to advance, and the batch-start modal
+ * promises in as many words "Copo không bao giờ đăng ký nhận email quảng cáo
+ * thay bạn."
  */
-export function evaluateCheckboxFill(d, ctx = {}) {
-    const kind = classifyConsent(d);
-    if (kind === 'marketing') return deny(DENY.MARKETING_CONSENT);
-    if (kind === 'declaration') return deny(DENY.APPLICATION_CONSENT, { consentKind: kind });
-    if (kind === 'terms') {
-        return ctx.consentDelegated === true
-            ? allow()
-            : deny(DENY.APPLICATION_CONSENT, { consentKind: kind });
-    }
-    return allow();   // an ordinary question — this is just form data
+export function evaluateCheckboxFill(d) {
+    if (classifyConsent(d) === 'marketing') return deny(DENY.MARKETING_CONSENT);
+    return allow();
 }
 
 /** May we write `value` into this field? */
@@ -382,7 +410,7 @@ export function evaluateFill(d, ctx = {}) {
     if (isSensitiveField(d) && ctx.source !== 'login') {
         return deny(DENY.SENSITIVE_FIELD);
     }
-    if ((d.type || '').toLowerCase() === 'checkbox') return evaluateCheckboxFill(d, ctx);
+    if ((d.type || '').toLowerCase() === 'checkbox') return evaluateCheckboxFill(d);
     return allow();
 }
 
@@ -472,9 +500,18 @@ export function describeElement(el, selector) {
     };
 }
 
-/** Convenience: describe + judge a click in one call. */
+/**
+ * Describe + judge an activation.
+ *
+ * `openingApplication` is re-derived here against the LIVE DOM rather than taken
+ * on trust: it is the one claim that unlocks a button reading "Apply" / "Nộp hồ
+ * sơ", so a caller that is wrong about it (a form rendered since it decided, a
+ * gateway re-run after the form appeared) would be handing over the exact control
+ * this policy exists to protect. A caller may only ever narrow it, never widen it.
+ */
 export function checkClick(el, ctx = {}, selector) {
-    return evaluateClick(describeElement(el, selector), ctx);
+    const opening = !!ctx.openingApplication && !isApplicationFormPage();
+    return evaluateClick(describeElement(el, selector), { ...ctx, openingApplication: opening });
 }
 
 /** Convenience: describe + judge a fill in one call. */

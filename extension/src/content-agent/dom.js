@@ -268,6 +268,25 @@ export function overlayClick(el, ctx = {}) {
     if (!el) return false;
     const verdict = checkClick(el, ctx);
     if (!verdict.allowed) { logDenial(verdict, el, ctx); return false; }
+    return rawActivate(el);
+}
+
+/** Alias that says what it is. Every activation in the agent — a page button, a
+ *  dropdown trigger, one of its options, a radio, a checkbox — goes through this
+ *  one function, so there is exactly one place the policy can be consulted and
+ *  exactly one place it can be forgotten. */
+export const safeActivate = overlayClick;
+
+/**
+ * The mechanical part: deliver ONE activation at the element's real coordinates.
+ *
+ * It dispatches the pointer/mouse preamble and then a single `.click()`. It used
+ * to also dispatch a synthetic `click` event inside the loop AND call `.click()`,
+ * which fires the page's handler twice — on a login or create-account button that
+ * means two submissions, a duplicate account attempt, or an extra failed-attempt
+ * tick against a tenant we are trying very hard not to get locked out of.
+ */
+function rawActivate(el) {
     let r = el.getBoundingClientRect();
     // elementFromPoint needs the element in the viewport.
     if (r.bottom < 0 || r.top > innerHeight || r.width === 0) {
@@ -278,10 +297,12 @@ export function overlayClick(el, ctx = {}) {
     const cy = Math.round(r.top + r.height / 2);
     const target = document.elementFromPoint(cx, cy) || el;   // the overlay, if any
     const opts = { bubbles: true, cancelable: true, composed: true, view: window, clientX: cx, clientY: cy, button: 0, buttons: 1 };
-    for (const type of ['pointerover', 'pointerenter', 'pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+    // Preamble only — NO synthetic 'click' here. `.click()` below is the single
+    // activation; dispatching both ran every handler twice.
+    for (const type of ['pointerover', 'pointerenter', 'pointerdown', 'mousedown', 'pointerup', 'mouseup']) {
         try { target.dispatchEvent(type.startsWith('pointer') ? new PointerEvent(type, opts) : new MouseEvent(type, opts)); } catch { /* ignore */ }
     }
-    try { target.click(); } catch { /* already dispatched */ }
+    try { target.click(); } catch { /* element detached mid-sequence */ }
     return true;
 }
 

@@ -74,7 +74,16 @@ export interface RecipeField {
     profileKey?: string;  // key in the synced ExtensionProfile (omit for a fixed `value`)
     value?: string;       // fixed value (e.g. Postal "100000") — wins over profileKey
     default?: string;     // fallback when the profile key is empty (e.g. Country → "Vietnam")
-    pickAny?: boolean;    // required-but-arbitrary dropdown: any option satisfies it
+    /** Semantic fallbacks for a required dropdown, tried in order after the
+     *  resolved value. Replaces the old `pickAny`, which took the FIRST option
+     *  when nothing matched — on "How did you hear about us?" that is a coin flip
+     *  between "Employee referral", "Recruiter" and "Job fair", i.e. a claim about
+     *  the candidate invented by the agent. No match now means the field is left
+     *  for the user rather than answered wrongly. */
+    valuePriority?: string[];
+    /** Where this answer came from, for the review hand-off. Omit when the value
+     *  is resolved from the profile. */
+    answerSource?: 'AGENT_DEFAULT';
     multi?: boolean;      // input-based multi-select (Country Phone Code): idempotency checks selectedItemList
     labelMatch?: string;  // match a dynamic-id field by its question/label text (Application Questions)
     // shadow-text  = text input inside a web-component shadow root (SmartRecruiters spl-input)
@@ -170,7 +179,14 @@ const WORKDAY: ApplyRecipe = {
                 // LLM landing them — the cause of the flaky My-Information step.
                 { label: 'Country', selector: '[data-automation-id="formField-country"] button', profileKey: 'nationality', default: 'Vietnam', type: 'custom-select', required: true },
                 { label: 'Province or City', selector: '[data-automation-id="formField-countryRegion"] button', profileKey: 'addressProvince', type: 'custom-select' },
-                { label: 'How did you hear', selector: '[data-automation-id="formField-source"] button', value: 'Website', pickAny: true, type: 'custom-select', required: true },
+                {
+                    label: 'How did you hear', selector: '[data-automation-id="formField-source"] button',
+                    valuePriority: [
+                        'Company Website', 'Company Careers Website', 'Employer Website',
+                        'Careers Website', 'Company Webpage', 'Website', 'Webpage', 'Online',
+                    ],
+                    type: 'custom-select', required: true, answerSource: 'AGENT_DEFAULT',
+                },
                 { label: 'Phone type', selector: '[data-automation-id="formField-phoneType"] button', value: 'Mobile', type: 'custom-select' },
                 // Required multi-select (input-based, not a button): the LLM types but never
                 // commits an item, leaving it empty ("0 items selected") and blocking Next.
@@ -186,7 +202,12 @@ const WORKDAY: ApplyRecipe = {
             name: 'My Experience',
             detect: '[data-automation-id="jobTitleHeading"], [data-automation-id="formField-degree"]',
             fields: [
-                { label: 'Degree', selector: '[data-automation-id="formField-degree"] button', profileKey: 'highestDegree', default: 'Bachelor', pickAny: true, type: 'custom-select', required: true },
+                {
+                    label: 'Degree', selector: '[data-automation-id="formField-degree"] button',
+                    profileKey: 'highestDegree',
+                    valuePriority: ["Bachelor's Degree", 'Bachelor', 'Bachelors', 'University', 'Undergraduate'],
+                    type: 'custom-select', required: true, answerSource: 'AGENT_DEFAULT',
+                },
             ],
             advance: '[data-automation-id="pageFooterNextButton"]',
         },

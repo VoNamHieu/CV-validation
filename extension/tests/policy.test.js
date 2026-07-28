@@ -56,12 +56,20 @@ describe('submit is refused', () => {
         assert.equal(v.code, DENY.FINAL_STEP);
     });
 
-    test('a widget option cannot bypass the final-step stop', () => {
-        // `widget` short-circuits, so it must never be set on the review page by
-        // a caller. This test documents the ordering so a future edit that moves
-        // the widget check below the final-step check is a visible behaviour change.
-        const v = evaluateClick(el('Vietnam'), { source: 'recipe', widget: true, atFinalStep: true });
-        assert.equal(v.allowed, true, 'widget short-circuit is intentional and comes first');
+    test('NOTHING is exempt at the final step — not even a dropdown option', () => {
+        // The review page ends the agent's authority. An earlier version let
+        // widget activations short-circuit ahead of this check, which meant a
+        // recipe or handler could still touch the page that carries Submit.
+        for (const ctx of [
+            { source: 'recipe', activation: 'widget-option', atFinalStep: true },
+            { source: 'recipe', activation: 'widget-open', atFinalStep: true },
+            { source: 'planner', atFinalStep: true },
+            { source: 'gateway', openingApplication: true, atFinalStep: true },
+        ]) {
+            const v = evaluateClick(el('Vietnam'), ctx);
+            assert.equal(v.allowed, false, JSON.stringify(ctx));
+            assert.equal(v.code, DENY.FINAL_STEP);
+        }
     });
 });
 
@@ -206,17 +214,27 @@ describe('over-restriction regressions', () => {
         assert.equal(evaluateFill({ type: 'checkbox', label: 'I have a driver\'s licence' }, planner).allowed, true);
     });
 
-    test('…but a personal declaration never is, delegated or not', () => {
-        const delegated = { source: 'planner', consentDelegated: true };
+    test('disclosures and declarations ARE answerable — the user reviews them at the end', () => {
+        // The agent's job is to complete the application; the review page is where
+        // the user checks it. Refusing these left Workday stuck at Voluntary
+        // Disclosures, so the application never reached the page that was supposed
+        // to make refusing unnecessary.
         for (const label of [
             'I certify that the information provided is accurate',
             'I declare under penalty of perjury',
             'Please self-identify your disability status',
             'Protected veteran status',
+            'I have read and consent to the Terms and Conditions',
             'Tôi cam đoan thông tin trên là đúng sự thật',
         ]) {
-            assert.equal(evaluateCheckboxFill(el(label), delegated).allowed, false, label);
+            assert.equal(evaluateCheckboxFill(el(label)).allowed, true, label);
         }
+    });
+
+    test('marketing opt-in is the one answer the agent never gives', () => {
+        // Not required to advance, and the batch-start modal promises it in words.
+        assert.equal(evaluateCheckboxFill(el('Send me job alerts and promotions')).allowed, false);
+        assert.equal(evaluateCheckboxFill(el('Tôi muốn nhận tin khuyến mãi')).allowed, false);
     });
 
     test('a declaration is not misread as delegable terms', () => {
@@ -254,8 +272,17 @@ describe('over-restriction regressions', () => {
     });
 
     test('an input[type=submit] is still judged by its visible value', () => {
-        assert.equal(looksLikeSubmit({ type: 'submit', value: 'Nộp hồ sơ' }), true);
+        // `value` is the label on a button-like input, so it must be read — but
+        // "Nộp hồ sơ" is an AMBIGUOUS apply verb, not an unambiguous submit, so
+        // the verdict comes from flow context rather than from the word alone.
+        assert.equal(looksLikeSubmit({ type: 'submit', value: 'Submit Application' }), true);
         assert.equal(looksLikeSubmit({ type: 'submit', value: 'Next' }), false);
+
+        const onForm = evaluateClick({ type: 'submit', value: 'Nộp hồ sơ' }, planner);
+        assert.equal(onForm.allowed, false, 'on a form it is the submit');
+        const asGateway = evaluateClick(
+            { type: 'submit', value: 'Nộp hồ sơ' }, { source: 'gateway', openingApplication: true });
+        assert.equal(asGateway.allowed, true, 'on a job ad it opens the application');
     });
 
     test('an email box beside "Forgot password?" is still fillable', () => {
@@ -276,6 +303,44 @@ describe('over-restriction regressions', () => {
             value: 'I built the password reset flow at my last company',
         };
         assert.equal(isSensitiveField(cover), false);
+    });
+});
+
+// ── the product contract, as one table ─────────────────────────────────────
+// Fill everything. Advance through everything. Review everything. Submit nothing.
+describe('acceptance matrix', () => {
+    const cases = [
+        // [what,                              ctx,                          allowed]
+        ['Next',                               planner,                       true],
+        ['Continue',                           planner,                       true],
+        ['Save and Continue',                  planner,                       true],
+        ['Tiếp tục',                           planner,                       true],
+        ['Voluntary Disclosures acknowledgement', planner,                    true],
+        ['Yes',                                planner,                       true],
+        ['No',                                 planner,                       true],
+        ['Prefer not to say',                  planner,                       true],
+        ['I acknowledge and agree',            planner,                       true],
+        ['Submit',                             planner,                       false],
+        ['Submit Application',                 planner,                       false],
+        ['Save and Continue',                  { ...planner, atFinalStep: true }, false],
+        ['Next',                               { ...planner, atFinalStep: true }, false],
+        ['Withdraw application',               planner,                       false],
+        ['Apply with Indeed',                  planner,                       false],
+    ];
+    for (const [label, ctx, allowed] of cases) {
+        test(`${allowed ? 'allowed' : 'refused'}: "${label}"${ctx.atFinalStep ? ' @final' : ''}`, () => {
+            assert.equal(evaluateClick(el(label), ctx).allowed, allowed);
+        });
+    }
+
+    test('radio and checkbox answers are all fillable', () => {
+        for (const d of [
+            { type: 'radio', label: 'Are you legally authorized to work?' },
+            { type: 'checkbox', label: 'I have read the notice' },
+            { type: 'checkbox', label: 'Disability status: I do not wish to answer' },
+        ]) {
+            assert.equal(evaluateFill(d, planner).allowed, true, JSON.stringify(d));
+        }
     });
 });
 

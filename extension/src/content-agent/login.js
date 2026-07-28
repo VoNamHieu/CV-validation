@@ -1,5 +1,5 @@
 // AUTO-SPLIT from content-agent.js (Phase 2). Part of the Copo apply agent.
-import { overlayClick, setNativeValue, sleep } from './dom.js';
+import { safeActivate, setNativeValue, sleep } from './dom.js';
 import { isThirdPartyApply } from './detect.js';
 import { classifyConsent, evaluateConsent } from './policy.js';
 import { authResult, classifyDomError, detectChallenge } from '../ats/classifier.js';
@@ -64,17 +64,19 @@ function _labelTextFor(box) {
  * audit trail for consent given on the user's behalf. Marketing/optional boxes
  * are left alone, always.
  */
-function _tickConsent() {
+function _tickConsent(consentDelegated) {
     const accepted = [];
-    // Ticking here is delegated by construction: we only reached a login wall
-    // holding a credential, and that credential exists only because the user
-    // completed the batch-start modal that grants exactly this.
-    const ctx = { source: 'login', formKind: 'signup', consentDelegated: true };
+    // Delegation is passed IN, never assumed here. It comes from the apply
+    // session, which the background sets from the batch-start modal — the only
+    // place the user actually granted it. Hard-coding `true` would have made this
+    // function's safety depend on nobody ever calling it from a flow that had no
+    // modal.
+    const ctx = { source: 'login', formKind: 'signup', consentDelegated: !!consentDelegated };
     for (const b of [...document.querySelectorAll('input[type="checkbox"]')].filter(_vis)) {
         if (b.checked) continue;
         const raw = _labelTextFor(b);
         if (!evaluateConsent({ text: raw, label: raw, type: 'checkbox' }, ctx).allowed) continue;
-        b.click();
+        safeActivate(b, { source: 'login', activation: 'widget-option' });
         if (!b.checked) { b.checked = true; b.dispatchEvent(new Event('change', { bubbles: true })); }
         // Trimmed + capped: evidence of WHAT was accepted, not a DOM dump.
         accepted.push(raw.replace(/\s+/g, ' ').slice(0, 120));
@@ -150,7 +152,7 @@ function _switchForm(to) {
         ? (_q('[data-automation-id="signInLink"]') || _findToggle(/\bsign in\b|\blog in\b|đăng nhập/))
         : (_q('[data-automation-id="createAccountLink"]') || _findToggle(/create (an )?account|sign up|register|đăng ký|tạo tài khoản/));
     if (!_vis(toggle)) return false;
-    toggle.click();
+    safeActivate(toggle, { source: 'login', activation: 'page-action' });
     return true;
 }
 
@@ -177,7 +179,7 @@ function _formKind(pwFields) {
  * untouched, whereas `invalid_credentials` blocks it and asks the user for a
  * password — so we only return the latter on an explicit credentials error.
  */
-export async function handleLoginWall(creds, login, operation = 'login') {
+export async function handleLoginWall(creds, login, operation = 'login', opts = {}) {
     if (!creds || !creds.password) return null;
     const wall = detectLoginWall(login);
     if (!wall) return null;
@@ -209,7 +211,7 @@ export async function handleLoginWall(creds, login, operation = 'login') {
 
     let consentAccepted = null;
     if (isCreate) {
-        consentAccepted = _tickConsent();
+        consentAccepted = _tickConsent(opts.consentDelegated);
         await sleep(150);
         // A required box we can't classify is the user's call, not ours.
         if (_hasUnhandledRequiredConsent()) {
@@ -229,13 +231,13 @@ export async function handleLoginWall(creds, login, operation = 'login') {
         if (!_vis(btn)) btn = _findSubmit(pwFields[0], /sign in|log in|login|continue|next|đăng nhập|tiếp tục/);
     }
     if (btn) {
-        // overlayClick clicks the TOPMOST element at the button's centre — Workday
+        // safeActivate clicks the TOPMOST element at the button's centre — Workday
         // overlays the submit with a "click_filter" div that owns the handler, so
         // clicking the <button> underneath is ignored. Pure JS; no debugger needed.
         // Declared as the login flow so the policy's account-creation rule lets
         // this through: it is the sanctioned path, running under the background's
         // per-tenant attempt budget.
-        overlayClick(btn, { source: 'login', formKind: isCreate ? 'signup' : 'signin' });
+        safeActivate(btn, { source: 'login', formKind: isCreate ? 'signup' : 'signin' });
         console.log(`[Copo Agent] login wall (${isCreate ? 'create-account' : 'sign-in'}): filled + submitted `
             + `[${btn.getAttribute?.('data-automation-id') || 'button'}]`);
     } else {

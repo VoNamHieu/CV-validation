@@ -15,7 +15,7 @@
  */
 
 import { AGENT_MAX_ITERATIONS, APPLY_SESSION_TTL_MS, FILL_RETRY_THRESHOLD, POST_ACTION_WAIT_MS } from './constants.js';
-import { overlayClick, sleep } from './dom.js';
+import { safeActivate, sleep } from './dom.js';
 import { removeProgress, showConfirmation, showProgress, showToast } from './ui.js';
 import { callAgentPlan, callLLMMapping } from './llm.js';
 import { executeFillInstructions } from './fill.js';
@@ -95,6 +95,11 @@ async function runAgentLoop(profile) {
     // after we actually did something count as a submitted application.
     let baselineSignals = null;
     let actionsTaken = 0;
+    // For the two-signal submitted check: a form we have actually seen, and where
+    // we started, so "the form is gone" and "we are on a confirmation URL" are
+    // statements about a change rather than about the first page we happened to load.
+    let sawForm = false;
+    const startUrl = window.location.href;
     const gatewayClicks = new Map();   // recipe gateway label → click count (loop guard)
 
     // Load the CV for THIS apply session (see loadSessionCv).
@@ -182,7 +187,7 @@ async function runAgentLoop(profile) {
                 // branch runs when isApplicationFormPage() said there is no form on
                 // screen, so a button reading "Nộp hồ sơ" opens one rather than
                 // sending one. (VN job boards use the same words for both.)
-                overlayClick(applyBtn, policyCtx('gateway', { openingApplication: true }));
+                safeActivate(applyBtn, policyCtx('gateway', { openingApplication: true }));
                 showProgress(0, AGENT_MAX_ITERATIONS, 'Đã click nút Ứng tuyển, chờ form...');
                 await sleep(2000);
             } else {
@@ -297,10 +302,34 @@ async function runAgentLoop(profile) {
             // a false positive (e.g. "Successfully uploaded" on the Autofill-with-Resume
             // step reading as the whole application being done). Trust atFinalStep there.
             const midRecipeFlow = !!recipe?.finalStepSelector && !atFinalStep(recipe);
-            if (newSignals.length > 0 && actionsTaken > 0 && !midRecipeFlow) {
+
+            // TWO independent signals are required before we claim an application
+            // was sent, because the agent does not send one — so `submitted` can
+            // only be the user submitting manually, or an ATS auto-submitting, and
+            // in both cases the page changes structurally.
+            //
+            // One signal is not enough: "Successfully uploaded", "Information
+            // saved" and "Profile updated" all match the success vocabulary and
+            // all appear mid-flow. Reporting those as submitted writes "đã nộp"
+            // into the user's history for an application still sitting half-filled
+            // in an open tab — a false success, which is the failure mode that
+            // costs the most to discover.
+            if (state.formFields.length >= 3) sawForm = true;
+            const formGone = sawForm && state.formFields.length === 0;
+            const confirmationUrl = state.url !== startUrl
+                && /thank|success|confirm|complete|submitted|hoan-?tat|thanh-?cong/i.test(state.url);
+            const structuralSignal = formGone || confirmationUrl;
+
+            if (newSignals.length > 0 && actionsTaken > 0 && !midRecipeFlow && !structuralSignal) {
+                console.log('[Copo Apply] completion text seen but the form is still here — not calling this submitted:',
+                    newSignals[0]);
+            }
+            if (newSignals.length > 0 && actionsTaken > 0 && !midRecipeFlow && structuralSignal) {
                 showProgress(i + 1, AGENT_MAX_ITERATIONS, 'Phát hiện ứng tuyển thành công!');
                 removeProgress();
-                reportResult(true, `Success detected: ${newSignals[0]}`, 'submitted');
+                reportResult(true,
+                    `Submitted: "${newSignals[0]}" + ${formGone ? 'form gone' : 'confirmation URL'}`,
+                    'submitted');
                 showConfirmation(state.totalFields, state.totalFields, true);
                 return;
             }
@@ -365,12 +394,12 @@ async function runAgentLoop(profile) {
                 showProgress(i + 1, AGENT_MAX_ITERATIONS,
                     grant.operation === 'signup' ? 'Tạo tài khoản…' : 'Đăng nhập…');
 
-                let result = await handleLoginWall(grant.credentials, recipe?.login, grant.operation);
+                let result = await handleLoginWall(grant.credentials, recipe?.login, grant.operation, { consentDelegated });
                 // A form switch (sign-in ⇄ create account) isn't an attempt; run the
                 // real one on the form we asked for.
                 if (result?.pending) {
                     await sleep(1200);
-                    result = await handleLoginWall(grant.credentials, recipe?.login, grant.operation);
+                    result = await handleLoginWall(grant.credentials, recipe?.login, grant.operation, { consentDelegated });
                 }
                 actionsTaken++;
 
@@ -490,7 +519,7 @@ async function runAgentLoop(profile) {
                         // The surrounding condition already excludes the review
                         // step; the policy re-checks it anyway, because on Workday
                         // this same selector IS the submit button there.
-                        overlayClick(adv, policyCtx('recipe'));
+                        safeActivate(adv, policyCtx('recipe'));
                         actionsTaken++;
                         await sleep(1500);
                         continue;
@@ -656,7 +685,7 @@ async function runAgentLoop(profile) {
                     };
                     console.log('[Copo Apply] CLICK →', info);
                     // Judge the click BEFORE acting on it, so the refusal (and its
-                    // code) lands in history. overlayClick would refuse it anyway,
+                    // code) lands in history. safeActivate would refuse it anyway,
                     // but silently — and a planner that can't see why its action
                     // did nothing just proposes the same one again next iteration.
                     const clickCtx = policyCtx('planner');
@@ -692,7 +721,7 @@ async function runAgentLoop(profile) {
                     // Overlay-aware: Workday covers Next/Continue/Submit buttons with
                     // a "click_filter" div that owns the handler — a plain .click() on
                     // the button is swallowed, so the agent could never advance a step.
-                    overlayClick(target, clickCtx);
+                    safeActivate(target, clickCtx);
                     actionResult = { clicked: plan.clickTarget, ...info };
                     actionsTaken++;
                 } else {

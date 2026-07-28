@@ -115,6 +115,34 @@ function persistState() {
     });
 }
 
+/**
+ * End the batch and leave nothing running. THE single path out of a batch —
+ * user cancel, out of credit, expired token, queue exhausted.
+ *
+ * Each of those used to unwind by hand, and each forgot something different: the
+ * credit path left the watchdog armed and the apply session live, cancel left the
+ * ATS runtime behind, completion left the pending flags. What survives is not
+ * cosmetic — a live `pendingAutoApply` fires the agent on the next job page the
+ * user opens, and a stale alarm wakes the worker to police a batch that ended.
+ */
+function abortBatch(reason, { keepQueue = true } = {}) {
+    console.log(`[Copo] Batch Apply: ending — ${reason}`);
+    isProcessing = false;
+    currentTabId = null;
+    currentJobIndex = keepQueue ? currentJobIndex : -1;
+    if (!keepQueue) applyQueue = [];
+    batchConsentDelegated = false;
+    clearJobSafetyTimer();
+    atsCoord.endBatch();
+    endApplySession();
+    chrome.storage.local.remove([
+        'pendingAutoApply', 'autoApplyJobUrl', 'batchMode', 'atsRuntime', 'lastHeartbeatAt',
+        ...(keepQueue ? [] : ['applyQueue', 'isProcessing', 'currentJobIndex', 'currentTabId', 'jobStartedAt']),
+    ]);
+    if (keepQueue) persistState();   // keep the terminal per-job rows for the UI
+    broadcastProgress();
+}
+
 /** Persist the ATS coordinator's runtime so a recycled worker doesn't hand a
  *  blocked tenant a fresh attempt budget. */
 function persistAtsRuntime() {
@@ -1081,16 +1109,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     // ── Cancel batch ──
     if (message.type === 'AUTO_APPLY_ALL_CANCEL') {
-        console.log('[Copo] Batch Apply: cancelled by user');
-        isProcessing = false;
-        applyQueue = [];
-        currentJobIndex = -1;
-        currentTabId = null;
-        clearJobSafetyTimer();
-        atsCoord.endBatch();
-        chrome.storage.local.remove(['applyQueue', 'isProcessing', 'currentJobIndex', 'currentTabId', 'jobStartedAt', 'lastHeartbeatAt', 'pendingAutoApply', 'autoApplyJobUrl', 'batchMode', 'atsRuntime']);
-        endApplySession();
-        broadcastProgress();
+        abortBatch('cancelled by user', { keepQueue: false });
         sendResponse({ success: true });
         return true;
     }
@@ -1189,16 +1208,7 @@ function processNextJob() {
 
     if (currentJobIndex >= applyQueue.length) {
         // All done!
-        console.log('[Copo] Batch Apply: all jobs completed!');
-        isProcessing = false;
-        currentTabId = null;
-        clearJobSafetyTimer();
-        atsCoord.endBatch();
-        chrome.storage.local.remove(['atsRuntime']);
-        chrome.storage.local.remove(['pendingAutoApply', 'autoApplyJobUrl', 'batchMode']);
-        endApplySession();
-        persistState();
-        broadcastProgress();
+        abortBatch('all jobs completed');
         return;
     }
 
@@ -1292,13 +1302,11 @@ function processNextJob() {
                     ? 'Không đủ credit để ứng tuyển job này.'
                     : 'Phiên đăng nhập hết hạn — mở Copo và đồng bộ lại.',
             };
-            persistState();
-            broadcastProgress();
             // Out of credits applies to every remaining job → stop the batch
-            // instead of churning failures; expired auth is the same.
-            isProcessing = false;
-            persistState();
-            broadcastProgress();
+            // instead of churning failures; expired auth is the same. Routed
+            // through abortBatch so the watchdog, apply session, session CV and
+            // pending flags are torn down too — this path used to leave all four.
+            abortBatch(charge.insufficient ? 'out of credits' : 'auth expired');
             return;
         }
         chrome.storage.local.set(storage, () => {

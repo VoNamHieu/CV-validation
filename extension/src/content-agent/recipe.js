@@ -13,7 +13,7 @@
 // pass; the recipe re-runs every iteration and is idempotent, so partial progress
 // accumulates and already-filled fields are skipped.
 
-import { deepFindControl, deepQuery, deepQueryAll, dropFileOnZone, overlayClick, setFileOnInput, setNativeValue, simulateTyping, sleep, waitForElement } from './dom.js';
+import { deepFindControl, deepQuery, deepQueryAll, dropFileOnZone, safeActivate, setFileOnInput, setNativeValue, simulateTyping, sleep, waitForElement } from './dom.js';
 import { isThirdPartyApply } from './detect.js';
 
 // Keep in sync with frontend/src/lib/applyRecipes.ts (WORKDAY). Fields verified
@@ -63,7 +63,21 @@ const FALLBACK_RECIPES = [
                     // the step stops depending on the LLM landing them.
                     { label: 'Country', selector: '[data-automation-id="formField-country"] button', profileKey: 'nationality', default: 'Vietnam', type: 'custom-select', required: true },
                     { label: 'Province or City', selector: '[data-automation-id="formField-countryRegion"] button', profileKey: 'addressProvince', type: 'custom-select' },
-                    { label: 'How did you hear', selector: '[data-automation-id="formField-source"] button', value: 'Website', pickAny: true, type: 'custom-select', required: true },
+                    // Required, and the answer is a FACT the employer acts on:
+                    // "Employee referral" or "Recruiter" routes the application
+                    // differently and implies a person who does not exist. It used
+                    // to carry `pickAny`, which takes the first option in the list
+                    // when nothing matches — a coin flip between claims about how
+                    // the candidate found the job. Now it walks a semantic ladder
+                    // and, failing all of it, leaves the field for the user.
+                    {
+                        label: 'How did you hear', selector: '[data-automation-id="formField-source"] button',
+                        valuePriority: [
+                            'Company Website', 'Company Careers Website', 'Employer Website',
+                            'Careers Website', 'Company Webpage', 'Website', 'Webpage', 'Online',
+                        ],
+                        type: 'custom-select', required: true, answerSource: 'AGENT_DEFAULT',
+                    },
                     { label: 'Phone type', selector: '[data-automation-id="formField-phoneType"] button', value: 'Mobile', type: 'custom-select' },
                     // Country Phone Code is a REQUIRED multi-select (input-based, not a
                     // button): the LLM types into it but never commits an item, so it
@@ -84,7 +98,18 @@ const FALLBACK_RECIPES = [
                 name: 'My Experience',
                 detect: '[data-automation-id="jobTitleHeading"], [data-automation-id="formField-degree"]',
                 fields: [
-                    { label: 'Degree', selector: '[data-automation-id="formField-degree"] button', profileKey: 'highestDegree', default: 'Bachelor', pickAny: true, type: 'custom-select', required: true },
+                    // Also a claim about the candidate, so also no `pickAny`: the
+                    // first option in a degree list is as likely to be "High
+                    // School" or "Doctorate" as anything else, and either is a
+                    // misrepresentation of their education. Match the profile's
+                    // own level through common phrasings; if none is offered,
+                    // leave it — the required-blocker audit names it at handoff.
+                    {
+                        label: 'Degree', selector: '[data-automation-id="formField-degree"] button',
+                        profileKey: 'highestDegree',
+                        valuePriority: ["Bachelor's Degree", 'Bachelor', 'Bachelors', 'University', 'Undergraduate'],
+                        type: 'custom-select', required: true, answerSource: 'AGENT_DEFAULT',
+                    },
                 ],
                 advance: '[data-automation-id="pageFooterNextButton"]',
             },
@@ -246,7 +271,7 @@ export function clickRecipeGateway(recipe, hasCV, clickedCounts) {
         // Workday's modal buttons sit under a click_filter overlay. A gateway is
         // pre-form by definition (it exists to REACH the form), so apply-verb
         // wording here is an opener, not a submit.
-        if (!overlayClick(target, {
+        if (!safeActivate(target, {
             source: 'gateway', openingApplication: true,
             submitSelector: recipe?.submitSelector,
         })) continue;
@@ -400,20 +425,40 @@ export async function applyRecipeFields(recipe, profile, cvData) {
     // re-renders the region field). Custom-selects re-query fresh each pass, so a
     // field that isn't rendered yet is simply retried next iteration.
     const outcomes = [];   // [label, status, note] per field → debug summary below
+    // Provenance for the review hand-off: which answers came from the user's own
+    // data, and which are values the agent chose to get the step to validate. The
+    // user is going to check the application on the review page, and "these four
+    // are ours, not yours" is the difference between a review they can do in a
+    // minute and one they have to do field by field.
+    const answers = [];
     for (const f of step.fields || []) {
         const val = recipeFieldValue(f, profile);
-        if ((val == null || String(val).trim() === '') && !f.pickAny) { outcomes.push([f.label, 'skip', 'no value']); continue; }
+        const hasLadder = Array.isArray(f.valuePriority) && f.valuePriority.length > 0;
+        if ((val == null || String(val).trim() === '') && !hasLadder) { outcomes.push([f.label, 'skip', 'no value']); continue; }
+        // A fixed `value`/`default` the profile did not supply is the agent's own
+        // choice; anything resolved from the profile is the user's.
+        const provenance = f.answerSource
+            || (f.profileKey && profile[f.profileKey] ? 'PROFILE' : 'AGENT_DEFAULT');
         try {
             if (f.type === 'custom-select') {
                 const r = await fillCustomSelect(f, val);
-                if (r.ok) { filled++; outcomes.push([f.label, 'OK', String(val || '(any)')]); }
+                if (r.ok) {
+                    filled++;
+                    outcomes.push([f.label, 'OK', String(r.matched || val)]);
+                    // `matched` is the ladder rung that landed — when it is not the
+                    // profile's own value, the answer is an agent default whatever
+                    // the field declared.
+                    const fromProfile = provenance === 'PROFILE'
+                        && String(r.matched || '') === String(val || '').trim().toLowerCase();
+                    answers.push({ field: f.label, value: r.matched || val, source: fromProfile ? 'PROFILE' : 'AGENT_DEFAULT' });
+                }
                 else if (r.reason === 'already-selected') outcomes.push([f.label, 'done', 'already selected']);
                 else if (r.reason === 'button-absent') outcomes.push([f.label, 'absent', 'not rendered yet']);
                 else outcomes.push([f.label, 'FAIL', r.reason]);
             } else if (f.type === 'autocomplete') {
                 // Type-to-search field (SmartRecruiters city) → type then pick a match.
                 const r = await fillAutocomplete(f, val);
-                if (r.ok) { filled++; outcomes.push([f.label, 'OK', String(val)]); }
+                if (r.ok) { filled++; outcomes.push([f.label, 'OK', String(val)]); answers.push({ field: f.label, value: val, source: provenance }); }
                 else if (r.reason === 'already-selected') outcomes.push([f.label, 'done', 'already filled']);
                 else if (r.reason === 'host-absent' || r.reason === 'input-absent') outcomes.push([f.label, 'absent', 'not rendered yet']);
                 else outcomes.push([f.label, 'FAIL', r.reason]);
@@ -430,7 +475,7 @@ export async function applyRecipeFields(recipe, profile, cvData) {
                 if (String(el.value ?? '').trim() !== '') { outcomes.push([f.label, 'done', 'already filled']); continue; }  // idempotent
                 setNativeValue(el, String(val));
                 await sleep(120);
-                if (String(el.value ?? '').trim() !== '') { filled++; outcomes.push([f.label, 'OK', String(val)]); }
+                if (String(el.value ?? '').trim() !== '') { filled++; outcomes.push([f.label, 'OK', String(val)]); answers.push({ field: f.label, value: val, source: provenance }); }
                 else outcomes.push([f.label, 'FAIL', 'value did not stick']);
             } else {
                 const el = f.labelMatch ? findFieldByLabel(f.labelMatch) : document.querySelector(f.selector);
@@ -439,7 +484,7 @@ export async function applyRecipeFields(recipe, profile, cvData) {
                 if (String(el.value ?? '').trim() !== '') { outcomes.push([f.label, 'done', 'already filled']); continue; }  // idempotent
                 setNativeValue(el, String(val));
                 await sleep(120);
-                if (String(el.value ?? '').trim() !== '') { filled++; outcomes.push([f.label, 'OK', String(val)]); }
+                if (String(el.value ?? '').trim() !== '') { filled++; outcomes.push([f.label, 'OK', String(val)]); answers.push({ field: f.label, value: val, source: provenance }); }
                 else outcomes.push([f.label, 'FAIL', 'value did not stick']);
             }
         } catch (e) { outcomes.push([f.label, 'FAIL', (e && e.message) || 'exception']); }
@@ -457,7 +502,7 @@ export async function applyRecipeFields(recipe, profile, cvData) {
             failed.map(([l, , why]) => `${l} — ${why}`).join('  |  '));
     }
 
-    return { matched: true, filled, step: step.name };
+    return { matched: true, filled, step: step.name, answers };
 }
 
 /** Resolve a field's value: an explicit fixed `value`, else the synced profile
@@ -487,8 +532,12 @@ function findFieldByLabel(labelMatch) {
  * Idempotent: Workday stores the chosen option's id in the button's `value`
  * attribute, so a non-empty value (incl. an "Autofill with Resume" pre-fill) is
  * skipped. Opens the listbox, type-filters when the field has a search input,
- * then clicks the option matching `value` (exact → contains → first when
- * `f.pickAny`). Leaves the popup CLOSED on a miss so it can't block the next field.
+ * then picks by semantic priority (`f.valuePriority`) — never by position.
+ * Leaves the popup CLOSED on a miss so it can't block the next field.
+ *
+ * Returns `{ok, reason, matched}` where `matched` is which rung of the ladder
+ * actually landed, so the caller can record whether the answer came from the
+ * profile or from an agent default.
  */
 async function fillCustomSelect(f, value) {
     const trigger = document.querySelector(f.selector);
@@ -504,7 +553,7 @@ async function fillCustomSelect(f, value) {
     }
     // `widget: true` — opening this listbox and picking from it are steps INSIDE
     // one approved field fill, so they are judged as values, not as page actions.
-    overlayClick(trigger, { source: 'recipe', widget: true });
+    safeActivate(trigger, { source: 'recipe', activation: 'widget-open' });
     if (!(await waitForElement('[data-automation-id="promptOption"]', 4000))) return { ok: false, reason: 'listbox-timeout' };
     await sleep(150);
     const want = String(value || '').trim().toLowerCase();
@@ -515,14 +564,32 @@ async function fillCustomSelect(f, value) {
     const opts = [...document.querySelectorAll('[data-automation-id="promptOption"]')]
         .filter(o => o.offsetParent !== null);
     const txt = (o) => (o.textContent || '').trim().toLowerCase();
-    const opt = (want && opts.find(o => txt(o) === want))
-        || (want && opts.find(o => txt(o).includes(want)))
-        || (f.pickAny ? opts[0] : null);
+
+    // Try, in order: the resolved value, then each rung of the field's semantic
+    // ladder. Exact match beats a substring match at every rung, so "Website"
+    // never wins over "Company Website" just by appearing earlier in the list.
+    //
+    // There is NO "pick the first option" fallback any more. These dropdowns
+    // answer questions ABOUT the candidate — how they found the job, what degree
+    // they hold — and the first option in an unmatched list is an arbitrary claim
+    // sent to a real employer ("Employee referral", "Doctorate"). Leaving the
+    // field empty is recoverable; a wrong answer on a submitted application is not.
+    const ladder = [want, ...(f.valuePriority || []).map(v => String(v).trim().toLowerCase())]
+        .filter(Boolean);
+    let opt = null;
+    let matched = '';
+    for (const wanted of ladder) {
+        opt = opts.find(o => txt(o) === wanted) || opts.find(o => txt(o).includes(wanted));
+        if (opt) { matched = wanted; break; }
+    }
     if (!opt) {
         trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); // close, don't block
-        return { ok: false, reason: `option-not-found (${opts.length} shown${want ? `, wanted "${value}"` : ''})` };
+        return {
+            ok: false,
+            reason: `option-not-found (${opts.length} shown${ladder.length ? `, tried ${ladder.length} candidate(s)` : ''})`,
+        };
     }
-    overlayClick(opt, { source: 'recipe', widget: true });
+    safeActivate(opt, { source: 'recipe', activation: 'widget-option' });
     await sleep(250);
     // A MULTI-select stays OPEN after a pick (so you can add more) — and its popup
     // overlays the page footer, SWALLOWING the agent's later "Next" click, so the
@@ -533,7 +600,7 @@ async function fillCustomSelect(f, value) {
         try { trigger.blur?.(); } catch { /* noop */ }
         await sleep(150);
     }
-    return { ok: true };
+    return { ok: true, matched };
 }
 
 /**
