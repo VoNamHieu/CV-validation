@@ -99,8 +99,14 @@ export default function Mode1ResultBanner() {
         setStatus('');
         // Render the TAILORED CV → PDF and pass it straight to the apply call,
         // so the extension stores it ATOMICALLY with the pending-apply flag —
-        // the agent then uploads THIS CV, not a stale one. Non-fatal: on render
-        // failure the agent falls back to whatever PDF was last synced.
+        // the agent then uploads THIS CV, not a stale one.
+        //
+        // A render failure is FATAL to the apply. It used to be waved through, on
+        // the theory that the agent could fall back to whatever PDF was last
+        // synced — but that slot holds the previously optimised job's CV, so the
+        // fallback quietly attached another company's document. An application
+        // cannot be withdrawn and re-sent, so it is better to stop here and let
+        // the user retry than to spend the opportunity on the wrong file.
         setStatus('📄 Đang tạo PDF từ CV đã tinh chỉnh…');
         let cvFileBase64: string | undefined;
         let cvFileName: string | undefined;
@@ -109,7 +115,12 @@ export default function Mode1ResultBanner() {
             cvFileBase64 = out.optimizedCvPdfBase64;
             cvFileName = out.optimizedCvFileName;
         } catch (e) {
-            console.warn('[Mode1] tailored-CV PDF render failed (non-fatal):', e);
+            console.warn('[Mode1] tailored-CV PDF render failed:', e);
+        }
+        if (!cvFileBase64 || !cvFileName) {
+            setApplying(false);
+            setStatus('❌ Chưa tạo được file CV tinh chỉnh — hãy thử lại trước khi ứng tuyển.');
+            return;
         }
         const res = await triggerMode1Apply(result.source_ref, { cvFileBase64, cvFileName });
         setApplying(false);

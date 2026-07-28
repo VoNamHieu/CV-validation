@@ -74,6 +74,21 @@ const FALLBACK_RECIPES = [
                 advance: '[data-automation-id="pageFooterNextButton"]',
             },
             {
+                // My Experience: "Autofill with Resume" populates Job Title / Company /
+                // School (text) but leaves the REQUIRED education Degree dropdown at
+                // "Select One" — that empty required field silently blocks Next and the
+                // agent used to loop until stuck. Pick the candidate's degree level (or
+                // any option) so it validates. jobTitle/company/dates come from the
+                // parse; anything the parser still left empty is surfaced by the
+                // required-blocker audit at hand-off.
+                name: 'My Experience',
+                detect: '[data-automation-id="jobTitleHeading"], [data-automation-id="formField-degree"]',
+                fields: [
+                    { label: 'Degree', selector: '[data-automation-id="formField-degree"] button', profileKey: 'highestDegree', default: 'Bachelor', pickAny: true, type: 'custom-select', required: true },
+                ],
+                advance: '[data-automation-id="pageFooterNextButton"]',
+            },
+            {
                 // Application Questions: the Yes/No conflict-of-interest dropdowns
                 // default to "No"; the two required free-text questions have per-job
                 // dynamic ids, so match them by question text (labelMatch).
@@ -184,8 +199,23 @@ export async function loadRecipes() {
     // before the web app redeploys /api/apply-recipes (which currently still serves
     // only the older set). A fetched recipe with the same `ats` OVERRIDES the bundled
     // one, so a live selector can still be hotfixed via a Vercel deploy.
+    // A fetched recipe wins only when it is at least as NEW as the bundled one.
+    // The hotfix direction (Vercel deploy ships a corrected selector before the
+    // Web Store review lands) is the point of the merge; the reverse — a web app
+    // that hasn't redeployed yet silently DOWNGRADING a recipe the extension just
+    // shipped — is a release-skew bug waiting for the next version bump.
     const byAts = new Map(FALLBACK_RECIPES.map(r => [r.ats, r]));
-    for (const r of fetched) if (r?.ats) byAts.set(r.ats, r);
+    for (const r of fetched) {
+        if (!r?.ats) continue;
+        const bundled = byAts.get(r.ats);
+        const remoteV = Number(r.version) || 0;
+        const bundledV = Number(bundled?.version) || 0;
+        if (bundled && remoteV < bundledV) {
+            console.warn(`[Copo Recipe] ignoring remote ${r.ats} v${remoteV} — bundled v${bundledV} is newer`);
+            continue;
+        }
+        byAts.set(r.ats, r);
+    }
     _recipes = [...byAts.values()];
     console.log(`[Copo Recipe] ${_recipes.length} recipe(s) [${_recipes.map(r => r.ats).join(', ')}] — ${fetched.length} from web app + ${FALLBACK_RECIPES.length} bundled`);
     return _recipes;
@@ -213,7 +243,13 @@ export function clickRecipeGateway(recipe, hasCV, clickedCounts) {
             if (el && el.offsetParent !== null) target = g.click ? document.querySelector(g.click) : el;
         }
         if (!target || target.offsetParent === null) continue;
-        overlayClick(target);   // Workday's modal buttons sit under a click_filter overlay
+        // Workday's modal buttons sit under a click_filter overlay. A gateway is
+        // pre-form by definition (it exists to REACH the form), so apply-verb
+        // wording here is an opener, not a submit.
+        if (!overlayClick(target, {
+            source: 'gateway', openingApplication: true,
+            submitSelector: recipe?.submitSelector,
+        })) continue;
         clickedCounts.set(g.label, (clickedCounts.get(g.label) || 0) + 1);
         console.log(`[Copo Recipe] gateway: clicked "${g.label}"`);
         return { clicked: true, label: g.label };
@@ -466,7 +502,9 @@ async function fillCustomSelect(f, value) {
     } else if ((trigger.getAttribute('value') || '').trim()) {
         return { ok: false, reason: 'already-selected' };
     }
-    overlayClick(trigger);
+    // `widget: true` — opening this listbox and picking from it are steps INSIDE
+    // one approved field fill, so they are judged as values, not as page actions.
+    overlayClick(trigger, { source: 'recipe', widget: true });
     if (!(await waitForElement('[data-automation-id="promptOption"]', 4000))) return { ok: false, reason: 'listbox-timeout' };
     await sleep(150);
     const want = String(value || '').trim().toLowerCase();
@@ -484,7 +522,7 @@ async function fillCustomSelect(f, value) {
         trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); // close, don't block
         return { ok: false, reason: `option-not-found (${opts.length} shown${want ? `, wanted "${value}"` : ''})` };
     }
-    overlayClick(opt);
+    overlayClick(opt, { source: 'recipe', widget: true });
     await sleep(250);
     // A MULTI-select stays OPEN after a pick (so you can add more) — and its popup
     // overlays the page footer, SWALLOWING the agent's later "Next" click, so the
@@ -500,11 +538,13 @@ async function fillCustomSelect(f, value) {
 
 /**
  * Fill a type-to-search autocomplete (SmartRecruiters city / place lookup).
- * The input lives in a web-component shadow root and needs ≥3 typed chars to
- * trigger the async suggestion list, then a click on a suggestion to COMMIT the
- * value (typing alone leaves it uncommitted and a blur can clear it). We type
- * char-by-char WITHOUT a trailing blur, wait for suggestions, then click the
- * best match (or the first). Idempotent: skips when the input already holds text.
+ * SR renders the result dropdown in a CLOSED shadow root / portal we can't reach
+ * with querySelector — so we DON'T try to click a suggestion node. Instead we type
+ * (≥3 chars → async lookup), then drive the component's keyboard list-navigator:
+ * ArrowDown highlights the first result, Enter commits it. Retried a few times
+ * because the place API is slow. Keyboard-only is also safer than clicking a found
+ * node — it can never mis-target an Experience/Education card. Idempotent: skips
+ * when the input already holds text.
  */
 async function fillAutocomplete(f, value) {
     // Don't gate on host.getClientRects() — spl-autocomplete can be display:contents
@@ -515,53 +555,39 @@ async function fillAutocomplete(f, value) {
     if (!input) return { ok: false, reason: 'input-absent' };
     if (String(input.value ?? '').trim() !== '') return { ok: false, reason: 'already-selected' };
 
+    // Type char-by-char to trigger the async place lookup. No trailing blur (blur
+    // closes the list before we can commit).
     input.focus();
     input.dispatchEvent(new Event('focus', { bubbles: true }));
-    try { input.value = ''; } catch { /* readonly? */ }
+    try { input.value = ''; } catch { /* readonly */ }
     for (const ch of String(value)) {
         input.value += ch;
-        input.dispatchEvent(new KeyboardEvent('keydown', { key: ch, bubbles: true }));
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        input.dispatchEvent(new KeyboardEvent('keyup', { key: ch, bubbles: true }));
-        await sleep(40);
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: ch, bubbles: true, composed: true }));
+        input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+        input.dispatchEvent(new KeyboardEvent('keyup', { key: ch, bubbles: true, composed: true }));
+        await sleep(45);
     }
-    await sleep(1500);   // wait for the async place-lookup list to render
+    const typed = String(input.value ?? '').trim();
 
-    // Options render as <spl-dropdown-item> inside the autocomplete's shadow root
-    // (deepQueryAll pierces it). Pick the best text match, else the first suggestion.
-    const optSel = '[role="option"], [data-test*="option"], [data-sr-id*="option"], '
-        + 'spl-dropdown-item, spl-select-option, [class*="dropdown-item"], '
-        + 'li[role="option"], li[class*="option"], .autocomplete-option, .pac-item';
-    // Diacritic-insensitive compare so "Hà Nội" matches a "Hanoi" suggestion.
-    const norm = (s) => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/\s+/g, ' ').trim();
-    // Scope the option search to the autocomplete HOST's own subtree (its dropdown
-    // renders inside its shadow). Searching the whole document risked picking a
-    // stray dropdown-item elsewhere — e.g. inside a résumé-parsed Experience/Education
-    // card — and clicking it, which OPENED that entry's edit form and left it empty.
-    const opts = deepQueryAll(optSel, host).filter(o => o.getClientRects().length && (o.textContent || '').trim());
-    if (opts.length) {
-        const want = norm(value);
-        const match = opts.find(o => norm(o.textContent).includes(want)) || opts[0];
-        console.log(`[Copo Recipe] autocomplete "${f.label}": typed "${value}" → ${opts.length} option(s), picking "${(match.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 40)}"`);
-        // Click the option element DIRECTLY with composed events — overlayClick's
-        // elementFromPoint can't target an element that lives inside a shadow root.
-        try { match.scrollIntoView({ block: 'center' }); } catch { /* ignore */ }
-        for (const type of ['pointerover', 'pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
-            try {
-                match.dispatchEvent(type.startsWith('pointer')
-                    ? new PointerEvent(type, { bubbles: true, composed: true, cancelable: true })
-                    : new MouseEvent(type, { bubbles: true, composed: true, cancelable: true }));
-            } catch { /* ignore */ }
+    // Keyboard commit: ArrowDown (highlight first result) → Enter (select). Full key
+    // props for handlers that read keyCode/which. Retry — the async lookup can lag.
+    const evt = (kind, k, code) => new KeyboardEvent(kind, { key: k, code: k, keyCode: code, which: code, bubbles: true, composed: true, cancelable: true });
+    for (let attempt = 0; attempt < 3; attempt++) {
+        await sleep(attempt === 0 ? 1700 : 900);   // wait for results (longer on the first pass)
+        input.dispatchEvent(evt('keydown', 'ArrowDown', 40));
+        input.dispatchEvent(evt('keyup', 'ArrowDown', 40));
+        await sleep(280);
+        input.dispatchEvent(evt('keydown', 'Enter', 13));
+        input.dispatchEvent(evt('keyup', 'Enter', 13));
+        await sleep(420);
+        const now = String(input.value ?? '').trim();
+        // Committed: selecting a place replaces the input with e.g. "Hanoi, Vietnam"
+        // — it differs from what we typed and/or gains a comma.
+        if (now && (now !== typed || now.includes(','))) {
+            console.log(`[Copo Recipe] autocomplete "${f.label}": committed via keyboard → "${now.slice(0, 40)}"`);
+            return { ok: true };
         }
-        try { match.click(); } catch { /* already dispatched */ }
-        await sleep(350);
-        return { ok: true };
     }
-    // No list rendered → keyboard commit (ArrowDown highlights, Enter picks). Best effort.
-    console.log(`[Copo Recipe] autocomplete "${f.label}": typed "${value}" → 0 options; ArrowDown+Enter fallback`);
-    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, composed: true }));
-    await sleep(150);
-    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, composed: true }));
-    await sleep(250);
-    return { ok: String(input.value ?? '').trim() !== '', reason: 'no-list-enter-fallback' };
+    console.log(`[Copo Recipe] autocomplete "${f.label}": keyboard nav did not commit (value="${String(input.value || '').slice(0, 30)}")`);
+    return { ok: false, reason: 'keyboard-no-commit' };
 }

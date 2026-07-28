@@ -1,0 +1,492 @@
+// The agent's deterministic safety layer — the ONE place an action is allowed
+// or refused.
+//
+// Everything else in the agent is allowed to be flexible: the planner may choose
+// any order, any selector, any recovery. What it may never do is perform an
+// action the user cannot undo. Those live here, in code, because the planner's
+// side of that contract ("NEVER click Submit yourself") is a sentence in a prompt
+// — probabilistic by construction, and reachable by any hostile page that talks
+// the model into ignoring it. A prompt states the policy; this file enforces it.
+//
+// Two halves on purpose:
+//   · classify* / evaluate*  — pure functions over a plain descriptor. No DOM, so
+//     the whole vocabulary is unit-testable in node (tests/policy.test.js).
+//   · describeElement / check* — the thin DOM adapter the agent actually calls.
+//
+// The choke point is dom.js `overlayClick`, which refuses an action this module
+// denies. Its context argument DEFAULTS to the strictest caller ('planner'), so
+// a future call site that forgets to declare itself gets the safe treatment
+// rather than a silent bypass.
+
+import { isThirdPartyApply } from './detect.js';
+
+// ── Vocabulary ─────────────────────────────────────────────────────────────
+// Narrow on purpose. A false negative here transmits an application the user
+// never approved; a false positive only costs the planner one action, and it is
+// told why so it can pick a different control. Where the two collide, the
+// unambiguous phrasings win: "apply" alone is NOT here, because on a job page
+// that is the gateway the agent is supposed to click.
+
+/** Sends the application. Bare "submit"/"nộp đơn" count: a control labelled that
+ *  way on a form is the real thing, and multi-step wizards say Next/Continue. */
+const SUBMIT_RE = new RegExp([
+    'submit',
+    'send (my )?application',
+    'finish (and|&) submit',
+    'nộp đơn', 'nop don',
+    'nộp hồ sơ', 'nop ho so',
+    'gửi hồ sơ', 'gui ho so',
+    'gửi đơn', 'gui don',
+    'hoàn tất ứng tuyển', 'hoan tat ung tuyen',
+].join('|'), 'i');
+
+/** Legal acknowledgement. Mirrors the pair login.js used to own privately — the
+ *  marketing exclusion is checked FIRST and wins, so "receive marketing updates
+ *  — I consent" can never be read as a required terms box. */
+export const CONSENT_RE =
+    /agree|consent|terms|privacy|i have read|acknowledge|đồng ý|dong y|điều khoản|dieu khoan/i;
+
+export const MARKETING_RE =
+    /marketing|newsletter|promotion|advertis|subscribe|updates about|job alerts|third[- ]part|nhận tin|nhan tin|khuyến mãi|khuyen mai|quảng cáo|quang cao|thông báo việc làm|thong bao viec lam/i;
+
+/**
+ * A statement ABOUT the user rather than an agreement to someone's terms: a
+ * certification ("I certify the information is accurate"), or the demographic
+ * self-identification ATS collect for EEO reporting (disability, veteran status,
+ * race, gender identity).
+ *
+ * These are never delegable. The batch-start modal delegates accepting a
+ * company's mandatory terms — it does not, and could not, delegate asserting
+ * facts about the person. Demographic answers additionally belong to the user by
+ * law in several jurisdictions, and "prefer not to say" is a real answer that
+ * only they can choose.
+ */
+/** Demographic self-identification, which ATS collect for EEO reporting. Never
+ *  delegable and never inferable: "prefer not to say" is a real answer, and only
+ *  the person can choose it. No phrasing exempts these. */
+const PERSONAL_DATA_RE =
+    /self[- ]identif|disability status|veteran status|protected veteran|race\/ethnicity|\bethnicity\b|gender identity|sexual orientation|dân tộc|dan toc|tôn giáo|ton giao/i;
+
+// Asserting a fact about oneself. The verbs are matched on their own rather than
+// as "i certify": real labels put words in between ("I agree and certify that…",
+// "I hereby declare…"), and an attestation wrapped in agreement wording must not
+// read as a delegable terms box. `\bcertify\b` does not match "certificate", so
+// document-upload copy is unaffected.
+const ATTESTATION_RE =
+    /\b(certify|certifies|declare|attest|affirm)\b|under penalty|to the best of my knowledge|i confirm that i\b|cam đoan|cam doan|cam kết|cam ket|tôi xác nhận rằng|toi xac nhan rang/i;
+
+/**
+ * Names a DOCUMENT being accepted. This is what separates "I certify I have read
+ * the Terms and Conditions" — ordinary terms acceptance, merely phrased with a
+ * certifying verb — from "I certify I have no criminal record", which is a
+ * statement about the person. Without the distinction the first one classified as
+ * a non-delegable declaration and blocked Workday's signup outright.
+ */
+const DOCUMENT_RE =
+    /\bterms\b|\bprivacy\b|\bpolic(y|ies)\b|\bconditions\b|\bagreement\b|điều khoản|dieu khoan|chính sách|chinh sach/i;
+
+/** Destroys work: removes an entry, withdraws or resets the application. The
+ *  agent has no reliable way to tell a stale ATS-parsed entry from one the user
+ *  wrote, so it never deletes either. */
+const DESTRUCTIVE_RE =
+    /\bdelete\b|\bremove\b|\bwithdraw\b|\bclear all\b|start over|reset( application)?|xoá|xóa|gỡ bỏ|go bo|rút hồ sơ|rut ho so|huỷ đơn|hủy đơn/i;
+
+/** Opens an account. The sanctioned path is login.js under the background's
+ *  per-tenant budget; a planner-initiated signup is outside that accounting. */
+const CREATE_ACCOUNT_RE =
+    /create (an )?account|sign ?up|register|đăng ký|dang ky|tạo tài khoản|tao tai khoan/i;
+
+/** Field targets that must never receive profile data, matched against selector,
+ *  name, id, label and nearby text. The server route filters the same families
+ *  (agent-plan/route.ts SENSITIVE_TARGET); the recipe path never reaches the
+ *  server at all, so the client needs its own copy rather than inheriting one. */
+const SENSITIVE_FIELD_RE =
+    /password|passwd|mật khẩu|mat khau|\botp\b|verification.?code|mã xác (minh|thực)|cvv|cvc|card.?number|số thẻ|so the|bank.?account|tài khoản ngân hàng|tai khoan ngan hang|cccd|cmnd|national.?id|\bssn\b|social.?security/i;
+
+// ── Denial codes ───────────────────────────────────────────────────────────
+// Stable identifiers so a refusal can be logged, counted and asserted on without
+// matching prose. They also travel to the planner as the reason an action failed.
+export const DENY = {
+    SUBMIT: 'submit_application',
+    FINAL_STEP: 'final_review_step',
+    APPLICATION_CONSENT: 'application_consent',
+    MARKETING_CONSENT: 'marketing_consent',
+    DESTRUCTIVE: 'destructive_action',
+    CREATE_ACCOUNT: 'unsanctioned_account_creation',
+    THIRD_PARTY: 'third_party_apply',
+    SENSITIVE_FIELD: 'sensitive_field',
+};
+
+/** Human wording per denial, for the log line and the planner's history. */
+const DENY_DETAIL = {
+    [DENY.SUBMIT]: 'chỉ người dùng được bấm nộp hồ sơ',
+    [DENY.FINAL_STEP]: 'đang ở bước review cuối — người dùng tự nộp',
+    [DENY.APPLICATION_CONSENT]: 'điều khoản của đơn ứng tuyển do người dùng tự tích',
+    [DENY.MARKETING_CONSENT]: 'không đăng ký nhận tin quảng cáo thay người dùng',
+    [DENY.DESTRUCTIVE]: 'không xoá/rút dữ liệu đã có trên form',
+    [DENY.CREATE_ACCOUNT]: 'tạo tài khoản chỉ chạy qua luồng đăng nhập có kiểm soát',
+    [DENY.THIRD_PARTY]: 'không ứng tuyển qua bên thứ ba',
+    [DENY.SENSITIVE_FIELD]: 'không điền trường nhạy cảm',
+};
+
+const allow = () => ({ allowed: true });
+const deny = (code, extra) => ({
+    allowed: false,
+    code,
+    reason: DENY_DETAIL[code] || code,
+    ...extra,
+});
+
+// ── Pure classifiers ───────────────────────────────────────────────────────
+
+/**
+ * A descriptor is everything the policy needs to judge a control, flattened out
+ * of the DOM so the rules can be tested without one.
+ *
+ * @typedef {object} ElementDescriptor
+ * @property {string} [text]        visible label of the control
+ * @property {string} [value]       for input[type=submit]/[type=button]
+ * @property {string} [type]        input type
+ * @property {string} [name]
+ * @property {string} [id]
+ * @property {string} [selector]    the selector the caller used to reach it
+ * @property {string} [automationId] data-automation-id (Workday) / data-test (SR)
+ * @property {string} [label]       associated <label> text
+ * @property {string} [nearbyText]  surrounding copy, for unlabelled controls
+ * @property {string} [href]
+ * @property {boolean} [isThirdParty] pre-computed third-party-apply verdict
+ */
+
+// Three deliberately different views of a control. Which one a rule reads is a
+// judgement about evidence, not a detail: matching too much text is how a rule
+// starts refusing legitimate fields, and matching too little is how it misses
+// the one it exists to catch.
+
+/** The control's OWN naming. `value` counts only where it IS the label (an
+ *  `<input type="submit" value="Nộp hồ sơ">`); for a text box the value is the
+ *  user's content, and reading it would let a cover letter that happens to
+ *  mention "password" veto its own field. */
+function labelText(d) {
+    const type = (d.type || '').toLowerCase();
+    const valueIsLabel = type === 'submit' || type === 'button' || type === 'reset';
+    return [d.text, valueIsLabel ? d.value : '', d.label, d.ariaLabel, d.placeholder]
+        .filter(Boolean).join(' ').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+/** Label plus the copy around it — needed only where a control is routinely
+ *  unlabelled and the meaning lives in the paragraph beside it, i.e. consent. */
+function proseText(d) {
+    return [labelText(d), (d.nearbyText || '').toLowerCase()]
+        .filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+}
+
+/** Machine identifiers. Strong evidence of what a field IS, and immune to page
+ *  copy — but they carry HTML idiom, so they are not read for every rule. */
+function identifiers(d) {
+    return [d.selector, d.name, d.id, d.automationId]
+        .filter(Boolean).join(' ').toLowerCase();
+}
+
+/**
+ * Visible wording only. Identifiers are deliberately NOT consulted: `name="submit"`
+ * and `type="submit"` are ordinary HTML for the Next button of any plain
+ * multi-step form, so matching them would refuse every step advance on ATS we
+ * have no recipe for. The exact-control case is covered by `ctx.submitSelector`,
+ * and the review page by `ctx.atFinalStep` — both are precise, and neither
+ * depends on guessing from an attribute.
+ */
+export function looksLikeSubmit(d) {
+    return SUBMIT_RE.test(labelText(d));
+}
+
+/** Own label only — a "Delete" link elsewhere in the same card must not veto an
+ *  unrelated control. */
+export function looksDestructive(d) {
+    return DESTRUCTIVE_RE.test(labelText(d));
+}
+
+/**
+ * What kind of checkbox is this?
+ *   'marketing'   — an opt-in we never tick, required or not
+ *   'terms'       — the mandatory acknowledgement gating a form
+ *   'declaration' — a statement ABOUT the user (a certification, or demographic
+ *                   self-identification). Only they can make it, delegated or not.
+ *   'other'       — an ordinary form question ("willing to relocate")
+ * Order is the priority: marketing beats a box that claims to be both, and a
+ * declaration beats "I agree" phrasing wrapped around a personal attestation.
+ */
+export function classifyConsent(d) {
+    // Prefer the control's OWN wording, and read the surrounding copy only when it
+    // has none. Consulting both unconditionally lets an unrelated paragraph in the
+    // same fieldset re-label a box that speaks for itself — on Workday's Voluntary
+    // Disclosures page the demographic questions and the terms acknowledgement
+    // share a container, so the terms box would inherit "disability status" and be
+    // refused, blocking the only route to the review step.
+    const h = labelText(d) || proseText(d);
+    if (MARKETING_RE.test(h)) return 'marketing';
+    if (PERSONAL_DATA_RE.test(h)) return 'declaration';
+    if (ATTESTATION_RE.test(h) && !DOCUMENT_RE.test(h)) return 'declaration';
+    if (CONSENT_RE.test(h)) return 'terms';
+    return 'other';
+}
+
+/**
+ * Identity signals only — type, own label, identifiers. Neighbouring copy is
+ * excluded on purpose: "Forgot password?" sits next to the EMAIL box on nearly
+ * every login wall, and reading it would make the agent refuse to type an email
+ * address.
+ */
+export function isSensitiveField(d) {
+    if ((d.type || '').toLowerCase() === 'password') return true;
+    return SENSITIVE_FIELD_RE.test(labelText(d)) || SENSITIVE_FIELD_RE.test(identifiers(d));
+}
+
+// ── Decisions ──────────────────────────────────────────────────────────────
+
+/**
+ * @typedef {object} PolicyContext
+ * @property {'planner'|'recipe'|'login'|'gateway'|'agent'} [source]
+ *   Who is asking. Defaults to 'planner' — the least-trusted caller — so a call
+ *   site that omits it is treated strictly rather than waved through.
+ * @property {boolean} [atFinalStep]  the ATS's review step is on screen
+ * @property {string}  [submitSelector] recipe's known submit control
+ * @property {'signup'|'signin'|'application'} [formKind]
+ *   Which form the control belongs to. Only 'signup' unlocks the terms
+ *   delegation, and only for source 'login'.
+ * @property {boolean} [consentDelegated] the user accepted the batch-start modal
+ */
+
+/**
+ * May we click this control?
+ *
+ * Order matters: the checks that protect an irreversible outcome run before the
+ * ones that merely keep the flow sane.
+ */
+export function evaluateClick(d, ctx = {}) {
+    const source = ctx.source || 'planner';
+
+    // 0. Intra-widget clicks — opening a dropdown, picking one of its options —
+    //    are a VALUE being chosen inside an already-approved fill, not a
+    //    page-level action. Judging them by the action vocabulary would let an
+    //    option that happens to read "Đã nộp hồ sơ" veto a required field, and
+    //    the widget cannot navigate or transmit anything on its own. Callers set
+    //    this only for controls they resolved inside a specific field's markup.
+    if (ctx.widget) return allow();
+
+    // 1. The review step. Workday's "Submit" reuses pageFooterNextButton, so on
+    //    the final page ANY advance sends the application — no vocabulary can
+    //    tell them apart and we must not try.
+    if (ctx.atFinalStep) return deny(DENY.FINAL_STEP);
+
+    // 2. The ATS's own submit control, named by the recipe. Exact and language-
+    //    independent, so it holds where text matching would not.
+    if (ctx.submitSelector && d.selector && selectorsMatch(d.selector, ctx.submitSelector)) {
+        return deny(DENY.SUBMIT);
+    }
+
+    // 3. Anything that reads as "send the application".
+    //
+    //    `openingApplication` is the one exemption, and it exists because the
+    //    vocabularies genuinely collide in Vietnamese: a job ad's button to OPEN
+    //    the form frequently says "Nộp hồ sơ" / "Nộp đơn", the same words a filled
+    //    form uses to send one. Text alone cannot separate them — position in the
+    //    flow can. Callers may set this ONLY when they have established there is
+    //    no application form on screen yet (index.js gates it on
+    //    !isApplicationFormPage(); a recipe gateway is pre-form by definition).
+    if (looksLikeSubmit(d) && !ctx.openingApplication) return deny(DENY.SUBMIT);
+
+    // 4. Destroying existing data.
+    if (looksDestructive(d)) return deny(DENY.DESTRUCTIVE);
+
+    // 5. Handing the flow to Indeed/LinkedIn — a foreign login, not this employer.
+    if (d.isThirdParty || isThirdPartyApplyDescriptor(d)) return deny(DENY.THIRD_PARTY);
+
+    // 6. Account creation outside the controlled login flow. login.js runs under
+    //    the background's per-tenant budget (1 signup + 1 login); a planner that
+    //    opens an account on its own is outside that accounting entirely.
+    if (source !== 'login' && CREATE_ACCOUNT_RE.test(labelText(d))) {
+        return deny(DENY.CREATE_ACCOUNT);
+    }
+
+    return allow();
+}
+
+/**
+ * May we tick this checkbox?
+ *
+ * The gate is DELEGATION, not the kind of form. The batch-start credentials modal
+ * says, in the user's own flow: "Bấm Tiếp tục nghĩa là bạn đồng ý để Copo chấp
+ * nhận điều khoản ứng tuyển bắt buộc của từng công ty thay bạn" — that covers the
+ * application's mandatory terms, not merely a signup's. Gating on
+ * `formKind === 'signup'` instead would have been stricter than what the user
+ * actually agreed to, and would have stalled Workday at Voluntary Disclosures,
+ * whose required acknowledgement is the only way to reach the review step.
+ *
+ * The inverse matters just as much: a batch that never showed the modal (every
+ * ATS that needs no account — SmartRecruiters among them) carries no delegation,
+ * so its consent box stays with the user. That is exactly what the SR recipe
+ * already does by leaving consent out of its field list.
+ *
+ * Whatever is ticked is recorded (login.js returns the labels as
+ * `consentAccepted`, stored with the auth attempt) — a delegation with no
+ * evidence of what was accepted is not a delegation anyone can audit.
+ */
+export function evaluateConsent(d, ctx = {}) {
+    const kind = classifyConsent(d);
+
+    // Never, under any delegation: a mailing list is not required to apply, and
+    // nobody asked us to sign them up for one.
+    if (kind === 'marketing') return deny(DENY.MARKETING_CONSENT);
+
+    // Anything that is not plainly the terms box — a personal declaration, or a
+    // box we simply cannot place — stays with the user.
+    if (kind !== 'terms') return deny(DENY.APPLICATION_CONSENT, { consentKind: kind });
+
+    if (ctx.consentDelegated === true) return allow();
+    return deny(DENY.APPLICATION_CONSENT, { consentKind: kind });
+}
+
+/**
+ * May the planner SET this checkbox from the answer it derived?
+ *
+ * Deliberately more permissive than `evaluateConsent`, because the two questions
+ * are not the same one. `evaluateConsent` asks "may we proactively tick a box on
+ * the user's behalf?" — a hunt across the form, so its answer must be narrow.
+ * This asks "may we answer THIS question?", where the field is one the planner
+ * was told to fill from profile data.
+ *
+ * Collapsing them refused every ordinary checkbox question ("Willing to
+ * relocate?", "Do you have a driver's licence?"). When such a box is required,
+ * refusing it does not make the agent safer — it makes the step unadvanceable,
+ * which is the same failure the Voluntary Disclosures case produced one layer up.
+ *
+ * What stays refused is what cannot be delegated at all: marketing, and any
+ * declaration about the person.
+ */
+export function evaluateCheckboxFill(d, ctx = {}) {
+    const kind = classifyConsent(d);
+    if (kind === 'marketing') return deny(DENY.MARKETING_CONSENT);
+    if (kind === 'declaration') return deny(DENY.APPLICATION_CONSENT, { consentKind: kind });
+    if (kind === 'terms') {
+        return ctx.consentDelegated === true
+            ? allow()
+            : deny(DENY.APPLICATION_CONSENT, { consentKind: kind });
+    }
+    return allow();   // an ordinary question — this is just form data
+}
+
+/** May we write `value` into this field? */
+export function evaluateFill(d, ctx = {}) {
+    // login.js is the only caller allowed near a password box, and only with the
+    // credential the background just handed it for this one tenant.
+    if (isSensitiveField(d) && ctx.source !== 'login') {
+        return deny(DENY.SENSITIVE_FIELD);
+    }
+    if ((d.type || '').toLowerCase() === 'checkbox') return evaluateCheckboxFill(d, ctx);
+    return allow();
+}
+
+/** Two selectors that reach the same control. Cheap normalization rather than
+ *  DOM resolution: the recipe writes `[data-automation-id="x"]` and the planner
+ *  may quote it differently. */
+function selectorsMatch(a, b) {
+    const norm = (s) => String(s || '').replace(/["']/g, '').replace(/\s+/g, '').toLowerCase();
+    return norm(a) === norm(b);
+}
+
+/** Descriptor-level third-party check, for callers that have no element. */
+function isThirdPartyApplyDescriptor(d) {
+    const t = labelText(d);
+    const href = (d.href || '').toLowerCase();
+    const PROVIDER = /indeed|linkedin|glassdoor|ziprecruiter/;
+    if (PROVIDER.test(t) && /(apply|sign\s*in|log\s*in|continue|đăng nhập|ứng tuyển|nộp đơn|nộp hồ sơ|tiếp tục)/.test(t)) return true;
+    return /indeed\.com|linkedin\.com\/(oauth|uas|checkpoint)|glassdoor\.com|ziprecruiter\.com/.test(href);
+}
+
+// ── DOM adapter ────────────────────────────────────────────────────────────
+
+/** Resolve the text an `aria-labelledby` / `aria-describedby` points at. Workday
+ *  labels its consent checkboxes this way rather than with a <label for>, so
+ *  without this the box arrives unlabelled and classifies as an ordinary
+ *  question — the delegation could never apply to the one box it exists for. */
+function ariaReferencedText(el) {
+    const ids = [
+        el.getAttribute?.('aria-labelledby') || '',
+        el.getAttribute?.('aria-describedby') || '',
+    ].join(' ').trim();
+    if (!ids) return '';
+    const parts = [];
+    for (const id of ids.split(/\s+/).slice(0, 4)) {
+        try {
+            const node = document.getElementById(id);
+            if (node?.textContent) parts.push(node.textContent);
+        } catch { /* malformed id */ }
+    }
+    return parts.join(' ');
+}
+
+/** Flatten a live element into the descriptor the rules above consume. */
+export function describeElement(el, selector) {
+    if (!el) return { selector };
+    const get = (a) => { try { return el.getAttribute?.(a) || ''; } catch { return ''; } };
+    const type = (el.type || '').toLowerCase();
+    // The accessible name IS the control's own wording — aria-labelledby is how
+    // Workday names its consent checkboxes, so it belongs with <label>, not with
+    // the surrounding copy.
+    let label = '';
+    try {
+        label = (el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`)?.textContent)
+            || el.closest?.('label')?.textContent
+            || ariaReferencedText(el)
+            || '';
+    } catch { /* selector engines dislike odd ids */ }
+
+    // Fallback only, for a box with no wording of its own, and read only by the
+    // consent classifier — never by the sensitive-field rule, where "Forgot
+    // password?" sits next to the email input on nearly every login wall.
+    let nearbyText = '';
+    if (!label && (type === 'checkbox' || type === 'radio')) {
+        try {
+            nearbyText = (el.closest?.('[data-automation-id^="formField-"], .form-group, fieldset')?.textContent
+                || '').replace(/\s+/g, ' ').trim().slice(0, 300);
+        } catch { /* best effort */ }
+    }
+
+    return {
+        text: (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 120),
+        // The value is only ever a LABEL on a button-like input; elsewhere it is
+        // the user's own content and must not be judged as if it described the field.
+        value: (type === 'submit' || type === 'button' || type === 'reset')
+            ? String(el.value || '').slice(0, 120) : '',
+        type,
+        name: el.name || '',
+        id: el.id || '',
+        selector: selector || '',
+        automationId: get('data-automation-id') || get('data-test'),
+        ariaLabel: get('aria-label'),
+        placeholder: el.placeholder || '',
+        label: label.replace(/\s+/g, ' ').trim().slice(0, 160),
+        nearbyText,
+        href: get('href'),
+        isThirdParty: (() => { try { return isThirdPartyApply(el); } catch { return false; } })(),
+    };
+}
+
+/** Convenience: describe + judge a click in one call. */
+export function checkClick(el, ctx = {}, selector) {
+    return evaluateClick(describeElement(el, selector), ctx);
+}
+
+/** Convenience: describe + judge a fill in one call. */
+export function checkFill(el, ctx = {}, selector) {
+    return evaluateFill(describeElement(el, selector), ctx);
+}
+
+/** One-line refusal log, so a denied action is visible in the page console
+ *  instead of looking like the agent silently doing nothing. */
+export function logDenial(verdict, el, ctx = {}) {
+    console.warn(
+        `[Copo Policy] ✋ ${verdict.code} (${ctx.source || 'planner'}) — ${verdict.reason}`,
+        el ? ((el.textContent || el.value || el.name || '').toString().replace(/\s+/g, ' ').trim().slice(0, 40)) : '',
+    );
+}

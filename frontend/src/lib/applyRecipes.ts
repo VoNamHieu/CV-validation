@@ -179,6 +179,18 @@ const WORKDAY: ApplyRecipe = {
             advance: '[data-automation-id="pageFooterNextButton"]',
         },
         {
+            // My Experience: "Autofill with Resume" fills Job Title / Company / School
+            // (text) but leaves the REQUIRED education Degree dropdown at "Select One" —
+            // that empty required field silently blocks Next (the agent looped until
+            // stuck). Pick the candidate's degree level (or any option) so it validates.
+            name: 'My Experience',
+            detect: '[data-automation-id="jobTitleHeading"], [data-automation-id="formField-degree"]',
+            fields: [
+                { label: 'Degree', selector: '[data-automation-id="formField-degree"] button', profileKey: 'highestDegree', default: 'Bachelor', pickAny: true, type: 'custom-select', required: true },
+            ],
+            advance: '[data-automation-id="pageFooterNextButton"]',
+        },
+        {
             // Application Questions: Yes/No conflict-of-interest dropdowns default to
             // "No"; the two required free-text questions have per-job dynamic ids, so
             // match them by question text.

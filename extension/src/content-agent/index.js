@@ -23,6 +23,8 @@ import { auditRequiredBlockers, observePageState, scrollAndCollect } from './obs
 import { findApplyButton, isApplicationFormPage, summarizeState, waitForJobPageSignal } from './detect.js';
 import { detectLoginWall, handleLoginWall } from './login.js';
 import { applyRecipeFields, atFinalStep, clickRecipeGateway, loadRecipes, recipeForUrl } from './recipe.js';
+import { checkClick, logDenial } from './policy.js';
+import { tenantRefFor } from '../ats/tenant.js';
 
 // Build marker — logs the moment content-agent.js injects on a matched page, so
 // you can confirm (in the PAGE / tab console, NOT the service-worker console) that
@@ -30,6 +32,52 @@ import { applyRecipeFields, atFinalStep, clickRecipeGateway, loadRecipes, recipe
 // apply tab, the new build isn't injected (reload the extension + refresh the tab).
 const COPO_BUILD = 'workday-audit-reload-2026-07-26';
 try { console.log(`%c[Copo] content-agent build ${COPO_BUILD} loaded → ${location.host}`, 'color:#c43b2e;font-weight:700'); } catch { /* noop */ }
+
+/**
+ * The CV this apply may upload.
+ *
+ * A driven apply (batch, or a single apply launched from the web app) uses the
+ * document attached to ITS session — and nothing else. There is deliberately no
+ * fallback here, because the obvious-looking one is wrong: the global
+ * `cvFileBase64` slot is not a generic CV. `buildCvPdfCache` writes whichever
+ * job was optimised most recently into it (the filename even carries that job's
+ * title), so falling back to it would upload another company's tailored CV —
+ * the exact bug session-scoping exists to prevent, one hop removed.
+ *
+ * A job queued without its own PDF therefore applies text-only, which is what
+ * the web app already promises the user when it counts them: "Các công việc
+ * thiếu file sẽ ứng tuyển chỉ với văn bản."
+ *
+ * The global slot is used ONLY when there is no session at all — a manual apply
+ * from the floating button, on a page the user opened themselves. There it is
+ * the sole candidate, and the most recent CV is the best available guess.
+ *
+ * @returns {{cv: object|null, driven: boolean}} `driven` marks an apply we were
+ *   sent to do (batch / web-app single). Those must carry their own tailored CV;
+ *   the caller refuses to apply without one rather than sending a weaker
+ *   application that can never be taken back.
+ */
+async function loadSessionCv() {
+    try {
+        const { applySession } = await chrome.storage.local.get('applySession');
+        const sid = applySession?.sessionId;
+        if (sid) {
+            const key = `applyCv:${sid}`;
+            const scoped = (await chrome.storage.local.get(key))[key];
+            if (scoped?.base64 && scoped?.fileName) {
+                return { cv: { base64: scoped.base64, fileName: scoped.fileName, scope: 'session' }, driven: true };
+            }
+            return { cv: null, driven: true };
+        }
+        const g = await chrome.storage.local.get(['cvFileBase64', 'cvFileName']);
+        if (g.cvFileBase64 && g.cvFileName) {
+            return { cv: { base64: g.cvFileBase64, fileName: g.cvFileName, scope: 'manual' }, driven: false };
+        }
+    } catch (e) {
+        console.warn('[Copo Apply] CV lookup failed:', e?.message);
+    }
+    return { cv: null, driven: false };
+}
 
 /**
  * Main agentic loop: Observe → Plan → Act → Verify.
@@ -49,17 +97,25 @@ async function runAgentLoop(profile) {
     let actionsTaken = 0;
     const gatewayClicks = new Map();   // recipe gateway label → click count (loop guard)
 
-    // Load CV data if available
-    const cvData = await new Promise(r => {
-        chrome.storage.local.get(['cvFileBase64', 'cvFileName'], d => {
-            if (d.cvFileBase64 && d.cvFileName) {
-                r({ base64: d.cvFileBase64, fileName: d.cvFileName });
-            } else {
-                r(null);
-            }
-        });
-    });
+    // Load the CV for THIS apply session (see loadSessionCv).
+    const { cv: cvData, driven } = await loadSessionCv();
     const hasCV = !!cvData;
+    if (cvData) console.log(`[Copo Apply] CV: ${cvData.fileName} (${cvData.scope})`);
+
+    // An apply we were SENT to do must carry the CV tailored for this job. If it
+    // does not, stop before touching the form.
+    //
+    // The alternative — apply "text-only" — was the old behaviour, and it is a
+    // worse outcome than not applying: an application is one-shot and cannot be
+    // withdrawn and re-sent with the right document, so a degraded submission
+    // spends the opportunity for good. Reporting it as blocked keeps the job
+    // actionable: the user re-renders the PDF and runs the batch again.
+    if (driven && !hasCV) {
+        console.warn('[Copo Apply] ✋ no tailored CV for this job — refusing to apply');
+        reportResult(false, 'Chưa có CV tinh chỉnh cho job này — hãy tối ưu lại rồi chạy lại.',
+            'blocked', { blockedReason: 'cv_missing' });
+        return;
+    }
     // ATS credentials are NOT read from storage any more: the background fetches
     // them from the backend just-in-time, per tenant, and hands them over only
     // when we actually hit a wall (see requestAtsAuth). Nothing here holds a
@@ -78,8 +134,31 @@ async function runAgentLoop(profile) {
         console.warn('[Copo Apply] recipe load failed (LLM-only):', e?.message);
     }
 
+    // Did the user delegate accepting each company's MANDATORY apply terms? Set
+    // by the background from the batch-start modal; absent for anything that
+    // never showed one, in which case the policy leaves consent boxes untouched.
+    const consentDelegated = await new Promise(r => {
+        chrome.storage.local.get('applySession', d => r(!!d.applySession?.consentDelegated));
+    });
+
+    // What the action policy needs to know about where we are, recomputed per
+    // call because `atFinalStep` is a live DOM question. Declaring the source is
+    // the caller's one job; omitting it means the strictest treatment.
+    const policyCtx = (source, extra = {}) => ({
+        source,
+        atFinalStep: recipe ? atFinalStep(recipe) : false,
+        submitSelector: recipe?.submitSelector,
+        consentDelegated,
+        ...extra,
+    });
+
+    // NOTE: no credential state is logged (or even in scope) here — the password
+    // is fetched from the background per tenant, at the moment of use. An earlier
+    // `hasCreds: !!applyCreds?.password` survived that refactor as a dangling
+    // reference and threw a ReferenceError before the try block, killing the loop
+    // on its very first line.
     console.log('[Copo Apply] ▶ runAgentLoop start', {
-        url: location.href, host: location.hostname, hasCV, hasCreds: !!applyCreds?.password,
+        url: location.href, host: location.hostname, hasCV,
         recipe: recipe?.ats || null, profileFields: Object.keys(profile || {}).length,
     });
 
@@ -99,7 +178,11 @@ async function runAgentLoop(profile) {
             const applyBtn = findApplyButton();
             if (applyBtn) {
                 console.log('[Copo Apply] step0: clicked Apply button:', (applyBtn.innerText || applyBtn.value || '').trim().slice(0, 40));
-                overlayClick(applyBtn);
+                // `openingApplication` is safe to assert here and ONLY here: this
+                // branch runs when isApplicationFormPage() said there is no form on
+                // screen, so a button reading "Nộp hồ sơ" opens one rather than
+                // sending one. (VN job boards use the same words for both.)
+                overlayClick(applyBtn, policyCtx('gateway', { openingApplication: true }));
                 showProgress(0, AGENT_MAX_ITERATIONS, 'Đã click nút Ứng tuyển, chờ form...');
                 await sleep(2000);
             } else {
@@ -252,7 +335,17 @@ async function runAgentLoop(profile) {
             // submit the page navigates and the redirect-resume re-injects us on
             // the real form. Guarded to a genuine login/signup page inside
             // handleLoginWall, so it no-ops on a normal application form.
-            if (!atsAuthDone && detectLoginWall(recipe?.login)) {
+            //
+            // Gated on tenantRefFor: candidate accounts only exist for vendors we
+            // actually support (Workday today). detectLoginWall is deliberately
+            // vendor-agnostic — a password box + "sign in" wording matches iCIMS,
+            // Taleo, or an inline account step at the END of a normal form. Without
+            // this gate the agent asked the background for a credential it could
+            // never resolve and closed out the whole job as 'blocked' with the
+            // self-contradicting "Trang này không cần tài khoản". Anywhere else the
+            // wall stays a state.blockers entry and the planner keeps filling the
+            // fields it CAN reach, which is the documented policy.
+            if (!atsAuthDone && tenantRefFor(location.href) && detectLoginWall(recipe?.login)) {
                 // Ask the background for this tenant's credential + which operation
                 // it's allowed to run (signup for a tenant we've never authenticated
                 // at, login for one we have). It owns the attempt budget, because a
@@ -394,7 +487,10 @@ async function runAgentLoop(profile) {
                             await sleep(250);
                         }
                         console.log(`[Copo Apply] recipe advance → ${stepNow.advance}`);
-                        overlayClick(adv);
+                        // The surrounding condition already excludes the review
+                        // step; the policy re-checks it anyway, because on Workday
+                        // this same selector IS the submit button there.
+                        overlayClick(adv, policyCtx('recipe'));
                         actionsTaken++;
                         await sleep(1500);
                         continue;
@@ -542,7 +638,7 @@ async function runAgentLoop(profile) {
                         lastValue: inst.value,
                     });
                 }
-                const filled = await executeFillInstructions(plan.instructions, cvData);
+                const filled = await executeFillInstructions(plan.instructions, cvData, policyCtx('planner'));
                 actionResult = { filled, total: plan.instructions.length };
                 if (filled > 0) actionsTaken++;
             } else if (plan.action === 'CLICK' && plan.clickTarget) {
@@ -559,6 +655,33 @@ async function runAgentLoop(profile) {
                         openDropdownOptions: document.querySelectorAll('[data-automation-id="promptOption"]').length,
                     };
                     console.log('[Copo Apply] CLICK →', info);
+                    // Judge the click BEFORE acting on it, so the refusal (and its
+                    // code) lands in history. overlayClick would refuse it anyway,
+                    // but silently — and a planner that can't see why its action
+                    // did nothing just proposes the same one again next iteration.
+                    const clickCtx = policyCtx('planner');
+                    const verdict = checkClick(target, clickCtx, plan.clickTarget);
+                    if (!verdict.allowed) {
+                        logDenial(verdict, target, clickCtx);
+                        actionResult = { blockedByPolicy: verdict.code, reason: verdict.reason, ...info };
+                        history.push({
+                            iteration: i,
+                            state: summarizeState(state),
+                            plan: { action: plan.action, reason: plan.reason },
+                            result: actionResult,
+                        });
+                        // A refused submit is the agent's job finishing, not failing:
+                        // the form is as filled as we are allowed to leave it.
+                        if (verdict.code === 'submit_application' || verdict.code === 'final_review_step') {
+                            removeProgress();
+                            showToast('✅ Đã điền xong — kiểm tra rồi tự bấm nộp để hoàn tất.', 8000);
+                            reportResult(true, `Policy stop at ${verdict.code} — awaiting user submit`, 'filled');
+                            showConfirmation(state.totalFields, state.totalFields, false);
+                            return;
+                        }
+                        await sleep(plan.waitMs || POST_ACTION_WAIT_MS);
+                        continue;
+                    }
                     // A leftover open Workday dropdown popup overlays the page footer
                     // and eats the Next/Continue click — close it before clicking.
                     if (info.openDropdownOptions > 0) {
@@ -569,7 +692,7 @@ async function runAgentLoop(profile) {
                     // Overlay-aware: Workday covers Next/Continue/Submit buttons with
                     // a "click_filter" div that owns the handler — a plain .click() on
                     // the button is swallowed, so the agent could never advance a step.
-                    overlayClick(target);
+                    overlayClick(target, clickCtx);
                     actionResult = { clicked: plan.clickTarget, ...info };
                     actionsTaken++;
                 } else {

@@ -41,6 +41,11 @@ import { atsAccounts as atsAccountsApi, type AtsAccount } from '@/lib/db';
 type AutoApplyStatus = 'idle' | 'checking' | 'sending' | 'opened' | 'error' | 'no-extension';
 type FullAutoStatus = 'idle' | 'rendering' | 'syncing' | 'launching' | 'error';
 
+/** Why a job is waiting on the user. Mirrors what the extension reports — a
+ *  value missing from BLOCKED_LABEL renders as an empty row, so the two must
+ *  stay in step. */
+type BlockedReason = 'verification' | 'credential' | 'cv_missing' | 'manual';
+
 interface BatchJobStatus {
     jobUrl: string;
     jobTitle: string;
@@ -55,13 +60,17 @@ interface BatchJobStatus {
     /** Canonical host of the account-gated tenant, when the job is on one. */
     tenantKey?: string;
     /** Why it's waiting, when status === 'blocked'. */
-    blockedReason?: 'verification' | 'credential' | 'manual';
+    blockedReason?: BlockedReason;
 }
 
 /** Blocked ≠ failed: the wording stays neutral and actionable. */
-const BLOCKED_LABEL: Record<'verification' | 'credential' | 'manual', string> = {
+const BLOCKED_LABEL: Record<BlockedReason, string> = {
     verification: 'Chờ bạn xác minh email',
     credential: 'Chờ bạn nhập mật khẩu',
+    // The agent refused to apply because this job had no tailored CV of its own.
+    // Named separately from `manual` so the row says what to DO about it — the
+    // fix is one click (re-optimise), not a trip to the company's site.
+    cv_missing: 'Chưa có file CV — hãy tối ưu lại',
     manual: 'Chờ bạn xử lý',
 };
 
@@ -696,26 +705,55 @@ export default function StepEditCv() {
         // (job A → CV A). The PDF is cached at Optimize time; if it's missing
         // (e.g. dropped after a reload) the job still applies text-only — use
         // "Fully Auto Apply All" to render missing PDFs on the fly.
-        const jobs = sortedEntries
-            .filter(e => e.optimizedCv && e.source)
-            .map(entry => ({
-                jobUrl: entry.applyUrl || entry.source!,
-                jobTitle: entry.jobTitle || 'Unknown',
-                company: entry.company || entry.label || '',
-                profile: buildProfile(entry.optimizedCv!, entry.coverLetter),
-                cvFileBase64: entry.optimizedCvPdfBase64,
-                cvFileName: entry.optimizedCvFileName,
-            }));
-
-        if (jobs.length === 0) {
+        // Every queued job must carry ITS OWN tailored CV. The PDF is cached at
+        // Optimize time; when it's missing (dropped from persistence after a
+        // reload) we render it now rather than queueing the job without one.
+        //
+        // The old path queued it anyway and warned that those jobs would "apply
+        // text-only". That is a worse outcome than not applying: an application
+        // cannot be withdrawn and re-sent with the right document, so a degraded
+        // submission spends the opportunity permanently. A job whose CV we cannot
+        // produce is therefore left OUT of the batch and named to the user.
+        const candidates = sortedEntries.filter(e => e.optimizedCv && e.source);
+        if (candidates.length === 0) {
             setAutoApplyMessage('Không có công việc nào có URL để ứng tuyển.');
             return;
         }
 
-        const withFile = jobs.filter(j => j.cvFileBase64).length;
-        if (withFile < jobs.length) {
+        const jobs: Array<{
+            jobUrl: string;
+            jobTitle: string;
+            company: string;
+            profile: ReturnType<typeof buildProfile>;
+            cvFileBase64: string;
+            cvFileName: string;
+        }> = [];
+        const missingCv: string[] = [];
+
+        for (const entry of candidates) {
+            const pdf = await ensureEntryPdf(entry);
+            if (!pdf) {
+                missingCv.push(entry.jobTitle || entry.company || entry.label || 'Job');
+                continue;
+            }
+            jobs.push({
+                jobUrl: entry.applyUrl || entry.source!,
+                jobTitle: entry.jobTitle || 'Unknown',
+                company: entry.company || entry.label || '',
+                profile: buildProfile(entry.optimizedCv!, entry.coverLetter),
+                cvFileBase64: pdf.base64,
+                cvFileName: pdf.fileName,
+            });
+        }
+
+        if (jobs.length === 0) {
+            setAutoApplyMessage('Không tạo được file CV cho công việc nào — hãy bấm tối ưu lại rồi thử lại.');
+            return;
+        }
+        if (missingCv.length) {
             setAutoApplyMessage(
-                `${withFile}/${jobs.length} công việc có sẵn CV PDF. Các công việc thiếu file sẽ ứng tuyển chỉ với văn bản, dùng "Ứng tuyển tự động hoàn toàn" để tạo đủ PDF.`,
+                `Bỏ qua ${missingCv.length} công việc chưa tạo được file CV (${missingCv.slice(0, 3).join(', ')}${missingCv.length > 3 ? '…' : ''}). `
+                + 'Hãy bấm tối ưu lại cho những vị trí này rồi chạy lại.',
             );
         }
 
@@ -731,7 +769,8 @@ export default function StepEditCv() {
             type: 'JOBFIT_AUTO_APPLY_ALL',
             jobs,
         }, '*');
-    }, [sortedEntries, buildProfile, ensureAgentConsent, ensureApplyCredentials, loginTenants, cvEmail]);
+    }, [sortedEntries, buildProfile, ensureEntryPdf, ensureAgentConsent, ensureApplyCredentials,
+        loginTenants, cvEmail]);
 
     /* ═══════════════════════════════════════════════════════════════
        FULLY AUTONOMOUS APPLY ALL — Generate PDFs + sync + launch batch
@@ -771,9 +810,10 @@ export default function StepEditCv() {
             jobTitle: string;
             company: string;
             profile: ReturnType<typeof buildProfile>;
-            cvFileBase64?: string;
-            cvFileName?: string;
+            cvFileBase64: string;
+            cvFileName: string;
         }> = [];
+        const renderFailed: string[] = [];
 
         for (let i = 0; i < candidates.length; i++) {
             const entry = candidates[i];
@@ -801,20 +841,31 @@ export default function StepEditCv() {
                     cvFileName: outFilename,
                 });
             } catch (err) {
-                // Per-job render failure: include the job without a CV file
-                // so the agent can still try to fill text fields.
+                // Per-job render failure: LEAVE THE JOB OUT. It used to be queued
+                // without a CV file "so the agent can still try to fill text
+                // fields", but that sends a weaker application that cannot be
+                // withdrawn and re-sent once the PDF works — the opportunity is
+                // spent. Better to name the job and let the user retry it.
                 console.warn('[FullAuto] PDF render failed for', entry.jobTitle, err);
-                jobs.push({
-                    jobUrl: entry.applyUrl || entry.source!,
-                    jobTitle: entry.jobTitle || 'Unknown',
-                    company: entry.company || entry.label || '',
-                    profile: buildProfile(cv, entry.coverLetter),
-                });
+                renderFailed.push(entry.jobTitle || entry.company || 'Job');
             }
             setFullAutoProgress({ done: i + 1, total: candidates.length });
         }
 
         // 2. Hand off to the extension's existing batch path with embedded CV files.
+        if (jobs.length === 0) {
+            setFullAutoStatus('idle');
+            setFullAutoError('Không tạo được file CV cho công việc nào — hãy thử lại.');
+            setTimeout(() => setFullAutoError(null), 5000);
+            return;
+        }
+        if (renderFailed.length) {
+            setFullAutoError(
+                `Bỏ qua ${renderFailed.length} công việc chưa tạo được file CV `
+                + `(${renderFailed.slice(0, 3).join(', ')}${renderFailed.length > 3 ? '…' : ''}).`,
+            );
+            setTimeout(() => setFullAutoError(null), 6000);
+        }
         setFullAutoStatus('launching');
         setBatchStarting(true);
         window.postMessage({ type: 'JOBFIT_AUTO_APPLY_ALL', jobs }, '*');

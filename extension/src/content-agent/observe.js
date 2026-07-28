@@ -352,6 +352,55 @@ export function detectErrors() {
 }
 
 /**
+ * Audit which REQUIRED fields are still empty/invalid — i.e. WHY "Next"/"Submit"
+ * won't advance. The generic scanners miss custom widgets (Workday's degree
+ * dropdown, its MM/YYYY date groups) that aren't <input>s, so a step blocked by
+ * one of those reads as "stuck" with no explanation. Returns [{label, kind}] so the
+ * agent can say what's missing and (recipe) try to fill it instead of looping.
+ */
+export function auditRequiredBlockers() {
+    const out = [];
+    const seen = new Set();
+    const push = (label, kind) => { const k = `${kind}:${label}`; if (label && !seen.has(k)) { seen.add(k); out.push({ label, kind }); } };
+    const labelOf = (el) => {
+        const wrap = el.closest?.('[data-automation-id^="formField-"]');
+        const l = (wrap?.querySelector('label, legend')?.textContent) || el.getAttribute?.('aria-label') || '';
+        return l.replace(/\*/g, ' ').replace(/\brequired\b/i, '').replace(/\s+/g, ' ').trim().slice(0, 40);
+    };
+    const isRequired = (el) => {
+        const wrap = el.closest?.('[data-automation-id^="formField-"]');
+        return el.getAttribute?.('aria-required') === 'true' || el.required
+            || !!wrap?.querySelector('abbr') || /required/i.test(el.getAttribute?.('aria-label') || '');
+    };
+    // 1) text / tel / email / textarea inputs
+    for (const inp of document.querySelectorAll('input[type="text"], input[type="tel"], input[type="email"], input:not([type]), textarea')) {
+        if (inp.offsetParent === null) continue;
+        if (isRequired(inp) && !String(inp.value || '').trim()) push(labelOf(inp), 'text');
+    }
+    // 2) custom-select buttons (Workday: button[aria-haspopup=listbox] showing "Select One")
+    for (const btn of document.querySelectorAll('button[aria-haspopup="listbox"], [data-automation-id^="formField-"] button[aria-haspopup]')) {
+        if (btn.offsetParent === null) continue;
+        const unset = !String(btn.getAttribute('value') || '').trim() && /select one|choose|^\s*$/i.test((btn.textContent || '').trim());
+        if (isRequired(btn) && unset) push(labelOf(btn), 'dropdown');
+    }
+    // 3) date groups (Workday dateInputWrapper) — empty when no digits are present
+    for (const dg of document.querySelectorAll('[data-automation-id="dateInputWrapper"]')) {
+        if (dg.offsetParent === null) continue;
+        const wrap = dg.closest('[data-automation-id^="formField-"]');
+        if (!wrap?.querySelector('abbr')) continue;   // required only
+        const help = wrap.querySelector('[id^="helpText"]')?.textContent || '';
+        if (!/\d/.test(help) && !/\d/.test(dg.textContent || '')) push(labelOf(dg), 'date');
+    }
+    // 4) visible validation errors already on screen
+    for (const e of document.querySelectorAll('[data-automation-id="errorMessage"], [data-automation-id="errorSummary"], [role="alert"]')) {
+        if (e.offsetParent === null) continue;
+        const t = (e.textContent || '').replace(/\s+/g, ' ').trim();
+        if (t) push(t.slice(0, 60), 'error');
+    }
+    return out;
+}
+
+/**
  * Detect step indicators for multi-step forms.
  */
 export function detectStepIndicator() {

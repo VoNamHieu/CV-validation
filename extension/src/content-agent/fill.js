@@ -1,5 +1,6 @@
 // AUTO-SPLIT from content-agent.js (Phase 2). Part of the Copo apply agent.
-import { setFileOnInput, setNativeValue, simulateTyping, sleep } from './dom.js';
+import { overlayClick, setFileOnInput, setNativeValue, simulateTyping, sleep } from './dom.js';
+import { checkFill, logDenial } from './policy.js';
 
 /**
  * Handle React Select: click to open, type to search, select matching option.
@@ -215,7 +216,7 @@ export async function handleCheckbox(el, value) {
 /**
  * Execute a single fill instruction, choosing the right strategy based on component type.
  */
-export async function executeSingleInstruction(inst, cvData) {
+export async function executeSingleInstruction(inst, cvData, ctx = {}) {
     const el = document.querySelector(inst.selector);
     if (!el) {
         console.warn(`[Copo Agent] Selector not found: ${inst.selector}`);
@@ -226,13 +227,14 @@ export async function executeSingleInstruction(inst, cvData) {
     const value = inst.value;
     const componentType = inst.componentType || 'native';
 
-    // Never fill credential inputs — profile data must not end up in a
-    // password box, and page text can't talk the planner into it (the server
-    // also filters these, this is the last line of defense).
-    if (el.type === 'password') {
-        console.warn(`[Copo Agent] Refusing to fill password field: ${inst.selector}`);
-        return false;
-    }
+    // Every planner-authored write goes through the policy first: credential and
+    // OTP/payment/ID boxes, and any checkbox that would accept something on the
+    // user's behalf. The server route filters the same families, but the planner
+    // is not the only thing that can be wrong — a mis-resolved selector lands
+    // here too, and this is the last point before the page is touched.
+    const fillCtx = { ...ctx, source: ctx.source || 'planner' };
+    const verdict = checkFill(el, fillCtx, inst.selector);
+    if (!verdict.allowed) { logDenial(verdict, el, fillCtx); return false; }
 
     try {
         // File upload
@@ -244,10 +246,13 @@ export async function executeSingleInstruction(inst, cvData) {
             return false;
         }
 
-        // Click (for buttons, navigation)
+        // Click (for buttons, navigation). Routed through overlayClick rather than
+        // a bare el.click() for two reasons: it is the policy choke point (a raw
+        // click here was a second, unguarded way for the planner to reach a submit
+        // button), and it handles the click_filter overlays that swallow plain
+        // clicks on Workday.
         if (action === 'click') {
-            el.click();
-            return true;
+            return overlayClick(el, fillCtx);
         }
 
         // Radio group
@@ -333,10 +338,10 @@ export async function executeSingleInstruction(inst, cvData) {
 /**
  * Execute a batch of fill instructions.
  */
-export async function executeFillInstructions(instructions, cvData) {
+export async function executeFillInstructions(instructions, cvData, ctx = {}) {
     let filled = 0;
     for (const inst of instructions) {
-        const success = await executeSingleInstruction(inst, cvData);
+        const success = await executeSingleInstruction(inst, cvData, ctx);
         if (success) filled++;
         await sleep(150);
     }

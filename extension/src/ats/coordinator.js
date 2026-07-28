@@ -37,6 +37,27 @@ export function endBatch() {
     batchId = null;
 }
 
+/**
+ * Serialize the runtime so it can outlive the service worker.
+ *
+ * MV3 recycles an idle worker, and a batch job legitimately takes minutes — so
+ * "the worker died mid-batch" is the normal case, not an edge one. Without this
+ * the attempt budget and every tenant verdict reset to zero on wake, and the
+ * runner cheerfully re-probed a tenant that was already waiting on the user.
+ */
+export function snapshot() {
+    return { batchId, tenantStates, attempts };
+}
+
+/** Adopt a snapshot taken before the worker was recycled. */
+export function restore(snap) {
+    if (!snap) return false;
+    batchId = snap.batchId ?? null;
+    tenantStates = snap.tenantStates || {};
+    attempts = snap.attempts || {};
+    return !!batchId;
+}
+
 export function stateFor(tenantKey) {
     return tenantStates[tenantKey]?.accountState || 'unknown';
 }
@@ -63,8 +84,18 @@ export function gateJob(tenantRef) {
     }
     if (state === 'temporarily_locked') {
         // Honour the backoff deadline; once it passes we may probe again.
-        const until = account?.nextRetryAt ? Date.parse(account.nextRetryAt) : 0;
-        if (!until || Date.now() < until) {
+        //
+        // A MISSING deadline must NOT read as "never". The DOM classifier reports
+        // a lockout with no retry-after (Workday's banner carries none), so the row
+        // lands with next_retry_at NULL — and treating that as an infinite block
+        // stranded the tenant for good: skipped in every later batch, while
+        // `temporarily_locked` is deliberately excluded from the "Cần bạn xử lý"
+        // list (it is supposed to clear itself) and the accounts panel offers no
+        // action. Nothing in the product could get it back. With no deadline we
+        // let the per-batch attempt budget do the bounding instead, which is what
+        // "temporarily" is supposed to mean.
+        const until = account?.nextRetryAt ? Date.parse(account.nextRetryAt) : NaN;
+        if (Number.isFinite(until) && Date.now() < until) {
             return { skip: true, reason: 'manual', state };
         }
     }

@@ -262,6 +262,51 @@ describe('coordinator', () => {
         assert.equal(coord.gateJob(AIA).skip, false, 'backoff expired → probe again');
     });
 
+    test('temporarily_locked WITHOUT a deadline is not a life sentence', () => {
+        // The DOM classifier reports a lockout with no retry-after (Workday's
+        // banner carries none), so this row shape is the common one, not an edge
+        // case. Treating a missing deadline as "never" stranded the tenant for
+        // good: skipped in every later batch, and `temporarily_locked` is
+        // deliberately absent from the "Cần bạn xử lý" list, so no screen in the
+        // product could clear it. The attempt budget is what bounds the retry.
+        coord.beginBatch('b1', {
+            [AIA.tenantKey]: { accountState: 'temporarily_locked', nextRetryAt: null },
+        });
+        assert.equal(coord.gateJob(AIA).skip, false);
+
+        coord.beginBatch('b2', {
+            [AIA.tenantKey]: { accountState: 'temporarily_locked', nextRetryAt: 'not a date' },
+        });
+        assert.equal(coord.gateJob(AIA).skip, false, 'an unparseable deadline is no deadline');
+    });
+
+    test('snapshot/restore survives a recycled service worker', () => {
+        // MV3 recycles an idle worker and a job legitimately takes minutes, so
+        // this is the NORMAL path through a batch. Losing the budget here means
+        // re-probing a tenant that is already waiting on the user.
+        coord.beginBatch('b1', {
+            [AIA.tenantKey]: { accountState: 'verification_required' },
+        });
+        coord.recordAttempt(AIA.tenantKey, 'signup');
+        const snap = JSON.parse(JSON.stringify(coord.snapshot()));  // through storage
+
+        coord.endBatch();                     // the worker died
+        assert.equal(coord.stateFor(AIA.tenantKey), 'unknown');
+
+        assert.equal(coord.restore(snap), true);
+        assert.equal(coord.currentBatchId(), 'b1', 'batchId must survive, or the '
+            + 'idempotency key for auth-results collides across batches');
+        assert.equal(coord.stateFor(AIA.tenantKey), 'verification_required');
+        assert.equal(coord.gateJob(AIA).skip, true, 'the blocked tenant stays blocked');
+        assert.equal(coord.nextOperation(AIA.tenantKey), 'login',
+            'the spent signup must not come back');
+    });
+
+    test('restore(null) is a no-op rather than a crash', () => {
+        coord.beginBatch('b1', {});
+        assert.equal(coord.restore(null), false);
+    });
+
     test('probe-once: the budget is spent after signup + login, then jobs skip', () => {
         // Ten jobs at one tenant must cost at most two auth operations — this is
         // the actual lockout defence, far more than any password choice.

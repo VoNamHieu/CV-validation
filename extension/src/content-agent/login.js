@@ -1,6 +1,7 @@
 // AUTO-SPLIT from content-agent.js (Phase 2). Part of the Copo apply agent.
 import { overlayClick, setNativeValue, sleep } from './dom.js';
 import { isThirdPartyApply } from './detect.js';
+import { classifyConsent, evaluateConsent } from './policy.js';
 import { authResult, classifyDomError, detectChallenge } from '../ats/classifier.js';
 
 // Fill a login field the React-correct way: setNativeValue drives the value
@@ -42,18 +43,10 @@ function _findEmailField(recipeSel) {
     return null;
 }
 
-// A consent box the user has ALREADY authorised us to tick: the mandatory terms
-// / privacy acknowledgement that gates account creation. The user delegates this
-// once, explicitly, in the batch-start credentials modal.
-const _REQUIRED_CONSENT_RE =
-    /agree|consent|terms|privacy|i have read|acknowledge|đồng ý|điều khoản/;
-
-// …but NEVER these. "Marketing consent" / "I'd like to receive updates" match the
-// word `consent` too, and opting a user into a company's mailing list is not
-// something they asked for — it's also not required to submit an application.
-// This exclusion is checked FIRST and wins.
-const _MARKETING_RE =
-    /marketing|newsletter|promotion|advertis|subscribe|updates about|job alerts|third[- ]part|nhận tin|khuyến mãi|quảng cáo|thông báo việc làm/;
+// The consent vocabulary used to live here as a private pair of regexes. It now
+// belongs to policy.js: the same distinction (delegated terms vs marketing vs an
+// application's own consent) has to hold for the planner and the recipe too, and
+// two copies of a safety rule is one copy too many.
 
 function _labelTextFor(box) {
     return (
@@ -73,12 +66,14 @@ function _labelTextFor(box) {
  */
 function _tickConsent() {
     const accepted = [];
+    // Ticking here is delegated by construction: we only reached a login wall
+    // holding a credential, and that credential exists only because the user
+    // completed the batch-start modal that grants exactly this.
+    const ctx = { source: 'login', formKind: 'signup', consentDelegated: true };
     for (const b of [...document.querySelectorAll('input[type="checkbox"]')].filter(_vis)) {
         if (b.checked) continue;
         const raw = _labelTextFor(b);
-        const lbl = raw.toLowerCase();
-        if (_MARKETING_RE.test(lbl)) continue;              // never opt in for the user
-        if (!_REQUIRED_CONSENT_RE.test(lbl)) continue;
+        if (!evaluateConsent({ text: raw, label: raw, type: 'checkbox' }, ctx).allowed) continue;
         b.click();
         if (!b.checked) { b.checked = true; b.dispatchEvent(new Event('change', { bubbles: true })); }
         // Trimmed + capped: evidence of WHAT was accepted, not a DOM dump.
@@ -97,8 +92,13 @@ function _hasUnhandledRequiredConsent() {
         .filter(_vis)
         .some((b) => {
             if (b.checked) return false;
-            const lbl = _labelTextFor(b).toLowerCase();
-            return !_REQUIRED_CONSENT_RE.test(lbl) && !_MARKETING_RE.test(lbl);
+            const raw = _labelTextFor(b);
+            // Anything that is neither the delegated terms box nor a marketing
+            // opt-in blocks the signup: a personal declaration ('declaration') and
+            // a box we cannot place ('other') both need the user, so the test is
+            // "not one of the two we know how to handle" rather than a single kind.
+            const kind = classifyConsent({ text: raw, label: raw });
+            return kind !== 'terms' && kind !== 'marketing';
         });
 }
 
@@ -232,7 +232,10 @@ export async function handleLoginWall(creds, login, operation = 'login') {
         // overlayClick clicks the TOPMOST element at the button's centre — Workday
         // overlays the submit with a "click_filter" div that owns the handler, so
         // clicking the <button> underneath is ignored. Pure JS; no debugger needed.
-        overlayClick(btn);
+        // Declared as the login flow so the policy's account-creation rule lets
+        // this through: it is the sanctioned path, running under the background's
+        // per-tenant attempt budget.
+        overlayClick(btn, { source: 'login', formKind: isCreate ? 'signup' : 'signin' });
         console.log(`[Copo Agent] login wall (${isCreate ? 'create-account' : 'sign-in'}): filled + submitted `
             + `[${btn.getAttribute?.('data-automation-id') || 'button'}]`);
     } else {

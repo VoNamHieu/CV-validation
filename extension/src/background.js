@@ -5,6 +5,7 @@
 
 import { mvpApply, readForm, reconcileSubmission } from './workday-api.js';
 import { tenantRefFor, sortJobsByTenant } from './ats/tenant.js';
+import { BLOCKING_STATES } from './ats/states.js';
 import * as atsBackend from './ats/backend.js';
 import * as atsCoord from './ats/coordinator.js';
 
@@ -32,6 +33,9 @@ let currentTabId = null;
 let isProcessing = false;
 let jobSafetyTimer = null;  // per-job watchdog handle, re-armed by agent heartbeats
 let jobStartedAt = 0;       // when the current job's tab was opened
+// Whether THIS batch's user has delegated accepting mandatory apply terms (i.e.
+// completed the batch-start credentials modal). Read by every job's session.
+let batchConsentDelegated = false;
 const TAB_DELAY_MS = 3000; // Delay between opening tabs
 
 // Watchdog window. One agent iteration can legitimately take a minute+ (LLM
@@ -43,16 +47,59 @@ const JOB_SAFETY_WINDOW_MS = 120000;
 // looping page can't hold the queue hostage.
 const JOB_HARD_CAP_MS = 15 * 60 * 1000;
 
+// Last sign of life from the driven page. Persisted (not just held in memory)
+// because it is the only evidence the watchdog has after a worker restart.
+let lastHeartbeatAt = 0;
+
+/** User-facing wording per block reason — mirrors the content agent's copy. */
+const ATS_BLOCK_DETAIL = {
+    verification: 'Chờ bạn xác minh email của công ty này',
+    credential: 'Cần thông tin đăng nhập riêng cho công ty này',
+    manual: 'Cần bạn xử lý trực tiếp trên trang này',
+};
+
+// Which credential we handed out per tenant this batch, so the auth result can
+// pin it — that pin is what keeps the tenant working after a password rotation.
+// Declared up here with the rest of the durable state: `adoptPersistedState`
+// rehydrates it on worker wake, so it must not sit below that function's use.
+const pendingAtsCredential = {};
+
 // ─── Restore in-flight state on service-worker wake (MV3 kills idle SWs) ───
-chrome.storage.local.get(['applyQueue', 'isProcessing', 'currentJobIndex', 'currentTabId', 'jobStartedAt'], (data) => {
-    if (data.isProcessing && Array.isArray(data.applyQueue) && data.applyQueue.length > 0) {
-        applyQueue = data.applyQueue;
-        isProcessing = data.isProcessing;
-        currentJobIndex = typeof data.currentJobIndex === 'number' ? data.currentJobIndex : -1;
-        currentTabId = data.currentTabId ?? null;
-        jobStartedAt = typeof data.jobStartedAt === 'number' ? data.jobStartedAt : Date.now();
+const RESTORE_KEYS = [
+    'applyQueue', 'isProcessing', 'currentJobIndex', 'currentTabId', 'jobStartedAt',
+    'lastHeartbeatAt', 'applySession', 'atsRuntime',
+];
+
+/** Pull persisted batch state back into memory. Safe to call repeatedly: it only
+ *  adopts state when a batch is genuinely in flight. */
+function adoptPersistedState(data) {
+    if (!data?.isProcessing || !Array.isArray(data.applyQueue) || data.applyQueue.length === 0) return false;
+    applyQueue = data.applyQueue;
+    isProcessing = data.isProcessing;
+    currentJobIndex = typeof data.currentJobIndex === 'number' ? data.currentJobIndex : -1;
+    currentTabId = data.currentTabId ?? null;
+    jobStartedAt = typeof data.jobStartedAt === 'number' ? data.jobStartedAt : Date.now();
+    lastHeartbeatAt = typeof data.lastHeartbeatAt === 'number' ? data.lastHeartbeatAt : 0;
+    batchConsentDelegated = !!data.applySession?.consentDelegated;
+    applySessionId = data.applySession?.sessionId ?? null;
+    applyTabId = data.applySession?.tabId ?? applyTabId;
+    // Per-tenant verdicts + the attempt budget. Losing these was not a cosmetic
+    // regression: a tenant already waiting on the user read as `unknown` again,
+    // so the runner re-probed it and spent another signup/login against an
+    // account that may be counting failures. See ATS_AUTH_REQUEST, which now also
+    // refuses on the server's own verdict as a second line of defence.
+    if (data.atsRuntime?.coord) atsCoord.restore(data.atsRuntime.coord);
+    if (data.atsRuntime?.pendingCredential) {
+        Object.assign(pendingAtsCredential, data.atsRuntime.pendingCredential);
+    }
+    return true;
+}
+
+chrome.storage.local.get(RESTORE_KEYS, (data) => {
+    if (adoptPersistedState(data)) {
         console.log('[Copo] SW woke — restored batch state:', {
             queue: applyQueue.length, currentJobIndex, currentTabId,
+            tenants: Object.keys(data.atsRuntime?.coord?.tenantStates || {}).length,
         });
         // The timer died with the old SW. Re-arm it so a tab that crashed
         // while we slept can't leave the queue stuck forever.
@@ -63,24 +110,71 @@ chrome.storage.local.get(['applyQueue', 'isProcessing', 'currentJobIndex', 'curr
 });
 
 function persistState() {
-    chrome.storage.local.set({ applyQueue, isProcessing, currentJobIndex, currentTabId, jobStartedAt });
+    chrome.storage.local.set({
+        applyQueue, isProcessing, currentJobIndex, currentTabId, jobStartedAt, lastHeartbeatAt,
+    });
+}
+
+/** Persist the ATS coordinator's runtime so a recycled worker doesn't hand a
+ *  blocked tenant a fresh attempt budget. */
+function persistAtsRuntime() {
+    chrome.storage.local.set({
+        atsRuntime: { coord: atsCoord.snapshot(), pendingCredential: pendingAtsCredential },
+    });
 }
 
 // ─── Per-job watchdog ───
+// Two layers, because neither is sufficient alone:
+//   · setTimeout — precise, but dies with the service worker.
+//   · chrome.alarms — survives the worker and wakes it, but is coarse.
+// The gap the alarm closes is real and reachable: if the content script dies
+// before its FIRST heartbeat (an import error, a PDF/404 shell, a hostile CSP),
+// nothing ever messages the worker again, the worker goes idle, its setTimeout
+// dies with it, and the batch sits on "đang xử lý" forever with no way out.
+const JOB_ALARM = 'copo-job-watchdog';
+
 function armJobSafetyTimer(timedJobIndex) {
     if (jobSafetyTimer) clearTimeout(jobSafetyTimer);
-    jobSafetyTimer = setTimeout(() => {
-        if (isProcessing && timedJobIndex === currentJobIndex &&
-            applyQueue[timedJobIndex]?.status === 'processing') {
-            console.warn(`[Copo] Batch Apply: timeout for job ${timedJobIndex + 1}, skipping`);
-            applyQueue[timedJobIndex].status = 'error';
-            applyQueue[timedJobIndex].result = { success: false, detail: 'Timeout — page did not respond' };
-            persistState();
-            broadcastProgress();
-            processNextJob();
-        }
-    }, JOB_SAFETY_WINDOW_MS);
+    jobSafetyTimer = setTimeout(() => failStalledJob(timedJobIndex), JOB_SAFETY_WINDOW_MS);
+    // Slightly longer than the in-memory timer so the precise one wins when the
+    // worker is alive, and the alarm is only ever the fallback.
+    chrome.alarms.create(JOB_ALARM, { delayInMinutes: (JOB_SAFETY_WINDOW_MS * 1.25) / 60000 });
 }
+
+function clearJobSafetyTimer() {
+    if (jobSafetyTimer) { clearTimeout(jobSafetyTimer); jobSafetyTimer = null; }
+    chrome.alarms.clear(JOB_ALARM);
+}
+
+/** Give up on the job at `idx` and move the queue along. */
+function failStalledJob(idx, detail = 'Timeout — page did not respond') {
+    if (!isProcessing || idx !== currentJobIndex) return;
+    if (applyQueue[idx]?.status !== 'processing') return;
+    console.warn(`[Copo] Batch Apply: timeout for job ${idx + 1}, skipping`);
+    applyQueue[idx].status = 'error';
+    applyQueue[idx].result = { success: false, detail };
+    persistState();
+    broadcastProgress();
+    processNextJob();
+}
+
+// Alarm path: the worker may have just been woken by this very alarm, so read
+// the persisted state rather than trusting whatever is (not) in memory.
+chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name !== JOB_ALARM) return;
+    chrome.storage.local.get(RESTORE_KEYS, (data) => {
+        if (!data.isProcessing) { chrome.alarms.clear(JOB_ALARM); return; }
+        adoptPersistedState(data);
+        const idx = currentJobIndex;
+        if (idx < 0 || applyQueue[idx]?.status !== 'processing') return;
+        const alive = Math.max(lastHeartbeatAt || 0, jobStartedAt || 0);
+        if (Date.now() - alive < JOB_SAFETY_WINDOW_MS) {
+            armJobSafetyTimer(idx);   // still working — re-arm and keep watching
+            return;
+        }
+        failStalledJob(idx, 'Timeout — trang không phản hồi');
+    });
+});
 
 // ─── Optional host-permission gating ───────────────────────────────────────
 // The manifest ships a NARROW host_permissions allowlist (known job boards +
@@ -168,18 +262,102 @@ async function extSpend(action, units = 1) {
 const APPLY_MAX_HOPS = 6;   // initial job page + up to ~5 redirects before we bail
 let applyTabId = null;
 let applyHops = 0;
+let applySessionId = null;
 
-function startApplySession(tabId, jobUrl) {
-    applyTabId = tabId;
-    applyHops = 0;
+// Per-job documents are SESSION-SCOPED, not global. The tailored CV belongs to
+// one job at one company: writing it to a shared `cvFileBase64` meant the next
+// job in the batch — one that carries no CV of its own — silently inherited the
+// previous company's tailored document and uploaded it. That is the worst class
+// of bug this agent can have, because it succeeds: the wrong PDF reaches a real
+// employer and nothing reports a failure.
+//
+// So `applyCv:<sessionId>` holds a job's own CV and dies with the session.
+//
+// Note what the global `cvFileBase64` actually is, because the name suggests
+// otherwise: it is NOT a generic CV. The web app's buildCvPdfCache pushes
+// whichever job was optimised most recently into it (that job's title is even in
+// the filename), so it is only meaningful for an apply that has no session of its
+// own — the floating button on a page the user opened. A driven apply must never
+// fall back to it; doing so re-creates the leak above one hop removed. See
+// loadSessionCv in the content agent.
+const SESSION_CV_PREFIX = 'applyCv:';
+
+function newSessionId() {
+    return 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+function sessionCvKey(sessionId) { return SESSION_CV_PREFIX + sessionId; }
+
+/**
+ * Build the storage fragment that OPENS a session. Returned rather than written
+ * so the caller can persist it in the SAME set() as the rest of the job's state,
+ * before the tab exists — the content script reads this during its first paint,
+ * so a write that races the tab creation reads as "no CV".
+ */
+function prepareApplySession(jobUrl, cv, opts = {}) {
+    const sessionId = newSessionId();
     let jobHost = '';
     try { jobHost = new URL(jobUrl).hostname; } catch (e) { }
-    chrome.storage.local.set({ applySession: { tabId, jobHost, startedAt: Date.now() } });
+    const fragment = {
+        applySession: {
+            sessionId, tabId: null, jobHost, startedAt: Date.now(),
+            // Did the user grant the agent permission to accept a company's
+            // MANDATORY apply terms on their behalf? True only when the
+            // batch-start credentials modal has been completed; the policy layer
+            // refuses every consent tick without it.
+            consentDelegated: !!opts.consentDelegated,
+        },
+    };
+    if (cv?.base64 && cv?.fileName) {
+        fragment[sessionCvKey(sessionId)] = { base64: cv.base64, fileName: cv.fileName };
+    }
+    return { sessionId, fragment };
 }
+
+/** Bind the freshly-created tab to the session prepared above, and retire the
+ *  previous job's document. Removing the predecessor by key is O(1); enumerating
+ *  storage to find it would mean deserializing every CV blob in it, once per job. */
+function adoptApplySession(sessionId, tabId) {
+    const previous = applySessionId;
+    applySessionId = sessionId;
+    applyTabId = tabId;
+    applyHops = 0;
+    if (previous && previous !== sessionId) {
+        chrome.storage.local.remove(sessionCvKey(previous));
+    }
+    chrome.storage.local.get('applySession', (d) => {
+        if (d.applySession?.sessionId === sessionId) {
+            chrome.storage.local.set({ applySession: { ...d.applySession, tabId } });
+        }
+    });
+}
+
 function endApplySession() {
+    const stale = applySessionId;
     applyTabId = null;
     applyHops = 0;
-    chrome.storage.local.remove(['applySession']);
+    applySessionId = null;
+    const keys = ['applySession'];
+    if (stale) keys.push(sessionCvKey(stale));
+    chrome.storage.local.remove(keys, () => sweepSessionCvs());
+}
+
+/**
+ * Drop every session CV blob left behind by a crash or a recycled worker.
+ *
+ * Only runs at a BATCH boundary, not per job: chrome.storage exposes no
+ * keys-only read, so enumerating means deserializing every value in storage —
+ * including the multi-megabyte base64 PDFs this is trying to clean up. The
+ * per-job case is handled by `adoptApplySession`, which knows the previous key
+ * outright.
+ */
+function sweepSessionCvs() {
+    chrome.storage.local.get(null, (all) => {
+        const dead = Object.keys(all).filter((k) => k.startsWith(SESSION_CV_PREFIX));
+        if (dead.length) {
+            chrome.storage.local.remove(dead);
+            console.log(`[Copo] session CV sweep: removed ${dead.length} blob(s)`);
+        }
+    });
 }
 
 // Ensure the agent is present on a (possibly redirected) apply page. Skip KNOWN
@@ -270,18 +448,21 @@ function handleAutoApplyStart(message, sendResponse) {
         sendResponse({ success: false, error: 'Batch apply đang chạy — hãy chờ xong hoặc hủy batch trước.' });
         return true;
     }
+    // Per-job CV file from the web app (rendered at Optimize time) so the agent
+    // can satisfy required file-upload fields on single applies too. It rides in
+    // the SESSION, not the global CV slot: this document was tailored for this
+    // one job and must not outlive it.
+    const jobCv = message.cvFileBase64 && message.cvFileName
+        ? { base64: message.cvFileBase64, fileName: message.cvFileName }
+        : null;
+    const { sessionId, fragment } = prepareApplySession(jobUrl, jobCv);
     const storage = {
         jobfitProfile: profile,
         pendingAutoApply: true,
         autoApplyJobUrl: jobUrl,
         batchMode: false,   // don't inherit a stale batchMode from a prior batch
+        ...fragment,
     };
-    // Per-job CV file from the web app (rendered at Optimize time) so the
-    // agent can satisfy required file-upload fields on single applies too.
-    if (message.cvFileBase64 && message.cvFileName) {
-        storage.cvFileBase64 = message.cvFileBase64;
-        storage.cvFileName = message.cvFileName;
-    }
     (async () => {
         const access = await ensureHostAccess(jobUrl);
         if (!access.ok) {
@@ -300,7 +481,7 @@ function handleAutoApplyStart(message, sendResponse) {
         }
         chrome.storage.local.set(storage, () => {
             chrome.tabs.create({ url: jobUrl, active: true }, (tab) => {
-                startApplySession(tab.id, jobUrl);  // follow redirects/new-tabs; onCompleted injects unknown hosts
+                adoptApplySession(sessionId, tab.id);  // follow redirects/new-tabs; onCompleted injects unknown hosts
                 console.log('[Copo] Auto Apply: opened tab', tab.id, 'for', jobUrl);
                 sendResponse({ success: true, tabId: tab.id });
             });
@@ -780,6 +961,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             // 'unknown' and probes normally.
             const resolved = await atsBackend.resolveTenants(jobs);
             atsCoord.beginBatch(`batch-${Date.now()}`, resolved.states);
+            persistAtsRuntime();
+            // Consent delegation comes from the batch-start modal, and that modal
+            // only appears when the batch actually contains account-gated jobs.
+            //
+            // `hasDefaultCredential` alone is NOT that signal: resolveTenants
+            // returns it as `true` when there is nothing to resolve, meaning
+            // "nothing to check" rather than "the user agreed to anything". Using
+            // it bare granted delegation to a batch of jobs that never showed a
+            // modal — e.g. SmartRecruiters, whose consent box is deliberately left
+            // for the user to tick.
+            const hasAccountGatedJob = jobs.some((j) => !!tenantRefFor(j.jobUrl));
+            batchConsentDelegated = hasAccountGatedJob && !!resolved.hasDefaultCredential;
 
             // Group jobs by tenant so one company's jobs run back to back — the
             // first probes, the rest inherit the verdict.
@@ -818,6 +1011,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             }
 
             const cred = await atsBackend.fetchCredential(ref);
+            // The SERVER's verdict outranks anything we remember. `atsCoord` lives
+            // in worker memory, and MV3 recycles the worker mid-batch as a matter
+            // of course — so "this tenant is waiting on the user" can be forgotten
+            // while remaining durably true. The credential response carries the
+            // account's current state precisely so this check is possible; without
+            // it a recycled worker hands out a fresh budget and re-probes an
+            // account that may be counting failed attempts against us.
+            if (cred.ok && BLOCKING_STATES.has(cred.accountState)) {
+                atsCoord.setState(ref.tenantKey, { accountState: cred.accountState });
+                persistAtsRuntime();
+                const reason = atsCoord.blockedReason(cred.accountState);
+                console.log(`[Copo ATS] ${ref.tenantKey} blocked server-side (${cred.accountState}) — not probing`);
+                sendResponse({ ok: false, reason, detail: ATS_BLOCK_DETAIL[reason] });
+                return;
+            }
             if (!cred.ok) {
                 // Distinguish "your session expired" from "this tenant is blocked":
                 // the first is fixable by re-opening the web app, the second isn't.
@@ -838,8 +1046,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 operation,
                 credentials: { email: cred.email, password: cred.password },
             });
-            // Remember which credential we used, so the result can pin it.
+            // Remember which credential we used, so the result can pin it. Both
+            // this and the spent attempt are persisted: a worker recycled between
+            // handing out the credential and hearing the verdict must not forget
+            // either. (Only the credential ID is stored — never the password.)
             pendingAtsCredential[ref.tenantKey] = cred.credentialId;
+            persistAtsRuntime();
         })();
         return true; // async
     }
@@ -859,6 +1071,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 automationVersion: chrome.runtime.getManifest().version,
             });
             if (report.ok && report.account) atsCoord.setState(ref.tenantKey, report.account);
+            persistAtsRuntime();
 
             const state = report.account?.accountState || 'unknown';
             sendResponse({ ok: true, state, reason: atsCoord.blockedReason(state) });
@@ -873,8 +1086,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         applyQueue = [];
         currentJobIndex = -1;
         currentTabId = null;
+        clearJobSafetyTimer();
         atsCoord.endBatch();
-        chrome.storage.local.remove(['applyQueue', 'isProcessing', 'currentJobIndex', 'currentTabId', 'jobStartedAt', 'pendingAutoApply', 'autoApplyJobUrl', 'batchMode']);
+        chrome.storage.local.remove(['applyQueue', 'isProcessing', 'currentJobIndex', 'currentTabId', 'jobStartedAt', 'lastHeartbeatAt', 'pendingAutoApply', 'autoApplyJobUrl', 'batchMode', 'atsRuntime']);
         endApplySession();
         broadcastProgress();
         sendResponse({ success: true });
@@ -911,6 +1125,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'AUTO_APPLY_HEARTBEAT') {
         if (isProcessing && sender.tab && sender.tab.id === currentTabId
             && Date.now() - jobStartedAt < JOB_HARD_CAP_MS) {
+            // Persisted, not just in memory: after a worker restart this is the
+            // only way the alarm-driven watchdog can tell a page that is working
+            // from one that died before it ever checked in.
+            lastHeartbeatAt = Date.now();
+            persistState();
             armJobSafetyTimer(currentJobIndex);
         }
         sendResponse({ ok: true });
@@ -932,7 +1151,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (isProcessing && currentJobIndex >= 0 && currentJobIndex < applyQueue.length) {
             // This job reported back — cancel its safety timeout so it can't fire
             // later against a different job.
-            if (jobSafetyTimer) { clearTimeout(jobSafetyTimer); jobSafetyTimer = null; }
+            clearJobSafetyTimer();
             // 'blocked' is its own terminal state: the agent stopped because the
             // tenant needs the USER, not because the job failed. Recording it as
             // an error would put a red row in front of someone who has merely not
@@ -962,17 +1181,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 });
 
-/** User-facing wording per block reason — mirrors the content agent's copy. */
-const ATS_BLOCK_DETAIL = {
-    verification: 'Chờ bạn xác minh email của công ty này',
-    credential: 'Cần thông tin đăng nhập riêng cho công ty này',
-    manual: 'Cần bạn xử lý trực tiếp trên trang này',
-};
-
-// Which credential we handed out per tenant this batch, so the auth result can
-// pin it — that pin is what keeps the tenant working after a password rotation.
-const pendingAtsCredential = {};
-
 // ─── Process next job in queue ───
 function processNextJob() {
     if (!isProcessing) return;
@@ -984,7 +1192,9 @@ function processNextJob() {
         console.log('[Copo] Batch Apply: all jobs completed!');
         isProcessing = false;
         currentTabId = null;
+        clearJobSafetyTimer();
         atsCoord.endBatch();
+        chrome.storage.local.remove(['atsRuntime']);
         chrome.storage.local.remove(['pendingAutoApply', 'autoApplyJobUrl', 'batchMode']);
         endApplySession();
         persistState();
@@ -1017,17 +1227,23 @@ function processNextJob() {
 
     console.log(`[Copo] Batch Apply: processing job ${currentJobIndex + 1}/${applyQueue.length} — ${job.jobUrl}`);
 
-    // Save profile + (optional) per-job CV file for this specific job + set pending flag
+    // Save profile + this job's own CV (scoped to its session) + the pending flag.
+    // The CV deliberately does NOT go into the shared slot: job N+1 without a
+    // tailored CV would otherwise upload job N's — a wrong, but perfectly
+    // successful-looking, application.
+    const jobCv = job.cvFileBase64 && job.cvFileName
+        ? { base64: job.cvFileBase64, fileName: job.cvFileName }
+        : null;
+    const { sessionId, fragment } = prepareApplySession(job.jobUrl, jobCv, {
+        consentDelegated: batchConsentDelegated,
+    });
     const storage = {
         jobfitProfile: job.profile,
         pendingAutoApply: true,
         autoApplyJobUrl: job.jobUrl,
         batchMode: true,
+        ...fragment,
     };
-    if (job.cvFileBase64 && job.cvFileName) {
-        storage.cvFileBase64 = job.cvFileBase64;
-        storage.cvFileName = job.cvFileName;
-    }
     (async () => {
         // ── Don't submit twice ──
         // A retried job (tab closed mid-flow, worker recycled, network died) may
@@ -1090,7 +1306,10 @@ function processNextJob() {
             chrome.tabs.create({ url: job.jobUrl, active: true }, (tab) => {
                 currentTabId = tab.id;
                 jobStartedAt = Date.now();
-                startApplySession(tab.id, job.jobUrl);  // follow redirects/new-tabs; onCompleted injects unknown hosts
+                // Reset the liveness clock: the PREVIOUS job's heartbeat must not
+                // read as this job's page being alive.
+                lastHeartbeatAt = 0;
+                adoptApplySession(sessionId, tab.id);  // follow redirects/new-tabs; onCompleted injects unknown hosts
                 persistState();
                 broadcastProgress();
 

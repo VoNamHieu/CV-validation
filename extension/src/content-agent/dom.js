@@ -1,4 +1,6 @@
 // AUTO-SPLIT from content-agent.js (Phase 2). Part of the Copo apply agent.
+import { checkClick, logDenial } from './policy.js';
+
 // ─── Helpers ───
 export function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -253,11 +255,19 @@ export async function simulateTyping(el, text) {
  * underneath is silently swallowed. So click the TOPMOST element at the button's
  * centre (elementFromPoint) with a full pointer/mouse sequence at real
  * coordinates. On a normal page this just clicks the button (or a harmless child
- * that bubbles to it), so it's safe to use for every click. Returns false only if
- * `el` is missing.
+ * that bubbles to it), so it's safe to use for every click.
+ *
+ * This is also the agent's single click choke point, so the action policy is
+ * enforced HERE rather than at each call site — a new call site cannot bypass it
+ * by forgetting a check. `ctx` declares who is asking; omitting it means the
+ * strictest caller ('planner'), so the failure mode of forgetting is a refused
+ * click, not a silent submit. Returns false when `el` is missing OR the policy
+ * refused the action (the refusal is logged with its code).
  */
-export function overlayClick(el) {
+export function overlayClick(el, ctx = {}) {
     if (!el) return false;
+    const verdict = checkClick(el, ctx);
+    if (!verdict.allowed) { logDenial(verdict, el, ctx); return false; }
     let r = el.getBoundingClientRect();
     // elementFromPoint needs the element in the viewport.
     if (r.bottom < 0 || r.top > innerHeight || r.width === 0) {
