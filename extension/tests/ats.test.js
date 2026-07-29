@@ -467,3 +467,51 @@ describe('unambiguous option matching', () => {
         assert.equal(uniqueMatch(opts, 'recruiter'), 'contacted by recruiter');
     });
 });
+
+// ── structured CV resolution ───────────────────────────────────────────────
+// The flat profile has ONE `highestDegree` string. Workday's My Experience step
+// asks for the school, the qualification, the subject, the grade and a language
+// proficiency as five separate REQUIRED fields — and Workday's own résumé parse
+// left every one of them blank (measured on a live Mondelez application). No
+// amount of widening a flat shape fixes that: the next tenant asks for a second
+// education entry, or three employment rows.
+describe('cvPath reaches what the flat profile cannot', () => {
+    const CV = {
+        education: [
+            { institution: 'University of Illinois at Urbana-Champaign', degree: 'Marketing', year: '2021 – 2025' },
+            { institution: 'Somewhere Else', degree: 'Diploma', year: '2019' },
+        ],
+        languages: [{ language: 'English', level: 'Fluent' }],
+        experience: [{ company: 'XGX', title: 'Product Manager / AI Operations' }],
+    };
+    /** Mirrors readCvPath in recipe.js. */
+    const read = (cv, path) => {
+        if (!cv || !path) return undefined;
+        let node = cv;
+        for (const part of String(path).split('.')) {
+            const m = part.match(/^([^[\]]+)(?:\[(\d+)\])?$/);
+            if (!m || node == null) return undefined;
+            node = node[m[1]];
+            if (m[2] != null) node = Array.isArray(node) ? node[Number(m[2])] : undefined;
+        }
+        return node;
+    };
+
+    test('reads an indexed entry', () => {
+        assert.equal(read(CV, 'education[0].institution'), 'University of Illinois at Urbana-Champaign');
+        assert.equal(read(CV, 'education[0].degree'), 'Marketing');
+    });
+
+    test('reaches entries a flat profile has no key for at all', () => {
+        assert.equal(read(CV, 'education[1].institution'), 'Somewhere Else');
+        assert.equal(read(CV, 'languages[0].level'), 'Fluent');
+        assert.equal(read(CV, 'experience[0].company'), 'XGX');
+    });
+
+    test('a missing path is undefined, not a crash', () => {
+        assert.equal(read(CV, 'education[9].institution'), undefined);
+        assert.equal(read(CV, 'nope.deep[0].x'), undefined);
+        assert.equal(read(null, 'education[0].degree'), undefined);
+        assert.equal(read(CV, ''), undefined);
+    });
+});

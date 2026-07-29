@@ -72,6 +72,13 @@ export interface RecipeField {
     control?: string;     // selector for the control INSIDE a shadow host (e.g. 'input[type="tel"]');
                           // resolved by piercing shadow roots. Defaults to the first text control.
     profileKey?: string;  // key in the synced ExtensionProfile (omit for a fixed `value`)
+    /** Dotted/indexed path into the STRUCTURED CV (`jobfitCv`) —
+     *  `education[0].institution`, `languages[0].level`, `experience[1].company`.
+     *  The flat profile is one string per concept and cannot express a list;
+     *  Workday asks for school / qualification / subject / grade / language level
+     *  as five separate required fields, and for a second education entry after
+     *  that. Resolution order is value → profileKey → cvPath → default. */
+    cvPath?: string;
     value?: string;       // fixed value (e.g. Postal "100000") — wins over profileKey
     default?: string;     // fallback when the profile key is empty (e.g. Country → "Vietnam")
     /** Semantic fallbacks for a required dropdown, tried in order after the
@@ -139,7 +146,7 @@ export interface ApplyRecipe {
 const WORKDAY: ApplyRecipe = {
     ats: 'workday',
     label: 'Workday',
-    version: 11,
+    version: 12,
     verified: true,
     hostPattern: '\\.myworkdayjobs\\.com|\\.myworkdaysite\\.com',
     login: {
@@ -228,8 +235,8 @@ const WORKDAY: ApplyRecipe = {
                 },
                 // Measured as REQUIRED on Mondelez and left blank by Workday's own
                 // résumé parse, so the step could not advance without them.
-                { label: 'School or University', selector: '[data-automation-id="formField-schoolName"] input', profileKey: 'schoolName', type: 'text', required: true },
-                { label: 'Field of Study', selector: '[data-automation-id="formField-fieldOfStudy"] input', profileKey: 'fieldOfStudy', type: 'text', required: true },
+                { label: 'School or University', selector: '[data-automation-id="formField-schoolName"] input', cvPath: 'education[0].institution', type: 'text', required: true },
+                { label: 'Field of Study', selector: '[data-automation-id="formField-fieldOfStudy"] input', cvPath: 'education[0].degree', type: 'text', required: true },
             ],
             advance: '[data-automation-id="pageFooterNextButton"]',
         },

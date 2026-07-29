@@ -24,7 +24,7 @@ export const FALLBACK_RECIPES = [
     {
         ats: 'workday',
         label: 'Workday',
-        version: 11,
+        version: 12,
         verified: true,
         hostPattern: '\\.myworkdayjobs\\.com|\\.myworkdaysite\\.com',
         login: {
@@ -146,8 +146,8 @@ export const FALLBACK_RECIPES = [
                     // Measured as REQUIRED on Mondelez, and left blank by Workday's
                     // own résumé parse — so the step could not advance without them
                     // even though the CV states both.
-                    { label: 'School or University', selector: '[data-automation-id="formField-schoolName"] input', profileKey: 'schoolName', type: 'text', required: true },
-                    { label: 'Field of Study', selector: '[data-automation-id="formField-fieldOfStudy"] input', profileKey: 'fieldOfStudy', type: 'text', required: true },
+                    { label: 'School or University', selector: '[data-automation-id="formField-schoolName"] input', cvPath: 'education[0].institution', type: 'text', required: true },
+                    { label: 'Field of Study', selector: '[data-automation-id="formField-fieldOfStudy"] input', cvPath: 'education[0].degree', type: 'text', required: true },
                 ],
                 advance: '[data-automation-id="pageFooterNextButton"]',
             },
@@ -385,7 +385,7 @@ export function recipeForUrl(recipes, url) {
  *
  * @returns {{matched:boolean, filled:number, step?:string}}
  */
-export async function applyRecipeFields(recipe, profile, cvData) {
+export async function applyRecipeFields(recipe, profile, cvData, cv) {
     if (!recipe || !profile) return { matched: false, filled: 0 };
 
     let filled = 0;
@@ -481,7 +481,7 @@ export async function applyRecipeFields(recipe, profile, cvData) {
     // minute and one they have to do field by field.
     const answers = [];
     for (const f of step.fields || []) {
-        const val = recipeFieldValue(f, profile);
+        const val = recipeFieldValue(f, profile, cv);
         const hasLadder = Array.isArray(f.valuePriority) && f.valuePriority.length > 0;
         if ((val == null || String(val).trim() === '') && !hasLadder) { outcomes.push([f.label, 'skip', 'no value']); continue; }
         // A fixed `value`/`default` the profile did not supply is the agent's own
@@ -558,13 +558,46 @@ export async function applyRecipeFields(recipe, profile, cvData) {
     return { matched: true, filled, step: step.name, answers };
 }
 
-/** Resolve a field's value: an explicit fixed `value`, else the synced profile
- *  key, else the recipe `default`. (Postal/how-did-you-hear use fixed values;
- *  Country uses profile.nationality with a "Vietnam" default.) */
-function recipeFieldValue(f, profile) {
+/**
+ * Read a dotted/indexed path out of the structured CV — `education[0].institution`,
+ * `languages[0].level`, `experience[1].company`.
+ *
+ * The flat 23-field profile cannot express any of those. It has one
+ * `highestDegree` string where Workday's My Experience step asks for the school,
+ * the qualification, the subject, the grade and a language proficiency — each a
+ * separate REQUIRED field, and each blank after Workday's own résumé parse
+ * (measured on a live Mondelez application). Widening the flat profile one key at
+ * a time does not fix that: the next tenant asks for a SECOND education entry, or
+ * three employment rows, and there is no flat key for those either.
+ *
+ * The structured CV was already synced to the extension for Mode-1 tailoring
+ * (`jobfitCv`); it was simply never read by the apply agent.
+ */
+function readCvPath(cv, path) {
+    if (!cv || !path) return undefined;
+    let node = cv;
+    for (const part of String(path).split('.')) {
+        const m = part.match(/^([^[\]]+)(?:\[(\d+)\])?$/);
+        if (!m || node == null) return undefined;
+        node = node[m[1]];
+        if (m[2] != null) node = Array.isArray(node) ? node[Number(m[2])] : undefined;
+    }
+    return node;
+}
+
+/**
+ * Resolve a field's value, best source first:
+ *   1. an explicit fixed `value` (Postal code, phone type)
+ *   2. the flat profile key — the fast path for the standard identity fields
+ *   3. a `cvPath` into the structured CV, for everything the flat shape cannot hold
+ *   4. the recipe `default`
+ */
+function recipeFieldValue(f, profile, cv) {
     if (f.value != null && f.value !== '') return f.value;
-    const p = profile[f.profileKey];
+    const p = profile?.[f.profileKey];
     if (p != null && String(p).trim() !== '') return p;
+    const fromCv = readCvPath(cv, f.cvPath);
+    if (fromCv != null && String(fromCv).trim() !== '') return String(fromCv);
     return f.default ?? '';
 }
 

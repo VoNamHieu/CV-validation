@@ -107,7 +107,16 @@ async function runAgentLoop(profile) {
     const reviewAnswers = new Map();
     const gatewayClicks = new Map();   // recipe gateway label → click count (loop guard)
 
-    // Load the CV for THIS apply session (see loadSessionCv).
+    // The STRUCTURED CV. Already synced for Mode-1 tailoring and never read by
+    // the apply agent, which only ever saw the flattened 23-field profile — so
+    // every field the flat shape has no slot for (school, subject, grade,
+    // language level, a second education entry, employment rows) was unfillable
+    // no matter how correct the selector was.
+    const cvStructured = await new Promise(r => {
+        chrome.storage.local.get('jobfitCv', d => r(d.jobfitCv || null));
+    });
+
+    // Load the CV FILE for THIS apply session (see loadSessionCv).
     const { cv: cvData, driven } = await loadSessionCv();
     const hasCV = !!cvData;
     if (cvData) console.log(`[Copo Apply] CV: ${cvData.fileName} (${cvData.scope})`);
@@ -455,7 +464,7 @@ async function runAgentLoop(profile) {
             // step is done; when it fills something new we re-observe so the LLM
             // sees the pre-filled state and only handles the rest (dropdowns, Next).
             if (recipe) {
-                const rf = await applyRecipeFields(recipe, profile, cvData);
+                const rf = await applyRecipeFields(recipe, profile, cvData, cvStructured);
                 for (const a of rf.answers || []) {
                     reviewAnswers.set(`${rf.step || '?'}::${a.field}`, { ...a, step: rf.step });
                 }
