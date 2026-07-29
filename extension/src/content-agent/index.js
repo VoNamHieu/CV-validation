@@ -81,6 +81,19 @@ async function loadSessionCv() {
 }
 
 /**
+ * A page-level failure the ATS says to recover from by reloading — as opposed to
+ * a field that failed validation.
+ *
+ * "Page Error - Error Code: VPS|<guid>" was measured on a live Mondelez apply
+ * step: a Workday server error that leaves the step wedged with every field still
+ * filled. The recovery only knew the friendlier "Something went wrong / refresh
+ * the page" wording, so this variant read as a normal page and the agent kept
+ * planning against a form that could not advance.
+ */
+const WORKDAY_ERROR_CARD_RE =
+    /something went wrong|refresh the page and (?:then )?try again|page error\s*-\s*error code|error code:\s*vps\b/i;
+
+/**
  * Main agentic loop: Observe → Plan → Act → Verify.
  */
 async function runAgentLoop(profile) {
@@ -269,7 +282,7 @@ async function runAgentLoop(profile) {
                 const _cxs = performance.getEntriesByType('resource').map(e => e.name)
                     .filter(u => /\/wday\/.*\/(jobapplication|package)\//.test(u));
                 const _undef = _cxs.filter(u => /\/undefined(\/|$|\?)/.test(u));
-                const _err = /something went wrong|refresh the page and (?:then )?try again/i.test(_bt);
+                const _err = WORKDAY_ERROR_CARD_RE.test(_bt);
                 if (_err || _undef.length) {
                     console.warn('[Copo Apply][DIAG]', _err ? 'ATS error card shown' : 'undefined-appId CXS call', {
                         url: location.href,
@@ -292,7 +305,7 @@ async function runAgentLoop(profile) {
             // that stays broken can't reload-loop forever.
             {
                 const bt = document.body?.innerText || '';
-                const errCard = /something went wrong|refresh the page and (?:then )?try again/i.test(bt);
+                const errCard = WORKDAY_ERROR_CARD_RE.test(bt);
                 // "Empty apply shell" = the form area never rendered (e.g. Workday paints
                 // only its header + footer, blank body). The OLD check required
                 // buttons.length===0, but the persistent header/footer chrome (Sign In,
@@ -326,6 +339,24 @@ async function runAgentLoop(profile) {
                 const wantReload = errCard || emptyStreak >= 2;
                 let reloads = 0;
                 try { reloads = parseInt(sessionStorage.getItem('copoApplyReloads') || '0', 10) || 0; } catch { /* ignore */ }
+                // Reloading a Workday apply flow can drop the authenticated
+                // session and land back on Create Account — measured on Mondelez,
+                // where a reload mid-application returned step 1 of 7 with every
+                // filled field gone. So recovery-by-reload is a LAST resort, and
+                // it must never fire once we are past the login wall on a tenant
+                // that required an account: the cost of being wrong is an
+                // application the user has to start over.
+                const pastAuthWall = !!tenantRefFor(location.href) && atsAuthDone;
+                if (wantReload && pastAuthWall) {
+                    console.warn('[Copo Apply] page error after sign-in — NOT reloading '
+                        + '(a reload here drops the Workday session and restarts the application)');
+                    removeProgress();
+                    showToast('⚠️ Trang ứng tuyển báo lỗi hệ thống. Hồ sơ đã điền vẫn còn — '
+                        + 'hãy thử lại trên tab này.', 9000);
+                    reportResult(false, 'ATS page error after sign-in — reload would lose the session',
+                        'blocked', { blockedReason: 'manual' });
+                    return;
+                }
                 if (wantReload && reloads < 2) {
                     try { sessionStorage.setItem('copoApplyReloads', String(reloads + 1)); } catch { /* ignore */ }
                     console.warn(`[Copo Apply] recovery: ${errCard ? 'error card' : 'empty page'} → reload ${reloads + 1}/2`, location.href);
