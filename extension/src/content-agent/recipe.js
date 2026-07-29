@@ -24,7 +24,7 @@ export const FALLBACK_RECIPES = [
     {
         ats: 'workday',
         label: 'Workday',
-        version: 10,
+        version: 11,
         verified: true,
         hostPattern: '\\.myworkdayjobs\\.com|\\.myworkdaysite\\.com',
         login: {
@@ -143,6 +143,11 @@ export const FALLBACK_RECIPES = [
                         // ladder only applies when the profile has nothing.
                         type: 'custom-select', required: true,
                     },
+                    // Measured as REQUIRED on Mondelez, and left blank by Workday's
+                    // own résumé parse — so the step could not advance without them
+                    // even though the CV states both.
+                    { label: 'School or University', selector: '[data-automation-id="formField-schoolName"] input', profileKey: 'schoolName', type: 'text', required: true },
+                    { label: 'Field of Study', selector: '[data-automation-id="formField-fieldOfStudy"] input', profileKey: 'fieldOfStudy', type: 'text', required: true },
                 ],
                 advance: '[data-automation-id="pageFooterNextButton"]',
             },

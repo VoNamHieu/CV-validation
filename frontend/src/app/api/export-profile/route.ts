@@ -4,7 +4,7 @@ import type { CVData } from '@/lib/types';
 
 /**
  * GET /api/export-profile
- * Returns the canonical 23-field schema the extension popup expects.
+ * Returns the canonical profile schema the extension popup expects.
  * The server is stateless and has no session — the actual profile data
  * flows from the web app to the extension via window.postMessage, not via
  * this endpoint. Kept as a schema reference + health check.
@@ -12,7 +12,7 @@ import type { CVData } from '@/lib/types';
 export async function GET() {
     return NextResponse.json({
         status: 'ready',
-        message: 'Profile data is pushed to the extension via postMessage from the CV editor. This endpoint exposes the canonical 23-field schema only.',
+        message: 'Profile data is pushed to the extension via postMessage from the CV editor. This endpoint exposes the canonical profile schema only.',
         schema: {
             fullName: 'string',
             firstName: 'string',
@@ -30,6 +30,9 @@ export async function GET() {
             currentLevel: 'string',
             yearsOfExperience: 'number',
             highestDegree: 'string',
+            schoolName: 'string',
+            fieldOfStudy: 'string',
+            primaryLanguage: 'string',
             currentSalary: 'string',
             currentIndustry: 'string',
             currentFields: 'string',
@@ -43,7 +46,7 @@ export async function GET() {
 
 /**
  * POST /api/export-profile
- * Body: { cvData: CVData } — server maps it into the 23-field ExtensionProfile.
+ * Body: { cvData: CVData } — server maps it into the ExtensionProfile.
  * Single source of truth for the mapping: cvToExtensionProfile.
  */
 export async function POST(request: Request) {

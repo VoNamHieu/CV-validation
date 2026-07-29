@@ -139,7 +139,7 @@ export interface ApplyRecipe {
 const WORKDAY: ApplyRecipe = {
     ats: 'workday',
     label: 'Workday',
-    version: 10,
+    version: 11,
     verified: true,
     hostPattern: '\\.myworkdayjobs\\.com|\\.myworkdaysite\\.com',
     login: {
@@ -226,6 +226,10 @@ const WORKDAY: ApplyRecipe = {
                     // match; absent that the field goes to them at review.
                     type: 'custom-select', required: true,
                 },
+                // Measured as REQUIRED on Mondelez and left blank by Workday's own
+                // résumé parse, so the step could not advance without them.
+                { label: 'School or University', selector: '[data-automation-id="formField-schoolName"] input', profileKey: 'schoolName', type: 'text', required: true },
+                { label: 'Field of Study', selector: '[data-automation-id="formField-fieldOfStudy"] input', profileKey: 'fieldOfStudy', type: 'text', required: true },
             ],
             advance: '[data-automation-id="pageFooterNextButton"]',
         },

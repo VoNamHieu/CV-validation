@@ -538,7 +538,7 @@ export default function StepEditCv() {
         }
     }, [setUserAvatar, updateJdEntry]);
 
-    /* ─── Build extension profile (23-field shape) from an optimized CV ───
+    /* ─── Build extension profile (flat profile shape) from an optimized CV ───
        The personal-info fields (contact/personal/employment/preferences) are
        authored by the user against the base cvData via the Personal Info
        section, but per-job optimized variants don't necessarily carry them.

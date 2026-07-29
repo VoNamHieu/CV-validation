@@ -55,7 +55,7 @@ function postAndAwait(
     });
 }
 
-/** Sync the 23-field profile into extension storage. */
+/** Sync the flat profile into extension storage. */
 export async function syncProfileToExtension(
     profile: ExtensionProfile,
     cvData?: CVData,
@@ -110,7 +110,7 @@ export async function syncAuthTokenToExtension(): Promise<SyncResult> {
 
 /**
  * Sync the rich CV JSON into extension storage. The extension needs this to
- * tailor the CV against a job page's JD (Mode 1) — the flat 23-field profile
+ * tailor the CV against a job page's JD (Mode 1) — the flat profile
  * isn't enough (no experience bullets / skills detail).
  */
 export function syncCvDataToExtension(cv: CVData): Promise<SyncResult> {

@@ -1,4 +1,4 @@
-// Single source of truth for the 23-field profile shape consumed by the
+// Single source of truth for the flat profile shape consumed by the
 // Copo extension popup and content-agent autofill. Maps a CVData
 // object into the flat shape the extension expects.
 
@@ -21,6 +21,12 @@ export interface ExtensionProfile {
     currentLevel: string;
     yearsOfExperience: number;
     highestDegree: string;
+    // Education detail Workday's "My Experience" step requires as separate
+    // REQUIRED fields — measured on a live Mondelez application, where the
+    // résumé parse left all of them blank and the step could not advance.
+    schoolName: string;
+    fieldOfStudy: string;
+    primaryLanguage: string;
     currentSalary: string;
     currentIndustry: string;
     currentFields: string;
@@ -49,6 +55,7 @@ export function cvToExtensionProfile(cv: CVData, coverLetterOverride?: string): 
         employment.years_of_experience || cv.experience?.length || 0;
     const highestDegree =
         employment.highest_degree || cv.education?.[0]?.degree || "";
+    const edu = cv.education?.[0];
 
     return {
         fullName: cv.name ?? "",
@@ -67,6 +74,13 @@ export function cvToExtensionProfile(cv: CVData, coverLetterOverride?: string): 
         currentLevel: employment.current_level ?? "",
         yearsOfExperience,
         highestDegree,
+        schoolName: edu?.institution ?? "",
+        // The CV models education as one `degree` string; Workday asks for the
+        // qualification and the field of study SEPARATELY. Until the CV editor
+        // splits them, the degree line doubles as the field of study — better a
+        // value the candidate wrote than an empty required field.
+        fieldOfStudy: edu?.degree ?? "",
+        primaryLanguage: cv.languages?.[0]?.language ?? "",
         currentSalary: employment.current_salary ?? "",
         currentIndustry: employment.current_industry ?? "",
         currentFields: employment.current_fields ?? "",
