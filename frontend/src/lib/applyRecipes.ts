@@ -139,7 +139,7 @@ export interface ApplyRecipe {
 const WORKDAY: ApplyRecipe = {
     ats: 'workday',
     label: 'Workday',
-    version: 6,
+    version: 7,
     verified: true,
     hostPattern: '\\.myworkdayjobs\\.com|\\.myworkdaysite\\.com',
     login: {
@@ -200,7 +200,11 @@ const WORKDAY: ApplyRecipe = {
             // that empty required field silently blocks Next (the agent looped until
             // stuck). Pick the candidate's degree level (or any option) so it validates.
             name: 'My Experience',
-            detect: '[data-automation-id="jobTitleHeading"], [data-automation-id="formField-degree"]',
+            // ONLY the degree field: `jobTitleHeading` is the job-title <h2>
+            // Workday renders on EVERY page of the apply flow, so using it as a
+            // step marker made My Experience match the Application Questions page
+            // first — and those fields were never filled on any job.
+            detect: '[data-automation-id="formField-degree"]',
             fields: [
                 {
                     label: 'Degree', selector: '[data-automation-id="formField-degree"] button',

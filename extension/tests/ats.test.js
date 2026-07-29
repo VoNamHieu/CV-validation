@@ -12,6 +12,7 @@ import { tenantRefFor, vendorForHost, sortJobsByTenant } from '../src/ats/tenant
 import { classifyDomError, classifyApiResponse, authResult, RETRYABLE } from '../src/ats/classifier.js';
 import { BLOCKING_STATES, OUTCOMES } from '../src/ats/states.js';
 import * as coord from '../src/ats/coordinator.js';
+import { FALLBACK_RECIPES } from '../src/content-agent/recipe.js';
 
 // ── tenant identity ────────────────────────────────────────────────────────
 describe('tenantRefFor', () => {
@@ -381,5 +382,42 @@ describe('coordinator', () => {
         coord.endBatch();
         assert.equal(coord.currentBatchId(), null);
         assert.equal(coord.stateFor(AIA.tenantKey), 'unknown');
+    });
+});
+
+// ── Workday step detection ─────────────────────────────────────────────────
+// Measured on Mondelez's Create Account page
+// (wd3.myworkdaysite.com/en-US/recruiting/mdlz/External/.../apply/autofillWithResume):
+// `jobTitleHeading` is a visible <h2> carrying the job title, and the degree
+// field is absent. It is rendered on EVERY page of the apply flow, so it can
+// never identify a step.
+describe('workday recipe steps are mutually exclusive', () => {
+    const wd = FALLBACK_RECIPES.find((r) => r.ats === 'workday');
+    /** Which step a page with `present` selectors resolves to — the same
+     *  first-match rule applyRecipeFields uses. */
+    const stepFor = (present) => wd.steps.find(
+        (s) => s.detect.split(',').some((sel) => present.includes(sel.trim())),
+    )?.name || null;
+
+    test('the job-title heading identifies no step at all', () => {
+        assert.equal(stepFor(['[data-automation-id="jobTitleHeading"]']), null,
+            'it is on every page of the flow, including Create Account');
+    });
+
+    test('Application Questions is not swallowed by My Experience', () => {
+        // The real regression: `find()` takes the FIRST match, so while
+        // jobTitleHeading was an alternative detect for My Experience, the
+        // questions page resolved to My Experience and its notice-period and
+        // salary fields were never filled on any job.
+        assert.equal(stepFor([
+            '[data-automation-id="jobTitleHeading"]',
+            '[data-automation-id="applyFlowPrimaryQuestionsPage"]',
+        ]), 'Application Questions');
+    });
+
+    test('each step still matches its own page', () => {
+        assert.equal(stepFor(['[data-automation-id="formField-legalName--firstName"]']), 'My Information');
+        assert.equal(stepFor(['[data-automation-id="formField-degree"]']), 'My Experience');
+        assert.equal(stepFor(['[data-automation-id="applyFlowPrimaryQuestionsPage"]']), 'Application Questions');
     });
 });

@@ -20,11 +20,11 @@ import { isThirdPartyApply } from './detect.js';
 // against real 3M Workday captures (My Information, 2026-07-15 / -22). The
 // custom-select handler is grounded in the captured widget markup (button[value]
 // + promptOption) but PENDING a live-fill verification.
-const FALLBACK_RECIPES = [
+export const FALLBACK_RECIPES = [
     {
         ats: 'workday',
         label: 'Workday',
-        version: 6,
+        version: 7,
         verified: true,
         hostPattern: '\\.myworkdayjobs\\.com|\\.myworkdaysite\\.com',
         login: {
@@ -95,8 +95,16 @@ const FALLBACK_RECIPES = [
                 // any option) so it validates. jobTitle/company/dates come from the
                 // parse; anything the parser still left empty is surfaced by the
                 // required-blocker audit at hand-off.
+                // Detect ONLY by the degree field. `jobTitleHeading` used to be
+                // an alternative here, and it is not a step marker at all — it is
+                // the <h2> job title Workday renders on EVERY page of the apply
+                // flow (measured on the Mondelez Create Account page, where it is
+                // visible and the degree field is not). Because `find()` takes the
+                // first matching step, that made My Experience swallow the
+                // Application Questions page too, so its notice-period and salary
+                // fields were never filled on any job.
                 name: 'My Experience',
-                detect: '[data-automation-id="jobTitleHeading"], [data-automation-id="formField-degree"]',
+                detect: '[data-automation-id="formField-degree"]',
                 fields: [
                     // Also a claim about the candidate, so also no `pickAny`: the
                     // first option in a degree list is as likely to be "High
