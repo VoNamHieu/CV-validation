@@ -160,16 +160,19 @@ describe('the topmost element is judged, not just the intended one', () => {
         assert.equal(intended.clicks, 0);
     });
 
-    test('an unrelated topmost element is refused rather than clicked blind', () => {
-        // Nothing links the two: a modal opened over the page between the policy
-        // check and the click. Clicking it would be acting on something we never
-        // judged and the caller never asked for.
+    test('an unrelated topmost element is never the one clicked', () => {
+        // Nothing links the two: a backdrop or focus trap sits over the control.
+        // Clicking IT would be acting on something the caller never asked for —
+        // so the activation goes to the intended element, which has already been
+        // judged. (Refusing outright was the first attempt, and it made Workday's
+        // apply modal unclickable, since its overlay is a sibling of the button.)
         const intended = new FakeEl('button'); intended.textContent = 'Next';
         const stranger = new FakeEl('div'); stranger.textContent = 'Cookie settings';
         installDom([stranger]);   // intended is NOT in the stack
 
-        assert.equal(safeActivate(intended, planner), false);
-        assert.equal(stranger.clicks, 0);
+        assert.equal(safeActivate(intended, planner), true);
+        assert.equal(intended.clicks, 1);
+        assert.equal(stranger.clicks, 0, 'the unrelated overlay is never activated');
     });
 });
 
@@ -245,5 +248,50 @@ describe('apply verb is decided by the page, not by the caller', () => {
         const btn = new FakeEl('button'); btn.textContent = 'Submit Application';
         installDom([btn], { formFields: [] });
         assert.equal(safeActivate(btn, { source: 'planner' }), false);
+    });
+});
+
+// ── Workday's apply modal: the overlay is a SIBLING, not an ancestor ───────
+// Reported live: the "Start Your Application" modal opened and "Autofill with
+// Resume" was never clicked. Requiring the topmost element to be on the intended
+// control's path refused the exact overlay shape the coordinate click exists for.
+describe('an unrelated overlay falls back to the judged element', () => {
+    test('the intended control is activated when the overlay is unrelated', () => {
+        const btn = new FakeEl('a'); btn.textContent = 'Autofill with Resume';
+        const backdrop = new FakeEl('div'); backdrop.textContent = '';   // sibling, contains nothing
+        installDom([backdrop], { formFields: [] });   // btn is NOT in the stack
+
+        assert.equal(safeActivate(btn, { source: 'gateway', openingApplication: true }), true);
+        assert.equal(btn.clicks, 1, 'the element we judged is the one activated');
+        assert.equal(backdrop.clicks, 0, 'the unrelated overlay is never clicked');
+    });
+
+    test('an unrelated overlay that is itself a submit still blocks everything', () => {
+        // The fallback must not become a way around the policy: the topmost is
+        // judged first, and a refusal there ends it.
+        const btn = new FakeEl('a'); btn.textContent = 'Autofill with Resume';
+        const overlay = new FakeEl('div'); overlay.textContent = 'Submit Application';
+        installDom([overlay], { formFields: [] });
+
+        assert.equal(safeActivate(btn, { source: 'gateway', openingApplication: true }), false);
+        assert.equal(btn.clicks, 0);
+        assert.equal(overlay.clicks, 0);
+    });
+});
+
+// ── a hidden file input is not "a form is present" ─────────────────────────
+describe('form-presence detection', () => {
+    test('a hidden résumé input does not make every page a form', () => {
+        // `file.type === 'file'` is true of every file input, so the old check
+        // was unconditional: any page carrying one refused the apply verb.
+        const btn = new FakeEl('button'); btn.textContent = 'Apply';
+        const hiddenFile = Object.assign(new FakeEl('input'), { type: 'file', offsetParent: null });
+        globalThis.__hiddenFile = hiddenFile;
+        installDom([btn], { formFields: [] });
+        const realQS = document.querySelector;
+        document.querySelector = (sel) => (sel === 'input[type="file"]' ? hiddenFile : realQS(sel));
+
+        assert.equal(safeActivate(btn, { source: 'planner' }), true);
+        assert.equal(btn.clicks, 1);
     });
 });

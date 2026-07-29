@@ -277,9 +277,22 @@ async function runAgentLoop(profile) {
                 const hasFormContent = !!document.querySelector(
                     'input:not([type="hidden"]):not([type="submit"]):not([type="button"]), textarea, select, '
                     + '[data-automation-id^="formField-"], [data-automation-id*="applyFlow"], [data-test^="personal-info"]');
-                const recipeStepPresent = !!(recipe && (recipe.steps || []).some(s => {
-                    try { return s.detect && document.querySelector(s.detect); } catch { return false; }
-                }));
+                // A recipe STEP or a recipe GATEWAY on screen means this page is
+                // doing its job, whatever the field count says.
+                //
+                // Gateways were missing from this test, and Workday's "Start Your
+                // Application" modal is exactly the shape that trips the
+                // empty-shell heuristic: three buttons, no inputs, no formField
+                // wrappers. So the agent decided the page was broken and RELOADED
+                // it — closing the modal it was supposed to click, twice, before
+                // giving up with "Trang lỗi/rỗng".
+                const recipeTargets = [
+                    ...(recipe?.steps || []).map(s => s.detect),
+                    ...(recipe?.gateways || []).map(g => g.detect),
+                ].filter(Boolean);
+                const recipeStepPresent = recipeTargets.some((sel) => {
+                    try { return !!document.querySelector(sel); } catch { return false; }
+                });
                 const emptyShell = state.formFields.length === 0 && !hasFormContent
                     && !recipeStepPresent && !state.blockers.length;
                 if (errCard || emptyShell) emptyStreak++; else emptyStreak = 0;

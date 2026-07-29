@@ -287,14 +287,23 @@ export function safeActivate(el, ctx = {}, originSelector) {
     // that one too, and require it to be on the intended element's own path: an
     // overlay that belongs to something else entirely is not a click we understand.
     const stack = _stackAt(point);
-    const target = stack[0] || el;
+    let target = stack[0] || el;
     if (target !== el) {
         const actual = checkClick(target, ctx, selector);
         if (!actual.allowed) { logDenial(actual, target, ctx); return false; }
         if (!_sharesPath(stack, el)) {
-            console.warn('[Copo Policy] ✋ topmost element at the target point is unrelated to the '
-                + 'intended control — refusing rather than clicking something we did not judge');
-            return false;
+            // The topmost element is not on the intended control's path — a modal
+            // backdrop, a focus trap, a sibling overlay. Do NOT click it: it is
+            // not what the caller asked for even though it passed the policy.
+            //
+            // Refusing outright was wrong too, and broke Workday's apply modal:
+            // its overlay is a SIBLING of the button, so "Autofill with Resume"
+            // stopped being clickable at all. Fall back to the element we were
+            // asked about and have already judged — that is both the right target
+            // and a judged one.
+            console.warn('[Copo] overlay at the click point is unrelated to the intended control — '
+                + 'activating the intended element directly instead');
+            target = el;
         }
     }
     return _dispatchOne(target, point);

@@ -535,8 +535,13 @@ export function checkClick(el, ctx = {}, selector) {
 function _applicationFormPresent() {
     try {
         if (isApplicationFormPage()) return true;
+        // A VISIBLE résumé upload. The visibility test matters: a file input is
+        // routinely present but hidden behind a styled button, and an earlier
+        // version of this check read `file.type === 'file'` as corroboration —
+        // which is true of every file input that exists, so any page carrying one
+        // counted as a form and the apply verb was refused on it.
         const file = document.querySelector('input[type="file"]');
-        return !!(file && (file.offsetParent !== null || file.type === 'file'));
+        return !!(file && file.offsetParent !== null);
     } catch { return true; }   // can't tell → assume a form, i.e. refuse
 }
 
