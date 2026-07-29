@@ -98,6 +98,27 @@ export function trace(step, data) {
 }
 
 /**
+ * Record a step only the first time this exact situation occurs.
+ *
+ * The loop re-checks the same conditions every iteration, so the honest
+ * per-iteration trace repeated "no login wall here" and "no upload target here"
+ * a dozen times with identical bodies — and the buffer is meant to be PASTED,
+ * where length is the binding constraint. The first real My Information trace
+ * was cut off by the chat client before reaching the line that explained it,
+ * killed by its own noise.
+ *
+ * `key` is the signature of the situation, not of the step: repeat it and the
+ * row is dropped, change it and the row is kept. Per page load, so a navigation
+ * legitimately reports the same condition again.
+ */
+const seenOnce = new Set();
+export function traceOnce(key, step, data) {
+    if (seenOnce.has(key)) return null;
+    seenOnce.add(key);
+    return trace(step, data);
+}
+
+/**
  * Print everything, including the steps that happened before the last
  * navigation — which is usually where the cause is.
  */

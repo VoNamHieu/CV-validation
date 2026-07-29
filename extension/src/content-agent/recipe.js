@@ -15,7 +15,7 @@
 
 import { deepFindControl, deepQuery, deepQueryAll, dropFileOnZone, safeActivate, setFileOnInput, setNativeValue, simulateTyping, sleep, waitForElement } from './dom.js';
 import { isThirdPartyApply } from './detect.js';
-import { trace } from './trace.js';
+import { trace, traceOnce } from './trace.js';
 
 // Keep in sync with frontend/src/lib/applyRecipes.ts (WORKDAY). Fields verified
 // against real 3M Workday captures (My Information, 2026-07-15 / -22). The
@@ -51,8 +51,15 @@ export const FALLBACK_RECIPES = [
                 fields: [
                     { label: 'First name', selector: '[data-automation-id="formField-legalName--firstName"] input', profileKey: 'firstName', type: 'text', required: true },
                     { label: 'Last name', selector: '[data-automation-id="formField-legalName--lastName"] input', profileKey: 'lastName', type: 'text', required: true },
-                    { label: 'Address line 1', selector: '[data-automation-id="formField-addressLine1"] input', profileKey: 'addressStreet', type: 'text' },
-                    { label: 'District or Town', selector: '[data-automation-id="formField-city"] input', profileKey: 'addressDistrict', type: 'text' },
+                    // REQUIRED on Mondelez (measured), and the flat profile carries
+                    // them only if the user filled them in by hand — a CV states an
+                    // address but nothing extracts it into those two keys. When they
+                    // were profile-only the planner hit two empty required fields
+                    // and returned NEED_HUMAN, ending the run on data the CV was
+                    // holding all along. Resolution is value → profileKey → cvPath,
+                    // so a filled profile still wins.
+                    { label: 'Address line 1', selector: '[data-automation-id="formField-addressLine1"] input', profileKey: 'addressStreet', cvPath: 'contact.address_street', type: 'text', required: true },
+                    { label: 'District or Town', selector: '[data-automation-id="formField-city"] input', profileKey: 'addressDistrict', cvPath: 'contact.address_district', type: 'text', required: true },
                     // Required text input; a résumé never carries it, so autofill leaves
                     // it blank and the step's Next validation blocks. Default to the VN
                     // generic postal code.
@@ -568,7 +575,11 @@ export async function applyRecipeFields(recipe, profile, cvData, cv) {
             // the file reach an input, and was this pass then cut short to let the
             // parser run (`once`) — because that early return is indistinguishable
             // from a stall if you are watching the page rather than the code.
-            trace('upload', {
+            // Only when something is actually there. A page with no upload target
+            // reports "nothing here" identically on every iteration, and those
+            // rows crowded out the ones that explained a failure.
+            const notable = ok || !!fileEl || already || !!host;
+            (notable ? trace : traceOnce.bind(null, `upload.none:${location.pathname}:${key}`))('upload', {
                 target: key,
                 via: t.via || 'input',
                 hostFound: !!host,
@@ -696,7 +707,11 @@ export async function applyRecipeFields(recipe, profile, cvData, cv) {
     // dropped ('FAIL — value did not stick'). All three present identically from
     // outside — the Next button simply does nothing — and the console line above
     // dies with the document on the navigation that never comes.
-    trace('recipe.fields', {
+    // Skip the idempotent all-"done" passes; the recipe re-runs every iteration
+    // and a step that is already filled has nothing to explain.
+    const notable = filled > 0 || failed.length
+        || outcomes.some(([, st]) => st === 'absent' || st === 'skip');
+    (notable ? trace : traceOnce.bind(null, `recipe.done:${step.name}`))('recipe.fields', {
         step: step.name,
         filled,
         ok: outcomes.filter(([, s]) => s === 'OK').map(([l]) => l).join(', ') || null,

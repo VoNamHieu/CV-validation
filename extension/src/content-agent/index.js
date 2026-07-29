@@ -22,7 +22,7 @@ import { executeFillInstructions } from './fill.js';
 import { auditRequiredBlockers, observePageState, scrollAndCollect } from './observe.js';
 import { findApplyButton, isApplicationFormPage, summarizeState, waitForJobPageSignal } from './detect.js';
 import { detectLoginWall, handleLoginWall } from './login.js';
-import { trace, traceClear, traceDump } from './trace.js';
+import { trace, traceClear, traceDump, traceOnce } from './trace.js';
 import { applyRecipeFields, atFinalStep, clickRecipeGateway, loadRecipes, recipeForUrl } from './recipe.js';
 import { checkClick, logDenial } from './policy.js';
 import { buildManifest, summarizeGaps, VERDICT } from './needs.js';
@@ -474,7 +474,9 @@ async function runAgentLoop(profile) {
             const _wall = (_tenant && !atsAuthDone) ? detectLoginWall(recipe?.login) : null;
             if (_tenant && !atsAuthDone && !_wall) {
                 const pw = [...document.querySelectorAll('input[type="password"]')];
-                trace('auth.skip', {
+                // Once per page, not once per iteration: the loop re-asks every
+                // pass and the answer only changes on navigation.
+                traceOnce(`auth.skip:${location.pathname}`, 'auth.skip', {
                     why: 'no login wall detected',
                     tenant: _tenant.tenantKey,
                     pwTotal: pw.length,
@@ -482,7 +484,8 @@ async function runAgentLoop(profile) {
                     bodyHead: (document.body?.innerText || '').replace(/\s+/g, ' ').slice(0, 140),
                 });
             } else if (_tenant && atsAuthDone) {
-                trace('auth.skip', { why: 'already authenticated this page-load', tenant: _tenant.tenantKey });
+                traceOnce(`auth.done:${location.pathname}`, 'auth.skip',
+                    { why: 'already authenticated this page-load', tenant: _tenant.tenantKey });
             }
 
             if (!atsAuthDone && _tenant && _wall) {

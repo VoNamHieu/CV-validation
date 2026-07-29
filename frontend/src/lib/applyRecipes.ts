@@ -178,8 +178,14 @@ const WORKDAY: ApplyRecipe = {
                 // we leave to the LLM since we have no romanization-split for it).
                 { label: 'First name', selector: '[data-automation-id="formField-legalName--firstName"] input', profileKey: 'firstName', type: 'text', required: true },
                 { label: 'Last name', selector: '[data-automation-id="formField-legalName--lastName"] input', profileKey: 'lastName', type: 'text', required: true },
-                { label: 'Address line 1', selector: '[data-automation-id="formField-addressLine1"] input', profileKey: 'addressStreet', type: 'text' },
-                { label: 'District or Town', selector: '[data-automation-id="formField-city"] input', profileKey: 'addressDistrict', type: 'text' },
+                // REQUIRED on Mondelez (measured), and the flat profile carries them
+                // only if the user typed them in — a CV states an address but nothing
+                // extracts it into those two keys. Profile-only, the planner hit two
+                // empty required fields and returned NEED_HUMAN, ending the run on
+                // data the CV was holding all along. Order is value → profileKey →
+                // cvPath, so a filled profile still wins.
+                { label: 'Address line 1', selector: '[data-automation-id="formField-addressLine1"] input', profileKey: 'addressStreet', cvPath: 'contact.address_street', type: 'text', required: true },
+                { label: 'District or Town', selector: '[data-automation-id="formField-city"] input', profileKey: 'addressDistrict', cvPath: 'contact.address_district', type: 'text', required: true },
                 // Required text input a résumé never carries → autofill leaves it blank
                 // and Next validation blocks. Default to the VN generic postal code.
                 { label: 'Postal Code', selector: '[data-automation-id="formField-postalCode"] input', value: '100000', type: 'text', required: true },
