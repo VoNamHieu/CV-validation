@@ -8,6 +8,15 @@ import { tenantRefFor, sortJobsByTenant } from './ats/tenant.js';
 import { BLOCKING_STATES } from './ats/states.js';
 import * as atsBackend from './ats/backend.js';
 import * as atsCoord from './ats/coordinator.js';
+import { initFixture } from './fixtures/dummy.js';
+
+// Seeds a fake candidate in `npm run build:test` bundles, and does nothing at all
+// in a normal one — build.mjs resolves this import to fixtures/noop.js, so there
+// is no flag to read and no branch to get wrong. Called on every worker wake
+// rather than on install: MV3 recycles the worker constantly, and a seed that ran
+// once would miss storage cleared in between. It no-ops when the slots are
+// already filled, so repeating it costs one read.
+initFixture();
 
 // Dev triggers (run in the service-worker console against your live session):
 //   copoWdApi('<apply url>')        — create/fill an application (uses jobfitProfile)

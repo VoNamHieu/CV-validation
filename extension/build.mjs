@@ -6,9 +6,15 @@
 // dist/ unpacked. Ship: `npm run zip`.
 import esbuild from 'esbuild';
 import { cpSync, mkdirSync, rmSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 const OUT = 'dist';
 const watch = process.argv.includes('--watch');
+// `npm run build:test` → a bundle that seeds itself with a fake candidate so the
+// apply agent can be driven without the web app, a synced profile or a tailored
+// CV. Off by default, and esbuild folds the constant so a normal build contains
+// neither the fixture data nor the call that would use it.
+const fixture = process.argv.includes('--fixture');
 
 // Static assets (source of truth at the extension root) copied as-is into dist.
 const STATIC = ['manifest.json', 'popup.html', 'content.css', 'popup.css', 'icons'];
@@ -37,6 +43,19 @@ const options = {
     logLevel: 'info',
     minify: false,      // keep readable — we debug these live in the browser
     sourcemap: false,
+    // Point the fixture import at an empty stub unless this is a fixture build.
+    // Dead-code elimination alone was not enough: esbuild folds the guard and
+    // tree-shakes the module but keeps the `if (false)` block calling into it,
+    // leaving a production bundle that referenced a function it no longer
+    // contained. Swapping the file makes the absence structural instead.
+    plugins: fixture ? [] : [{
+        name: 'strip-fixtures',
+        setup(build) {
+            build.onResolve({ filter: /fixtures\/dummy\.js$/ }, () => ({
+                path: resolve('src/fixtures/noop.js'),
+            }));
+        },
+    }],
 };
 
 if (watch) {
@@ -47,5 +66,5 @@ if (watch) {
     console.log('[build] watching src/ → dist/ (re-run `npm run build` after editing manifest/static)');
 } else {
     await esbuild.build(options);
-    console.log('[build] done → dist/');
+    console.log(`[build] done → dist/${fixture ? '  ⚠️  FIXTURE BUILD — seeds fake candidate data' : ''}`);
 }
