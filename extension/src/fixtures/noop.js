@@ -19,3 +19,16 @@ export function initFixture() {
        helper is installed, so `copoFixture` is undefined. That absence is a
        usable check: if it answers in a build you thought was clean, it is not. */
 }
+
+/**
+ * Always null in production, which is the point.
+ *
+ * The fixture reads an ATS password out of chrome.storage.local. Production
+ * never does: it fetches credentials from the backend at the moment of use and
+ * keeps them in local scope for the length of the fill. Returning null here is
+ * what makes "a stored password can be used to apply" untrue of a shipped build
+ * rather than merely unused by it.
+ */
+export async function readFixtureCredential() {
+    return null;
+}

@@ -8,7 +8,7 @@ import { tenantRefFor, sortJobsByTenant } from './ats/tenant.js';
 import { BLOCKING_STATES } from './ats/states.js';
 import * as atsBackend from './ats/backend.js';
 import * as atsCoord from './ats/coordinator.js';
-import { initFixture } from './fixtures/dummy.js';
+import { initFixture, readFixtureCredential } from './fixtures/dummy.js';
 
 // Seeds a fake candidate in `npm run build:test` bundles, and does nothing at all
 // in a normal one — build.mjs resolves this import to fixtures/noop.js, so there
@@ -71,6 +71,13 @@ const ATS_BLOCK_DETAIL = {
 // Declared up here with the rest of the durable state: `adoptPersistedState`
 // rehydrates it on worker wake, so it must not sit below that function's use.
 const pendingAtsCredential = {};
+
+// Tenants whose credential came from the fixture rather than the backend.
+// Deliberately NOT persisted: it exists only to stop the auth result being
+// reported for an account the backend has no row for, and a worker recycled
+// mid-attempt loses nothing that matters — the report would be rejected anyway.
+// Always empty in production, where readFixtureCredential returns null.
+const fixtureServedTenants = new Set();
 
 // ─── Restore in-flight state on service-worker wake (MV3 kills idle SWs) ───
 const RESTORE_KEYS = [
@@ -1028,9 +1035,37 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             const ref = tenantRefFor(message.url);
             if (!ref) { sendResponse({ ok: false, reason: 'manual', detail: 'Trang này không cần tài khoản' }); return; }
 
+            // Fixture builds only — resolves to null in production, so the branch
+            // is dead weight there rather than a second credential path.
+            //
+            // A supplied credential is a statement that the account EXISTS, and
+            // that is what 'ready' encodes, so setting it here is not a shortcut
+            // around the coordinator: nextOperation reads the same state it always
+            // does and returns 'login' instead of the signup-first probe, and the
+            // per-tenant attempt budget still applies. Testing against a real ATS
+            // otherwise starts by trying to register an account that is already
+            // there.
+            const fixtureCred = await readFixtureCredential();
+            if (fixtureCred && fixtureCred.operation === 'login') {
+                atsCoord.setState(ref.tenantKey, { accountState: 'ready' });
+            }
+
             const operation = atsCoord.nextOperation(ref.tenantKey);
             if (!operation) {
                 sendResponse({ ok: false, reason: 'manual', detail: 'Đã thử đăng nhập tối đa cho công ty này' });
+                return;
+            }
+
+            if (fixtureCred) {
+                console.warn(`[Copo] ⚠️  FIXTURE CREDENTIAL used for ${ref.tenantKey} (${operation}) — `
+                    + 'this password came from chrome.storage.local, which production never reads.');
+                atsCoord.recordAttempt(ref.tenantKey, operation);
+                fixtureServedTenants.add(ref.tenantKey);
+                sendResponse({
+                    ok: true,
+                    operation,
+                    credentials: { email: fixtureCred.email, password: fixtureCred.password },
+                });
                 return;
             }
 
@@ -1085,6 +1120,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         (async () => {
             const ref = tenantRefFor(message.url);
             if (!ref || !message.result) { sendResponse({ ok: false }); return; }
+
+            // A fixture credential has no row on the backend, so reporting it
+            // would POST an attempt against a credentialId that does not exist
+            // and come back rejected — noise that reads like a real failure while
+            // testing. Record the outcome locally and stop there.
+            if (fixtureServedTenants.has(ref.tenantKey)) {
+                const ok = message.result.outcome === 'success';
+                const local = ok ? 'ready' : 'unknown';
+                atsCoord.setState(ref.tenantKey, { accountState: local });
+                console.warn(`[Copo] ⚠️  FIXTURE — auth result for ${ref.tenantKey} `
+                    + `(${message.result.outcome}) NOT reported to the backend.`);
+                sendResponse({ ok: true, state: local, reason: atsCoord.blockedReason(local) });
+                return;
+            }
 
             const report = await atsBackend.reportAuthResult(ref, message.result, {
                 credentialId: pendingAtsCredential[ref.tenantKey],

@@ -250,6 +250,47 @@ export async function seedDummyData() {
     return seeded;
 }
 
+/**
+ * The storage key a test build reads an ATS login out of.
+ *
+ * Production has no such key and must not grow one. Credentials there are
+ * fetched from the backend per tenant, at the moment of use, and live only in
+ * the content script's local scope for the length of the fill — a password in
+ * chrome.storage.local is readable by anything that can reach the extension's
+ * storage and outlives the apply by however long nobody clears it. This exists
+ * because testing against a real ATS otherwise needs the whole backend
+ * credential path stood up, and it is confined to fixture builds by the same
+ * module swap that hides the fake candidate.
+ */
+export const CREDENTIAL_KEY = 'jobfitApplyCredentials';
+
+/**
+ * Read the test login, if one was supplied.
+ *
+ * Shape: `{ email, password }`, optionally `{ operation: 'signup' }` to probe an
+ * account that does not exist yet. Set it from the service-worker console:
+ *
+ *   chrome.storage.local.set({ jobfitApplyCredentials: { email: '…', password: '…' } })
+ *
+ * One credential covers every tenant. That is wrong for a real batch across
+ * several companies and exactly right for driving one ATS by hand, which is what
+ * this is for.
+ */
+export async function readFixtureCredential() {
+    if (typeof chrome === 'undefined' || !chrome?.storage?.local) return null;
+    const got = await chrome.storage.local.get(CREDENTIAL_KEY);
+    const c = got?.[CREDENTIAL_KEY];
+    if (!c?.email || !c?.password) return null;
+    return {
+        email: String(c.email),
+        password: String(c.password),
+        // Default LOGIN, not signup. Supplying a credential is a statement that
+        // the account already exists, and the coordinator's signup-first probe is
+        // for tenants where that is unknown.
+        operation: c.operation === 'signup' ? 'signup' : 'login',
+    };
+}
+
 /** Replace whatever is in the four slots with the fixture. */
 export async function installDummyData() {
     if (typeof chrome === 'undefined' || !chrome?.storage?.local) return [];

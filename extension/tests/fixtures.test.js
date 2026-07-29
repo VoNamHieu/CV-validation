@@ -15,16 +15,63 @@ import * as noop from '../src/fixtures/noop.js';
 import { PROFILE_KEYS, buildManifest, classifyField, canonicalValue } from '../src/content-agent/needs.js';
 
 describe('the production stub can stand in for the fixture', () => {
-    test('it provides what background.js imports', () => {
-        // build.mjs swaps the module by path, so a rename here is caught by
-        // esbuild — but only for the ONE name background imports today. This
-        // pins that name so the swap cannot quietly become a partial one.
-        assert.equal(typeof noop.initFixture, 'function');
-        assert.equal(typeof dummy.initFixture, 'function');
+    test('it provides every name background.js imports', () => {
+        // build.mjs swaps the module by path, so a missing export is an esbuild
+        // error — but only for the names imported TODAY. Pinning them here keeps
+        // the swap from quietly becoming a partial one.
+        for (const name of ['initFixture', 'readFixtureCredential']) {
+            assert.equal(typeof noop[name], 'function', `noop.js is missing ${name}`);
+            assert.equal(typeof dummy[name], 'function', `dummy.js is missing ${name}`);
+        }
     });
 
     test('the stub does nothing without a chrome runtime', () => {
         assert.doesNotThrow(() => noop.initFixture());
+    });
+
+    test('production never yields a credential', async () => {
+        // The property that matters more than any other in this file: a shipped
+        // build cannot log into an ATS with a password someone left in storage,
+        // because the function that would read it returns null unconditionally.
+        assert.equal(await noop.readFixtureCredential(), null);
+    });
+});
+
+describe('the fixture credential', () => {
+    // chrome.storage stub — enough to exercise the read, and it disappears with
+    // the test rather than becoming a fake the rest of the suite quietly leans on.
+    const withStorage = async (value, fn) => {
+        const prev = globalThis.chrome;
+        globalThis.chrome = { storage: { local: { get: async () => ({ jobfitApplyCredentials: value }) } } };
+        try { return await fn(); } finally { globalThis.chrome = prev; }
+    };
+
+    test('defaults to LOGIN, not signup', async () => {
+        // Supplying a credential says the account exists. Probing signup first —
+        // the right default when that is unknown — means every test run opens by
+        // trying to register an account that is already there.
+        const c = await withStorage({ email: 'a@b.test', password: 'pw' }, dummy.readFixtureCredential);
+        assert.equal(c.operation, 'login');
+    });
+
+    test('signup is available when asked for by name', async () => {
+        const c = await withStorage({ email: 'a@b.test', password: 'pw', operation: 'signup' },
+            dummy.readFixtureCredential);
+        assert.equal(c.operation, 'signup');
+    });
+
+    test('a half-filled credential is no credential', async () => {
+        // Otherwise a typo'd key sends the agent at a login form with a blank
+        // password, which burns an attempt against the tenant's budget.
+        for (const bad of [null, {}, { email: 'a@b.test' }, { password: 'pw' }, { email: '', password: 'pw' }]) {
+            assert.equal(await withStorage(bad, dummy.readFixtureCredential), null, JSON.stringify(bad));
+        }
+    });
+
+    test('no chrome runtime means no credential', async () => {
+        const prev = globalThis.chrome;
+        globalThis.chrome = undefined;
+        try { assert.equal(await dummy.readFixtureCredential(), null); } finally { globalThis.chrome = prev; }
     });
 });
 
