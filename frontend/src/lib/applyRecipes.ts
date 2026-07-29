@@ -214,6 +214,12 @@ const WORKDAY: ApplyRecipe = {
                 // Required multi-select (input-based, not a button): the LLM types but never
                 // commits an item, leaving it empty ("0 items selected") and blocking Next.
                 { label: 'Country Phone Code', selector: '[data-automation-id="formField-countryPhoneCode"] input', value: 'Vietnam', type: 'custom-select', multi: true, required: true },
+            // REQUIRED on Mondelez and matched by nothing here — the recipe filled
+            // the other eleven required fields and left this one, so the step never
+            // validated and never advanced. "No" is not a guess: it is the
+            // deterministic Answer Policy rule for previous_employment, and a
+            // candidate who HAD worked there would be applying from an internal site.
+            { label: 'Previously worked here', selector: '[data-automation-id="formField-candidateIsPreviousWorker"]', value: 'No', type: 'radio', required: true, answerSource: 'AGENT_DEFAULT' },
             ],
             advance: '[data-automation-id="pageFooterNextButton"]',
         },

@@ -533,6 +533,22 @@ describe('workday recipe steps are mutually exclusive', () => {
         assert.ok(step.advanceWhen, 'and without this it clicks Continue before the CV attaches');
     });
 
+    test('every REQUIRED field measured on Mondelez has a recipe entry', () => {
+        // The exact list read off a live My Information step. The recipe covered
+        // eleven of the twelve; the missing one was a required RADIO group, and
+        // the advance is withheld while anything required is empty — so the step
+        // filled almost completely and then sat there with nothing to show for it.
+        const MEASURED_REQUIRED = [
+            'source', 'candidateIsPreviousWorker', 'country', 'legalName--lastName',
+            'legalName--firstName', 'addressLine1', 'city', 'countryRegion',
+            'postalCode', 'phoneType', 'countryPhoneCode', 'phoneNumber',
+        ];
+        const covered = wd.steps.find(s => s.name === 'My Information').fields
+            .map(f => f.selector).join(' ');
+        const missing = MEASURED_REQUIRED.filter(id => !covered.includes(`formField-${id}`));
+        assert.deepEqual(missing, [], 'a required field with no recipe entry stalls the step silently');
+    });
+
     test('the upload page never shadows a real form step', () => {
         // Workday keeps the /apply/autofillWithResume URL for the whole wizard, so
         // if that page container outlives the step it names, first-match order is

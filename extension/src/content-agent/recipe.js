@@ -99,6 +99,13 @@ export const FALLBACK_RECIPES = [
                     // stays empty ("0 items selected") and silently blocks Next — the
                     // scanner can't see it's required, so the agent looped until stuck.
                     { label: 'Country Phone Code', selector: '[data-automation-id="formField-countryPhoneCode"] input', value: 'Vietnam', type: 'custom-select', multi: true, required: true },
+                    // REQUIRED on Mondelez and matched by nothing here — the recipe
+                    // filled the other eleven required fields and left this one, so
+                    // the step never validated and never advanced. "No" is not a
+                    // guess: it is the deterministic Answer Policy rule for
+                    // previous_employment, and a candidate who HAD worked there
+                    // would be applying from an internal site.
+                    { label: 'Previously worked here', selector: '[data-automation-id="formField-candidateIsPreviousWorker"]', value: 'No', type: 'radio', required: true, answerSource: 'AGENT_DEFAULT' },
                 ],
                 advance: '[data-automation-id="pageFooterNextButton"]',
             },
@@ -612,7 +619,13 @@ export async function applyRecipeFields(recipe, profile, cvData, cv) {
         const provenance = f.answerSource
             || (f.profileKey && profile[f.profileKey] ? 'PROFILE' : 'AGENT_DEFAULT');
         try {
-            if (f.type === 'custom-select') {
+            if (f.type === 'radio') {
+                const r = fillRadio(f, val);
+                if (r.ok) { filled++; outcomes.push([f.label, 'OK', String(val)]); answers.push({ field: f.label, value: val, source: provenance }); }
+                else if (r.reason === 'already-selected') outcomes.push([f.label, 'done', 'already selected']);
+                else if (r.reason === 'group-absent') outcomes.push([f.label, 'absent', 'not rendered yet']);
+                else outcomes.push([f.label, 'FAIL', r.reason]);
+            } else if (f.type === 'custom-select') {
                 const r = await fillCustomSelect(f, val);
                 if (r.ok) {
                     filled++;
@@ -677,8 +690,67 @@ export async function applyRecipeFields(recipe, profile, cvData, cv) {
         console.warn(`[Copo Recipe] ✗ FAILED (${step.name}):`,
             failed.map(([l, , why]) => `${l} — ${why}`).join('  |  '));
     }
+    // The same verdicts into the trace. A step that will not advance is always
+    // one of these: a field the recipe never had, one whose selector no longer
+    // resolves ('absent' every pass), or one that took a value the page then
+    // dropped ('FAIL — value did not stick'). All three present identically from
+    // outside — the Next button simply does nothing — and the console line above
+    // dies with the document on the navigation that never comes.
+    trace('recipe.fields', {
+        step: step.name,
+        filled,
+        ok: outcomes.filter(([, s]) => s === 'OK').map(([l]) => l).join(', ') || null,
+        alreadyDone: outcomes.filter(([, s]) => s === 'done').length,
+        absent: outcomes.filter(([, s]) => s === 'absent').map(([l]) => l).join(', ') || null,
+        skipped: outcomes.filter(([, s]) => s === 'skip').map(([l, , why]) => `${l}(${why})`).join(', ') || null,
+        failed: failed.map(([l, , why]) => `${l}: ${why}`).join(' | ') || null,
+    });
 
     return { matched: true, filled, step: step.name, answers };
+}
+
+/**
+ * Pick one option in a radio group.
+ *
+ * The recipe had no radio support at all, which is why My Information stalled:
+ * Mondelez marks "Have you previously worked for this organization?" REQUIRED,
+ * and it is a radio group. The recipe filled the other eleven required fields,
+ * left that one untouched, and the advance is withheld while anything required
+ * is empty — so the step sat there with nothing to show for it.
+ *
+ * Three things this does NOT do, each learned from a real defect:
+ *   · It does not set `.checked` directly. An earlier version did, and it also
+ *     dispatched `change` and reported success even when the policy had refused
+ *     the click — a refusal that silently became a mutation.
+ *   · It does not match by substring alone. "No" is a substring of "Not
+ *     applicable" and of "None of the above", so an exact label match wins first
+ *     and a substring only counts when exactly one option has it.
+ *   · It does not report success on a click that did not take. Workday's radios
+ *     sit under overlays; the only proof is re-reading `checked` afterwards.
+ */
+function fillRadio(f, val) {
+    const wrap = document.querySelector(f.selector);
+    if (!wrap) return { ok: false, reason: 'group-absent' };
+    const radios = [...wrap.querySelectorAll('input[type="radio"]')].filter(r => r.offsetParent !== null);
+    if (!radios.length) return { ok: false, reason: 'group-absent' };
+
+    const labelOf = (r) => {
+        const byFor = r.id ? wrap.querySelector(`label[for="${CSS.escape(r.id)}"]`) : null;
+        return ((byFor || r.closest('label'))?.textContent || '').replace(/\s+/g, ' ').trim();
+    };
+    const want = String(val).trim().toLowerCase();
+    if (radios.some(r => r.checked && labelOf(r).toLowerCase() === want)) {
+        return { ok: false, reason: 'already-selected' };
+    }
+    const exact = radios.filter(r => labelOf(r).toLowerCase() === want);
+    const loose = radios.filter(r => labelOf(r).toLowerCase().includes(want));
+    const target = exact[0] || (loose.length === 1 ? loose[0] : null);
+    if (!target) return { ok: false, reason: `no unique option for "${val}"` };
+
+    if (!safeActivate(target, { source: 'recipe', activation: 'widget-option' }, f.selector)) {
+        return { ok: false, reason: 'policy-denied' };
+    }
+    return target.checked ? { ok: true } : { ok: false, reason: 'click did not select it' };
 }
 
 /**
