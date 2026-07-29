@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 
 import {
     buildManifest, classifyField, canonicalValue, compareValues, summarizeGaps,
-    SOURCE, VERDICT,
+    FIELD_PATTERNS, PROFILE_KEYS, SOURCE, VERDICT,
 } from '../src/content-agent/needs.js';
 
 const DATA = {
@@ -158,5 +158,24 @@ describe('overriding a wrong parse', () => {
             [field({ label: 'Job Title', value: 'Consultant', componentType: 'custom-dropdown' })], data);
         assert.equal(m.override.length, 0);
         assert.ok(m.verify.some(v => v.verdict === VERDICT.MISMATCH));
+    });
+});
+
+// ── the schema contract ────────────────────────────────────────────────────
+describe('every profileKey a pattern reads actually exists', () => {
+    test('no pattern names a field the schema does not define', () => {
+        // A profileKey the schema never defines reads as undefined forever, which
+        // is indistinguishable from "the user has not filled it in" — so the field
+        // is reported as a gap the user has no way to close. Five keys were in
+        // exactly that state until the schema caught up.
+        const unknown = FIELD_PATTERNS
+            .filter(p => p.profileKey && !PROFILE_KEYS.has(p.profileKey))
+            .map(p => `${p.key} → profile.${p.profileKey}`);
+        assert.deepEqual(unknown, [], 'add these to ExtensionProfile, or read them via cvPath');
+    });
+
+    test('every pattern can be answered from somewhere', () => {
+        const orphans = FIELD_PATTERNS.filter(p => !p.profileKey && !p.path).map(p => p.key);
+        assert.deepEqual(orphans, [], 'a pattern with no source can only ever be a gap');
     });
 });

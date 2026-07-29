@@ -15,6 +15,10 @@ export interface EducationDetail {
     degree: string;
     institution: string;
     year: string;
+    /** Optional: several ATS ask for it as a REQUIRED field (Workday's "Overall
+     *  Result (GPA)"), and no résumé parse can supply it — only the candidate
+     *  knows. Optional so CVs saved before this existed still type-check. */
+    gpa?: string;
 }
 
 export interface ProjectDetail {
@@ -49,6 +53,8 @@ export interface ContactInfo {
     address_province: string;
     address_district: string;
     address_street: string;
+    /** Required by several international ATS and never present on a CV. */
+    address_postal_code?: string;
     linkedin: string;
     github: string;
     portfolio: string;
@@ -75,6 +81,17 @@ export interface EmploymentInfo {
 export interface JobPreferences {
     desired_locations: string;
     desired_salary: string;
+    /** Answers application forms demand that a CV never states. Collected once,
+     *  reused at every company — the alternative is what happens today: an
+     *  application stalls on "Notice period", the user fixes it by hand, and the
+     *  next company asks exactly the same thing.
+     *  Optional so existing saved CVs still type-check. */
+    notice_period?: string;
+    /** "Are you legally authorized to work in X?" — a material statement, so the
+     *  agent never guesses it. Stored as the candidate's own answer. */
+    work_authorized?: string;
+    /** "Will you require visa sponsorship?" — same reasoning. */
+    requires_sponsorship?: string;
 }
 
 // Languages a cover letter can be generated in. Add an entry here and it shows

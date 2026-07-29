@@ -54,7 +54,7 @@ export const FIELD_PATTERNS = [
     { key: 'addressDistrict', match: /district|town|city\b|quận|huyện|thành phố/i, profileKey: 'addressDistrict' },
     { key: 'addressProvince', match: /province|region|state|tỉnh/i, profileKey: 'addressProvince' },
     { key: 'postalCode', match: /postal|zip|mã bưu/i, profileKey: 'postalCode' },
-    { key: 'gpa', match: /\bgpa\b|grade (average|point)|overall result|điểm trung bình/i, profileKey: 'gpa', userOnly: true },
+    { key: 'gpa', match: /\bgpa\b|grade (average|point)|overall result|điểm trung bình/i, path: 'education[0].gpa', userOnly: true },
     { key: 'school', match: /school|university|college|institution|trường/i, path: 'education[0].institution' },
     { key: 'fieldOfStudy', match: /field of study|major|subject|chuyên ngành|ngành học/i, path: 'education[0].degree' },
     { key: 'degree', match: /\bdegree\b|qualification|bằng cấp|trình độ/i, profileKey: 'highestDegree' },
@@ -75,6 +75,24 @@ export const FIELD_PATTERNS = [
     { key: 'workAuthorization', match: /legally authoriz|right to work|work permit/i, profileKey: 'workAuthorized', userOnly: true },
     { key: 'sponsorship', match: /sponsor|visa support|bảo lãnh/i, profileKey: 'requiresSponsorship', userOnly: true },
 ];
+
+/**
+ * The flat profile's keys, mirroring frontend/src/lib/extension-profile.ts.
+ *
+ * Kept here as a checkable list because the two live in different packages: a
+ * `profileKey` naming a field the schema does not define reads as `undefined`
+ * forever, which looks exactly like "the user has not filled it in" — so the
+ * field is reported as a gap the user can never close. Five keys were in that
+ * state (gpa, postalCode, noticePeriod, workAuthorized, requiresSponsorship)
+ * before the schema caught up. tests/needs.test.js asserts the two agree.
+ */
+export const PROFILE_KEYS = new Set([
+    'fullName', 'firstName', 'lastName', 'email', 'phone', 'dateOfBirth', 'gender',
+    'nationality', 'maritalStatus', 'addressProvince', 'addressDistrict', 'addressStreet',
+    'postalCode', 'currentTitle', 'currentLevel', 'yearsOfExperience', 'highestDegree',
+    'currentSalary', 'currentIndustry', 'currentFields', 'desiredLocations', 'desiredSalary',
+    'noticePeriod', 'workAuthorized', 'requiresSponsorship', 'coverLetter', 'skills',
+]);
 
 /** The concept a field is asking about, or null when nothing recognises it. */
 export function classifyField(field) {

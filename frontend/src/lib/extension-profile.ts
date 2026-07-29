@@ -21,6 +21,13 @@ export interface ExtensionProfile {
     currentLevel: string;
     yearsOfExperience: number;
     highestDegree: string;
+    // Answers international ATS demand that no CV states. Empty until the
+    // candidate supplies them; the agent reports them as gaps rather than
+    // guessing, so they can be collected once and reused everywhere.
+    postalCode: string;
+    noticePeriod: string;
+    workAuthorized: string;
+    requiresSponsorship: string;
     currentSalary: string;
     currentIndustry: string;
     currentFields: string;
@@ -63,6 +70,7 @@ export function cvToExtensionProfile(cv: CVData, coverLetterOverride?: string): 
         addressProvince: contact.address_province ?? "",
         addressDistrict: contact.address_district ?? "",
         addressStreet: contact.address_street ?? "",
+        postalCode: contact.address_postal_code ?? "",
         currentTitle,
         currentLevel: employment.current_level ?? "",
         yearsOfExperience,
@@ -72,6 +80,9 @@ export function cvToExtensionProfile(cv: CVData, coverLetterOverride?: string): 
         currentFields: employment.current_fields ?? "",
         desiredLocations: preferences.desired_locations ?? "",
         desiredSalary: preferences.desired_salary ?? "",
+        noticePeriod: preferences.notice_period ?? "",
+        workAuthorized: preferences.work_authorized ?? "",
+        requiresSponsorship: preferences.requires_sponsorship ?? "",
         coverLetter: (coverLetterOverride && coverLetterOverride.trim()) || (cv.summary ?? ""),
         skills: (cv.skills ?? []).join(", "),
     };
