@@ -1066,6 +1066,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 atsCoord.setState(ref.tenantKey, { accountState: 'ready' });
             }
 
+            // The budget decision lives here, so the content script's trace cannot
+            // show it — and "hết lượt" without the counters behind it is what made
+            // the last three investigations start from a guess.
+            console.log(`[Copo ATS] grant? ${ref.tenantKey}`, {
+                state: atsCoord.stateFor(ref.tenantKey),
+                attempts: atsCoord.snapshot().attempts?.[ref.tenantKey] || { signup: 0, login: 0 },
+                batch: atsCoord.currentBatchId(),
+                source: fixtureCred ? 'fixture' : 'backend',
+            });
+
             const operation = atsCoord.nextOperation(ref.tenantKey);
             if (!operation) {
                 // Name the batch. The old wording ("Đã thử đăng nhập tối đa cho

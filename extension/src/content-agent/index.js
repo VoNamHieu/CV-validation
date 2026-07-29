@@ -22,6 +22,7 @@ import { executeFillInstructions } from './fill.js';
 import { auditRequiredBlockers, observePageState, scrollAndCollect } from './observe.js';
 import { findApplyButton, isApplicationFormPage, summarizeState, waitForJobPageSignal } from './detect.js';
 import { detectLoginWall, handleLoginWall } from './login.js';
+import { trace, traceClear, traceDump } from './trace.js';
 import { applyRecipeFields, atFinalStep, clickRecipeGateway, loadRecipes, recipeForUrl } from './recipe.js';
 import { checkClick, logDenial } from './policy.js';
 import { buildManifest, summarizeGaps, VERDICT } from './needs.js';
@@ -97,6 +98,11 @@ const WORKDAY_ERROR_CARD_RE =
  * Main agentic loop: Observe → Plan → Act → Verify.
  */
 async function runAgentLoop(profile) {
+    // Deliberately NOT a reset. The agent is re-injected on every navigation, so
+    // each page load re-enters here — and the steps worth reading are the ones
+    // from before the last navigation. The buffer is cleared when a job's result
+    // is reported, not when a page loads.
+    trace('loop.enter', { host: location.hostname, hasProfile: !!profile });
     const history = [];
     let prevStateHash = '';
     let prevStepCurrent = null;
@@ -450,8 +456,14 @@ async function runAgentLoop(profile) {
                 // The grant spends the tenant's attempt, so asking for one we
                 // cannot use is how a tenant runs out of logins without the ATS
                 // ever seeing a submission.
-                if (!await waitForLoginFormReady(recipe?.login)) {
-                    console.log('[Copo Agent] login wall detected but not fillable yet — waiting');
+                trace('auth.wall', {
+                    tenant: tenantRefFor(location.href)?.tenantKey,
+                    passwordFields: document.querySelectorAll('input[type="password"]').length,
+                    iteration: i + 1,
+                });
+                const ready = await waitForLoginFormReady(recipe?.login);
+                if (!ready) {
+                    trace('auth.notReady', { waitedMs: 8000, action: 'retry next iteration' });
                     await sleep(1000);
                     continue;
                 }
@@ -461,6 +473,13 @@ async function runAgentLoop(profile) {
                 // at, login for one we have). It owns the attempt budget, because a
                 // content script dies on every navigation and can't count.
                 const grant = await requestAtsAuth();
+                trace('auth.grant', {
+                    ok: !!grant?.ok,
+                    operation: grant?.operation,
+                    reason: grant?.reason,
+                    detail: grant?.detail,
+                    email: grant?.credentials?.email,
+                });
 
                 if (!grant?.ok) {
                     // No credential we can use, or the budget is spent. Don't sit on
@@ -476,11 +495,13 @@ async function runAgentLoop(profile) {
                     grant.operation === 'signup' ? 'Tạo tài khoản…' : 'Đăng nhập…');
 
                 let result = await handleLoginWall(grant.credentials, recipe?.login, grant.operation);
+                trace('auth.attempt', { pass: 1, outcome: result?.outcome, pending: result?.pending, result: result === null ? 'null' : undefined });
                 // A form switch (sign-in ⇄ create account) isn't an attempt; run the
                 // real one on the form we asked for.
                 if (result?.pending) {
                     await sleep(1200);
                     result = await handleLoginWall(grant.credentials, recipe?.login, grant.operation);
+                    trace('auth.attempt', { pass: 2, outcome: result?.outcome, result: result === null ? 'null' : undefined });
                 }
 
                 // Null means handleLoginWall found no wall to act on — it went away
@@ -491,7 +512,7 @@ async function runAgentLoop(profile) {
                 // not finished loading, and leave the tenant with no logins left.
                 if (!result) {
                     await abandonAtsAuth(grant.operation, 'no login form to act on');
-                    console.log('[Copo Agent] login wall vanished before fill — attempt refunded');
+                    trace('auth.refund', { operation: grant.operation, why: 'handleLoginWall returned null' });
                     await sleep(1200);
                     continue;
                 }
@@ -500,6 +521,10 @@ async function runAgentLoop(profile) {
                 // Report the verdict; the background persists it, so every remaining
                 // job on this tenant inherits it instead of re-probing.
                 const verdict = await reportAtsAuth(result);
+                trace('auth.verdict', {
+                    outcome: result.outcome, source: result.source, sourceCode: result.sourceCode,
+                    state: verdict?.state, blocked: verdict?.reason,
+                });
                 atsAuthDone = true;
 
                 if (result?.outcome === 'success') {
@@ -1005,6 +1030,13 @@ function contextGone() {
 function reportResult(success, detail, outcome, extra = {}) {
     const o = outcome || (success ? 'filled' : 'failed');
     console.log(`[Copo Apply] ■ result: ${success ? '✅' : '✖'} outcome=${o} | ${detail} | ${window.location.hostname}`);
+    // A run that did not finish is the one worth explaining, and the reason is
+    // usually several navigations back — where the console for it no longer
+    // exists. Print the whole trace here so a failure is one paste, not an
+    // archaeology exercise.
+    trace('run.end', { success, outcome: o, detail, ...extra });
+    if (!success) traceDump(`${o} — ${detail}`);
+    traceClear();   // this job is over; the next one starts from an empty buffer
     if (contextGone()) {
         console.warn('[Copo Apply] extension was reloaded — this tab is orphaned, result not reported');
         return;

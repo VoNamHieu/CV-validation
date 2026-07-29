@@ -2,6 +2,7 @@
 import { safeActivate, setNativeValue, sleep } from './dom.js';
 import { isThirdPartyApply } from './detect.js';
 import { evaluateConsent } from './policy.js';
+import { trace } from './trace.js';
 import { authResult, classifyDomError, detectChallenge } from '../ats/classifier.js';
 
 // Fill a login field the React-correct way: setNativeValue drives the value
@@ -47,6 +48,29 @@ function _findEmailField(recipeSel) {
 // belongs to policy.js: the same distinction (a marketing opt-in vs everything
 // else) has to hold for the planner and the recipe too, and two copies of a
 // safety rule is one copy too many.
+
+/**
+ * What the page's error banner actually says, for the LOCAL trace only.
+ *
+ * classifyDomError deliberately returns a code and no words, because its value
+ * is sent to the backend and auth banners echo the account's email. This reads
+ * the same nodes for the console, where nothing is transmitted — and "the ATS
+ * said Account locked" is the difference between a fix and another guess at
+ * `unrecognized_error`.
+ */
+function _visibleErrorText() {
+    try {
+        return [...document.querySelectorAll(
+            '[data-automation-id="errorMessage"], [data-automation-id*="errorMessage"], '
+            + '[role="alert"], .css-error, [data-automation-id="alertMessage"]')]
+            .filter(_vis)
+            .map(n => n.textContent || '')
+            .join(' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, 240) || null;
+    } catch { return null; }
+}
 
 function _labelTextFor(box) {
     return (
@@ -169,13 +193,27 @@ function _formKind(pwFields) {
  * password — so we only return the latter on an explicit credentials error.
  */
 export async function handleLoginWall(creds, login, operation = 'login', opts = {}) {
-    if (!creds || !creds.password) return null;
+    if (!creds || !creds.password) {
+        trace('login.abort', { why: 'no credential passed in', hasEmail: !!creds?.email });
+        return null;
+    }
     const wall = detectLoginWall(login);
-    if (!wall) return null;
+    if (!wall) {
+        // The single most common way this function does nothing: it is called a
+        // beat before (or after) the wall exists. Record what the page looked
+        // like, or the next investigation starts from zero again.
+        trace('login.noWall', {
+            passwordFields: document.querySelectorAll('input[type="password"]').length,
+            visiblePasswords: [...document.querySelectorAll('input[type="password"]')].filter(_vis).length,
+            bodyHead: (document.body?.innerText || '').replace(/\s+/g, ' ').slice(0, 120),
+        });
+        return null;
+    }
     const { pwFields } = wall;
 
     // A challenge beats everything: we cannot and must not try to solve it.
     if (detectChallenge()) {
+        trace('login.challenge', { operation });
         return authResult(operation, 'challenge_required', 'dom', { sourceCode: 'captcha' });
     }
 
@@ -184,18 +222,33 @@ export async function handleLoginWall(creds, login, operation = 'login', opts = 
     // existing account, or a login for an account that doesn't exist yet).
     const kind = _formKind(pwFields);
     const want = operation === 'signup' ? 'signup' : 'signin';
+    trace('login.form', { asked: operation, onScreen: kind, passwordFields: pwFields.length });
     if (kind !== want && _switchForm(want)) {
-        console.log(`[Copo Agent] login wall: switching to ${want} form`);
+        trace('login.switch', { from: kind, to: want });
         return { pending: true };
+    }
+    if (kind !== want) {
+        // No toggle found. We are about to fill the wrong kind of form, which is
+        // the one thing the switch above exists to prevent — so say so loudly
+        // rather than letting it read as a normal fill in the log.
+        trace('login.switchFailed', { asked: want, stuckOn: kind });
     }
 
     const isCreate = _formKind(pwFields) === 'signup';
     const emailEl = _findEmailField(login?.emailSelector);
-    if (emailEl && creds.email) await _typeInto(emailEl, creds.email);
+    const emailOk = !!(emailEl && creds.email) && await _typeInto(emailEl, creds.email);
     // Fill EVERY visible password box with the same value: a create-account form
     // (Workday) has Password + "Verify New Password" and both must match; a plain
     // sign-in form has one, so this is a no-op difference there.
-    for (const pw of pwFields) await _typeInto(pw, creds.password);
+    const pwOk = [];
+    for (const pw of pwFields) pwOk.push(await _typeInto(pw, creds.password));
+    trace('login.fill', {
+        emailFound: !!emailEl,
+        emailSelector: emailEl?.getAttribute('data-automation-id') || emailEl?.id || emailEl?.name || null,
+        emailAccepted: emailOk,
+        passwordsFilled: `${pwOk.filter(Boolean).length}/${pwFields.length}`,
+        isCreate,
+    });
     await sleep(300);
 
     let consentAccepted = null;
@@ -226,9 +279,16 @@ export async function handleLoginWall(creds, login, operation = 'login', opts = 
         // Declared as the login flow so the policy's account-creation rule lets
         // this through: it is the sanctioned path, running under the background's
         // per-tenant attempt budget.
-        safeActivate(btn, { source: 'login', formKind: isCreate ? 'signup' : 'signin' });
-        console.log(`[Copo Agent] login wall (${isCreate ? 'create-account' : 'sign-in'}): filled + submitted `
-            + `[${btn.getAttribute?.('data-automation-id') || 'button'}]`);
+        const clicked = safeActivate(btn, { source: 'login', formKind: isCreate ? 'signup' : 'signin' });
+        // safeActivate returns false when the policy refused or the element had no
+        // viewport box. Both look exactly like a successful submit from the
+        // outside — the page simply does not move — so the flag has to be recorded.
+        trace('login.submit', {
+            via: btn.getAttribute?.('data-automation-id') || btn.tagName,
+            label: (btn.textContent || '').trim().slice(0, 40),
+            activated: clicked,
+            isCreate,
+        });
     } else {
         // No button — press Enter (works on simple forms; ignored by hardened ones).
         const pw0 = pwFields[0];
@@ -236,7 +296,7 @@ export async function handleLoginWall(creds, login, operation = 'login', opts = 
         for (const type of ['keydown', 'keypress', 'keyup']) {
             pw0.dispatchEvent(new KeyboardEvent(type, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
         }
-        console.log(`[Copo Agent] login wall (${isCreate ? 'create-account' : 'sign-in'}): filled, no button — submitted via Enter`);
+        trace('login.submit', { via: 'Enter key', activated: null, isCreate, why: 'no submit button found' });
     }
 
     return await _observeOutcome(isCreate ? 'signup' : 'login', login, consentAccepted);
@@ -251,12 +311,16 @@ export async function handleLoginWall(creds, login, operation = 'login', opts = 
  */
 async function _observeOutcome(operation, login, consentAccepted) {
     const DEADLINE = Date.now() + 15000;
+    const startedAt = Date.now();
     let lastError = null;
+    let polls = 0;
 
     while (Date.now() < DEADLINE) {
         await sleep(700);
+        polls++;
 
         if (detectChallenge()) {
+            trace('login.outcome', { verdict: 'challenge_required', afterMs: Date.now() - startedAt });
             return authResult(operation, 'challenge_required', 'dom', {
                 sourceCode: 'captcha', consentAccepted,
             });
@@ -264,6 +328,10 @@ async function _observeOutcome(operation, login, consentAccepted) {
 
         const err = classifyDomError();
         if (err && err.code !== 'unrecognized_error') {
+            trace('login.outcome', {
+                verdict: err.outcome, code: err.code, afterMs: Date.now() - startedAt,
+                banner: _visibleErrorText(),
+            });
             return authResult(operation, err.outcome, 'dom', {
                 sourceCode: err.code, consentAccepted,
             });
@@ -274,9 +342,22 @@ async function _observeOutcome(operation, login, consentAccepted) {
         // interstitial, which classifyDomError catches above as
         // verification_required before we ever get here.
         if (!detectLoginWall(login)) {
+            trace('login.outcome', { verdict: 'success', afterMs: Date.now() - startedAt, polls });
             return authResult(operation, 'success', 'dom', { consentAccepted });
         }
     }
+
+    // The interesting failure: 15s on the same wall with no error text. Capture
+    // what the page actually says, because "unknown_error" on its own has now
+    // twice sent an investigation looking in the wrong place.
+    trace('login.outcome', {
+        verdict: 'unknown_error',
+        polls,
+        stillOnWall: true,
+        lastUnrecognisedCode: lastError?.code || null,
+        banner: _visibleErrorText(),
+        bodyHead: (document.body?.innerText || '').replace(/\s+/g, ' ').slice(0, 220),
+    });
 
     // Still on the wall with nothing we recognise. Report the ambiguity honestly:
     // unknown_error leaves the tenant's state alone rather than telling the user

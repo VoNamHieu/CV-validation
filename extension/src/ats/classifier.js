@@ -113,6 +113,11 @@ export function classifyDomError(doc = document) {
     // A banner we can't place: real, but we must not guess which kind. The
     // caller reports unknown_error, which leaves the tenant's state untouched
     // rather than falsely accusing the password.
+    //
+    // The banner's WORDS are deliberately not returned. This value is sent to the
+    // backend with the auth result, and auth banners routinely echo the account's
+    // email address. Callers that want the text for a local log read the DOM
+    // themselves (see login.js `_visibleErrorText`) — it stays in the browser.
     return { outcome: 'unknown_error', code: 'unrecognized_error' };
 }
 
