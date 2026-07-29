@@ -90,6 +90,17 @@ export const ANSWER_RULES = [
         requiresDelegation: true,
     },
     {
+        // Knowable only to the candidate. Unlike a degree — which the institution,
+        // subject and years together determine — no evidence on the page or in the
+        // CV implies a grade, and a plausible-looking number is a fabricated
+        // academic record. Listed here so the rule is visible rather than implied
+        // by absence.
+        kind: 'grade',
+        match: /\bgpa\b|grade (average|point)|overall result|điểm trung bình|xếp loại/i,
+        profileKeys: ['gpa'],
+        candidates: [],
+    },
+    {
         kind: 'source',
         match: /how did you hear|how did you find|source|bạn biết đến/i,
         candidates: [

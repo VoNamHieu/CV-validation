@@ -727,7 +727,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // ── LLM PROXY — Agent Plan (agentic loop brain) ──
     // ══════════════════════════════════════════════════════════════
     if (message.type === 'PROXY_LLM_AGENT_PLAN') {
-        const { pageState, profileData, history, hasCV } = message;
+        const { pageState, profileData, history, hasCV, credentials } = message;
         (async () => {
             try {
                 const data = await chrome.storage.local.get(['jobfitAppUrl', 'jobfitToken']);
@@ -744,7 +744,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                         const res = await fetch(`${baseUrl}/api/ai/agent-plan`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json', ...authHeaders },
-                            body: JSON.stringify({ pageState, profileData, history, hasCV }),
+                            body: JSON.stringify({ pageState, profileData, history, hasCV, credentials }),
                             signal: AbortSignal.timeout(120000),  // room for slow / thinking model (App Questions big prompt)
                         });
                         if (!res.ok) {

@@ -24,7 +24,7 @@ export async function callLLMMapping(formFields, profileData) {
 /**
  * Call the new agent-plan endpoint for the agentic loop.
  */
-export async function callAgentPlan(pageState, profileData, history, hasCV) {
+export async function callAgentPlan(pageState, profileData, history, hasCV, credentials) {
     return new Promise((resolve, reject) => {
         const timeout = setTimeout(() => reject(new Error('Agent plan timeout (65s)')), LLM_TIMEOUT);
         chrome.runtime.sendMessage({
@@ -33,6 +33,9 @@ export async function callAgentPlan(pageState, profileData, history, hasCV) {
             profileData,
             history,
             hasCV,
+            // Education / languages, so the planner can INFER the fields a CV
+            // never states outright (which qualification a degree list means).
+            credentials,
         }, (response) => {
             clearTimeout(timeout);
             if (chrome.runtime.lastError) return reject(new Error(`Extension error: ${chrome.runtime.lastError.message}`));

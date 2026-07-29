@@ -129,3 +129,19 @@ describe('real-world phrasings', () => {
         assert.equal(a.kind, 'previous_employment');
     });
 });
+
+describe('grade is never inferred', () => {
+    test('GPA is left to the candidate even with options offered', () => {
+        // A degree is derivable from institution + subject + years. A grade is
+        // not derivable from anything — a plausible number is a fabricated
+        // academic record.
+        assert.equal(resolveAnswer(q('Overall Result (GPA)'), [], {}), null);
+        assert.equal(resolveAnswer(q('Điểm trung bình'), [], {}), null);
+    });
+
+    test('…but the profile answers it when the candidate supplied one', () => {
+        const a = resolveAnswer(q('Overall Result (GPA)'), [], { gpa: '3.6' });
+        assert.equal(a.value, '3.6');
+        assert.equal(a.source, ANSWER_SOURCE.PROFILE);
+    });
+});

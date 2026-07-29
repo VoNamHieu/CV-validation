@@ -80,6 +80,13 @@ interface AgentPlanRequest {
     profileData: Record<string, unknown>;
     history: HistoryEntry[];
     hasCV: boolean;
+    /** Education + languages from the structured CV. Present so the planner can
+     *  INFER answers the CV never states outright — chiefly which entry in a
+     *  degree list a qualification corresponds to. */
+    credentials?: {
+        education?: { degree?: string; institution?: string; year?: string }[];
+        languages?: { language?: string; level?: string }[];
+    } | null;
 }
 
 interface AgentPlan {
@@ -127,7 +134,7 @@ export async function POST(request: Request) {
         const unauth = await requireUser(request);
         if (unauth) return unauth;
 
-        const { pageState, profileData, history, hasCV } = (await request.json()) as AgentPlanRequest;
+        const { pageState, profileData, history, hasCV, credentials } = (await request.json()) as AgentPlanRequest;
 
         if (!pageState || !profileData) {
             return NextResponse.json({ detail: 'pageState and profileData are required' }, { status: 400 });
@@ -174,6 +181,9 @@ ${JSON.stringify(filledFields.map(f => ({ label: f.label || f.name, value: f.val
 ${JSON.stringify(profileData, null, 2)}
 
 ## HAS CV FILE: ${hasCV}
+
+## EDUCATION & LANGUAGES (from the candidate's CV — use these to INFER, see rule 24):
+${JSON.stringify(credentials ?? {}, null, 2)}
 
 ## ACTION HISTORY (last ${history?.length || 0} actions):
 ${JSON.stringify(history || [], null, 2)}
@@ -240,6 +250,23 @@ Decide the single best next action. Return a JSON object.
     the review page.
 23. Everything you answer under rule 21 will be shown to the user at review as an
     agent default, so prefer the neutral option over the flattering one.
+24. You MAY INFER an answer when it is derivable from evidence you were given,
+    and you must pick ONLY from the options the form actually offers:
+    - Degree / qualification: derive it from EDUCATION above — the institution,
+      the subject and the years together determine which award a school grants.
+      A degree list is usually named per discipline ("B.B.A. - Bachelor of
+      Business Administration", "B.S. - Bachelor of Science", "B.Eng - Bachelor
+      of Engineering"), so match the SUBJECT, not the word "Bachelor" alone.
+      A Vietnamese "Cử nhân" is a bachelor's; "Kỹ sư" is an engineering
+      bachelor's; "Thạc sĩ" is a master's.
+    - Language and proficiency: derive from LANGUAGES above, or from the language
+      the CV and the education are in.
+    If the evidence does not single out one option — several equally plausible,
+    or the subject is missing — answer nothing and say so in "reason". A degree
+    picked by coin flip is a false credential on a real application.
+25. NEVER infer these; they are knowable only to the candidate and no evidence
+    implies them: GPA / grade average, salary expectation, notice period, work
+    authorization, visa sponsorship. Leave them and name them in "reason".
 
 ## OUTPUT FORMAT:
 {

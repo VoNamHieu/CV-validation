@@ -116,6 +116,18 @@ async function runAgentLoop(profile) {
         chrome.storage.local.get('jobfitCv', d => r(d.jobfitCv || null));
     });
 
+    // The slice of the structured CV the planner needs to INFER answers a CV
+    // never states outright — most of all which entry in a degree list a
+    // qualification corresponds to. That is derivable from the institution, the
+    // subject and the years; it is not a fact invented about the candidate, and
+    // it is the difference between an application that reaches review and one
+    // that stalls on a required dropdown. Kept small on purpose: education and
+    // languages only, never the whole CV.
+    const credentials = cvStructured ? {
+        education: (cvStructured.education || []).slice(0, 4),
+        languages: (cvStructured.languages || []).slice(0, 4),
+    } : null;
+
     // Load the CV FILE for THIS apply session (see loadSessionCv).
     const { cv: cvData, driven } = await loadSessionCv();
     const hasCV = !!cvData;
@@ -679,7 +691,7 @@ async function runAgentLoop(profile) {
             const _planT0 = Date.now();
             console.log(`[Copo Apply] → LLM plan request (fields=${state.formFields.length}, unfilledRequired=${state.unfilledRequired.length})…`);
             try {
-                plan = await callAgentPlan(state, profile, history.slice(-8), hasCV);
+                plan = await callAgentPlan(state, profile, history.slice(-8), hasCV, credentials);
             } catch (err) {
                 console.warn(`[Copo Apply] ✖ LLM plan FAILED in ${Date.now() - _planT0}ms: ${err.message}`);
                 // Fallback: use simple map-form for the first iteration
