@@ -749,6 +749,13 @@ async function runAgentLoop(profile) {
                 // outside all three look identical: the page simply does not move.
                 const _stepNow = (recipe.steps || []).find(s => s.detect && document.querySelector(s.detect));
                 const _adv = _stepNow?.advance ? document.querySelector(_stepNow.advance) : null;
+                // A step may name a precondition for leaving it. The résumé-upload
+                // page does: advancing before the file attaches skips the parse the
+                // step exists for. Only enforced when we actually have a CV — a
+                // text-only apply must not deadlock waiting for an upload that was
+                // never going to happen.
+                const _waitingFor = (_stepNow?.advanceWhen && hasCV
+                    && !document.querySelector(_stepNow.advanceWhen)) ? _stepNow.advanceWhen : null;
                 trace('advance.check', {
                     recipeMatched: rf.matched,
                     step: _stepNow?.name || _stepNow?.detect || null,
@@ -760,8 +767,10 @@ async function runAgentLoop(profile) {
                     advFound: !!_adv,
                     advVisible: !!(_adv && _adv.offsetParent !== null),
                     advLabel: _adv ? (_adv.textContent || '').trim().slice(0, 28) : null,
+                    waitingFor: _waitingFor,
                 });
-                if (rf.matched && state.unfilledRequired.length === 0 && state.errors.length === 0 && !atFinalStep(recipe)) {
+                if (rf.matched && !_waitingFor && state.unfilledRequired.length === 0
+                    && state.errors.length === 0 && !atFinalStep(recipe)) {
                     const stepNow = _stepNow;
                     const adv = _adv;
                     if (adv && adv.offsetParent !== null) {

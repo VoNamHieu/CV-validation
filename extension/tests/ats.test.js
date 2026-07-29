@@ -520,6 +520,30 @@ describe('workday recipe steps are mutually exclusive', () => {
         assert.equal(stepFor(['[data-automation-id="formField-degree"]']), 'My Experience');
         assert.equal(stepFor(['[data-automation-id="applyFlowPrimaryQuestionsPage"]']), 'Application Questions');
     });
+
+    test('the résumé-upload page is a step, so something can advance it', () => {
+        // Step 1 of 6 had no entry at all. That page carries no form fields — a
+        // dropzone and "Continue" — so with no step matched there was no `advance`
+        // selector to click, and the agent is deliberately not handed a fieldless
+        // page to plan against. A run that logged in and uploaded the CV then sat
+        // there until the stuck-detector ended it.
+        assert.equal(stepFor(['[data-automation-id="applyFlowAutoFillPage"]']), 'Autofill with Resume');
+        const step = wd.steps.find(s => s.name === 'Autofill with Resume');
+        assert.ok(step.advance, 'without this there is nothing to click');
+        assert.ok(step.advanceWhen, 'and without this it clicks Continue before the CV attaches');
+    });
+
+    test('the upload page never shadows a real form step', () => {
+        // Workday keeps the /apply/autofillWithResume URL for the whole wizard, so
+        // if that page container outlives the step it names, first-match order is
+        // the only thing keeping My Information reachable. Hence: listed last.
+        assert.equal(stepFor([
+            '[data-automation-id="applyFlowAutoFillPage"]',
+            '[data-automation-id="formField-legalName--firstName"]',
+        ]), 'My Information');
+        assert.equal(wd.steps[wd.steps.length - 1].name, 'Autofill with Resume',
+            'order is the mechanism — keep it last');
+    });
 });
 
 // ── option matching must not guess a discipline ────────────────────────────

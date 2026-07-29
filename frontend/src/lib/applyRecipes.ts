@@ -103,6 +103,12 @@ export interface RecipeStep {
     detect?: string;      // selector present when this step is on screen
     fields: RecipeField[];
     advance?: string;     // "Next"/"Continue" button selector
+    // Precondition for LEAVING this step: `advance` is withheld until this
+    // selector matches. The résumé-upload step needs it — clicking Continue
+    // before the file attaches skips the parse the step exists for. Only enforced
+    // when a CV is actually in play, so a text-only apply cannot deadlock waiting
+    // for an upload that was never going to happen.
+    advanceWhen?: string;
 }
 // A non-form gateway the agent must click to reach the form (e.g. Workday's
 // "Start Your Application" modal, rendered as <a role="button"> the generic scan
@@ -146,7 +152,7 @@ export interface ApplyRecipe {
 const WORKDAY: ApplyRecipe = {
     ats: 'workday',
     label: 'Workday',
-    version: 12,
+    version: 13,
     verified: true,
     hostPattern: '\\.myworkdayjobs\\.com|\\.myworkdaysite\\.com',
     login: {
@@ -252,9 +258,33 @@ const WORKDAY: ApplyRecipe = {
             ],
             advance: '[data-automation-id="pageFooterNextButton"]',
         },
+        {
+            // Step 1 of the wizard, and it had no entry here at all — which is why
+            // a run that logged in and uploaded the CV then sat on this page until
+            // the stuck-detector killed it. The page carries NO form fields (a
+            // dropzone and "Continue", nothing else), so the agent took the "host
+            // matches but the form has not rendered yet" branch and waited for a
+            // form that was never coming: no step matched, so there was no
+            // `advance` selector to click, and the LLM is deliberately not handed a
+            // fieldless page.
+            //
+            // LAST in the array on purpose. steps.find() takes the first match, and
+            // Workday keeps the /apply/autofillWithResume URL for the whole wizard
+            // — so if this page's container id outlives the step it belongs to, the
+            // specific steps above must still win.
+            name: 'Autofill with Resume',
+            detect: '[data-automation-id="applyFlowAutoFillPage"]',
+            fields: [],
+            // Do not leave until the resume is actually attached. Advancing early
+            // skips the parse this step exists for, and that parse is what fills My
+            // Information — measured: the file input is absent on the first pass and
+            // appears on the second, so an unguarded advance sails past the upload.
+            advanceWhen: '[data-automation-id="file-upload-item"], [data-automation-id="file-upload-successful"]',
+            advance: '[data-automation-id="pageFooterNextButton"]',
+        },
     ],
-    // Resume upload lives on the earlier "Autofill with Resume" step (not captured
-    // here) — this is Workday's stable upload input; unverified against a live DOM.
+    // Uploaded on the "Autofill with Resume" step above — Workday's stable upload
+    // input, measured on Mondelez (present from the second pass, not the first).
     fileUploadSelector: '[data-automation-id="file-upload-input-ref"]',
     submitSelector: '[data-automation-id="pageFooterSubmitButton"]',
     // Final Review step (its "Submit" reuses pageFooterNextButton) → agent stops here.

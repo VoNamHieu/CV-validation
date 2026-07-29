@@ -25,7 +25,7 @@ export const FALLBACK_RECIPES = [
     {
         ats: 'workday',
         label: 'Workday',
-        version: 12,
+        version: 13,
         verified: true,
         hostPattern: '\\.myworkdayjobs\\.com|\\.myworkdaysite\\.com',
         login: {
@@ -162,6 +162,31 @@ export const FALLBACK_RECIPES = [
                     { label: 'Notice period', labelMatch: 'notice period', value: '30 days', type: 'text' },
                     { label: 'Salary expectations', labelMatch: 'salary', profileKey: 'desiredSalary', default: 'Negotiable', type: 'text' },
                 ],
+                advance: '[data-automation-id="pageFooterNextButton"]',
+            },
+            {
+                // Step 1 of the wizard, and it had no entry here at all — which is
+                // why a run that logged in and uploaded the CV then sat on this page
+                // until the stuck-detector killed it. The page carries NO form
+                // fields (a dropzone and "Continue", nothing else), so the agent
+                // took the "host matches but the form has not rendered yet" branch
+                // and waited for a form that was never coming: no step matched, so
+                // there was no `advance` selector to click, and the LLM is
+                // deliberately not handed a fieldless page.
+                //
+                // LAST in the array on purpose. `steps.find()` takes the first
+                // match, and Workday keeps the /apply/autofillWithResume URL for
+                // the whole wizard — so if this page's container id outlives the
+                // step it belongs to, the specific steps above must still win.
+                name: 'Autofill with Resume',
+                detect: '[data-automation-id="applyFlowAutoFillPage"]',
+                fields: [],
+                // Do not leave until the résumé is actually attached. Advancing
+                // early skips the parse this step exists for, and the parse is what
+                // fills My Information — measured: the file input is absent on the
+                // first pass and appears on the second, so an unguarded advance
+                // would sail past the upload on iteration 1.
+                advanceWhen: '[data-automation-id="file-upload-item"], [data-automation-id="file-upload-successful"]',
                 advance: '[data-automation-id="pageFooterNextButton"]',
             },
         ],
