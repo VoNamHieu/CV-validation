@@ -24,7 +24,7 @@ import { findApplyButton, isApplicationFormPage, summarizeState, waitForJobPageS
 import { detectLoginWall, handleLoginWall } from './login.js';
 import { applyRecipeFields, atFinalStep, clickRecipeGateway, loadRecipes, recipeForUrl } from './recipe.js';
 import { checkClick, logDenial } from './policy.js';
-import { resolveAnswer } from './answers.js';
+import { buildManifest, summarizeGaps, VERDICT } from './needs.js';
 import { tenantRefFor } from '../ats/tenant.js';
 
 // Build marker — logs the moment content-agent.js injects on a matched page, so
@@ -642,42 +642,53 @@ async function runAgentLoop(profile) {
                 prevStateHash = stateHash;
             }
 
-            // ── ANSWER POLICY: answer the questions we can answer ourselves ──
+            // ── NEEDS PASS: what this page asks for, and what answers it ──
             //
-            // Runs before the planner because these are the questions that used to
-            // END the run: the prompt said "not in profile → NEED_HUMAN", so a
-            // required Voluntary Disclosure or a "Are you a current employee?"
-            // stopped the application short of the review page. Nothing here is
-            // invented about the candidate — see answers.js — and every value is
-            // recorded as an agent default so the review can point at it.
-            //
-            // Idempotent: fields that already hold a value are skipped, so this
-            // goes quiet once the step is answered.
+            // One pass replaces what used to be three disconnected ones: the
+            // recipe bound selectors to values, a rule table answered screening
+            // questions, and nothing at all checked what the ATS had already
+            // filled. That last gap is the expensive one — the recipe treats any
+            // non-empty value as finished, so a parser that read the job title as
+            // "Consultant" when the CV says "Product Owner" was left standing.
             {
-                const auto = [];
-                for (const f of state.formFields) {
-                    if (f.value && String(f.value).trim() !== '') continue;
-                    const label = f.label || f.ariaLabel || f.placeholder || f.nearbyText || '';
-                    const options = (f.options || []).map(o => o.text || o.value).filter(Boolean);
-                    const ans = resolveAnswer({ label, questionText: label }, options, profile, { consentDelegated });
-                    if (!ans) continue;
-                    const action = f.componentType === 'radio-group' ? 'radio'
-                        : f.componentType === 'checkbox' ? 'checkbox'
-                        : f.componentType === 'native-select' ? 'select'
-                        : (f.options && f.options.length) ? 'custom-select' : 'fill';
-                    auto.push({
-                        selector: f.selector, action, value: ans.value,
-                        componentType: f.componentType, fieldLabel: label,
+                const manifest = buildManifest(state.formFields, { profile, cv: cvStructured }, { consentDelegated });
+
+                // Record disagreements for the review. They are NOT auto-corrected:
+                // overwriting a value the ATS chose needs a confidence this layer
+                // does not yet have, and a wrong correction is worse than a flagged
+                // one the user can see.
+                for (const v of manifest.verify) {
+                    if (v.verdict !== VERDICT.MISMATCH) continue;
+                    reviewAnswers.set(`mismatch::${v.label}`, {
+                        field: v.label, value: v.actual, source: 'ATS_PARSED',
+                        expected: v.expected, verdict: v.verdict,
                     });
-                    reviewAnswers.set(`answer::${label}`, { field: label, value: ans.value, source: ans.source, kind: ans.kind });
+                    console.warn(`[Copo Needs] ⚠ ${v.label}: form has "${String(v.actual).slice(0, 30)}" but the CV says "${String(v.expected).slice(0, 30)}"`);
                 }
-                if (auto.length) {
-                    console.log('[Copo Answers] deterministic:', auto.map(a => `${a.fieldLabel}=${a.value}`).join(' · '));
-                    showProgress(i + 1, AGENT_MAX_ITERATIONS, `Trả lời ${auto.length} câu hỏi tiêu chuẩn…`);
-                    const n = await executeFillInstructions(auto, cvData, policyCtx('recipe'));
+
+                if (manifest.gaps.length) {
+                    const g = summarizeGaps(manifest);
+                    console.log('[Copo Needs] gaps →', JSON.stringify({ userOnly: g.userOnly, inferable: g.inferable }));
+                }
+
+                if (manifest.fill.length) {
+                    console.log('[Copo Needs] filling:', manifest.fill.map(a => `${a.label}=${String(a.value).slice(0, 20)}[${a.source}]`).join(' · '));
+                    showProgress(i + 1, AGENT_MAX_ITERATIONS, `Điền ${manifest.fill.length} trường từ hồ sơ…`);
+                    const instructions = manifest.fill.map(a => ({
+                        selector: a.selector,
+                        action: a.componentType === 'radio-group' ? 'radio'
+                            : a.componentType === 'checkbox' ? 'checkbox'
+                            : a.componentType === 'native-select' ? 'select'
+                            : (a.componentType && a.componentType !== 'native') ? 'custom-select' : 'fill',
+                        value: a.value, componentType: a.componentType, fieldLabel: a.label,
+                    }));
+                    for (const a of manifest.fill) {
+                        reviewAnswers.set(`answer::${a.label}`, { field: a.label, value: a.value, source: a.source });
+                    }
+                    const n = await executeFillInstructions(instructions, cvData, policyCtx('recipe'));
                     if (n > 0) {
                         actionsTaken++;
-                        history.push({ iteration: i, plan: { action: 'ANSWER', reason: 'deterministic answer policy' }, result: { filled: n } });
+                        history.push({ iteration: i, plan: { action: 'NEEDS', reason: 'deterministic field resolution' }, result: { filled: n } });
                         await sleep(600);
                         continue;   // re-observe before spending an LLM call
                     }
@@ -879,9 +890,16 @@ async function runAgentLoop(profile) {
 function summarizeAnswers(reviewAnswers) {
     const all = [...reviewAnswers.values()];
     const defaults = all.filter(a => a.source === 'AGENT_DEFAULT');
+    // Values the ATS parsed that disagree with the candidate's own CV. They are
+    // reported, never silently corrected — and they are the single most useful
+    // thing on a review page, because they are the errors a person reading their
+    // own filled form is least likely to notice.
+    const mismatches = all.filter(a => a.verdict === 'MISMATCH');
     return {
         answered: all.length,
         agentDefaults: defaults.length,
+        mismatches: mismatches.length,
+        mismatchFields: mismatches.map(a => ({ field: a.field, expected: a.expected, actual: a.value })).slice(0, 10),
         // Named, not just counted: "4 giá trị mặc định" tells the user there is
         // something to check but not what, which is the same as telling them to
         // re-read the whole form.

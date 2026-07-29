@@ -62,7 +62,16 @@ interface BatchJobStatus {
         outcome?: 'submitted' | 'filled' | 'failed';
         /** What the agent answered on the user's behalf, so the review can point
          *  at the few fields worth checking instead of the whole form. */
-        review?: { answered: number; agentDefaults: number; agentDefaultFields?: string[] };
+        review?: {
+            answered: number;
+            agentDefaults: number;
+            agentDefaultFields?: string[];
+            /** Values the ATS parsed that disagree with the CV — reported, never
+             *  silently corrected. The errors a person re-reading their own filled
+             *  form is least likely to catch. */
+            mismatches?: number;
+            mismatchFields?: { field: string; expected: string; actual: string }[];
+        };
     };
     /** Canonical host of the account-gated tenant, when the job is on one. */
     tenantKey?: string;
@@ -1365,12 +1374,16 @@ export default function StepEditCv() {
                                     {job.status === 'processing' && 'Đang xử lý...'}
                                     {job.status === 'done' && (job.result?.outcome === 'submitted'
                                         ? 'Đã nộp'
-                                        : job.result?.review?.agentDefaults
-                                            // Name what to check. "Đã điền, chờ nộp" tells the
-                                            // user to review without telling them what — which
-                                            // in practice means re-reading the whole form.
-                                            ? `Đã điền — kiểm tra ${job.result.review.agentDefaults} giá trị mặc định`
-                                            : 'Đã điền, chờ nộp')}
+                                        // Name what to check. "Đã điền, chờ nộp" tells the
+                                        // user to review without telling them what — which in
+                                        // practice means re-reading the whole form. A parse
+                                        // mismatch outranks a default: it is a wrong value
+                                        // already sitting in the form.
+                                        : job.result?.review?.mismatches
+                                            ? `Đã điền — ${job.result.review.mismatches} trường lệch với CV, cần kiểm tra`
+                                            : job.result?.review?.agentDefaults
+                                                ? `Đã điền — kiểm tra ${job.result.review.agentDefaults} giá trị mặc định`
+                                                : 'Đã điền, chờ nộp')}
                                     {job.status === 'blocked' && BLOCKED_LABEL[job.blockedReason ?? 'manual']}
                                     {job.status === 'error' && (job.result?.detail || 'Lỗi')}
                                 </span>
