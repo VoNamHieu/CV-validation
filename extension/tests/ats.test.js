@@ -9,7 +9,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { tenantRefFor, vendorForHost, sortJobsByTenant } from '../src/ats/tenant.js';
-import { classifyDomError, classifyApiResponse, authResult, RETRYABLE } from '../src/ats/classifier.js';
+import { classifyDomError, classifyApiResponse, authResult, detectChallenge, RETRYABLE } from '../src/ats/classifier.js';
 import { BLOCKING_STATES, OUTCOMES } from '../src/ats/states.js';
 import * as coord from '../src/ats/coordinator.js';
 import { FALLBACK_RECIPES } from '../src/content-agent/recipe.js';
@@ -132,6 +132,61 @@ function docWith(text, { challenge = false } = {}) {
         querySelector: (sel) => (challenge && sel.includes('captcha') ? {} : null),
     };
 }
+
+// ── challenge detection ────────────────────────────────────────────────────
+/**
+ * A document stub built from real nodes, because the bug this pins is about
+ * WHICH element matched and what was inside it — a stub that answers by
+ * substring cannot express that.
+ */
+function docWithNodes(nodes) {
+    const matches = (el, sel) => sel.split(',').map(s => s.trim()).some((s) => {
+        if (s.startsWith('iframe')) return el.tag === 'iframe' && (
+            (s.includes('recaptcha') && /recaptcha/.test(el.src || ''))
+            || (s.includes('hcaptcha') && /hcaptcha/.test(el.src || ''))
+            || (s.includes('title') && /captcha/i.test(el.title || '')));
+        if (s === '.g-recaptcha') return el.cls === 'g-recaptcha';
+        if (s === '#challenge-form') return el.id === 'challenge-form';
+        if (s.includes('data-automation-id*="captcha"')) return /captcha/i.test(el.aid || '');
+        return false;
+    });
+    const wrap = (el) => ({
+        ...el,
+        offsetParent: el.hidden ? null : {},
+        getAttribute: (a) => (a === 'data-automation-id' ? el.aid || null : null),
+        querySelector: (sel) => (el.contains || []).map(wrap).find(c => matches(c, sel)) || null,
+    });
+    const all = nodes.map(wrap);
+    return { querySelectorAll: (sel) => all.filter(el => matches(el, sel)) };
+}
+
+describe('detectChallenge', () => {
+    test('a real reCAPTCHA frame is a challenge', () => {
+        assert.equal(detectChallenge(docWithNodes([{ tag: 'iframe', src: 'https://google.com/recaptcha/api2' }])), true);
+    });
+
+    test('a hidden challenge frame is not on screen, so not a challenge', () => {
+        assert.equal(detectChallenge(docWithNodes([{ tag: 'iframe', src: '.../recaptcha', hidden: true }])), false);
+    });
+
+    test('Workday\'s noCaptchaWrapper is not a captcha', () => {
+        // Measured on Mondelez. This div is the wrapper around the Create Account
+        // SUBMIT BUTTON, and its name is Workday saying there is no captcha here —
+        // but `[data-automation-id*="captcha" i]` matched the substring, so every
+        // signup aborted as challenge_required at the element it needed to click.
+        assert.equal(detectChallenge(docWithNodes([
+            { tag: 'div', aid: 'noCaptchaWrapper', contains: [{ tag: 'button', aid: 'createAccountSubmitButton' }] },
+        ])), false);
+    });
+
+    test('a captcha-named wrapper counts once it actually holds a challenge', () => {
+        // The other half: the name is not evidence, the contents are.
+        assert.equal(detectChallenge(docWithNodes([
+            { tag: 'div', aid: 'captchaWrapper', contains: [{ tag: 'iframe', src: '.../hcaptcha' }] },
+        ])), true);
+        assert.equal(detectChallenge(docWithNodes([{ tag: 'div', aid: 'captchaWrapper', contains: [] }])), false);
+    });
+});
 
 describe('classifyDomError', () => {
     test('nothing on screen → null', () => {

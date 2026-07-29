@@ -43,8 +43,16 @@ function scrub(data) {
     if (!data || typeof data !== 'object') return data;
     const out = {};
     for (const [k, v] of Object.entries(data)) {
-        if (/pass|pwd|secret|token|credential/i.test(k)) { out[k] = v ? `«${String(v).length} chars»` : v; continue; }
         if (v === null || v === undefined) { out[k] = v; continue; }
+        // Only STRINGS are masked. Matching on the key alone turned
+        // `passwordFields: 2` into «1 chars» and `pass: 1` (the attempt number)
+        // into the same — the first real trace came back with its two most
+        // useful counts redacted, which is a log that hides the thing it was
+        // added to show. A number cannot be a password.
+        if (typeof v === 'string' && /pass|pwd|secret|token|credential/i.test(k)) {
+            out[k] = `«${v.length} chars»`;
+            continue;
+        }
         const text = typeof v === 'object' ? JSON.stringify(v) : String(v);
         out[k] = maskEmails(text).slice(0, VALUE_CAP);
     }

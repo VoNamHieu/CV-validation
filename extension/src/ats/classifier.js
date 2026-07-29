@@ -83,12 +83,38 @@ const DOM_PATTERNS = [
     },
 ];
 
-/** True when the page is showing a CAPTCHA / bot challenge. */
+const CHALLENGE_FRAME = 'iframe[src*="recaptcha"], iframe[src*="hcaptcha"], iframe[title*="captcha" i]';
+const CHALLENGE_HOST = '.g-recaptcha, #challenge-form';
+
+/** Names that contain "captcha" while asserting the OPPOSITE. */
+const NOT_A_CHALLENGE = /no.?captcha|captcha.?free|without.?captcha/i;
+
+/**
+ * True when the page is showing a CAPTCHA / bot challenge.
+ *
+ * Detection is by EVIDENCE, not by name, because a name can say the opposite of
+ * what a substring match reads. Measured on Mondelez's Workday create-account
+ * page: the submit button sits inside
+ * `<div data-automation-id="noCaptchaWrapper">` — Workday's marker for the
+ * variant that has NO captcha — and `[data-automation-id*="captcha" i]` matched
+ * it, so the agent aborted every signup with `challenge_required` at the exact
+ * element it needed to click, and the run ended "Cần bạn xử lý trực tiếp trên
+ * trang này" on a page with no challenge at all.
+ *
+ * So a captcha-ish automation id now counts only when it actually contains a
+ * challenge frame, and negated names never count. The block itself is right and
+ * stays: the agent must not attempt a bot challenge.
+ */
 export function detectChallenge(doc = document) {
-    return !!(
-        doc.querySelector('iframe[src*="recaptcha"], iframe[src*="hcaptcha"], iframe[title*="captcha" i]')
-        || doc.querySelector('[data-automation-id*="captcha" i], .g-recaptcha, #challenge-form')
-    );
+    const vis = (el) => !!(el && el.offsetParent !== null);
+    if ([...doc.querySelectorAll(CHALLENGE_FRAME)].some(vis)) return true;
+    if ([...doc.querySelectorAll(CHALLENGE_HOST)].some(vis)) return true;
+    return [...doc.querySelectorAll('[data-automation-id*="captcha" i]')].some((el) => {
+        if (NOT_A_CHALLENGE.test(el.getAttribute('data-automation-id') || '')) return false;
+        if (!vis(el)) return false;
+        // A vendor-named wrapper proves nothing on its own; a challenge inside it does.
+        return !!el.querySelector(`${CHALLENGE_FRAME}, ${CHALLENGE_HOST}`);
+    });
 }
 
 /**
