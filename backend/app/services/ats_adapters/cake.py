@@ -2,7 +2,8 @@
 endpoint found by rendering + sniffing the network:
   GET https://ats.internal.cake.vn/api/job-post/public/all
   → {"data":[{id, title, job_content, office:{name}, department, …}]}
-Detail page = cake.vn/tuyen-dung/jobs/{id}. VN fintech → all VN.
+Detail page = cake.vn/tuyen-dung/jobs/{key} (key = slug; the numeric id 404s).
+VN fintech → all VN.
 """
 from __future__ import annotations
 
@@ -31,13 +32,17 @@ def _cake(career_url: str) -> list[dict]:
     for j in rows:
         title = (j.get("title") or "").strip()
         jid = j.get("id")
-        if not title or not jid:
+        # Detail URL is /jobs/{key} — `key` is the slug (e.g. Backend-Engineer);
+        # the numeric `id` route 404s. Identity stays the numeric id.
+        key = (j.get("key") or "").strip()
+        if not title or not jid or not key:
             continue
         office = j.get("office") or {}
         loc = (office.get("name") if isinstance(office, dict) else "") or ""
         out.append({
             "title": title[:200],
-            "url": f"{_DETAIL}{jid}",
+            "url": f"{_DETAIL}{key}",
+            "external_id": str(jid),
             "location": str(loc)[:120],
             "description": _strip_html(j.get("job_content") or "")[:600],
         })
