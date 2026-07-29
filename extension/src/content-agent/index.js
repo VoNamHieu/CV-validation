@@ -24,6 +24,7 @@ import { findApplyButton, isApplicationFormPage, summarizeState, waitForJobPageS
 import { detectLoginWall, handleLoginWall } from './login.js';
 import { applyRecipeFields, atFinalStep, clickRecipeGateway, loadRecipes, recipeForUrl } from './recipe.js';
 import { checkClick, logDenial } from './policy.js';
+import { resolveAnswer } from './answers.js';
 import { tenantRefFor } from '../ats/tenant.js';
 
 // Build marker — logs the moment content-agent.js injects on a matched page, so
@@ -605,6 +606,48 @@ async function runAgentLoop(profile) {
             } else {
                 sameStateCount = 0;
                 prevStateHash = stateHash;
+            }
+
+            // ── ANSWER POLICY: answer the questions we can answer ourselves ──
+            //
+            // Runs before the planner because these are the questions that used to
+            // END the run: the prompt said "not in profile → NEED_HUMAN", so a
+            // required Voluntary Disclosure or a "Are you a current employee?"
+            // stopped the application short of the review page. Nothing here is
+            // invented about the candidate — see answers.js — and every value is
+            // recorded as an agent default so the review can point at it.
+            //
+            // Idempotent: fields that already hold a value are skipped, so this
+            // goes quiet once the step is answered.
+            {
+                const auto = [];
+                for (const f of state.formFields) {
+                    if (f.value && String(f.value).trim() !== '') continue;
+                    const label = f.label || f.ariaLabel || f.placeholder || f.nearbyText || '';
+                    const options = (f.options || []).map(o => o.text || o.value).filter(Boolean);
+                    const ans = resolveAnswer({ label, questionText: label }, options, profile, { consentDelegated });
+                    if (!ans) continue;
+                    const action = f.componentType === 'radio-group' ? 'radio'
+                        : f.componentType === 'checkbox' ? 'checkbox'
+                        : f.componentType === 'native-select' ? 'select'
+                        : (f.options && f.options.length) ? 'custom-select' : 'fill';
+                    auto.push({
+                        selector: f.selector, action, value: ans.value,
+                        componentType: f.componentType, fieldLabel: label,
+                    });
+                    reviewAnswers.set(`answer::${label}`, { field: label, value: ans.value, source: ans.source, kind: ans.kind });
+                }
+                if (auto.length) {
+                    console.log('[Copo Answers] deterministic:', auto.map(a => `${a.fieldLabel}=${a.value}`).join(' · '));
+                    showProgress(i + 1, AGENT_MAX_ITERATIONS, `Trả lời ${auto.length} câu hỏi tiêu chuẩn…`);
+                    const n = await executeFillInstructions(auto, cvData, policyCtx('recipe'));
+                    if (n > 0) {
+                        actionsTaken++;
+                        history.push({ iteration: i, plan: { action: 'ANSWER', reason: 'deterministic answer policy' }, result: { filled: n } });
+                        await sleep(600);
+                        continue;   // re-observe before spending an LLM call
+                    }
+                }
             }
 
             // ── 3. PLAN: Ask LLM what to do next ──
