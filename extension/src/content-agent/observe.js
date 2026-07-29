@@ -251,7 +251,15 @@ export function extractFormFields() {
  */
 export function scanButtons() {
     const buttons = [];
-    const allClickables = document.querySelectorAll('button, a[role="button"], [role="button"], input[type="submit"]');
+    // Scope to the open dialog, exactly as extractFormFields does. Measured on
+    // Workday's "Start Your Application" modal: scanning the whole document
+    // offered the planner "Sign In", "Search for Jobs", the page's video control
+    // bar and the "Apply" button behind the backdrop, alongside the three options
+    // that were actually clickable. Every one of those is inert while the modal
+    // is up, and each is a way for the planner to spend an iteration on nothing.
+    const modal = findActiveModal();
+    const root = modal || document;
+    const allClickables = root.querySelectorAll('button, a[role="button"], [role="button"], input[type="submit"]');
 
     const navTexts = [
         'next', 'tiếp', 'tiep theo', 'continue', 'tiếp tục', 'kế tiếp',
