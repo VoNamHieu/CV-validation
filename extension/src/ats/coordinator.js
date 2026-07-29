@@ -148,3 +148,24 @@ export function recordAttempt(tenantKey, operation) {
     if (operation === 'signup') c.signup += 1;
     else if (operation === 'login') c.login += 1;
 }
+
+/**
+ * Give an attempt back, for a grant that never became a submission.
+ *
+ * The budget is spent when the credential is handed out, not when the form is
+ * sent — deliberately, because the content script dies on every navigation and a
+ * grant whose outcome we never hear must still count. But that makes the count
+ * wrong in the other direction whenever the agent asks for a credential and then
+ * cannot use it: the login wall was still rendering, or the form vanished under
+ * it. Measured on Workday, where the apply URL shows a wall a beat before the
+ * fields exist — one such miss spent the tenant's only login and every later job
+ * there was refused with "hết lượt" for an attempt the ATS never saw.
+ *
+ * Refunding is safe precisely because nothing was submitted: the protection this
+ * budget exists for is failed logins the ATS counts, and there was none.
+ */
+export function refundAttempt(tenantKey, operation) {
+    const c = counters(tenantKey);
+    if (operation === 'signup' && c.signup > 0) c.signup -= 1;
+    else if (operation === 'login' && c.login > 0) c.login -= 1;
+}

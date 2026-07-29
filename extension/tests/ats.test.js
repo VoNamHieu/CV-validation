@@ -345,6 +345,30 @@ describe('coordinator', () => {
         assert.equal(coord.gateJob(AIA).skip, true, 'budget spent → remaining jobs skip');
     });
 
+    test('a grant that never became a submission is refunded', () => {
+        // The failure this fixes: the agent asked for a credential while the login
+        // wall was still rendering, found nothing to type into, and the tenant was
+        // out of logins for the rest of the batch — for an attempt the ATS never
+        // saw. Refunding is safe exactly because nothing was submitted; the budget
+        // exists to limit failed logins the ATS counts, and there was none.
+        coord.beginBatch('b1', {});
+        assert.equal(coord.nextOperation(AIA.tenantKey), 'signup');
+        coord.recordAttempt(AIA.tenantKey, 'signup');
+        coord.refundAttempt(AIA.tenantKey, 'signup');
+        assert.equal(coord.nextOperation(AIA.tenantKey), 'signup', 'the attempt comes back');
+    });
+
+    test('a refund cannot mint attempts that were never spent', () => {
+        // Otherwise a repeated abandon would drive the counter negative and hand
+        // the tenant unlimited logins — the exact opposite of what it is for.
+        coord.beginBatch('b1', {});
+        coord.refundAttempt(AIA.tenantKey, 'login');
+        coord.refundAttempt(AIA.tenantKey, 'login');
+        coord.recordAttempt(AIA.tenantKey, 'signup');
+        coord.recordAttempt(AIA.tenantKey, 'login');
+        assert.equal(coord.nextOperation(AIA.tenantKey), null);
+    });
+
     test("a 'ready' tenant logs in instead of probing signup first", () => {
         // How a supplied credential reaches 'login' without bypassing anything:
         // it says the account EXISTS, which is what 'ready' means, and this is

@@ -1143,6 +1143,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     // ── ATS candidate account: the agent's normalized verdict ──
+    // ── The agent got a credential and could not use it ──
+    // Nothing was submitted, so the attempt goes back. Without this, a login wall
+    // that was still rendering when the agent looked cost the tenant its only
+    // login for the whole batch.
+    if (message.type === 'ATS_AUTH_ABANDON') {
+        const ref = tenantRefFor(message.url);
+        if (ref && message.operation) {
+            atsCoord.refundAttempt(ref.tenantKey, message.operation);
+            fixtureServedTenants.delete(ref.tenantKey);
+            delete pendingAtsCredential[ref.tenantKey];
+            persistAtsRuntime();
+            console.log(`[Copo ATS] ${ref.tenantKey}: ${message.operation} refunded (${message.why || 'not attempted'})`);
+        }
+        sendResponse({ ok: true });
+        return true;
+    }
+
     if (message.type === 'ATS_AUTH_RESULT') {
         (async () => {
             const ref = tenantRefFor(message.url);

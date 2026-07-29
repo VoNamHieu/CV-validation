@@ -446,6 +446,16 @@ async function runAgentLoop(profile) {
             // wall stays a state.blockers entry and the planner keeps filling the
             // fields it CAN reach, which is the documented policy.
             if (!atsAuthDone && tenantRefFor(location.href) && detectLoginWall(recipe?.login)) {
+                // Let the form finish rendering BEFORE asking for a credential.
+                // The grant spends the tenant's attempt, so asking for one we
+                // cannot use is how a tenant runs out of logins without the ATS
+                // ever seeing a submission.
+                if (!await waitForLoginFormReady(recipe?.login)) {
+                    console.log('[Copo Agent] login wall detected but not fillable yet — waiting');
+                    await sleep(1000);
+                    continue;
+                }
+
                 // Ask the background for this tenant's credential + which operation
                 // it's allowed to run (signup for a tenant we've never authenticated
                 // at, login for one we have). It owns the attempt budget, because a
@@ -471,6 +481,19 @@ async function runAgentLoop(profile) {
                 if (result?.pending) {
                     await sleep(1200);
                     result = await handleLoginWall(grant.credentials, recipe?.login, grant.operation);
+                }
+
+                // Null means handleLoginWall found no wall to act on — it went away
+                // between the check above and the fill, or was never really there.
+                // Nothing was typed and nothing was submitted, so this is NOT an
+                // attempt: give it back and let the loop look again. Treating it as
+                // a verdict is what used to end the job on a page that had simply
+                // not finished loading, and leave the tenant with no logins left.
+                if (!result) {
+                    await abandonAtsAuth(grant.operation, 'no login form to act on');
+                    console.log('[Copo Agent] login wall vanished before fill — attempt refunded');
+                    await sleep(1200);
+                    continue;
                 }
                 actionsTaken++;
 
@@ -1020,6 +1043,41 @@ async function requestAtsAuth() {
     } catch {
         return { ok: false, reason: 'manual', detail: 'Không liên lạc được với extension' };
     }
+}
+
+/** Hand back a credential we never used, so the attempt is not counted. */
+async function abandonAtsAuth(operation, why) {
+    try {
+        await chrome.runtime.sendMessage({
+            type: 'ATS_AUTH_ABANDON', url: window.location.href, operation, why,
+        });
+    } catch { /* worker gone — the batch is over anyway */ }
+}
+
+/**
+ * Wait until the login form can actually be filled.
+ *
+ * `detectLoginWall` answers on a password box plus sign-in wording, and on
+ * Workday both appear a beat before the form is usable — so the agent asked for
+ * a credential, spent the tenant's attempt, and then found nothing to type into.
+ * Requesting the grant is the commitment point, so it has to happen after this,
+ * not before.
+ */
+async function waitForLoginFormReady(login, timeoutMs = 8000) {
+    const deadline = Date.now() + timeoutMs;
+    const vis = (e) => !!(e && e.offsetParent !== null);
+    while (Date.now() < deadline) {
+        const wall = detectLoginWall(login);
+        if (wall) {
+            const hasText = [...document.querySelectorAll('input[type="text"], input[type="email"], input:not([type])')]
+                .some(vis);
+            const hasSubmit = [...document.querySelectorAll('button, [role="button"], input[type="submit"]')]
+                .some(vis);
+            if (hasText && hasSubmit) return wall;
+        }
+        await sleep(300);
+    }
+    return null;
 }
 
 /** Hand the normalized verdict back so it's persisted for the whole tenant. */
