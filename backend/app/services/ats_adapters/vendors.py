@@ -29,6 +29,8 @@ from app.services.ats_adapters.axonactive import *  # noqa: F401,F403
 from app.services.ats_adapters.dsv import *  # noqa: F401,F403
 from app.services.ats_adapters.coccoc import *  # noqa: F401,F403
 from app.services.ats_adapters.seongon import *  # noqa: F401,F403
+from app.services.ats_adapters.bidv import *  # noqa: F401,F403
+from app.services.ats_adapters.viettelai import *  # noqa: F401,F403
 from app.services.ats_adapters.hyatt import *  # noqa: F401,F403
 from app.services.ats_adapters.maisonrmi import *  # noqa: F401,F403
 from app.services.ats_adapters.concung import *  # noqa: F401,F403
@@ -120,6 +122,8 @@ _ADAPTERS: list = [
     ("dsv",             lambda u, h: _is_dsv(u),             lambda u, h: _dsv(u)),
     ("coccoc",          lambda u, h: _is_coccoc(u),          lambda u, h: _coccoc(u)),
     ("seongon",         lambda u, h: _is_seongon(u),         lambda u, h: _seongon(u)),
+    ("bidv",            lambda u, h: _is_bidv(u),            lambda u, h: _bidv(u)),
+    ("viettelai",       lambda u, h: _is_viettelai(u),       lambda u, h: _viettelai(u)),
     ("hyatt",           lambda u, h: _is_hyatt(u),           lambda u, h: _hyatt(u)),
     ("maisonrmi",       lambda u, h: _is_maisonrmi(u),       lambda u, h: _maisonrmi(u)),
     ("concung",         lambda u, h: _is_concung(u),         lambda u, h: _concung(u)),
