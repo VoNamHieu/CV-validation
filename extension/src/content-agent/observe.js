@@ -290,35 +290,76 @@ export function scanButtons() {
     return buttons;
 }
 
+/** Wording that states something is wrong with what was entered. */
+const ERROR_TEXT_RE =
+    /\berror\b|\binvalid\b|\brequired\b|must be|must contain|cannot be|can't be|is not valid|please (enter|select|provide|choose|correct|fix)|missing|too (short|long)|lỗi|bắt buộc|không hợp lệ|không được để trống|vui lòng (nhập|chọn|điền)|chưa (nhập|chọn|điền)/i;
+
+/** Wording that is a page STATUS announcement — the thing live regions exist for. */
+const STATUS_TEXT_RE =
+    /\bis loaded\b|\bloaded\b|\bloading\b|\bpage\b.*\b(loaded|ready)\b|results? (found|updated|loaded)|\bsaved\b|\bsuccess/i;
+
+/**
+ * Does this live-region text actually report a validation problem?
+ *
+ * Split out as a pure function because it is a judgement about language, and the
+ * cost of getting it wrong is not obvious from the DOM: a false error is fed to
+ * the planner every iteration as evidence the form is failing, which is exactly
+ * how "Sales Specialist page is loaded" ended up in an agent's error list.
+ *
+ * A live region INSIDE a form-field wrapper is trusted without a text match —
+ * that is where frameworks put a field's own error, and its wording is
+ * unpredictable. Everywhere else needs the text to say something went wrong,
+ * and a status announcement is rejected outright even if it happens to contain
+ * an error-ish word.
+ */
+export function isLikelyValidationError(text, { inFieldWrapper = false } = {}) {
+    const t = String(text || '').trim();
+    if (!t) return false;
+    if (inFieldWrapper) return !STATUS_TEXT_RE.test(t);
+    if (STATUS_TEXT_RE.test(t)) return false;
+    return ERROR_TEXT_RE.test(t);
+}
+
 /**
  * Detect validation errors on the page.
  */
 export function detectErrors() {
     const errors = [];
     const seen = new Set();
+    // Selectors that NAME an error. Whatever they contain is one.
     const errorSelectors = [
         '.error', '.invalid-feedback', '.field-error', '[class*="error-msg"]',
-        '[role="alert"]', '.text-danger', '.has-error', '.ant-form-item-explain-error',
+        '.text-danger', '.has-error', '.ant-form-item-explain-error',
         '.MuiFormHelperText-root.Mui-error', '[class*="validation-error"]',
         // Workday: a failed field renders an errorMessage node inside its formField
-        // wrapper; page-level issues use errorSummary / alertBanner. Without these the
-        // agent was blind to why "Next" wouldn't advance and looped until it stalled.
+        // wrapper; page-level issues use errorSummary. Without these the agent was
+        // blind to why "Next" wouldn't advance and looped until it stalled.
         '[data-automation-id="errorMessage"]', '[data-automation-id="formFieldError"]',
-        '[data-automation-id="errorSummary"]', '[data-automation-id="alertBanner"]',
+        '[data-automation-id="errorSummary"]',
     ];
+    // Selectors that are a DELIVERY MECHANISM, not a verdict — see
+    // isLikelyValidationError. `role="alert"` is how a page announces anything
+    // urgent to a screen reader; on a Workday job page it carries "Sales
+    // Specialist page is loaded", which was reported as a validation error on
+    // every single iteration and shipped to the planner as evidence the form was
+    // failing. A banner is the same shape: it can just as easily say a draft was
+    // saved.
+    const ambiguousSelectors = ['[role="alert"]', '[data-automation-id="alertBanner"]'];
 
-    for (const sel of errorSelectors) {
+    for (const sel of [...errorSelectors, ...ambiguousSelectors]) {
+        const ambiguous = ambiguousSelectors.includes(sel);
         for (const el of document.querySelectorAll(sel)) {
             if (!el.offsetParent) continue;
             const msg = el.textContent?.trim();
             if (!msg || msg.length > 200 || seen.has(msg)) continue;
-            seen.add(msg);
 
             // Associate with the nearest field — Workday formField wrapper first (so
             // we can name the field), then a generic form-group.
             let nearFieldSelector = '';
             let field = '';
             const wd = el.closest('[data-automation-id^="formField-"]');
+            if (ambiguous && !isLikelyValidationError(msg, { inFieldWrapper: !!wd })) continue;
+            seen.add(msg);
             if (wd) {
                 nearFieldSelector = `[data-automation-id="${wd.getAttribute('data-automation-id')}"]`;
                 field = findLabelFor(wd.querySelector('input, textarea, button') || wd, document);
@@ -391,11 +432,19 @@ export function auditRequiredBlockers() {
         const help = wrap.querySelector('[id^="helpText"]')?.textContent || '';
         if (!/\d/.test(help) && !/\d/.test(dg.textContent || '')) push(labelOf(dg), 'date');
     }
-    // 4) visible validation errors already on screen
+    // 4) visible validation errors already on screen. `role="alert"` is filtered
+    //    the same way detectErrors filters it — otherwise the "blockers" report
+    //    the agent shows the user when it gives up would name a page-load
+    //    announcement as the reason the step won't advance.
     for (const e of document.querySelectorAll('[data-automation-id="errorMessage"], [data-automation-id="errorSummary"], [role="alert"]')) {
         if (e.offsetParent === null) continue;
         const t = (e.textContent || '').replace(/\s+/g, ' ').trim();
-        if (t) push(t.slice(0, 60), 'error');
+        if (!t) continue;
+        const isLiveRegion = e.getAttribute?.('role') === 'alert';
+        if (isLiveRegion && !isLikelyValidationError(t, {
+            inFieldWrapper: !!e.closest?.('[data-automation-id^="formField-"]'),
+        })) continue;
+        push(t.slice(0, 60), 'error');
     }
     return out;
 }
