@@ -421,3 +421,49 @@ describe('workday recipe steps are mutually exclusive', () => {
         assert.equal(stepFor(['[data-automation-id="applyFlowPrimaryQuestionsPage"]']), 'Application Questions');
     });
 });
+
+// ── option matching must not guess a discipline ────────────────────────────
+// Measured on Mondelez's Degree list (19 named qualifications, no generic
+// "Bachelor's Degree"). A plain substring match on "Bachelor" hits eleven of
+// them and would take the first — Architecture — as the degree of someone who
+// studied Marketing. That is a false credential on a real application.
+describe('unambiguous option matching', () => {
+    const DEGREES = [
+        'A.A. - Associate of Arts or equivalent',
+        'B.Arch - Bachelor of Architecture or equivalent',
+        'B.B.A. - Bachelor of Business Administration or equivalent',
+        'B.S. - Bachelor of Science or equivalent',
+        'B.A. - Bachelor of Arts or equivalent',
+    ].map(t => t.toLowerCase());
+
+    /** Mirrors fillCustomSelect's uniqueMatch. */
+    const uniqueMatch = (list, wanted) => {
+        const exact = list.filter(o => o === wanted);
+        if (exact.length) return exact[0];
+        const prefix = list.filter(o => o.startsWith(wanted));
+        if (prefix.length === 1) return prefix[0];
+        const contains = list.filter(o => o.includes(wanted));
+        return contains.length === 1 ? contains[0] : null;
+    };
+
+    test('"bachelor" is ambiguous and therefore answers nothing', () => {
+        assert.equal(uniqueMatch(DEGREES, 'bachelor'), null,
+            'eleven disciplines contain it; picking the first is a fabricated credential');
+    });
+
+    test('a specific degree the candidate stated does match', () => {
+        assert.equal(uniqueMatch(DEGREES, 'b.b.a.'),
+            'b.b.a. - bachelor of business administration or equivalent');
+    });
+
+    test('an exact option always wins over a longer one containing it', () => {
+        const opts = ['mobile', 'mobile - personal', 'mobile - work'];
+        assert.equal(uniqueMatch(opts, 'mobile'), 'mobile');
+    });
+
+    test('a unique substring is still accepted', () => {
+        const opts = ['company website', 'contacted by recruiter', 'job board'];
+        assert.equal(uniqueMatch(opts, 'company website'), 'company website');
+        assert.equal(uniqueMatch(opts, 'recruiter'), 'contacted by recruiter');
+    });
+});

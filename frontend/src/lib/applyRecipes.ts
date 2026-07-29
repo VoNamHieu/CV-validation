@@ -139,7 +139,7 @@ export interface ApplyRecipe {
 const WORKDAY: ApplyRecipe = {
     ats: 'workday',
     label: 'Workday',
-    version: 8,
+    version: 10,
     verified: true,
     hostPattern: '\\.myworkdayjobs\\.com|\\.myworkdaysite\\.com',
     login: {
@@ -191,7 +191,13 @@ const WORKDAY: ApplyRecipe = {
                     ],
                     type: 'custom-select', required: true, answerSource: 'AGENT_DEFAULT',
                 },
-                { label: 'Phone type', selector: '[data-automation-id="formField-phoneType"] button', value: 'Mobile', type: 'custom-select' },
+                {
+                    // Measured options: "Mobile - Personal", "Mobile - Work",
+                    // "Telephone - Office", "Telephone - Personal".
+                    label: 'Phone type', selector: '[data-automation-id="formField-phoneType"] button',
+                    valuePriority: ['Mobile - Personal', 'Mobile', 'Cell'],
+                    type: 'custom-select', answerSource: 'AGENT_DEFAULT',
+                },
                 // Required multi-select (input-based, not a button): the LLM types but never
                 // commits an item, leaving it empty ("0 items selected") and blocking Next.
                 { label: 'Country Phone Code', selector: '[data-automation-id="formField-countryPhoneCode"] input', value: 'Vietnam', type: 'custom-select', multi: true, required: true },
@@ -213,7 +219,11 @@ const WORKDAY: ApplyRecipe = {
                 {
                     label: 'Degree', selector: '[data-automation-id="formField-degree"] button',
                     profileKey: 'highestDegree',
-                    valuePriority: ["Bachelor's Degree", 'Bachelor', 'Bachelors', 'University', 'Undergraduate'],
+                    // NO ladder. Measured on Mondelez: 19 named qualifications
+                    // (B.Arch, B.B.A., B.S., L.L.B. …) and no generic "Bachelor's
+                    // Degree", so a fallback rung would pick a DISCIPLINE the
+                    // candidate never claimed. Only their own stated degree may
+                    // match; absent that the field goes to them at review.
                     type: 'custom-select', required: true,
                 },
             ],

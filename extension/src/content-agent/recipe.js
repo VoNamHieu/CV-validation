@@ -24,7 +24,7 @@ export const FALLBACK_RECIPES = [
     {
         ats: 'workday',
         label: 'Workday',
-        version: 8,
+        version: 10,
         verified: true,
         hostPattern: '\\.myworkdayjobs\\.com|\\.myworkdaysite\\.com',
         login: {
@@ -83,7 +83,16 @@ export const FALLBACK_RECIPES = [
                         ],
                         type: 'custom-select', required: true, answerSource: 'AGENT_DEFAULT',
                     },
-                    { label: 'Phone type', selector: '[data-automation-id="formField-phoneType"] button', value: 'Mobile', type: 'custom-select' },
+                    // Measured options on Mondelez: "Mobile - Personal",
+                    // "Mobile - Work", "Telephone - Office", "Telephone - Personal".
+                    // A bare "Mobile" substring-matches the first of those, but
+                    // naming the ladder makes the personal line a deliberate
+                    // choice rather than whichever happens to be listed first.
+                    {
+                        label: 'Phone type', selector: '[data-automation-id="formField-phoneType"] button',
+                        valuePriority: ['Mobile - Personal', 'Mobile', 'Cell'],
+                        type: 'custom-select', answerSource: 'AGENT_DEFAULT',
+                    },
                     // Country Phone Code is a REQUIRED multi-select (input-based, not a
                     // button): the LLM types into it but never commits an item, so it
                     // stays empty ("0 items selected") and silently blocks Next — the
@@ -120,7 +129,14 @@ export const FALLBACK_RECIPES = [
                     {
                         label: 'Degree', selector: '[data-automation-id="formField-degree"] button',
                         profileKey: 'highestDegree',
-                        valuePriority: ["Bachelor's Degree", 'Bachelor', 'Bachelors', 'University', 'Undergraduate'],
+                        // NO ladder. Measured on Mondelez: the list is 19 named
+                        // qualifications (B.Arch, B.B.A., B.S., L.L.B. …) with no
+                        // generic "Bachelor's Degree" entry, so any fallback rung
+                        // would be picking a DISCIPLINE the candidate never
+                        // claimed. Only their own stated degree may match here;
+                        // absent that the field is left for them at review.
+                        // (Backed by the unambiguous-match rule in fillCustomSelect,
+                        // which refuses "Bachelor" outright — it hits 11 options.)
                         // No fixed answerSource: when `highestDegree` is on the
                         // profile this IS the user's answer, and hard-coding
                         // AGENT_DEFAULT flagged their own degree for review. The
@@ -215,6 +231,17 @@ export const FALLBACK_RECIPES = [
         thirdPartySkip: ['indeed', 'linkedin'],
     },
 ];
+
+/**
+ * How an open dropdown's choices are marked up — and it is NOT one thing.
+ *
+ * 3M tags each choice `data-automation-id="promptOption"`. Mondelez (measured on
+ * wd3.myworkdaysite.com/recruiting/mdlz) tags none of them: the popup is a plain
+ * [role="listbox"] of [role="option"] rows carrying only opaque ids. Matching
+ * promptOption alone found zero options there — on a listbox that had opened
+ * correctly — so every custom-select on that tenant failed as "listbox-timeout".
+ */
+const OPTION_SEL = '[data-automation-id="promptOption"], [role="option"]';
 
 let _recipes = null; // in-memory cache for this page's lifetime
 // Résumé-upload targets we've already sent the CV to THIS page load. Guards the
@@ -582,7 +609,34 @@ async function fillCustomSelect(f, value) {
     if (!safeActivate(trigger, { source: 'recipe', activation: 'widget-open' }, f.selector)) {
         return { ok: false, reason: 'policy-denied' };
     }
-    if (!(await waitForElement('[data-automation-id="promptOption"]', 4000))) return { ok: false, reason: 'listbox-timeout' };
+    // Scope the option list. Workday reuses `promptOption` for the SELECTED
+    // CHIPS as well as for the popup's choices — measured on Mondelez, where the
+    // committed "Vietnam (+84)" sits inside countryPhoneCode's selectedItemList
+    // carrying that exact automation id. A global query therefore sees other
+    // fields' answers as candidates, and clicking a chip DESELECTS it: filling
+    // one field could silently erase another's. It also made the
+    // waitForElement() guard below pass instantly on a page where no listbox had
+    // opened at all.
+    const visibleOptions = () => [...document.querySelectorAll(OPTION_SEL)]
+        .filter(o => o.offsetParent !== null)
+        // A committed chip is also role=option / promptOption. Clicking one
+        // DESELECTS it, so leaving them in the candidate pool meant filling one
+        // field could silently erase another field's answer.
+        .filter(o => o.getAttribute('data-automation-id') !== 'selectedItem')
+        .filter(o => !o.closest('[data-automation-id="selectedItemList"]'))
+        // The placeholder row is a real option element; picking it answers nothing.
+        .filter(o => o.id !== 'select-one' && (o.textContent || '').trim().toLowerCase() !== 'select one')
+        .filter(o => {
+            const owner = o.closest('[data-automation-id^="formField-"]');
+            return !owner || owner === wrap;   // never another field's committed answer
+        });
+
+    // Wait for OUR listbox, not for any promptOption anywhere on the page.
+    {
+        const deadline = Date.now() + 4000;
+        while (!visibleOptions().length && Date.now() < deadline) await sleep(150);
+        if (!visibleOptions().length) return { ok: false, reason: 'listbox-timeout' };
+    }
     await sleep(150);
     const want = String(value || '').trim().toLowerCase();
     // Type-to-filter: the trigger itself when it's an input (Mondelez renders the
@@ -590,8 +644,6 @@ async function fillCustomSelect(f, value) {
     // search input beside the button (long lists like Country on 3M).
     const filter = (trigger.tagName === 'INPUT' ? trigger : null) || wrap?.querySelector('input[type="text"]');
     const txt = (o) => (o.textContent || '').trim().toLowerCase();
-    const visibleOptions = () => [...document.querySelectorAll('[data-automation-id="promptOption"]')]
-        .filter(o => o.offsetParent !== null);
 
     // The candidates, best first: the resolved value, then each rung of the
     // field's semantic ladder. Exact match beats a substring match at every rung,
@@ -604,6 +656,29 @@ async function fillCustomSelect(f, value) {
     // empty is recoverable; a wrong answer on a submitted application is not.
     const ladder = [want, ...(f.valuePriority || []).map(v => String(v).trim().toLowerCase())]
         .filter(Boolean);
+
+    /**
+     * A match only counts when it is UNAMBIGUOUS.
+     *
+     * Measured on Mondelez's Degree list: every option names a discipline
+     * ("B.Arch - Bachelor of Architecture or equivalent", "B.B.A. - Bachelor of
+     * Business Administration…") and there is no generic "Bachelor's Degree" at
+     * all. A plain substring match on "Bachelor" hits ELEVEN of them and takes
+     * the first — Architecture — which is a false credential claim on a real
+     * application for someone who studied Marketing.
+     *
+     * So: exact wins; a prefix or substring match is accepted only when exactly
+     * one option matches it. Anything else is ambiguous and answers nothing,
+     * which the review then names.
+     */
+    const uniqueMatch = (list, wanted) => {
+        const exact = list.filter(o => txt(o) === wanted);
+        if (exact.length) return exact[0];
+        const prefix = list.filter(o => txt(o).startsWith(wanted));
+        if (prefix.length === 1) return prefix[0];
+        const contains = list.filter(o => txt(o).includes(wanted));
+        return contains.length === 1 ? contains[0] : null;
+    };
 
     let opt = null;
     let matched = '';
@@ -618,12 +693,12 @@ async function fillCustomSelect(f, value) {
             await simulateTyping(filter, wanted);
             await sleep(450);
             shown = visibleOptions();
-            opt = shown.find(o => txt(o) === wanted) || shown.find(o => txt(o).includes(wanted));
+            opt = uniqueMatch(shown, wanted);
             if (opt) { matched = wanted; break; }
         }
     } else {
         for (const wanted of ladder) {
-            opt = shown.find(o => txt(o) === wanted) || shown.find(o => txt(o).includes(wanted));
+            opt = uniqueMatch(shown, wanted);
             if (opt) { matched = wanted; break; }
         }
     }
