@@ -100,6 +100,10 @@ async function runAgentLoop(profile) {
     // statements about a change rather than about the first page we happened to load.
     let sawForm = false;
     const startUrl = window.location.href;
+    // Answer provenance, accumulated ACROSS steps — a Workday application spans
+    // four pages, and the user reviews it once at the end. Keyed by field so a
+    // re-fill on a later pass updates rather than duplicates.
+    const reviewAnswers = new Map();
     const gatewayClicks = new Map();   // recipe gateway label → click count (loop guard)
 
     // Load the CV for THIS apply session (see loadSessionCv).
@@ -187,7 +191,7 @@ async function runAgentLoop(profile) {
                 // branch runs when isApplicationFormPage() said there is no form on
                 // screen, so a button reading "Nộp hồ sơ" opens one rather than
                 // sending one. (VN job boards use the same words for both.)
-                safeActivate(applyBtn, policyCtx('gateway', { openingApplication: true }));
+                safeActivate(applyBtn, policyCtx('gateway', { openingApplication: true }), null);
                 showProgress(0, AGENT_MAX_ITERATIONS, 'Đã click nút Ứng tuyển, chờ form...');
                 await sleep(2000);
             } else {
@@ -340,7 +344,7 @@ async function runAgentLoop(profile) {
             if (recipe && atFinalStep(recipe)) {
                 removeProgress();
                 showToast('✅ Đã điền xong tới bước cuối — kiểm tra rồi bấm "Submit" để nộp.', 7000);
-                reportResult(true, 'Reached review step — filled, awaiting user submit', 'filled');
+                reportResult(true, 'Reached review step — filled, awaiting user submit', 'filled', { review: summarizeAnswers(reviewAnswers) });
                 showConfirmation(state.totalFields, state.totalFields, false);
                 return;
             }
@@ -438,6 +442,9 @@ async function runAgentLoop(profile) {
             // sees the pre-filled state and only handles the rest (dropdowns, Next).
             if (recipe) {
                 const rf = await applyRecipeFields(recipe, profile, cvData);
+                for (const a of rf.answers || []) {
+                    reviewAnswers.set(`${rf.step || '?'}::${a.field}`, { ...a, step: rf.step });
+                }
                 console.log(`[Copo Apply] recipe(${recipe.ats} v${recipe.version}): ${rf.matched ? `step="${rf.step || '—'}" filled=${rf.filled}` : 'no step matched → LLM handles'}`);
                 // Single-page hard cap: even if a field won't stick and we keep
                 // re-filling it (rf.filled>0 every pass), never spin forever — hand off
@@ -448,7 +455,7 @@ async function runAgentLoop(profile) {
                         removeProgress();
                         const miss = (state.unfilledRequired || []).slice(0, 4).join(', ');
                         showToast(`✅ Đã điền hồ sơ${miss ? ` — kiểm tra lại: ${miss}` : ''}. Tích ô đồng ý điều khoản rồi bấm "Submit" để nộp.`, 10000);
-                        reportResult(true, `${recipe.label} filled (pass cap) — awaiting user consent + submit`, 'filled');
+                        reportResult(true, `${recipe.label} filled (pass cap) — awaiting user consent + submit`, 'filled', { review: summarizeAnswers(reviewAnswers) });
                         showConfirmation(state.totalFields, state.totalFields, false);
                         return;
                     }
@@ -491,7 +498,7 @@ async function runAgentLoop(profile) {
                         removeProgress();
                         const miss = (state.unfilledRequired || []).slice(0, 4).join(', ');
                         showToast(`✅ Đã điền hồ sơ${miss ? ` — kiểm tra lại: ${miss}` : ''}. Tích ô đồng ý điều khoản rồi bấm "Submit" để nộp.`, 10000);
-                        reportResult(true, `${recipe.label} filled — awaiting user consent + submit`, 'filled');
+                        reportResult(true, `${recipe.label} filled — awaiting user consent + submit`, 'filled', { review: summarizeAnswers(reviewAnswers) });
                         showConfirmation(state.totalFields, state.totalFields, false);
                         return;
                     }
@@ -519,7 +526,17 @@ async function runAgentLoop(profile) {
                         // The surrounding condition already excludes the review
                         // step; the policy re-checks it anyway, because on Workday
                         // this same selector IS the submit button there.
-                        safeActivate(adv, policyCtx('recipe'));
+                        // A refused advance is not progress. Incrementing
+                        // `actionsTaken` anyway told the completion check that we
+                        // had acted, and let the loop continue as if the step had
+                        // moved on.
+                        if (!safeActivate(adv, policyCtx('recipe'), stepNow.advance)) {
+                            removeProgress();
+                            showToast('✅ Đã điền xong — kiểm tra rồi tự bấm nộp để hoàn tất.', 8000);
+                            reportResult(true, 'Policy stopped the step advance — awaiting user submit', 'filled', { review: summarizeAnswers(reviewAnswers) });
+                            showConfirmation(state.totalFields, state.totalFields, false);
+                            return;
+                        }
                         actionsTaken++;
                         await sleep(1500);
                         continue;
@@ -640,7 +657,7 @@ async function runAgentLoop(profile) {
                 // 'submitted') so the batch UI doesn't claim applications were
                 // sent. Report BEFORE the confirmation overlay: awaiting the
                 // user's click here would stall the whole batch queue.
-                reportResult(true, `Filled ~${filledCount} fields in ${i + 1} iterations — awaiting user submit`, 'filled');
+                reportResult(true, `Filled ~${filledCount} fields in ${i + 1} iterations — awaiting user submit`, 'filled', { review: summarizeAnswers(reviewAnswers) });
                 showConfirmation(filledCount, state.totalFields, false);
                 return;
             }
@@ -704,7 +721,7 @@ async function runAgentLoop(profile) {
                         if (verdict.code === 'submit_application' || verdict.code === 'final_review_step') {
                             removeProgress();
                             showToast('✅ Đã điền xong — kiểm tra rồi tự bấm nộp để hoàn tất.', 8000);
-                            reportResult(true, `Policy stop at ${verdict.code} — awaiting user submit`, 'filled');
+                            reportResult(true, `Policy stop at ${verdict.code} — awaiting user submit`, 'filled', { review: summarizeAnswers(reviewAnswers) });
                             showConfirmation(state.totalFields, state.totalFields, false);
                             return;
                         }
@@ -721,7 +738,7 @@ async function runAgentLoop(profile) {
                     // Overlay-aware: Workday covers Next/Continue/Submit buttons with
                     // a "click_filter" div that owns the handler — a plain .click() on
                     // the button is swallowed, so the agent could never advance a step.
-                    safeActivate(target, clickCtx);
+                    if (!safeActivate(target, clickCtx, plan.clickTarget)) { await sleep(POST_ACTION_WAIT_MS); continue; }
                     actionResult = { clicked: plan.clickTarget, ...info };
                     actionsTaken++;
                 } else {
@@ -772,6 +789,19 @@ async function runAgentLoop(profile) {
 //        | 'blocked'   (waiting on the USER — verify an email, supply a password;
 //                       NOT a failure, and never shown as one)
 //        | 'failed'
+function summarizeAnswers(reviewAnswers) {
+    const all = [...reviewAnswers.values()];
+    const defaults = all.filter(a => a.source === 'AGENT_DEFAULT');
+    return {
+        answered: all.length,
+        agentDefaults: defaults.length,
+        // Named, not just counted: "4 giá trị mặc định" tells the user there is
+        // something to check but not what, which is the same as telling them to
+        // re-read the whole form.
+        agentDefaultFields: defaults.map(a => a.field).slice(0, 10),
+    };
+}
+
 function reportResult(success, detail, outcome, extra = {}) {
     const o = outcome || (success ? 'filled' : 'failed');
     console.log(`[Copo Apply] ■ result: ${success ? '✅' : '✖'} outcome=${o} | ${detail} | ${window.location.hostname}`);

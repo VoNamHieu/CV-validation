@@ -24,7 +24,7 @@ const FALLBACK_RECIPES = [
     {
         ats: 'workday',
         label: 'Workday',
-        version: 5,
+        version: 6,
         verified: true,
         hostPattern: '\\.myworkdayjobs\\.com|\\.myworkdaysite\\.com',
         login: {
@@ -108,7 +108,11 @@ const FALLBACK_RECIPES = [
                         label: 'Degree', selector: '[data-automation-id="formField-degree"] button',
                         profileKey: 'highestDegree',
                         valuePriority: ["Bachelor's Degree", 'Bachelor', 'Bachelors', 'University', 'Undergraduate'],
-                        type: 'custom-select', required: true, answerSource: 'AGENT_DEFAULT',
+                        // No fixed answerSource: when `highestDegree` is on the
+                        // profile this IS the user's answer, and hard-coding
+                        // AGENT_DEFAULT flagged their own degree for review. The
+                        // ladder only applies when the profile has nothing.
+                        type: 'custom-select', required: true,
                     },
                 ],
                 advance: '[data-automation-id="pageFooterNextButton"]',
@@ -274,7 +278,7 @@ export function clickRecipeGateway(recipe, hasCV, clickedCounts) {
         if (!safeActivate(target, {
             source: 'gateway', openingApplication: true,
             submitSelector: recipe?.submitSelector,
-        })) continue;
+        }, g.detect)) continue;
         clickedCounts.set(g.label, (clickedCounts.get(g.label) || 0) + 1);
         console.log(`[Copo Recipe] gateway: clicked "${g.label}"`);
         return { clicked: true, label: g.label };
@@ -448,8 +452,12 @@ export async function applyRecipeFields(recipe, profile, cvData) {
                     // `matched` is the ladder rung that landed — when it is not the
                     // profile's own value, the answer is an agent default whatever
                     // the field declared.
-                    const fromProfile = provenance === 'PROFILE'
-                        && String(r.matched || '') === String(val || '').trim().toLowerCase();
+                    // `r.matched` is already lower-cased by the option matcher,
+                    // so comparing it to a raw profile value ("Vietnam",
+                    // "Bachelor") always failed and mislabelled the user's OWN
+                    // answers as agent defaults. Normalise both sides.
+                    const nrm = (v) => String(v ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+                    const fromProfile = provenance === 'PROFILE' && nrm(r.matched) === nrm(val);
                     answers.push({ field: f.label, value: r.matched || val, source: fromProfile ? 'PROFILE' : 'AGENT_DEFAULT' });
                 }
                 else if (r.reason === 'already-selected') outcomes.push([f.label, 'done', 'already selected']);
@@ -553,7 +561,9 @@ async function fillCustomSelect(f, value) {
     }
     // `widget: true` — opening this listbox and picking from it are steps INSIDE
     // one approved field fill, so they are judged as values, not as page actions.
-    safeActivate(trigger, { source: 'recipe', activation: 'widget-open' });
+    if (!safeActivate(trigger, { source: 'recipe', activation: 'widget-open' }, f.selector)) {
+        return { ok: false, reason: 'policy-denied' };
+    }
     if (!(await waitForElement('[data-automation-id="promptOption"]', 4000))) return { ok: false, reason: 'listbox-timeout' };
     await sleep(150);
     const want = String(value || '').trim().toLowerCase();
@@ -589,7 +599,9 @@ async function fillCustomSelect(f, value) {
             reason: `option-not-found (${opts.length} shown${ladder.length ? `, tried ${ladder.length} candidate(s)` : ''})`,
         };
     }
-    safeActivate(opt, { source: 'recipe', activation: 'widget-option' });
+    if (!safeActivate(opt, { source: 'recipe', activation: 'widget-option' }, f.selector)) {
+        return { ok: false, reason: 'policy-denied' };
+    }
     await sleep(250);
     // A MULTI-select stays OPEN after a pick (so you can add more) — and its popup
     // overlays the page footer, SWALLOWING the agent's later "Next" click, so the

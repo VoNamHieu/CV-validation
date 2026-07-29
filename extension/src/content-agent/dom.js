@@ -264,41 +264,101 @@ export async function simulateTyping(el, text) {
  * click, not a silent submit. Returns false when `el` is missing OR the policy
  * refused the action (the refusal is logged with its code).
  */
-export function overlayClick(el, ctx = {}) {
+export function safeActivate(el, ctx = {}, originSelector) {
     if (!el) return false;
-    const verdict = checkClick(el, ctx);
-    if (!verdict.allowed) { logDenial(verdict, el, ctx); return false; }
-    return rawActivate(el);
+
+    // The selector the caller USED to reach this element. It matters because the
+    // exact-control rule (`ctx.submitSelector`) can only fire when the descriptor
+    // carries a selector — and without it, a submit button that the planner
+    // mis-typed as `custom-dropdown` reached the dropdown handler, arrived here
+    // with no selector, read as harmless text ("Continue"), and was clicked.
+    const selector = originSelector || ctx.originSelector || '';
+
+    const intended = checkClick(el, ctx, selector);
+    if (!intended.allowed) { logDenial(intended, el, ctx); return false; }
+
+    const point = _viewportCentre(el);
+    if (!point) return false;
+
+    // What will ACTUALLY receive the click. Workday covers its footer buttons with
+    // a transparent "click_filter" div that owns the handler, which is why we aim
+    // at coordinates rather than calling el.click() — but it also means the element
+    // the page acts on is not always the one the policy just approved. So approve
+    // that one too, and require it to be on the intended element's own path: an
+    // overlay that belongs to something else entirely is not a click we understand.
+    const stack = _stackAt(point);
+    const target = stack[0] || el;
+    if (target !== el) {
+        const actual = checkClick(target, ctx, selector);
+        if (!actual.allowed) { logDenial(actual, target, ctx); return false; }
+        if (!_sharesPath(stack, el)) {
+            console.warn('[Copo Policy] ✋ topmost element at the target point is unrelated to the '
+                + 'intended control — refusing rather than clicking something we did not judge');
+            return false;
+        }
+    }
+    return _dispatchOne(target, point);
 }
 
-/** Alias that says what it is. Every activation in the agent — a page button, a
- *  dropdown trigger, one of its options, a radio, a checkbox — goes through this
- *  one function, so there is exactly one place the policy can be consulted and
- *  exactly one place it can be forgotten. */
-export const safeActivate = overlayClick;
+/** Kept for readability at call sites that are literally clicking a page button. */
+export const overlayClick = safeActivate;
 
-/**
- * The mechanical part: deliver ONE activation at the element's real coordinates.
- *
- * It dispatches the pointer/mouse preamble and then a single `.click()`. It used
- * to also dispatch a synthetic `click` event inside the loop AND call `.click()`,
- * which fires the page's handler twice — on a login or create-account button that
- * means two submissions, a duplicate account attempt, or an extra failed-attempt
- * tick against a tenant we are trying very hard not to get locked out of.
- */
-function rawActivate(el) {
-    let r = el.getBoundingClientRect();
-    // elementFromPoint needs the element in the viewport.
+/** Centre of the element, scrolled into view first — elementFromPoint only sees
+ *  what is in the viewport. Null when the element has no box to aim at. */
+function _viewportCentre(el) {
+    let r;
+    try { r = el.getBoundingClientRect(); } catch { return null; }
+    if (!r) return null;
     if (r.bottom < 0 || r.top > innerHeight || r.width === 0) {
         try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch { /* ignore */ }
-        r = el.getBoundingClientRect();
+        try { r = el.getBoundingClientRect(); } catch { return null; }
     }
-    const cx = Math.round(r.left + r.width / 2);
-    const cy = Math.round(r.top + r.height / 2);
-    const target = document.elementFromPoint(cx, cy) || el;   // the overlay, if any
-    const opts = { bubbles: true, cancelable: true, composed: true, view: window, clientX: cx, clientY: cy, button: 0, buttons: 1 };
-    // Preamble only — NO synthetic 'click' here. `.click()` below is the single
-    // activation; dispatching both ran every handler twice.
+    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+}
+
+/** Every element under the point, topmost first. */
+function _stackAt({ x, y }) {
+    try {
+        if (typeof document.elementsFromPoint === 'function') return document.elementsFromPoint(x, y) || [];
+        const one = document.elementFromPoint(x, y);
+        return one ? [one] : [];
+    } catch { return []; }
+}
+
+/**
+ * Is `el` part of the stack under the click point?
+ *
+ * Plain `stack.includes(el)` is not enough: elementsFromPoint reports the shadow
+ * HOST, not the control inside it, so every SmartRecruiters field would look
+ * unrelated to its own overlay. Walk el's ancestry across shadow boundaries and
+ * accept a stack entry that contains el, is contained by el, or hosts it.
+ */
+function _sharesPath(stack, el) {
+    const chain = new Set();
+    let node = el;
+    for (let i = 0; node && i < 40; i++) {
+        chain.add(node);
+        node = node.parentNode || node.host || null;
+        if (node && node.nodeType === 11 /* DocumentFragment: a shadow root */) node = node.host;
+    }
+    return stack.some(s => chain.has(s)
+        || (s.contains && s.contains(el))
+        || (el.contains && el.contains(s)));
+}
+
+/**
+ * Deliver exactly ONE activation at real coordinates.
+ *
+ * The pointer/mouse preamble deliberately excludes `click`: dispatching a
+ * synthetic click AND calling `.click()` ran the page's handler twice, which on a
+ * login or create-account button is a duplicate submission and an extra
+ * failed-attempt tick against a tenant we are trying not to get locked out of.
+ */
+function _dispatchOne(target, { x, y }) {
+    const opts = {
+        bubbles: true, cancelable: true, composed: true, view: window,
+        clientX: x, clientY: y, button: 0, buttons: 1,
+    };
     for (const type of ['pointerover', 'pointerenter', 'pointerdown', 'mousedown', 'pointerup', 'mouseup']) {
         try { target.dispatchEvent(type.startsWith('pointer') ? new PointerEvent(type, opts) : new MouseEvent(type, opts)); } catch { /* ignore */ }
     }

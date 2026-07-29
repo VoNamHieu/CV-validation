@@ -139,7 +139,7 @@ export interface ApplyRecipe {
 const WORKDAY: ApplyRecipe = {
     ats: 'workday',
     label: 'Workday',
-    version: 5,
+    version: 6,
     verified: true,
     hostPattern: '\\.myworkdayjobs\\.com|\\.myworkdaysite\\.com',
     login: {
@@ -206,7 +206,7 @@ const WORKDAY: ApplyRecipe = {
                     label: 'Degree', selector: '[data-automation-id="formField-degree"] button',
                     profileKey: 'highestDegree',
                     valuePriority: ["Bachelor's Degree", 'Bachelor', 'Bachelors', 'University', 'Undergraduate'],
-                    type: 'custom-select', required: true, answerSource: 'AGENT_DEFAULT',
+                    type: 'custom-select', required: true,
                 },
             ],
             advance: '[data-automation-id="pageFooterNextButton"]',

@@ -20,7 +20,7 @@ export async function handleReactSelect(el, value, ctx) {
 
     // Click the control to open
     const control = container.querySelector('[class*="-control"]') || container;
-    safeActivate(control, wctx(ctx, 'widget-open'));
+    if (!safeActivate(control, wctx(ctx, 'widget-open'))) return false;
     await sleep(400);
 
     // Find the input inside
@@ -34,7 +34,7 @@ export async function handleReactSelect(el, value, ctx) {
     const options = document.querySelectorAll('[class*="-option"]');
     for (const opt of options) {
         if (opt.textContent?.trim().toLowerCase().includes(value.toLowerCase())) {
-            safeActivate(opt, wctx(ctx, 'widget-option'));
+            if (!safeActivate(opt, wctx(ctx, 'widget-option'))) return false;
             await sleep(200);
             return true;
         }
@@ -51,7 +51,7 @@ export async function handleMuiAutocomplete(el, value, ctx) {
 
     const input = container.querySelector('input') || el;
     input.focus();
-    safeActivate(input, wctx(ctx, 'widget-open'));
+    if (!safeActivate(input, wctx(ctx, 'widget-open'))) return false;
     await sleep(400);
 
     if (input.tagName === 'INPUT') {
@@ -65,7 +65,7 @@ export async function handleMuiAutocomplete(el, value, ctx) {
         const options = listbox.querySelectorAll('[role="option"], li');
         for (const opt of options) {
             if (opt.textContent?.trim().toLowerCase().includes(value.toLowerCase())) {
-                safeActivate(opt, wctx(ctx, 'widget-option'));
+                if (!safeActivate(opt, wctx(ctx, 'widget-option'))) return false;
                 await sleep(200);
                 return true;
             }
@@ -82,7 +82,7 @@ export async function handleAntSelect(el, value, ctx) {
     if (!container) return false;
 
     const selector = container.querySelector('.ant-select-selector') || container;
-    safeActivate(selector, wctx(ctx, 'widget-open'));
+    if (!safeActivate(selector, wctx(ctx, 'widget-open'))) return false;
     await sleep(400);
 
     const searchInput = document.querySelector('.ant-select-dropdown input, .ant-select-search__field');
@@ -94,7 +94,7 @@ export async function handleAntSelect(el, value, ctx) {
     const options = document.querySelectorAll('.ant-select-item-option');
     for (const opt of options) {
         if (opt.textContent?.trim().toLowerCase().includes(value.toLowerCase())) {
-            safeActivate(opt, wctx(ctx, 'widget-option'));
+            if (!safeActivate(opt, wctx(ctx, 'widget-option'))) return false;
             await sleep(200);
             return true;
         }
@@ -116,7 +116,7 @@ export async function handleSelect2(el, value, ctx) {
     const select2Container = fromContainer || fromSibling;
 
     if (select2Container) {
-        safeActivate(select2Container, wctx(ctx, 'widget-open'));
+        if (!safeActivate(select2Container, wctx(ctx, 'widget-open'))) return false;
         await sleep(400);
     } else {
         // Try opening via the hidden select
@@ -133,7 +133,7 @@ export async function handleSelect2(el, value, ctx) {
         const results = document.querySelectorAll('.select2-results__option');
         for (const r of results) {
             if (r.textContent?.trim().toLowerCase().includes(value.toLowerCase())) {
-                safeActivate(r, wctx(ctx, 'widget-option'));
+                if (!safeActivate(r, wctx(ctx, 'widget-option'))) return false;
                 await sleep(200);
                 return true;
             }
@@ -146,7 +146,7 @@ export async function handleSelect2(el, value, ctx) {
  * Handle custom dropdown (role=combobox, etc).
  */
 export async function handleCustomDropdown(el, value, ctx) {
-    safeActivate(el, wctx(ctx, 'widget-open'));
+    if (!safeActivate(el, wctx(ctx, 'widget-open'))) return false;
     await sleep(400);
 
     const allOptions = document.querySelectorAll(
@@ -155,8 +155,10 @@ export async function handleCustomDropdown(el, value, ctx) {
     for (const opt of allOptions) {
         if (opt.offsetParent !== null && opt.textContent?.trim().toLowerCase().includes(value.toLowerCase())) {
             const radio = opt.querySelector('input[type="radio"], input[type="checkbox"]');
-            if (radio) safeActivate(radio, wctx(ctx, 'widget-option'));
-            else safeActivate(opt, wctx(ctx, 'widget-option'));
+            const picked = radio
+                ? safeActivate(radio, wctx(ctx, 'widget-option'))
+                : safeActivate(opt, wctx(ctx, 'widget-option'));
+            if (!picked) return false;
             await sleep(200);
             return true;
         }
@@ -195,7 +197,10 @@ export async function handleRadioGroup(elOrName, value, ctx) {
     const target = match || fallback;
     if (!target) return false;
 
-    safeActivate(target, wctx(ctx, 'widget-option'));
+    // A refused activation must leave the page exactly as it was. Forcing
+    // `checked` and dispatching `change` here applied the very answer the policy
+    // had just refused, and then reported success for it.
+    if (!safeActivate(target, wctx(ctx, 'widget-option'))) return false;
     if (!target.checked) {
         target.checked = true;
         target.dispatchEvent(new Event('change', { bubbles: true }));
@@ -212,7 +217,7 @@ export async function handleCheckbox(el, value, ctx) {
             String(value ?? '').toLowerCase().trim()
         );
     if (el.checked !== want) {
-        safeActivate(el, wctx(ctx, 'widget-option'));
+        if (!safeActivate(el, wctx(ctx, 'widget-option'))) return false;
         el.dispatchEvent(new Event('change', { bubbles: true }));
     }
     return true;
@@ -241,7 +246,11 @@ export async function executeSingleInstruction(inst, cvData, ctx = {}) {
     // user's behalf. The server route filters the same families, but the planner
     // is not the only thing that can be wrong — a mis-resolved selector lands
     // here too, and this is the last point before the page is touched.
-    const fillCtx = { ...ctx, source: ctx.source || 'planner' };
+    // `originSelector` rides along so every nested activation — a dropdown
+    // trigger, one of its options — is still judged against the selector the
+    // planner actually named. Without it the exact submit-control rule cannot
+    // fire once a handler has resolved some inner element.
+    const fillCtx = { ...ctx, source: ctx.source || 'planner', originSelector: inst.selector };
     const verdict = checkFill(el, fillCtx, inst.selector);
     if (!verdict.allowed) { logDenial(verdict, el, fillCtx); return false; }
 
@@ -261,7 +270,7 @@ export async function executeSingleInstruction(inst, cvData, ctx = {}) {
         // button), and it handles the click_filter overlays that swallow plain
         // clicks on Workday.
         if (action === 'click') {
-            return safeActivate(el, fillCtx);
+            return safeActivate(el, fillCtx, inst.selector);
         }
 
         // Radio group

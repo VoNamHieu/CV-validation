@@ -56,7 +56,14 @@ interface BatchJobStatus {
     status: 'pending' | 'processing' | 'done' | 'error' | 'blocked';
     // outcome: 'submitted' = success signal seen after the agent acted;
     // 'filled' = form filled, tab left open for the user to review & submit.
-    result?: { success: boolean; detail?: string; outcome?: 'submitted' | 'filled' | 'failed' };
+    result?: {
+        success: boolean;
+        detail?: string;
+        outcome?: 'submitted' | 'filled' | 'failed';
+        /** What the agent answered on the user's behalf, so the review can point
+         *  at the few fields worth checking instead of the whole form. */
+        review?: { answered: number; agentDefaults: number; agentDefaultFields?: string[] };
+    };
     /** Canonical host of the account-gated tenant, when the job is on one. */
     tenantKey?: string;
     /** Why it's waiting, when status === 'blocked'. */
@@ -1356,7 +1363,14 @@ export default function StepEditCv() {
                                 }}>
                                     {job.status === 'pending' && 'Chờ'}
                                     {job.status === 'processing' && 'Đang xử lý...'}
-                                    {job.status === 'done' && (job.result?.outcome === 'submitted' ? 'Đã nộp' : 'Đã điền, chờ nộp')}
+                                    {job.status === 'done' && (job.result?.outcome === 'submitted'
+                                        ? 'Đã nộp'
+                                        : job.result?.review?.agentDefaults
+                                            // Name what to check. "Đã điền, chờ nộp" tells the
+                                            // user to review without telling them what — which
+                                            // in practice means re-reading the whole form.
+                                            ? `Đã điền — kiểm tra ${job.result.review.agentDefaults} giá trị mặc định`
+                                            : 'Đã điền, chờ nộp')}
                                     {job.status === 'blocked' && BLOCKED_LABEL[job.blockedReason ?? 'manual']}
                                     {job.status === 'error' && (job.result?.detail || 'Lỗi')}
                                 </span>
