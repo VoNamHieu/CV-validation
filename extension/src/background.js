@@ -89,6 +89,22 @@ const RESTORE_KEYS = [
  *  adopts state when a batch is genuinely in flight. */
 function adoptPersistedState(data) {
     if (!data?.isProcessing || !Array.isArray(data.applyQueue) || data.applyQueue.length === 0) return false;
+
+    // A batch nobody ended is not a batch still running. `isProcessing` survives
+    // a worker kill, a closed tab and an extension reload, so without a staleness
+    // check the state below is adopted forever — and the part of it that hurts is
+    // the attempt budget, which then refuses to log into that company again with
+    // a message about attempts made hours ago. No single job can outlive the hard
+    // cap, so a last sign of life older than that means the batch is dead.
+    const alive = Math.max(data.lastHeartbeatAt || 0, data.jobStartedAt || 0);
+    if (alive && Date.now() - alive > JOB_HARD_CAP_MS) {
+        console.warn('[Copo] discarding a batch that went silent '
+            + `${Math.round((Date.now() - alive) / 60000)} min ago — its attempt budget dies with it`);
+        chrome.storage.local.remove(RESTORE_KEYS);
+        atsCoord.endBatch();
+        return false;
+    }
+
     applyQueue = data.applyQueue;
     isProcessing = data.isProcessing;
     currentJobIndex = typeof data.currentJobIndex === 'number' ? data.currentJobIndex : -1;
@@ -1052,7 +1068,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
             const operation = atsCoord.nextOperation(ref.tenantKey);
             if (!operation) {
-                sendResponse({ ok: false, reason: 'manual', detail: 'Đã thử đăng nhập tối đa cho công ty này' });
+                // Name the batch. The old wording ("Đã thử đăng nhập tối đa cho
+                // công ty này") reads as a permanent verdict on the company, and
+                // it was being shown for attempts spent in an earlier run — so it
+                // looked like the agent had given up without doing anything.
+                console.warn(`[Copo ATS] ${ref.tenantKey} budget spent this batch:`,
+                    atsCoord.snapshot().attempts?.[ref.tenantKey]);
+                sendResponse({
+                    ok: false,
+                    reason: 'manual',
+                    detail: 'Đã dùng hết lượt đăng nhập cho công ty này trong lượt chạy hiện tại. '
+                        + 'Bắt đầu lượt mới để thử lại.',
+                });
                 return;
             }
 
@@ -1739,11 +1766,22 @@ async function extCrawl(url) {
 // ─── Install event ───
 chrome.runtime.onInstalled.addListener(() => {
     console.log('[Copo] Extension installed!');
-    // Clear any stale queue
+    // Clear any stale queue.
+    //
+    // `atsRuntime` belongs in this list and was missing from it, which is worse
+    // than it sounds: it holds the per-tenant attempt budget, so a batch
+    // abandoned mid-run (extension reloaded, tab closed) left its spent budget in
+    // storage while the queue beside it was cleared. The next apply at that
+    // company then refused before touching the page — "Đã thử đăng nhập tối đa
+    // cho công ty này" for attempts made in a batch that no longer existed — and
+    // reloading the extension, the obvious fix, did not help because reloading is
+    // exactly what got here.
     chrome.storage.local.remove([
         'applyQueue', 'isProcessing', 'currentJobIndex', 'currentTabId', 'jobStartedAt',
         'pendingAutoApply', 'autoApplyJobUrl', 'batchMode',
+        'atsRuntime', 'applySession', 'lastHeartbeatAt',
     ]);
+    atsCoord.endBatch();
 
     // MV3 content scripts only inject into pages that load AFTER install. A user
     // who already has a CV in the web app and installs the extension with the

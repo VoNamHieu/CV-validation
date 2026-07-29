@@ -345,6 +345,27 @@ describe('coordinator', () => {
         assert.equal(coord.gateJob(AIA).skip, true, 'budget spent → remaining jobs skip');
     });
 
+    test("a 'ready' tenant logs in instead of probing signup first", () => {
+        // How a supplied credential reaches 'login' without bypassing anything:
+        // it says the account EXISTS, which is what 'ready' means, and this is
+        // the ordinary consequence of that state. Signup-first is the right
+        // default only while the account's existence is unknown — otherwise every
+        // run opens by trying to register an account that is already there.
+        coord.beginBatch('b1', {});
+        coord.setState(AIA.tenantKey, { accountState: 'ready' });
+        assert.equal(coord.nextOperation(AIA.tenantKey), 'login');
+    });
+
+    test("'ready' does not buy extra attempts", () => {
+        // The state changes WHICH operation is chosen, never how many are
+        // allowed — otherwise it would be a way to re-probe a tenant that had
+        // already spent its budget.
+        coord.beginBatch('b1', {});
+        coord.setState(AIA.tenantKey, { accountState: 'ready' });
+        coord.recordAttempt(AIA.tenantKey, 'login');
+        assert.equal(coord.nextOperation(AIA.tenantKey), null);
+    });
+
     test('a verdict recorded for the tenant applies to its later jobs', () => {
         coord.beginBatch('b1', {});
         assert.equal(coord.gateJob(AIA).skip, false);

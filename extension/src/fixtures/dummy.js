@@ -304,6 +304,24 @@ export async function clearDummyData() {
     await chrome.storage.local.remove(SEED_KEYS);
 }
 
+/**
+ * Throw away the persisted batch + per-tenant auth state.
+ *
+ * The attempt budget is 1 signup + 1 login per tenant per batch, and it is
+ * persisted so an MV3 worker restart cannot hand out a second one. Testing burns
+ * through that constantly — every abandoned run leaves a tenant with nothing
+ * left, and the next attempt refuses before touching the page. Production
+ * discards a dead batch on its own now; this is the manual version, for when you
+ * want a clean budget without waiting or reloading.
+ */
+export async function resetAtsRuntime() {
+    if (typeof chrome === 'undefined' || !chrome?.storage?.local) return;
+    await chrome.storage.local.remove([
+        'atsRuntime', 'applyQueue', 'isProcessing', 'currentJobIndex',
+        'currentTabId', 'jobStartedAt', 'lastHeartbeatAt', 'applySession',
+    ]);
+}
+
 const BANNER = '[Copo] ⚠️  FIXTURE BUILD — this extension carries FAKE candidate data. '
     + 'Never use it to send a real application.';
 
@@ -334,8 +352,12 @@ export function initFixture() {
     // user actually chose this build.
     try {
         chrome.runtime.onInstalled.addListener(() => {
-            installDummyData()
-                .then(seeded => console.warn(`${BANNER} Installed over any previous data: ${seeded.join(', ')}.`))
+            // Budget too, not just the data. A test build inheriting the spent
+            // login attempts of whatever ran before it refuses at the first login
+            // wall, and reports it as though the company were the problem.
+            Promise.all([installDummyData(), resetAtsRuntime()])
+                .then(([seeded]) => console.warn(
+                    `${BANNER} Installed over any previous data: ${seeded.join(', ')}. ATS budget reset.`))
                 .catch(e => console.warn('[Copo] fixture install failed:', e?.message));
         });
     } catch { /* no runtime here — nothing to hook */ }
@@ -346,13 +368,19 @@ export function initFixture() {
         /** Overwrite the slots with the fixture, whatever is in them now. */
         install: async () => {
             const keys = await installDummyData();
-            console.warn('[Copo] fixture installed:', keys.join(', '));
+            await resetAtsRuntime();
+            console.warn('[Copo] fixture installed:', keys.join(', '), '— ATS attempt budget reset.');
             return keys;
         },
         /** Remove it. Re-sync from the web app to get the real profile back. */
         clear: async () => {
             await clearDummyData();
             console.warn('[Copo] fixture cleared — re-sync from the web app to restore real data.');
+        },
+        /** Give every tenant its login attempts back. */
+        resetAts: async () => {
+            await resetAtsRuntime();
+            console.warn('[Copo] ATS attempt budget + batch state cleared. Reload the page to retry.');
         },
     };
 }
