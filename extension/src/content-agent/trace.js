@@ -18,13 +18,31 @@ const KEY = 'copoAgentTrace';
 const MAX = 120;          // a long run, still one screenful when printed
 const VALUE_CAP = 200;    // keep a DOM dump from swallowing the buffer
 
+/**
+ * Every browser touch below is guarded.
+ *
+ * policy.js calls trace() and is deliberately unit-testable in plain node — no
+ * DOM, no storage — so a tracer that assumes a browser would make the safety
+ * layer untestable to gain a log line. Outside a browser this degrades to a
+ * console call and nothing else.
+ */
+const hasStore = () => {
+    try { return typeof sessionStorage !== 'undefined' && !!sessionStorage; } catch { return false; }
+};
+
 /** Read the buffer that survived the last navigation. */
 function load() {
+    if (!hasStore()) return [];
     try { return JSON.parse(sessionStorage.getItem(KEY) || '[]'); } catch { return []; }
 }
 
 function save(rows) {
+    if (!hasStore()) return;
     try { sessionStorage.setItem(KEY, JSON.stringify(rows.slice(-MAX))); } catch { /* full or blocked */ }
+}
+
+function here() {
+    try { return typeof location !== 'undefined' ? location.pathname.slice(-52) : ''; } catch { return ''; }
 }
 
 /** Emails: keep enough to recognise the account, not enough to be an address. */
@@ -69,7 +87,7 @@ export function trace(step, data) {
     const row = {
         t: new Date().toISOString().slice(11, 23),
         step,
-        url: location.pathname.slice(-52),
+        url: here(),
         ...scrub(data),
     };
     const rows = load();
@@ -102,5 +120,6 @@ export function traceDump(reason) {
  * failure needs to be explained by.
  */
 export function traceClear() {
+    if (!hasStore()) return;
     try { sessionStorage.removeItem(KEY); } catch { /* ignore */ }
 }

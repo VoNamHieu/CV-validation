@@ -269,6 +269,20 @@ async function runAgentLoop(profile) {
                 console.warn('[Copo Apply] ⚠ validation errors:',
                     state.errors.map(e => `${e.field || e.nearFieldSelector || '?'} — ${e.message}`.slice(0, 90)).join('   |   '));
             }
+            // The same snapshot into the trace. The console lines above scroll away
+            // with the document on every navigation, so a run that ends three page
+            // loads later leaves a dump that says what the agent DID and nothing
+            // about what it was looking at — which is the half that explains it.
+            trace('loop.iter', {
+                n: i + 1,
+                step: _step,
+                fields: state.formFields.length,
+                buttons: state.buttons.length,
+                errors: state.errors.length,
+                blockers: state.blockers.length,
+                labels: state.formFields.slice(0, 8).map(f =>
+                    `${(f.label || f.name || f.ariaLabel || '?').trim().slice(0, 18)}[${f.componentType || f.type}${f.value ? '=✓' : ''}${f.required ? ',req' : ''}]`).join(' '),
+            });
 
             // ── DIAG: surface WHY a recipe'd ATS breaks ("Something went wrong").
             // From the isolated world we can't read fetch bodies, but Resource Timing
@@ -451,7 +465,27 @@ async function runAgentLoop(profile) {
             // self-contradicting "Trang này không cần tài khoản". Anywhere else the
             // wall stays a state.blockers entry and the planner keeps filling the
             // fields it CAN reach, which is the documented policy.
-            if (!atsAuthDone && tenantRefFor(location.href) && detectLoginWall(recipe?.login)) {
+            // Why the auth branch is or is not entered, recorded either way. A run
+            // that never tried to log in left a trace with no auth step at all —
+            // indistinguishable from one where the branch was never reached, and
+            // that difference is the whole diagnosis. The checks are cheap; the
+            // ambiguity cost a round trip.
+            const _tenant = tenantRefFor(location.href);
+            const _wall = (_tenant && !atsAuthDone) ? detectLoginWall(recipe?.login) : null;
+            if (_tenant && !atsAuthDone && !_wall) {
+                const pw = [...document.querySelectorAll('input[type="password"]')];
+                trace('auth.skip', {
+                    why: 'no login wall detected',
+                    tenant: _tenant.tenantKey,
+                    pwTotal: pw.length,
+                    pwVisible: pw.filter(e => e.offsetParent !== null).length,
+                    bodyHead: (document.body?.innerText || '').replace(/\s+/g, ' ').slice(0, 140),
+                });
+            } else if (_tenant && atsAuthDone) {
+                trace('auth.skip', { why: 'already authenticated this page-load', tenant: _tenant.tenantKey });
+            }
+
+            if (!atsAuthDone && _tenant && _wall) {
                 // Let the form finish rendering BEFORE asking for a credential.
                 // The grant spends the tenant's attempt, so asking for one we
                 // cannot use is how a tenant runs out of logins without the ATS
@@ -708,9 +742,28 @@ async function runAgentLoop(profile) {
                 // left → ADVANCE deterministically instead of burning a slow/overloaded
                 // LLM call just to click "Save and Continue". Close a leftover dropdown
                 // popup first (it overlays the footer + eats the click).
+                // Why the deterministic advance did or did not fire. Every term
+                // here has stalled a run at least once — an unmatched step means no
+                // `advance` selector, one unfilled required field withholds the
+                // click entirely, and a false-positive final step denies it. From
+                // outside all three look identical: the page simply does not move.
+                const _stepNow = (recipe.steps || []).find(s => s.detect && document.querySelector(s.detect));
+                const _adv = _stepNow?.advance ? document.querySelector(_stepNow.advance) : null;
+                trace('advance.check', {
+                    recipeMatched: rf.matched,
+                    step: _stepNow?.name || _stepNow?.detect || null,
+                    unfilledRequired: state.unfilledRequired.length,
+                    unfilledLabels: state.unfilledRequired.slice(0, 5).map(f => (f.label || f.selector || '?').slice(0, 22)).join(' | '),
+                    errors: state.errors.length,
+                    atFinalStep: atFinalStep(recipe),
+                    advSelector: _stepNow?.advance || null,
+                    advFound: !!_adv,
+                    advVisible: !!(_adv && _adv.offsetParent !== null),
+                    advLabel: _adv ? (_adv.textContent || '').trim().slice(0, 28) : null,
+                });
                 if (rf.matched && state.unfilledRequired.length === 0 && state.errors.length === 0 && !atFinalStep(recipe)) {
-                    const stepNow = (recipe.steps || []).find(s => s.detect && document.querySelector(s.detect));
-                    const adv = stepNow?.advance ? document.querySelector(stepNow.advance) : null;
+                    const stepNow = _stepNow;
+                    const adv = _adv;
                     if (adv && adv.offsetParent !== null) {
                         if (document.querySelector('[data-automation-id="promptOption"]')) {
                             (document.activeElement || document.body)?.dispatchEvent?.(
@@ -725,7 +778,9 @@ async function runAgentLoop(profile) {
                         // `actionsTaken` anyway told the completion check that we
                         // had acted, and let the loop continue as if the step had
                         // moved on.
-                        if (!safeActivate(adv, policyCtx('recipe'), stepNow.advance)) {
+                        const advanced = safeActivate(adv, policyCtx('recipe'), stepNow.advance);
+                        trace('advance.click', { selector: stepNow.advance, activated: advanced });
+                        if (!advanced) {
                             removeProgress();
                             showToast('✅ Đã điền xong — kiểm tra rồi tự bấm nộp để hoàn tất.', 8000);
                             reportResult(true, 'Policy stopped the step advance — awaiting user submit', 'filled', { review: summarizeAnswers(reviewAnswers), fieldGaps: [...fieldGaps.values()] });

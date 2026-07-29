@@ -19,6 +19,7 @@
 // rather than a silent bypass.
 
 import { isApplicationFormPage, isThirdPartyApply } from './detect.js';
+import { trace } from './trace.js';
 
 // ── Vocabulary ─────────────────────────────────────────────────────────────
 // Narrow on purpose. A false negative here transmits an application the user
@@ -535,11 +536,32 @@ export function checkFill(el, ctx = {}, selector) {
     return evaluateFill(describeElement(el, selector), ctx);
 }
 
-/** One-line refusal log, so a denied action is visible in the page console
- *  instead of looking like the agent silently doing nothing. */
+/**
+ * One-line refusal log, so a denied action is visible instead of looking like
+ * the agent silently doing nothing.
+ *
+ * It also goes into the run trace. A refusal and a click that simply had no
+ * effect are indistinguishable from outside — the page does not move either way
+ * — and a console warning does not survive the navigation that follows, so a run
+ * that stalled on a denied "Continue" produced a dump with no sign of the
+ * refusal in it. This is the single most useful line the trace can carry, which
+ * is why it is emitted from the policy itself rather than from each caller.
+ */
 export function logDenial(verdict, el, ctx = {}) {
+    const label = el
+        ? ((el.textContent || el.value || el.name || '').toString().replace(/\s+/g, ' ').trim().slice(0, 40))
+        : '';
     console.warn(
-        `[Copo Policy] ✋ ${verdict.code} (${ctx.source || 'planner'}) — ${verdict.reason}`,
-        el ? ((el.textContent || el.value || el.name || '').toString().replace(/\s+/g, ' ').trim().slice(0, 40)) : '',
+        `[Copo Policy] ✋ ${verdict.code} (${ctx.source || 'planner'}) — ${verdict.reason}`, label,
     );
+    trace('policy.deny', {
+        code: verdict.code,
+        source: ctx.source || 'planner',
+        label,
+        automationId: el?.getAttribute?.('data-automation-id') || null,
+        // atFinalStep denies EVERYTHING, so when it is the reason the useful
+        // question is whether the review page is really on screen.
+        atFinalStep: ctx.atFinalStep ?? null,
+        ambiguous: verdict.ambiguous ?? undefined,
+    });
 }

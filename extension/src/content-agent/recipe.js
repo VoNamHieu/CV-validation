@@ -15,6 +15,7 @@
 
 import { deepFindControl, deepQuery, deepQueryAll, dropFileOnZone, safeActivate, setFileOnInput, setNativeValue, simulateTyping, sleep, waitForElement } from './dom.js';
 import { isThirdPartyApply } from './detect.js';
+import { trace } from './trace.js';
 
 // Keep in sync with frontend/src/lib/applyRecipes.ts (WORKDAY). Fields verified
 // against real 3M Workday captures (My Information, 2026-07-15 / -22). The
@@ -530,6 +531,21 @@ export async function applyRecipeFields(recipe, profile, cvData, cv) {
                     try { if (dropFileOnZone(host, cvData.base64, cvData.fileName)) { ok = true; console.log(`[Copo Recipe] upload "${key}": used drop fallback`); } } catch { /* best effort */ }
                 }
             }
+            // The upload itself, in the trace. "Uploaded the CV and then nothing
+            // happened" is reported often and answered by exactly two facts: did
+            // the file reach an input, and was this pass then cut short to let the
+            // parser run (`once`) — because that early return is indistinguishable
+            // from a stall if you are watching the page rather than the code.
+            trace('upload', {
+                target: key,
+                via: t.via || 'input',
+                hostFound: !!host,
+                fileInput: !!fileEl,
+                shadow: _sh,
+                alreadyHadFile: already,
+                ok,
+                stopsPass: !!(ok && t.once),
+            });
             if (ok) {
                 filled++;
                 if (t.once) {
