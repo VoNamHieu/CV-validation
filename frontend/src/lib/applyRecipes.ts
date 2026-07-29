@@ -139,7 +139,7 @@ export interface ApplyRecipe {
 const WORKDAY: ApplyRecipe = {
     ats: 'workday',
     label: 'Workday',
-    version: 7,
+    version: 8,
     verified: true,
     hostPattern: '\\.myworkdayjobs\\.com|\\.myworkdaysite\\.com',
     login: {
@@ -180,7 +180,11 @@ const WORKDAY: ApplyRecipe = {
                 { label: 'Country', selector: '[data-automation-id="formField-country"] button', profileKey: 'nationality', default: 'Vietnam', type: 'custom-select', required: true },
                 { label: 'Province or City', selector: '[data-automation-id="formField-countryRegion"] button', profileKey: 'addressProvince', type: 'custom-select' },
                 {
-                    label: 'How did you hear', selector: '[data-automation-id="formField-source"] button',
+                    // 3M renders this as a button→listbox, Mondelez as a
+                    // searchable text input. Measured on both; only one exists
+                    // per tenant, so the comma list resolves whichever is there.
+                    label: 'How did you hear',
+                    selector: '[data-automation-id="formField-source"] input, [data-automation-id="formField-source"] button',
                     valuePriority: [
                         'Company Website', 'Company Careers Website', 'Employer Website',
                         'Careers Website', 'Company Webpage', 'Website', 'Webpage', 'Online',

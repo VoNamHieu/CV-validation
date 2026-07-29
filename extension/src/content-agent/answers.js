@@ -53,7 +53,10 @@ export const ANSWER_RULES = [
     },
     {
         kind: 'previous_employment',
-        match: /previously (been )?employed|former employee|worked here before|đã từng làm việc/i,
+        // Measured wording on Mondelez: "Have you previously worked for this
+        // organization?" — a REQUIRED radio that the old pattern missed, so
+        // the step could not advance without the user.
+        match: /previously (been )?(employed|worked)|former employee|worked (here|for (this|us)) before|đã từng làm việc/i,
         candidates: ['no', 'không'],
     },
     {

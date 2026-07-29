@@ -114,3 +114,18 @@ describe('unknown questions', () => {
         assert.equal(resolveAnswer(q('What is your favourite programming language?'), [], {}), null);
     });
 });
+
+// ── wording measured on real forms ─────────────────────────────────────────
+describe('real-world phrasings', () => {
+    test('Mondelez: "previously worked for this organization" resolves to No', () => {
+        // Measured on wd3.myworkdaysite.com/recruiting/mdlz — a REQUIRED radio on
+        // My Information, absent from the recipe, and missed by the first version
+        // of this rule (which only knew "previously been employed"). A required
+        // question with no answer is a step the agent cannot leave.
+        const a = resolveAnswer(
+            q('Have you previously worked for this organization? If Yes, please answer the questions below. If No, please continue to the next page.'),
+            ['Yes', 'No'], {});
+        assert.equal(a.value, 'No');
+        assert.equal(a.kind, 'previous_employment');
+    });
+});

@@ -24,7 +24,7 @@ export const FALLBACK_RECIPES = [
     {
         ats: 'workday',
         label: 'Workday',
-        version: 7,
+        version: 8,
         verified: true,
         hostPattern: '\\.myworkdayjobs\\.com|\\.myworkdaysite\\.com',
         login: {
@@ -71,7 +71,12 @@ export const FALLBACK_RECIPES = [
                     // the candidate found the job. Now it walks a semantic ladder
                     // and, failing all of it, leaves the field for the user.
                     {
-                        label: 'How did you hear', selector: '[data-automation-id="formField-source"] button',
+                        // Two different widgets behind one automation id: 3M renders
+                        // a button→listbox, Mondelez a searchable text input
+                        // (placeholder "Search"). Measured on both. The comma list
+                        // matches whichever exists — only one does per tenant.
+                        label: 'How did you hear',
+                        selector: '[data-automation-id="formField-source"] input, [data-automation-id="formField-source"] button',
                         valuePriority: [
                             'Company Website', 'Company Careers Website', 'Employer Website',
                             'Careers Website', 'Company Webpage', 'Website', 'Webpage', 'Online',
@@ -559,12 +564,17 @@ async function fillCustomSelect(f, value) {
     const trigger = document.querySelector(f.selector);
     if (!trigger || trigger.offsetParent === null) return { ok: false, reason: 'trigger-absent' };
     const wrap = trigger.closest('[data-automation-id^="formField-"]');
-    // Idempotency: a MULTI-select stores its picks in selectedItemList; a single
-    // button-select stores the chosen option's id in the button's `value` attr.
-    if (f.multi) {
-        const chips = wrap?.querySelector('[data-automation-id="selectedItemList"]');
-        if (chips && chips.children.length) return { ok: false, reason: 'already-selected' };
-    } else if ((trigger.getAttribute('value') || '').trim()) {
+    // Idempotency. Three shapes, all seen in the wild:
+    //   · a button-select stores the chosen option's id in the button's `value`
+    //   · a multi-select lists its picks as chips in selectedItemList
+    //   · a SEARCHABLE single-select (Mondelez's source/phone-code prompt) is an
+    //     <input>, whose `value` attribute stays empty after a pick — its answer
+    //     also lands in selectedItemList
+    // Checking chips regardless of `f.multi` is what stops the search-box shape
+    // from being re-answered on every pass.
+    const chips = wrap?.querySelector('[data-automation-id="selectedItemList"]');
+    if (chips && chips.children.length) return { ok: false, reason: 'already-selected' };
+    if (!f.multi && (trigger.getAttribute('value') || '').trim()) {
         return { ok: false, reason: 'already-selected' };
     }
     // `widget: true` — opening this listbox and picking from it are steps INSIDE
@@ -575,36 +585,53 @@ async function fillCustomSelect(f, value) {
     if (!(await waitForElement('[data-automation-id="promptOption"]', 4000))) return { ok: false, reason: 'listbox-timeout' };
     await sleep(150);
     const want = String(value || '').trim().toLowerCase();
-    // Type-to-filter: the trigger itself when it's an input (multi-select / Country
-    // Phone Code), else a search input beside the button (long lists like Country).
+    // Type-to-filter: the trigger itself when it's an input (Mondelez renders the
+    // source and phone-code prompts as a search box, placeholder "Search"), else a
+    // search input beside the button (long lists like Country on 3M).
     const filter = (trigger.tagName === 'INPUT' ? trigger : null) || wrap?.querySelector('input[type="text"]');
-    if (filter && want) { await simulateTyping(filter, String(value)); await sleep(500); }
-    const opts = [...document.querySelectorAll('[data-automation-id="promptOption"]')]
-        .filter(o => o.offsetParent !== null);
     const txt = (o) => (o.textContent || '').trim().toLowerCase();
+    const visibleOptions = () => [...document.querySelectorAll('[data-automation-id="promptOption"]')]
+        .filter(o => o.offsetParent !== null);
 
-    // Try, in order: the resolved value, then each rung of the field's semantic
-    // ladder. Exact match beats a substring match at every rung, so "Website"
-    // never wins over "Company Website" just by appearing earlier in the list.
+    // The candidates, best first: the resolved value, then each rung of the
+    // field's semantic ladder. Exact match beats a substring match at every rung,
+    // so "Website" never wins over "Company Website" just by appearing earlier.
     //
-    // There is NO "pick the first option" fallback any more. These dropdowns
-    // answer questions ABOUT the candidate — how they found the job, what degree
-    // they hold — and the first option in an unmatched list is an arbitrary claim
-    // sent to a real employer ("Employee referral", "Doctorate"). Leaving the
-    // field empty is recoverable; a wrong answer on a submitted application is not.
+    // There is NO "pick the first option" fallback. These dropdowns answer
+    // questions ABOUT the candidate — how they found the job, what degree they
+    // hold — and the first option in an unmatched list is an arbitrary claim sent
+    // to a real employer ("Employee referral", "Doctorate"). Leaving the field
+    // empty is recoverable; a wrong answer on a submitted application is not.
     const ladder = [want, ...(f.valuePriority || []).map(v => String(v).trim().toLowerCase())]
         .filter(Boolean);
+
     let opt = null;
     let matched = '';
-    for (const wanted of ladder) {
-        opt = opts.find(o => txt(o) === wanted) || opts.find(o => txt(o).includes(wanted));
-        if (opt) { matched = wanted; break; }
+    let shown = visibleOptions();
+    if (filter) {
+        // A SEARCH box shows nothing until something is typed, so each rung has to
+        // be typed before it can be matched. Previously the ladder was only
+        // compared against whatever happened to be on screen — which for a search
+        // prompt is nothing at all, so a required field like "How Did You Hear
+        // About Us?" could never be answered on tenants that render it this way.
+        for (const wanted of ladder) {
+            await simulateTyping(filter, wanted);
+            await sleep(450);
+            shown = visibleOptions();
+            opt = shown.find(o => txt(o) === wanted) || shown.find(o => txt(o).includes(wanted));
+            if (opt) { matched = wanted; break; }
+        }
+    } else {
+        for (const wanted of ladder) {
+            opt = shown.find(o => txt(o) === wanted) || shown.find(o => txt(o).includes(wanted));
+            if (opt) { matched = wanted; break; }
+        }
     }
     if (!opt) {
         trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); // close, don't block
         return {
             ok: false,
-            reason: `option-not-found (${opts.length} shown${ladder.length ? `, tried ${ladder.length} candidate(s)` : ''})`,
+            reason: `option-not-found (${shown.length} shown${ladder.length ? `, tried ${ladder.length} candidate(s)` : ''})`,
         };
     }
     if (!safeActivate(opt, { source: 'recipe', activation: 'widget-option' }, f.selector)) {
