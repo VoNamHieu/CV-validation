@@ -44,11 +44,36 @@ describe('tenantRefFor', () => {
         assert.equal(ref.careerSiteKey, null);
     });
 
+    test('myworkdaysite pods scope the account by PATH, not by host', () => {
+        // wd3.myworkdaysite.com is one pod shared by every company on it. Keying
+        // on the host collapsed them into a single account: a credential pinned
+        // for Mondelez applied to Unilever, a verification block at one blocked
+        // all, and the per-tenant attempt budget — the actual lockout defence —
+        // was spent by the first two companies on behalf of everybody.
+        const mdlz = tenantRefFor('https://wd3.myworkdaysite.com/recruiting/mdlz/External/job/Ho-Chi-Minh-Vietnam/Sales-Operation-Intern_R-173597-1');
+        const unilever = tenantRefFor('https://wd3.myworkdaysite.com/recruiting/unilever/Careers/job/HCM/X_R-1');
+        assert.equal(mdlz.tenantKey, 'wd3.myworkdaysite.com/mdlz');
+        assert.notEqual(mdlz.tenantKey, unilever.tenantKey, 'two companies, two accounts');
+        assert.equal(mdlz.careerSiteKey, 'External', '"recruiting" is plumbing, not the career site');
+        assert.equal(mdlz.tenantSlug, 'mdlz', 'the label must name the company, not the pod');
+        assert.equal(mdlz.canonicalHost, 'wd3.myworkdaysite.com', 'the link still points at the host');
+    });
+
+    test('two career sites of the SAME myworkdaysite tenant still share one account', () => {
+        const a = tenantRefFor('https://wd3.myworkdaysite.com/recruiting/mdlz/External/job/X/A_R-1');
+        const b = tenantRefFor('https://wd3.myworkdaysite.com/recruiting/mdlz/Campus/job/X/B_R-2');
+        assert.equal(a.tenantKey, b.tenantKey);
+    });
+
+    test('a bare pod URL names no account and is declined', () => {
+        assert.equal(tenantRefFor('https://wd3.myworkdaysite.com/recruiting'), null);
+    });
+
     test('covers myworkdaysite.com', () => {
         // Absent from host_permissions until this change — those tenants had no
         // cookies and no content script at all.
         assert.equal(vendorForHost('acme.wd5.myworkdaysite.com'), 'workday');
-        assert.equal(tenantRefFor('https://acme.wd5.myworkdaysite.com/en-US/S/job/1').atsVendor, 'workday');
+        assert.equal(tenantRefFor('https://acme.wd5.myworkdaysite.com/recruiting/acme/S/job/1').atsVendor, 'workday');
     });
 
     test('returns null for ATS that need no account, and for junk', () => {

@@ -5,23 +5,41 @@
 // on purpose (same arrangement as recipe.js vs applyRecipes.ts): the extension
 // ships independently of a Vercel deploy.
 //
-// The key is the HOST, not the career site: a Workday session cookie is
-// host-scoped, so /AIA_Careers and /AIA_Campus on one host share an account.
-// Keying on the site too would fragment a per-tenant password override and
-// re-prompt the user for the same company.
+// The key is the ACCOUNT NAMESPACE, and Workday puts that in two different
+// places depending on the host:
+//
+//   myworkdayjobs.com   →  3m.wd1.myworkdayjobs.com/en-US/Search/job/…
+//                          tenant = the SUBDOMAIN. /AIA_Careers and /AIA_Campus
+//                          on one host share an account, so the career site is
+//                          metadata — keying on it would fragment a per-tenant
+//                          password override and re-prompt for the same company.
+//
+//   myworkdaysite.com   →  wd3.myworkdaysite.com/recruiting/mdlz/External/job/…
+//                          tenant = a PATH segment. The host is shared by every
+//                          company on that pod.
+//
+// Reading the host alone collapsed Mondelez, Unilever and everyone else on
+// wd3.myworkdaysite.com into ONE account: a credential pinned for one applied to
+// all, a verification block at one blocked all, and the per-tenant attempt budget
+// that exists to prevent lockouts was spent by the first two companies for
+// everybody.
 
 const VENDOR_RULES = [
-    { test: /\.myworkdayjobs\.com$|\.myworkdaysite\.com$/i, vendor: 'workday' },
+    { test: /\.myworkdayjobs\.com$/i, vendor: 'workday', shape: 'subdomain' },
+    { test: /\.myworkdaysite\.com$/i, vendor: 'workday', shape: 'path' },
 ];
 
 const LOCALE_RE = /^[a-z]{2}([-_][A-Za-z]{2})?$/;
+/** Path segments that are Workday plumbing, never a tenant or a career site. */
+const STRUCTURAL = new Set(['wday', 'recruiting', 'authgwy', 'en', 'd']);
 
 /** Vendor for a host, or null when this ATS needs no candidate account. */
 export function vendorForHost(host) {
-    for (const rule of VENDOR_RULES) {
-        if (rule.test.test(host)) return rule.vendor;
-    }
-    return null;
+    return _ruleFor(host)?.vendor || null;
+}
+
+function _ruleFor(host) {
+    return VENDOR_RULES.find(r => r.test.test(host)) || null;
 }
 
 /**
@@ -40,23 +58,36 @@ export function tenantRefFor(url) {
         return null;
     }
     const host = parsed.host.toLowerCase();
-    const vendor = vendorForHost(host);
-    if (!vendor) return null;
+    const rule = _ruleFor(host);
+    if (!rule) return null;
 
-    let careerSiteKey = null;
+    // Meaningful path segments, in order, with plumbing and locales removed and
+    // everything from /job onwards dropped.
+    const segs = [];
     for (const seg of parsed.pathname.split('/').filter(Boolean)) {
-        if (seg === 'wday' || LOCALE_RE.test(seg)) continue;
         if (seg === 'job' || seg === 'jobs' || seg === 'apply') break;
-        careerSiteKey = seg;
-        break;
+        if (STRUCTURAL.has(seg.toLowerCase()) || LOCALE_RE.test(seg)) continue;
+        segs.push(seg);
     }
-    return {
-        atsVendor: vendor,
-        tenantKey: host,
-        canonicalHost: host,
-        careerSiteKey,
-        tenantSlug: host.split('.')[0] || host,
-    };
+
+    let tenantKey, tenantSlug, careerSiteKey;
+    if (rule.shape === 'path') {
+        // wd3.myworkdaysite.com/recruiting/<tenant>/<site>/job/…
+        const slug = segs[0] || '';
+        careerSiteKey = segs[1] || null;
+        // No tenant segment (a bare pod URL) is not an account scope we can
+        // name, so we decline rather than inventing a shared one.
+        if (!slug) return null;
+        tenantSlug = slug.toLowerCase();
+        tenantKey = `${host}/${tenantSlug}`;
+    } else {
+        // <tenant>.wdN.myworkdayjobs.com/<locale>/<site>/job/…
+        tenantKey = host;
+        tenantSlug = host.split('.')[0] || host;
+        careerSiteKey = segs[0] || null;
+    }
+
+    return { atsVendor: rule.vendor, tenantKey, canonicalHost: host, careerSiteKey, tenantSlug };
 }
 
 /**

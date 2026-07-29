@@ -27,6 +27,13 @@ export interface AtsTenantSummary extends AtsTenantRef {
 }
 
 const LOCALE_RE = /^[a-z]{2}([-_][A-Za-z]{2})?$/;
+/** Path segments that are Workday plumbing, never a tenant or a career site. */
+const STRUCTURAL = new Set(['wday', 'recruiting', 'authgwy', 'en', 'd']);
+/** Where the account namespace lives for each host family. */
+const HOST_SHAPE: { test: RegExp; shape: 'subdomain' | 'path' }[] = [
+    { test: /\.myworkdayjobs\.com$/i, shape: 'subdomain' },
+    { test: /\.myworkdaysite\.com$/i, shape: 'path' },
+];
 
 /**
  * Tenant identity for a job/apply URL, or null when the ATS needs no account.
@@ -45,20 +52,37 @@ export function tenantRefFor(url?: string | null): AtsTenantRef | null {
         return null;
     }
     const host = parsed.host.toLowerCase();
-    const segments = parsed.pathname.split('/').filter(Boolean);
-    let careerSiteKey: string | undefined;
-    for (const seg of segments) {
-        if (seg === 'wday' || LOCALE_RE.test(seg)) continue;
+    const shape = HOST_SHAPE.find((h) => h.test.test(host))?.shape ?? 'subdomain';
+
+    const segs: string[] = [];
+    for (const seg of parsed.pathname.split('/').filter(Boolean)) {
         if (seg === 'job' || seg === 'jobs' || seg === 'apply') break;
-        careerSiteKey = seg;
-        break;
+        if (STRUCTURAL.has(seg.toLowerCase()) || LOCALE_RE.test(seg)) continue;
+        segs.push(seg);
     }
-    return { atsVendor: ats.ats, tenantKey: host, canonicalHost: host, careerSiteKey };
+
+    if (shape === 'path') {
+        // wd3.myworkdaysite.com/recruiting/<tenant>/<site>/job/… — the host is
+        // shared by every company on the pod, so the tenant segment is what
+        // scopes the account.
+        const slug = segs[0];
+        if (!slug) return null;
+        return {
+            atsVendor: ats.ats,
+            tenantKey: `${host}/${slug.toLowerCase()}`,
+            canonicalHost: host,
+            careerSiteKey: segs[1],
+        };
+    }
+    return { atsVendor: ats.ats, tenantKey: host, canonicalHost: host, careerSiteKey: segs[0] };
 }
 
 /** The tenant slug ("aia" from aia.wd3.myworkdayjobs.com) — a usable fallback
  *  label when we have no company name for the job. */
 export function tenantSlug(tenantKey: string): string {
+    // A composite key (wd3.myworkdaysite.com/mdlz) names the tenant after the
+    // slash; splitting on '.' would label every company on that pod "Wd3".
+    if (tenantKey.includes('/')) return tenantKey.split('/').pop() || tenantKey;
     return tenantKey.split('.')[0] || tenantKey;
 }
 
