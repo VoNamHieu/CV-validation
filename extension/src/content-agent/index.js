@@ -845,9 +845,25 @@ function summarizeAnswers(reviewAnswers) {
     };
 }
 
+/**
+ * True when this content script has been orphaned by an extension reload.
+ *
+ * `chrome.runtime.sendMessage(...).catch()` does NOT cover this: with the context
+ * gone `chrome.runtime` is undefined, so reading `.sendMessage` throws
+ * synchronously — before there is a promise to catch — and the throw escapes into
+ * whatever was driving the loop.
+ */
+function contextGone() {
+    try { return !(chrome && chrome.runtime && chrome.runtime.id); } catch { return true; }
+}
+
 function reportResult(success, detail, outcome, extra = {}) {
     const o = outcome || (success ? 'filled' : 'failed');
     console.log(`[Copo Apply] ■ result: ${success ? '✅' : '✖'} outcome=${o} | ${detail} | ${window.location.hostname}`);
+    if (contextGone()) {
+        console.warn('[Copo Apply] extension was reloaded — this tab is orphaned, result not reported');
+        return;
+    }
     chrome.runtime.sendMessage({
         type: 'AUTO_APPLY_RESULT',
         result: {
@@ -898,7 +914,8 @@ async function reportAtsAuth(result) {
 
 // ─── Heartbeat: tell background this job is still actively working ───
 function sendHeartbeat() {
-    chrome.runtime.sendMessage({ type: 'AUTO_APPLY_HEARTBEAT' }).catch(() => { });
+    if (contextGone()) return;
+    try { chrome.runtime.sendMessage({ type: 'AUTO_APPLY_HEARTBEAT' }).catch(() => { }); } catch { /* orphaned */ }
 }
 
 // ═══════════════════════════════════════════════════════════════════

@@ -80,7 +80,13 @@ export default function TestApplyPanel() {
         // fire a text-only apply.
         setStatus(job.job_id, { state: 'sending', msg: 'Đang tạo CV PDF…' });
         const { optimizedCvPdfBase64, optimizedCvFileName } = await buildCvPdfCache(cvData, { jobTitle: job.title });
-        if (!optimizedCvPdfBase64) console.warn('[TestApply] CV PDF render/sync failed — applying text-only');
+        // No CV, no apply. The agent refuses a driven apply without the CV
+        // tailored for that job, so sending one anyway just opens a tab that
+        // immediately reports back blocked — stop here and say why instead.
+        if (!optimizedCvPdfBase64 || !optimizedCvFileName) {
+            setStatus(job.job_id, { state: 'error', msg: 'Chưa tạo được file CV PDF — thử lại.' });
+            return;
+        }
 
         setStatus(job.job_id, { state: 'sending', msg: 'Đang gửi lệnh ứng tuyển…' });
         try {
