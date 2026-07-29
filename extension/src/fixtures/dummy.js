@@ -250,43 +250,68 @@ export async function seedDummyData() {
     return seeded;
 }
 
+/** Replace whatever is in the four slots with the fixture. */
+export async function installDummyData() {
+    if (typeof chrome === 'undefined' || !chrome?.storage?.local) return [];
+    await chrome.storage.local.remove(SEED_KEYS);
+    return seedDummyData();
+}
+
+/** Empty the four slots so the web app can sync the real profile back in. */
+export async function clearDummyData() {
+    if (typeof chrome === 'undefined' || !chrome?.storage?.local) return;
+    await chrome.storage.local.remove(SEED_KEYS);
+}
+
+const BANNER = '[Copo] ⚠️  FIXTURE BUILD — this extension carries FAKE candidate data. '
+    + 'Never use it to send a real application.';
+
 /**
- * Seed, then say so — loudly, once per worker wake.
+ * Wire the fixture up.
  *
- * The warning matters more than it looks. A fixture build behaves exactly like a
- * real one right up until it types a stranger's name into a real employer's
- * form, so the console line is the only thing that distinguishes them before
- * that point. (The data itself is the second line of defence: the name says TEST
- * and the CV file says DO NOT SUBMIT, both of which show up in the form.)
+ * INSTALLING the extension overwrites; a plain worker wake does not. That split
+ * is the whole ergonomics of this thing. Seeding empty slots only was the safe
+ * design and it was also useless: anyone who has ever signed into the web app
+ * has a profile in storage, so loading a test build seeded nothing and they
+ * tested with their real identity — the exact outcome the caution was meant to
+ * prevent. Building and loading a fixture build IS the instruction to use fake
+ * data, so onInstalled acts on it. A worker wake is not a new instruction, so it
+ * only fills what is missing and leaves a forced state alone.
+ *
+ * The console banner fires on every wake regardless. A fixture build behaves
+ * exactly like a real one right up until it types a stranger's name into a real
+ * employer's form, so that line is the only thing telling them apart before that
+ * point — the data is the second line of defence (the name says TEST, the CV file
+ * says DO NOT SUBMIT, and both appear in the form).
  */
-export async function initFixture() {
+export function initFixture() {
+    const announce = (seeded) => console.warn(BANNER
+        + (seeded.length ? ` Seeded: ${seeded.join(', ')}.` : ' Slots already filled; seeded nothing.')
+        + ' — copoFixture.install() to re-apply, copoFixture.clear() to remove it.');
+
+    // Fires when the unpacked extension is loaded or reloaded: the moment the
+    // user actually chose this build.
     try {
-        const seeded = await seedDummyData();
-        console.warn('[Copo] ⚠️  FIXTURE BUILD — this extension carries FAKE candidate data. '
-            + 'Never use it to send a real application.'
-            + (seeded.length ? ` Seeded: ${seeded.join(', ')}.` : ' Real data present; seeded nothing.'));
-        if (!seeded.length) {
-            console.warn('[Copo] Run copoFixture.force() in this console to REPLACE it with test data, '
-                + 'or copoFixture.restore() to clear it again.');
-        }
-        // Exposed rather than run automatically, because the automatic version of
-        // "replace whatever is there" is how a test build overwrites the profile
-        // of someone who only wanted to try it. Typing the command is the consent.
-        self.copoFixture = {
-            /** Replace real data with the fixture. Returns the keys written. */
-            force: async () => {
-                await chrome.storage.local.remove(SEED_KEYS);
-                const keys = await seedDummyData();
-                console.warn('[Copo] fixture forced:', keys.join(', '));
-                return keys;
-            },
-            /** Wipe the four slots so the web app can re-sync the real profile. */
-            restore: async () => {
-                await chrome.storage.local.remove(SEED_KEYS);
-                console.warn('[Copo] fixture cleared — re-sync from the web app to restore real data.');
-            },
-        };
-    } catch (e) {
-        console.warn('[Copo] fixture seed failed:', e?.message);
-    }
+        chrome.runtime.onInstalled.addListener(() => {
+            installDummyData()
+                .then(seeded => console.warn(`${BANNER} Installed over any previous data: ${seeded.join(', ')}.`))
+                .catch(e => console.warn('[Copo] fixture install failed:', e?.message));
+        });
+    } catch { /* no runtime here — nothing to hook */ }
+
+    seedDummyData().then(announce).catch(e => console.warn('[Copo] fixture seed failed:', e?.message));
+
+    self.copoFixture = {
+        /** Overwrite the slots with the fixture, whatever is in them now. */
+        install: async () => {
+            const keys = await installDummyData();
+            console.warn('[Copo] fixture installed:', keys.join(', '));
+            return keys;
+        },
+        /** Remove it. Re-sync from the web app to get the real profile back. */
+        clear: async () => {
+            await clearDummyData();
+            console.warn('[Copo] fixture cleared — re-sync from the web app to restore real data.');
+        },
+    };
 }

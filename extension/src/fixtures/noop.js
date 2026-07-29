@@ -14,6 +14,8 @@
  * the branch entirely: production seeds nothing because the function does
  * nothing, and the file holding the fake candidate is never read.
  */
-export async function initFixture() {
-    /* production build — no fixture data exists to seed */
+export function initFixture() {
+    /* production build — no fixture data exists to seed, and no console
+       helper is installed, so `copoFixture` is undefined. That absence is a
+       usable check: if it answers in a build you thought was clean, it is not. */
 }

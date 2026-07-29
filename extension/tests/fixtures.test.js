@@ -10,7 +10,23 @@ import assert from 'node:assert/strict';
 import {
     DUMMY_PROFILE, DUMMY_CV, DUMMY_CV_FILENAME, buildDummyPdfBase64,
 } from '../src/fixtures/dummy.js';
+import * as dummy from '../src/fixtures/dummy.js';
+import * as noop from '../src/fixtures/noop.js';
 import { PROFILE_KEYS, buildManifest, classifyField, canonicalValue } from '../src/content-agent/needs.js';
+
+describe('the production stub can stand in for the fixture', () => {
+    test('it provides what background.js imports', () => {
+        // build.mjs swaps the module by path, so a rename here is caught by
+        // esbuild — but only for the ONE name background imports today. This
+        // pins that name so the swap cannot quietly become a partial one.
+        assert.equal(typeof noop.initFixture, 'function');
+        assert.equal(typeof dummy.initFixture, 'function');
+    });
+
+    test('the stub does nothing without a chrome runtime', () => {
+        assert.doesNotThrow(() => noop.initFixture());
+    });
+});
 
 describe('the fake profile matches the real schema', () => {
     test('every key it defines is one the agent reads', () => {
