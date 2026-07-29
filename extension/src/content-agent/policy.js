@@ -510,8 +510,34 @@ export function describeElement(el, selector) {
  * this policy exists to protect. A caller may only ever narrow it, never widen it.
  */
 export function checkClick(el, ctx = {}, selector) {
-    const opening = !!ctx.openingApplication && !isApplicationFormPage();
+    // Flow position decides, not the caller.
+    //
+    // This used to require the caller to CLAIM `openingApplication`, which meant
+    // only step 0 and the recipe gateway ever got it — so when the planner
+    // proposed the same "Apply" button on the same job-description page, the
+    // identical click was refused. The agent stopped on a page with no form and
+    // no fields, which is the opposite of protecting anything.
+    //
+    // A caller may still force it OFF (it knows something we don't), but it
+    // cannot force it ON: the page is the authority on whether a form exists.
+    const opening = ctx.openingApplication === false ? false : !_applicationFormPresent();
     return evaluateClick(describeElement(el, selector), { ...ctx, openingApplication: opening });
+}
+
+/**
+ * Is there an application form on screen right now?
+ *
+ * Deliberately broader than `isApplicationFormPage()` alone: a résumé upload is
+ * proof of a form even when there are too few text inputs to trip the count, and
+ * that is exactly the shape of a short "quick apply" modal whose button says
+ * nothing more specific than "Ứng tuyển".
+ */
+function _applicationFormPresent() {
+    try {
+        if (isApplicationFormPage()) return true;
+        const file = document.querySelector('input[type="file"]');
+        return !!(file && (file.offsetParent !== null || file.type === 'file'));
+    } catch { return true; }   // can't tell → assume a form, i.e. refuse
 }
 
 /** Convenience: describe + judge a fill in one call. */

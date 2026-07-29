@@ -201,3 +201,49 @@ describe('openingApplication is re-derived, not trusted', () => {
         assert.equal(btn.clicks, 0);
     });
 });
+
+// ── the 3M regression: Apply refused on a job-description page ─────────────
+// Live log, 3m.wd1.myworkdayjobs.com:
+//   iter 1 · fields=0 · LLM plan action=CLICK "I need to click 'Apply'"
+//   [Copo Policy] ✋ submit_application (planner)
+//   result: ✅ outcome=filled          ← nothing had been filled
+// The flag that permits an apply verb was something the CALLER had to claim, so
+// step 0 had it and the planner did not — same button, same page, two verdicts.
+describe('apply verb is decided by the page, not by the caller', () => {
+    const applyBtn = () => { const b = new FakeEl('button'); b.textContent = 'Apply'; return b; };
+    const field = () => Object.assign(new FakeEl('input'), { offsetParent: {} });
+
+    test('the planner may click Apply on a job-description page', () => {
+        const btn = applyBtn();
+        installDom([btn], { formFields: [] });        // no form on screen
+        assert.equal(safeActivate(btn, { source: 'planner' }), true);
+        assert.equal(btn.clicks, 1);
+    });
+
+    test('…and may not once a form is on screen', () => {
+        const btn = applyBtn();
+        installDom([btn], { formFields: [field(), field(), field()] });
+        assert.equal(safeActivate(btn, { source: 'planner' }), false);
+        assert.equal(btn.clicks, 0);
+    });
+
+    test('a caller may force it off, but never on', () => {
+        const btn = applyBtn();
+        installDom([btn], { formFields: [] });
+        assert.equal(safeActivate(btn, { source: 'planner', openingApplication: false }), false,
+            'an explicit refusal is still honoured');
+
+        const btn2 = applyBtn();
+        installDom([btn2], { formFields: [field(), field(), field()] });
+        assert.equal(safeActivate(btn2, { source: 'gateway', openingApplication: true }), false,
+            'claiming it while a form exists must not grant it');
+    });
+
+    test('an unambiguous submit is still refused with no form on screen', () => {
+        // The exemption covers the AMBIGUOUS verbs only. "Submit Application"
+        // never means "open the application".
+        const btn = new FakeEl('button'); btn.textContent = 'Submit Application';
+        installDom([btn], { formFields: [] });
+        assert.equal(safeActivate(btn, { source: 'planner' }), false);
+    });
+});

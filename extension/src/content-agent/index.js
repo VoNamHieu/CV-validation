@@ -759,13 +759,23 @@ async function runAgentLoop(profile) {
                             plan: { action: plan.action, reason: plan.reason },
                             result: actionResult,
                         });
-                        // A refused submit is the agent's job finishing, not failing:
-                        // the form is as filled as we are allowed to leave it.
+                        // A refused submit ends the run as SUCCESS only when there
+                        // is something to hand over. Reporting "✅ đã điền xong"
+                        // after filling nothing — which is what happened when the
+                        // policy refused the Apply button on a job-description page
+                        // — is a false success: the batch row said done, the user
+                        // believed it, and the application had not been started.
                         if (verdict.code === 'submit_application' || verdict.code === 'final_review_step') {
                             removeProgress();
-                            showToast('✅ Đã điền xong — kiểm tra rồi tự bấm nộp để hoàn tất.', 8000);
-                            reportResult(true, `Policy stop at ${verdict.code} — awaiting user submit`, 'filled', { review: summarizeAnswers(reviewAnswers) });
-                            showConfirmation(state.totalFields, state.totalFields, false);
+                            if (actionsTaken > 0) {
+                                showToast('✅ Đã điền xong — kiểm tra rồi tự bấm nộp để hoàn tất.', 8000);
+                                reportResult(true, `Policy stop at ${verdict.code} — awaiting user submit`, 'filled', { review: summarizeAnswers(reviewAnswers) });
+                                showConfirmation(state.totalFields, state.totalFields, false);
+                            } else {
+                                showToast('⚠️ Chưa mở được form ứng tuyển trên trang này — hãy bấm Apply thủ công.', 8000);
+                                reportResult(false, `Blocked before filling anything (${verdict.code})`, 'blocked',
+                                    { blockedReason: 'manual' });
+                            }
                             return;
                         }
                         await sleep(plan.waitMs || POST_ACTION_WAIT_MS);
