@@ -35,6 +35,22 @@ describe('demographic / EEO self-identification', () => {
         assert.equal(a.value, 'Prefer not to say');
     });
 
+    test('recognises a neutral placeholder as the decline option', () => {
+        // Measured on Mondelez, where Gender is REQUIRED and the four options are
+        // Female / Male / Not Specified / Other. Every phrasing the rule knew was
+        // US-styled ("prefer not to say"), so nothing matched and the step could
+        // not advance at all — on a field that does offer a way to say nothing.
+        const a = resolveAnswer(q('Gender'), ['Female', 'Male', 'Not Specified', 'Other'], {});
+        assert.equal(a.value, 'Not Specified');
+    });
+
+    test('"Other" is a statement, not a decline', () => {
+        // The trap in the option list above: "Other" is the only one left if the
+        // placeholder is missed, and picking it asserts something about the person.
+        const a = resolveAnswer(q('Gender'), ['Female', 'Male', 'Other'], {});
+        assert.equal(a, null);
+    });
+
     test('with no decline option offered, it answers nothing', () => {
         const a = resolveAnswer(q('Gender'), ['Male', 'Female'], {});
         assert.equal(a, null, 'better an empty field the review names than a guess');
@@ -106,6 +122,26 @@ describe('source question', () => {
             resolveAnswer(q('How did you hear about us?'), ['Employee Referral', 'Recruiter'], {}),
             null);
     });
+});
+
+describe('questions only the candidate can answer', () => {
+    // Recognised so the review names them, never answered so the agent cannot
+    // put a claim on a real application that the candidate did not make.
+    const MATERIAL = [
+        ['Do you have an agreement or requirement with your current or previous employer '
+            + '(e.g. non-compete agreement, or other restrictive covenant)?', 'restrictive_covenant'],
+        ['Are you legally authorized to work in Vietnam?', 'work_authorization'],
+        ['Do you currently, or will you in the future, require Mondelēz to sponsor a work visa?',
+            'sponsorship'],
+    ];
+
+    for (const [label, kind] of MATERIAL) {
+        test(`recognised but unanswered: ${kind}`, () => {
+            assert.equal(ruleFor(label)?.kind, kind, 'a blank the user cannot see is worse than a named gap');
+            assert.equal(resolveAnswer(q(label), ['Yes', 'No'], {}), null,
+                'both answers state a fact about the candidate');
+        });
+    }
 });
 
 describe('unknown questions', () => {

@@ -248,6 +248,88 @@ export const FALLBACK_RECIPES = [
  */
 const OPTION_SEL = '[data-automation-id="promptOption"], [role="option"]';
 
+/** The element that actually scrolls a prompt's option list, if any. */
+function optionScroller(opt) {
+    for (let p = opt?.parentElement; p && p !== document.body; p = p.parentElement) {
+        if (p.scrollHeight > p.clientHeight + 20) return p;
+    }
+    return null;
+}
+
+/**
+ * Make a virtualised list re-render around its current scrollTop.
+ *
+ * Measured on Mondelez's Field of Study (≈1000 majors, ~22 rows in the DOM at a
+ * time): assigning scrollTop moves the scrollbar but leaves the SAME rows
+ * rendered — 40 assignments in a row never got past "A". The rows only refreshed
+ * once a scroll event reached the widget, and then they matched whatever
+ * scrollTop already was. So: move, then tell it we moved.
+ */
+function nudgeScroll(sc) {
+    try {
+        sc.dispatchEvent(new Event('scroll', { bubbles: true }));
+        sc.dispatchEvent(new WheelEvent('wheel', { deltaY: 1, bubbles: true, cancelable: true }));
+    } catch { /* a widget that ignores this is one we can already read */ }
+}
+
+/**
+ * Page through a scrollable option list looking for a match.
+ *
+ * Without this the agent only ever saw the first rendered window, so any value
+ * past the first ~20 rows read as "option-not-found" on a list that contained it.
+ * Returns null when the whole list has been walked without an unambiguous match —
+ * still no guessing.
+ */
+async function findInList(getShown, match) {
+    let opt = match(getShown());
+    if (opt) return opt;
+    const sc = optionScroller(getShown()[0]);
+    if (!sc) return null;
+    const step = Math.max(40, sc.clientHeight * 0.8);
+    const seen = new Set();
+    for (let pos = 0; pos <= sc.scrollHeight; pos += step) {
+        sc.scrollTop = pos;
+        nudgeScroll(sc);
+        await sleep(120);
+        const shown = getShown();
+        const key = shown.map(o => (o.textContent || '').trim()).join('|');
+        if (seen.has(key)) continue;   // same window re-rendered; already matched it
+        seen.add(key);
+        opt = match(shown);
+        if (opt) return opt;
+    }
+    return null;
+}
+
+/**
+ * Put an option inside its list's visible band and hand back the element to
+ * click.
+ *
+ * Two separate things go wrong without this. A row can be rendered ABOVE the
+ * container's clip rect (measured: the row's box said y=242 while the list
+ * started at y=426), and the click then lands on whatever occupies that point
+ * instead. And the virtualiser recycles row elements while scrolling, so the
+ * element matched a moment ago may since have become a different major — hence
+ * the re-resolve by text rather than trusting the old reference.
+ */
+async function revealOption(opt, getShown, match) {
+    const sc = optionScroller(opt);
+    if (sc) {
+        const or = opt.getBoundingClientRect();
+        const cr = sc.getBoundingClientRect();
+        if (or.top < cr.top || or.bottom > cr.bottom) {
+            sc.scrollTop += (or.top - cr.top) - (cr.height / 2 - or.height / 2);
+            nudgeScroll(sc);
+            await sleep(200);
+            return match(getShown()) || opt;   // rows may have been recycled
+        }
+        return opt;
+    }
+    try { opt.scrollIntoView({ block: 'center' }); } catch { /* noop */ }
+    await sleep(150);
+    return opt;
+}
+
 let _recipes = null; // in-memory cache for this page's lifetime
 // Résumé-upload targets we've already sent the CV to THIS page load. Guards the
 // SmartRecruiters "apply-with-resume" parser dropzone (hidefilelist → its file
@@ -731,15 +813,19 @@ async function fillCustomSelect(f, value) {
             await simulateTyping(filter, wanted);
             await sleep(450);
             shown = visibleOptions();
-            opt = uniqueMatch(shown, wanted);
+            // Typing does not narrow every prompt. Mondelez's Field of Study
+            // takes the text and still lists all majors from "Accounting" —
+            // so the typed rung has to be searched for, not just read off.
+            opt = await findInList(visibleOptions, (list) => uniqueMatch(list, wanted));
             if (opt) { matched = wanted; break; }
         }
     } else {
         for (const wanted of ladder) {
-            opt = uniqueMatch(shown, wanted);
+            opt = await findInList(visibleOptions, (list) => uniqueMatch(list, wanted));
             if (opt) { matched = wanted; break; }
         }
     }
+    if (opt) opt = await revealOption(opt, visibleOptions, (list) => uniqueMatch(list, matched));
     if (!opt) {
         trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); // close, don't block
         return {
@@ -747,7 +833,12 @@ async function fillCustomSelect(f, value) {
             reason: `option-not-found (${shown.length} shown${ladder.length ? `, tried ${ladder.length} candidate(s)` : ''})`,
         };
     }
-    if (!safeActivate(opt, { source: 'recipe', activation: 'widget-option' }, f.selector)) {
+    // Multiselect rows carry their own radio/checkbox and commit only when THAT
+    // is clicked. Measured on Mondelez's Field of Study: a click on the row's
+    // centre hit-tested as the row and did nothing at all; the control inside it
+    // committed "Marketing" on the first try.
+    const hit = opt.querySelector('input[type="radio"], input[type="checkbox"]') || opt;
+    if (!safeActivate(hit, { source: 'recipe', activation: 'widget-option' }, f.selector)) {
         return { ok: false, reason: 'policy-denied' };
     }
     await sleep(250);

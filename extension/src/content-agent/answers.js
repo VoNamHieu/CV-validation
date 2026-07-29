@@ -39,11 +39,18 @@ export const ANSWER_RULES = [
         // Every one of these forms offers a decline option BY LAW in the US, and
         // declining is the only answer that states nothing about the person.
         match: /self[- ]identif|disability|veteran|race|ethnicity|gender|sexual orientation|dân tộc|giới tính/i,
+        // Tenants word the decline option however they like. Mondelez offers
+        // Female / Male / "Not Specified" / Other on a REQUIRED Gender field —
+        // none of the US-styled phrasings below matched it, so the step could not
+        // advance at all. Keep the explicit refusals first (they say "I choose not
+        // to answer"), then the neutral placeholders (which say nothing either).
         candidates: [
             "i don't wish to answer", 'i do not wish to answer', 'i prefer not to answer',
             'prefer not to say', 'prefer not to disclose', 'decline to self identify',
             'decline to self-identify', 'do not wish to disclose', 'not applicable',
             'không muốn trả lời', 'không tiết lộ',
+            'not specified', 'unspecified', 'undisclosed', 'not disclosed',
+            'no answer', 'không xác định', 'không muốn nêu',
         ],
     },
     {
@@ -63,6 +70,16 @@ export const ANSWER_RULES = [
         kind: 'conflict_of_interest',
         match: /conflict of interest|relative|family member (who )?works|xung đột lợi ích/i,
         candidates: ['no', 'không'],
+    },
+    {
+        kind: 'restrictive_covenant',
+        // "Do you have an agreement with your current or previous employer (e.g.
+        // non-compete…)?" — REQUIRED on Mondelez and matched by nothing, so it
+        // reached the user as an unnamed blank. Recognised here so it is reported
+        // BY NAME, but never answered: only the candidate knows what they signed,
+        // and "No" to a covenant they actually hold is a material misstatement.
+        match: /non[- ]?compete|non[- ]?solicit|restrictive covenant|agreement or requirement with your (current|previous) employer|cam kết không cạnh tranh/i,
+        candidates: [],
     },
     {
         kind: 'work_authorization',

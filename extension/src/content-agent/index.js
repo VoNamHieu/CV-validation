@@ -339,27 +339,32 @@ async function runAgentLoop(profile) {
                 const wantReload = errCard || emptyStreak >= 2;
                 let reloads = 0;
                 try { reloads = parseInt(sessionStorage.getItem('copoApplyReloads') || '0', 10) || 0; } catch { /* ignore */ }
-                // Reloading a Workday apply flow can drop the authenticated
-                // session and land back on Create Account — measured on Mondelez,
-                // where a reload mid-application returned step 1 of 7 with every
-                // filled field gone. So recovery-by-reload is a LAST resort, and
-                // it must never fire once we are past the login wall on a tenant
-                // that required an account: the cost of being wrong is an
-                // application the user has to start over.
+                // Reload IS the recovery Workday itself prescribes for its error
+                // card, and it keeps the session: measured twice on Mondelez, a
+                // reload on "Something went wrong" came back signed in with the
+                // draft intact and the flow advanced to the next step. (An earlier
+                // run showed Create Account after a reload and looked like session
+                // loss; the same URL rendered the signed-in flow moments later, so
+                // that was a transient render, not a dropped session.)
+                //
+                // What must not happen is reloading INTO an auth wall and grinding
+                // there, so past the login wall we allow one attempt, not two, and
+                // the login-wall branch below stops the agent if we land on one.
                 const pastAuthWall = !!tenantRefFor(location.href) && atsAuthDone;
-                if (wantReload && pastAuthWall) {
-                    console.warn('[Copo Apply] page error after sign-in — NOT reloading '
-                        + '(a reload here drops the Workday session and restarts the application)');
+                const reloadBudget = pastAuthWall ? 1 : 2;
+                if (wantReload && reloads >= reloadBudget && pastAuthWall) {
+                    console.warn('[Copo Apply] page error persists after reload — stopping '
+                        + 'rather than looping on a broken ATS page');
                     removeProgress();
-                    showToast('⚠️ Trang ứng tuyển báo lỗi hệ thống. Hồ sơ đã điền vẫn còn — '
-                        + 'hãy thử lại trên tab này.', 9000);
-                    reportResult(false, 'ATS page error after sign-in — reload would lose the session',
+                    showToast('⚠️ Trang ứng tuyển báo lỗi hệ thống sau khi tải lại. '
+                        + 'Hồ sơ đã điền vẫn còn — hãy thử lại trên tab này.', 9000);
+                    reportResult(false, 'ATS page error persists after reload',
                         'blocked', { blockedReason: 'manual' });
                     return;
                 }
-                if (wantReload && reloads < 2) {
+                if (wantReload && reloads < reloadBudget) {
                     try { sessionStorage.setItem('copoApplyReloads', String(reloads + 1)); } catch { /* ignore */ }
-                    console.warn(`[Copo Apply] recovery: ${errCard ? 'error card' : 'empty page'} → reload ${reloads + 1}/2`, location.href);
+                    console.warn(`[Copo Apply] recovery: ${errCard ? 'error card' : 'empty page'} → reload ${reloads + 1}/${reloadBudget}`, location.href);
                     showProgress(i + 1, AGENT_MAX_ITERATIONS, 'Trang lỗi/rỗng — tải lại…');
                     await sleep(600);
                     location.reload();
