@@ -200,6 +200,12 @@
 
     // ── Listen for pushed messages FROM background ──
     chrome.runtime.onMessage.addListener((message) => {
+        // Field gaps discovered while applying — forwarded to the page so the app
+        // can offer to collect them once. Data only; the page decides what to do.
+        if (message?.type === 'JOBFIT_FIELD_GAPS') {
+            window.postMessage({ type: 'JOBFIT_FIELD_GAPS', gaps: message.gaps || [] }, '*');
+            return;
+        }
         // Progress updates + Mode-1 tailored-CV results both forward to the page.
         if (message.type === 'JOBFIT_APPLY_PROGRESS' || message.type === 'JOBFIT_MODE1_RESULT') {
             window.postMessage(message, '*');

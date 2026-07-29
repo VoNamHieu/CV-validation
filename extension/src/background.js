@@ -36,6 +36,8 @@ let jobStartedAt = 0;       // when the current job's tab was opened
 // Whether THIS batch's user has delegated accepting mandatory apply terms (i.e.
 // completed the batch-start credentials modal). Read by every job's session.
 let batchConsentDelegated = false;
+// Union of the field gaps every job in this batch reported.
+const batchFieldGaps = new Map();
 const TAB_DELAY_MS = 3000; // Delay between opening tabs
 
 // Watchdog window. One agent iteration can legitimately take a minute+ (LLM
@@ -127,6 +129,12 @@ function persistState() {
  */
 function abortBatch(reason, { keepQueue = true } = {}) {
     console.log(`[Copo] Batch Apply: ending — ${reason}`);
+    if (batchFieldGaps.size) {
+        const gaps = [...batchFieldGaps.values()];
+        console.log('[Copo] field gaps this batch:', gaps.map(g => g.key || g.label).join(', '));
+        pushToWebApp({ type: 'JOBFIT_FIELD_GAPS', gaps, reason });
+    }
+    batchFieldGaps.clear();
     isProcessing = false;
     currentTabId = null;
     currentJobIndex = keepQueue ? currentJobIndex : -1;
@@ -1182,6 +1190,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 applyQueue[currentJobIndex].blockedReason = message.result?.blockedReason || 'manual';
             }
             applyQueue[currentJobIndex].result = message.result;
+            // Which fields this application asked for that the user's stored data
+            // could not answer. Accumulated across the batch and pushed to the web
+            // app, so the product can ask ONCE instead of discovering the same
+            // hole at every company — which is what happens today: an application
+            // stalls on "Overall Result (GPA)", the user fixes it by hand, and the
+            // next company asks for exactly the same thing.
+            for (const g of message.result?.fieldGaps || []) {
+                if (g?.key || g?.label) batchFieldGaps.set(g.key || g.label, g);
+            }
             persistState();
 
             // Broadcast progress update to web app

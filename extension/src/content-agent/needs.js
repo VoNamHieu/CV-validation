@@ -153,9 +153,23 @@ export function compareValues(expected, actual) {
  *   `verify` — filled fields checked against canonical data (mismatches included)
  *   `gaps`   — required fields nothing deterministic can answer. `userOnly:true`
  *              marks the ones no inference should attempt either.
+ *   `override` — filled fields the candidate's data DISAGREES with, and which can
+ *              be corrected unambiguously. A mismatch that is not safely
+ *              correctable stays in `verify` for the review to name.
  */
 export function buildManifest(fields = [], data = {}, opts = {}) {
-    const fill = []; const verify = []; const gaps = [];
+    const fill = []; const verify = []; const gaps = []; const override = [];
+
+    // How many fields on THIS page ask for the same concept. A page with two
+    // "School or University" inputs is showing two education rows, and our
+    // canonical data always reads entry [0] — so we cannot tell which row is
+    // which, and overriding would move the wrong school onto the wrong line.
+    // Correcting is only safe where the mapping is unambiguous.
+    const keyCount = new Map();
+    for (const f of fields) {
+        const k = classifyField(f)?.key;
+        if (k) keyCount.set(k, (keyCount.get(k) || 0) + 1);
+    }
 
     for (const f of fields) {
         const label = f.label || f.ariaLabel || f.placeholder || f.nearbyText || '';
@@ -166,10 +180,26 @@ export function buildManifest(fields = [], data = {}, opts = {}) {
         if (filled) {
             // Already answered — by the ATS parse, or by an earlier pass.
             const verdict = compareValues(canonical?.value, f.value);
-            verify.push({
+            const entry = {
                 selector: f.selector, label, key: pattern?.key ?? null,
                 expected: canonical?.value ?? null, actual: f.value, verdict,
-            });
+            };
+            verify.push(entry);
+
+            // The candidate's own data is the source of truth: they wrote and
+            // approved it, while the ATS value is a machine's guess at a PDF. So a
+            // disagreement is corrected, not merely reported — but only where the
+            // correction is certainly the right one:
+            //
+            //   · the concept appears ONCE on the page, so there is no question
+            //     which entry the field belongs to (see keyCount above), and
+            //   · the control is a plain text input. Overwriting a committed
+            //     dropdown means deselecting first, and a half-applied change to a
+            //     select is worse than a flagged one.
+            const textish = !f.componentType || f.componentType === 'native';
+            if (verdict === VERDICT.MISMATCH && pattern && keyCount.get(pattern.key) === 1 && textish) {
+                override.push({ ...entry, value: canonical.value, source: canonical.source, componentType: f.componentType });
+            }
             continue;
         }
 
@@ -201,7 +231,7 @@ export function buildManifest(fields = [], data = {}, opts = {}) {
         }
     }
 
-    return { fill, verify, gaps };
+    return { fill, verify, gaps, override };
 }
 
 /** The compact shape worth reporting to the app: what this page asked for that

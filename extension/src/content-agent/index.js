@@ -105,6 +105,10 @@ async function runAgentLoop(profile) {
     // four pages, and the user reviews it once at the end. Keyed by field so a
     // re-fill on a later pass updates rather than duplicates.
     const reviewAnswers = new Map();
+    // Fields this application asked for that no stored data could answer. Sent
+    // back with the result so the product can ask the user once rather than
+    // discovering the same hole at every company.
+    const fieldGaps = new Map();
     const gatewayClicks = new Map();   // recipe gateway label → click count (loop guard)
 
     // The STRUCTURED CV. Already synced for Mode-1 tailoring and never read by
@@ -379,7 +383,7 @@ async function runAgentLoop(profile) {
             if (recipe && atFinalStep(recipe)) {
                 removeProgress();
                 showToast('✅ Đã điền xong tới bước cuối — kiểm tra rồi bấm "Submit" để nộp.', 7000);
-                reportResult(true, 'Reached review step — filled, awaiting user submit', 'filled', { review: summarizeAnswers(reviewAnswers) });
+                reportResult(true, 'Reached review step — filled, awaiting user submit', 'filled', { review: summarizeAnswers(reviewAnswers), fieldGaps: [...fieldGaps.values()] });
                 showConfirmation(state.totalFields, state.totalFields, false);
                 return;
             }
@@ -490,7 +494,7 @@ async function runAgentLoop(profile) {
                         removeProgress();
                         const miss = (state.unfilledRequired || []).slice(0, 4).join(', ');
                         showToast(`✅ Đã điền hồ sơ${miss ? ` — kiểm tra lại: ${miss}` : ''}. Tích ô đồng ý điều khoản rồi bấm "Submit" để nộp.`, 10000);
-                        reportResult(true, `${recipe.label} filled (pass cap) — awaiting user consent + submit`, 'filled', { review: summarizeAnswers(reviewAnswers) });
+                        reportResult(true, `${recipe.label} filled (pass cap) — awaiting user consent + submit`, 'filled', { review: summarizeAnswers(reviewAnswers), fieldGaps: [...fieldGaps.values()] });
                         showConfirmation(state.totalFields, state.totalFields, false);
                         return;
                     }
@@ -533,7 +537,7 @@ async function runAgentLoop(profile) {
                         removeProgress();
                         const miss = (state.unfilledRequired || []).slice(0, 4).join(', ');
                         showToast(`✅ Đã điền hồ sơ${miss ? ` — kiểm tra lại: ${miss}` : ''}. Tích ô đồng ý điều khoản rồi bấm "Submit" để nộp.`, 10000);
-                        reportResult(true, `${recipe.label} filled — awaiting user consent + submit`, 'filled', { review: summarizeAnswers(reviewAnswers) });
+                        reportResult(true, `${recipe.label} filled — awaiting user consent + submit`, 'filled', { review: summarizeAnswers(reviewAnswers), fieldGaps: [...fieldGaps.values()] });
                         showConfirmation(state.totalFields, state.totalFields, false);
                         return;
                     }
@@ -568,7 +572,7 @@ async function runAgentLoop(profile) {
                         if (!safeActivate(adv, policyCtx('recipe'), stepNow.advance)) {
                             removeProgress();
                             showToast('✅ Đã điền xong — kiểm tra rồi tự bấm nộp để hoàn tất.', 8000);
-                            reportResult(true, 'Policy stopped the step advance — awaiting user submit', 'filled', { review: summarizeAnswers(reviewAnswers) });
+                            reportResult(true, 'Policy stopped the step advance — awaiting user submit', 'filled', { review: summarizeAnswers(reviewAnswers), fieldGaps: [...fieldGaps.values()] });
                             showConfirmation(state.totalFields, state.totalFields, false);
                             return;
                         }
@@ -653,17 +657,21 @@ async function runAgentLoop(profile) {
             {
                 const manifest = buildManifest(state.formFields, { profile, cv: cvStructured }, { consentDelegated });
 
-                // Record disagreements for the review. They are NOT auto-corrected:
-                // overwriting a value the ATS chose needs a confidence this layer
-                // does not yet have, and a wrong correction is worse than a flagged
-                // one the user can see.
+                // The candidate's own data wins. A mismatch the pipeline can
+                // correct unambiguously IS corrected; one it cannot (a repeated
+                // concept, a committed dropdown) is reported instead, because
+                // there the risk is not our data but our aim.
+                const correctable = new Set(manifest.override.map(o => o.selector));
                 for (const v of manifest.verify) {
                     if (v.verdict !== VERDICT.MISMATCH) continue;
+                    const willFix = correctable.has(v.selector);
                     reviewAnswers.set(`mismatch::${v.label}`, {
-                        field: v.label, value: v.actual, source: 'ATS_PARSED',
-                        expected: v.expected, verdict: v.verdict,
+                        field: v.label, value: willFix ? v.expected : v.actual,
+                        source: willFix ? 'CORRECTED' : 'ATS_PARSED',
+                        expected: v.expected, wasParsedAs: v.actual, verdict: v.verdict,
                     });
-                    console.warn(`[Copo Needs] ⚠ ${v.label}: form has "${String(v.actual).slice(0, 30)}" but the CV says "${String(v.expected).slice(0, 30)}"`);
+                    console.warn(`[Copo Needs] ${willFix ? '✎ correcting' : '⚠ flagged'} ${v.label}: `
+                        + `form "${String(v.actual).slice(0, 28)}" vs CV "${String(v.expected).slice(0, 28)}"`);
                 }
 
                 if (manifest.gaps.length) {
@@ -671,10 +679,15 @@ async function runAgentLoop(profile) {
                     console.log('[Copo Needs] gaps →', JSON.stringify({ userOnly: g.userOnly, inferable: g.inferable }));
                 }
 
-                if (manifest.fill.length) {
-                    console.log('[Copo Needs] filling:', manifest.fill.map(a => `${a.label}=${String(a.value).slice(0, 20)}[${a.source}]`).join(' · '));
-                    showProgress(i + 1, AGENT_MAX_ITERATIONS, `Điền ${manifest.fill.length} trường từ hồ sơ…`);
-                    const instructions = manifest.fill.map(a => ({
+                // Corrections go out with the fills, in the same pass.
+                const todo = [...manifest.override, ...manifest.fill];
+                if (todo.length) {
+                    console.log('[Copo Needs] applying:', todo.map(a => `${a.label}=${String(a.value).slice(0, 20)}[${a.source}]`).join(' · '));
+                    showProgress(i + 1, AGENT_MAX_ITERATIONS,
+                        manifest.override.length
+                            ? `Sửa ${manifest.override.length} trường lệch + điền ${manifest.fill.length}…`
+                            : `Điền ${manifest.fill.length} trường từ hồ sơ…`);
+                    const instructions = todo.map(a => ({
                         selector: a.selector,
                         action: a.componentType === 'radio-group' ? 'radio'
                             : a.componentType === 'checkbox' ? 'checkbox'
@@ -684,6 +697,12 @@ async function runAgentLoop(profile) {
                     }));
                     for (const a of manifest.fill) {
                         reviewAnswers.set(`answer::${a.label}`, { field: a.label, value: a.value, source: a.source });
+                    }
+                    // Remember what this page asked for that stored data could not
+                    // answer, so the app can collect it ONCE instead of stalling at
+                    // every company that asks.
+                    for (const g of manifest.gaps) {
+                        fieldGaps.set(g.key || g.label, { key: g.key, label: g.label, userOnly: g.userOnly });
                     }
                     const n = await executeFillInstructions(instructions, cvData, policyCtx('recipe'));
                     if (n > 0) {
@@ -745,7 +764,7 @@ async function runAgentLoop(profile) {
                 // 'submitted') so the batch UI doesn't claim applications were
                 // sent. Report BEFORE the confirmation overlay: awaiting the
                 // user's click here would stall the whole batch queue.
-                reportResult(true, `Filled ~${filledCount} fields in ${i + 1} iterations — awaiting user submit`, 'filled', { review: summarizeAnswers(reviewAnswers) });
+                reportResult(true, `Filled ~${filledCount} fields in ${i + 1} iterations — awaiting user submit`, 'filled', { review: summarizeAnswers(reviewAnswers), fieldGaps: [...fieldGaps.values()] });
                 showConfirmation(filledCount, state.totalFields, false);
                 return;
             }
@@ -814,7 +833,7 @@ async function runAgentLoop(profile) {
                             removeProgress();
                             if (actionsTaken > 0) {
                                 showToast('✅ Đã điền xong — kiểm tra rồi tự bấm nộp để hoàn tất.', 8000);
-                                reportResult(true, `Policy stop at ${verdict.code} — awaiting user submit`, 'filled', { review: summarizeAnswers(reviewAnswers) });
+                                reportResult(true, `Policy stop at ${verdict.code} — awaiting user submit`, 'filled', { review: summarizeAnswers(reviewAnswers), fieldGaps: [...fieldGaps.values()] });
                                 showConfirmation(state.totalFields, state.totalFields, false);
                             } else {
                                 showToast('⚠️ Chưa mở được form ứng tuyển trên trang này — hãy bấm Apply thủ công.', 8000);
@@ -904,6 +923,7 @@ function summarizeAnswers(reviewAnswers) {
         // something to check but not what, which is the same as telling them to
         // re-read the whole form.
         agentDefaultFields: defaults.map(a => a.field).slice(0, 10),
+        corrected: all.filter(a => a.source === 'CORRECTED').length,
     };
 }
 

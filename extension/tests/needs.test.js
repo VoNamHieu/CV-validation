@@ -113,3 +113,50 @@ describe('one pass over a page', () => {
         assert.equal(s.mismatches[0].expected, 'Product Owner');
     });
 });
+
+// ── the candidate's data is the source of truth ────────────────────────────
+// They wrote and approved it; the ATS value is a machine's guess at a PDF. So a
+// disagreement is CORRECTED — but only where the correction is certainly the
+// right one, because the risk here is not that our data is wrong, it is that our
+// comparison pointed at the wrong row.
+describe('overriding a wrong parse', () => {
+    const data = { profile: { currentTitle: 'Product Owner' }, cv: DATA.cv };
+
+    test('a wrong single-valued field is corrected', () => {
+        const m = buildManifest([field({ label: 'Job Title', value: 'Consultant' })], data);
+        assert.equal(m.override.length, 1);
+        assert.equal(m.override[0].value, 'Product Owner');
+        assert.equal(m.override[0].actual, 'Consultant');
+    });
+
+    test('a correct value is left alone', () => {
+        const m = buildManifest([field({ label: 'Job Title', value: 'Product Owner' })], data);
+        assert.equal(m.override.length, 0);
+    });
+
+    test('a formatting difference is not a correction', () => {
+        const m = buildManifest([field({ label: 'Job Title', value: 'product owner' })], data);
+        assert.equal(m.override.length, 0, 'same fact, different case');
+    });
+
+    test('a REPEATED concept is reported, never overridden', () => {
+        // Two "School or University" inputs means two education rows. Our data
+        // always reads entry [0], so correcting would move the wrong school onto
+        // the wrong line — a new error, introduced confidently.
+        const m = buildManifest([
+            field({ label: 'School or University', value: 'Some Other University' }),
+            field({ label: 'School or University', value: 'Another Place', selector: '#y' }),
+        ], DATA);
+        assert.equal(m.override.length, 0);
+        assert.ok(m.verify.some(v => v.verdict === VERDICT.MISMATCH), 'still surfaced for review');
+    });
+
+    test('a committed dropdown is reported, never overridden', () => {
+        // Overwriting a select means deselecting first; a half-applied change to
+        // a committed choice is worse than a flagged one.
+        const m = buildManifest(
+            [field({ label: 'Job Title', value: 'Consultant', componentType: 'custom-dropdown' })], data);
+        assert.equal(m.override.length, 0);
+        assert.ok(m.verify.some(v => v.verdict === VERDICT.MISMATCH));
+    });
+});

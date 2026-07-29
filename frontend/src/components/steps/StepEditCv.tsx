@@ -38,6 +38,17 @@ import { summarizeTenants } from '@/lib/atsTenant';
 import { useAtsCredentials } from '@/lib/ats-credentials-context';
 import { atsAccounts as atsAccountsApi, type AtsAccount } from '@/lib/db';
 
+/** A field an application asked for that the user's stored data could not
+ *  answer. Reported by the agent so the app can collect it once instead of
+ *  stalling at every company that asks the same question. */
+interface FieldGap {
+    key?: string;
+    label?: string;
+    /** True when no inference could ever supply it — only the candidate knows
+     *  (GPA, salary expectation, work authorization). */
+    userOnly?: boolean;
+}
+
 type AutoApplyStatus = 'idle' | 'checking' | 'sending' | 'opened' | 'error' | 'no-extension';
 type FullAutoStatus = 'idle' | 'rendering' | 'syncing' | 'launching' | 'error';
 
@@ -267,6 +278,7 @@ export default function StepEditCv() {
 
     // ── Batch Apply State ──
     const [batchProgress, setBatchProgress] = useState<BatchProgress | null>(null);
+    const [fieldGaps, setFieldGaps] = useState<FieldGap[]>([]);
     const [batchStarting, setBatchStarting] = useState(false);
 
     // ── Fully Autonomous Apply State ──
@@ -283,6 +295,10 @@ export default function StepEditCv() {
             if (event.source !== window) return;
             if (event.data?.type === 'JOBFIT_EXTENSION_READY' && event.data?.extensionId) {
                 (window as JobfitWindow).__jobfitExtensionId = event.data.extensionId;
+            }
+            // Fields the batch could not answer from stored data.
+            if (event.data?.type === 'JOBFIT_FIELD_GAPS') {
+                setFieldGaps(Array.isArray(event.data.gaps) ? event.data.gaps : []);
             }
             // Real-time progress updates from extension
             if (event.data?.type === 'JOBFIT_APPLY_PROGRESS') {
@@ -1264,6 +1280,42 @@ export default function StepEditCv() {
             )}
 
             {/* ═══ Batch Apply Progress Panel ═══ */}
+            {fieldGaps.length > 0 && (
+                <section
+                    aria-label="Thông tin còn thiếu"
+                    style={{
+                        background: 'rgba(59,130,246,0.07)', border: '1px solid rgba(59,130,246,0.32)',
+                        borderRadius: 12, padding: '14px 18px', marginBottom: 16,
+                    }}
+                >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                        <Warning size={16} weight="fill" color="#3b82f6" />
+                        <h3 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                            Bổ sung để lần sau không bị kẹt
+                        </h3>
+                    </div>
+                    <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: '0 0 10px' }}>
+                        Các công ty vừa rồi hỏi những thông tin này mà hồ sơ chưa có. Điền một lần vào CV
+                        là những lần ứng tuyển sau tự động qua được.
+                    </p>
+                    <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                        {fieldGaps.map((g) => (
+                            <li
+                                key={g.key || g.label}
+                                title={g.userOnly ? 'Chỉ bạn mới trả lời được — Copo không suy đoán' : 'Copo có thể suy ra nếu CV đủ dữ kiện'}
+                                style={{
+                                    fontSize: '0.78rem', padding: '4px 10px', borderRadius: 999,
+                                    background: 'var(--bg-card)', border: '1px solid var(--border-subtle)',
+                                    color: 'var(--text-secondary)',
+                                }}
+                            >
+                                {g.label || g.key}{g.userOnly ? ' •' : ''}
+                            </li>
+                        ))}
+                    </ul>
+                </section>
+            )}
+
             {(isBatchActive || batchDone) && batchProgress && (
                 <div style={{
                     background: 'linear-gradient(135deg, rgba(196, 59, 46,0.06), rgba(226, 114, 99,0.04))',
