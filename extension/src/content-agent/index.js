@@ -182,13 +182,6 @@ async function runAgentLoop(profile) {
         console.warn('[Copo Apply] recipe load failed (LLM-only):', e?.message);
     }
 
-    // Did the user delegate accepting each company's MANDATORY apply terms? Set
-    // by the background from the batch-start modal; absent for anything that
-    // never showed one, in which case the policy leaves consent boxes untouched.
-    const consentDelegated = await new Promise(r => {
-        chrome.storage.local.get('applySession', d => r(!!d.applySession?.consentDelegated));
-    });
-
     // What the action policy needs to know about where we are, recomputed per
     // call because `atFinalStep` is a live DOM question. Declaring the source is
     // the caller's one job; omitting it means the strictest treatment.
@@ -196,7 +189,6 @@ async function runAgentLoop(profile) {
         source,
         atFinalStep: recipe ? atFinalStep(recipe) : false,
         submitSelector: recipe?.submitSelector,
-        consentDelegated,
         ...extra,
     });
 
@@ -473,12 +465,12 @@ async function runAgentLoop(profile) {
                 showProgress(i + 1, AGENT_MAX_ITERATIONS,
                     grant.operation === 'signup' ? 'Tạo tài khoản…' : 'Đăng nhập…');
 
-                let result = await handleLoginWall(grant.credentials, recipe?.login, grant.operation, { consentDelegated });
+                let result = await handleLoginWall(grant.credentials, recipe?.login, grant.operation);
                 // A form switch (sign-in ⇄ create account) isn't an attempt; run the
                 // real one on the form we asked for.
                 if (result?.pending) {
                     await sleep(1200);
-                    result = await handleLoginWall(grant.credentials, recipe?.login, grant.operation, { consentDelegated });
+                    result = await handleLoginWall(grant.credentials, recipe?.login, grant.operation);
                 }
                 actionsTaken++;
 
@@ -531,7 +523,7 @@ async function runAgentLoop(profile) {
             // non-empty value as finished, so a parser that read the job title as
             // "Consultant" when the CV says "Product Owner" was left standing.
             {
-                const manifest = buildManifest(state.formFields, { profile, cv: cvStructured }, { consentDelegated });
+                const manifest = buildManifest(state.formFields, { profile, cv: cvStructured });
 
                 // The candidate's own data wins. A mismatch the pipeline can
                 // correct unambiguously IS corrected; one it cannot (a repeated

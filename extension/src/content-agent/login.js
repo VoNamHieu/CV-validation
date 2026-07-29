@@ -1,7 +1,7 @@
 // AUTO-SPLIT from content-agent.js (Phase 2). Part of the Copo apply agent.
 import { safeActivate, setNativeValue, sleep } from './dom.js';
 import { isThirdPartyApply } from './detect.js';
-import { classifyConsent, evaluateConsent } from './policy.js';
+import { evaluateConsent } from './policy.js';
 import { authResult, classifyDomError, detectChallenge } from '../ats/classifier.js';
 
 // Fill a login field the React-correct way: setNativeValue drives the value
@@ -44,9 +44,9 @@ function _findEmailField(recipeSel) {
 }
 
 // The consent vocabulary used to live here as a private pair of regexes. It now
-// belongs to policy.js: the same distinction (delegated terms vs marketing vs an
-// application's own consent) has to hold for the planner and the recipe too, and
-// two copies of a safety rule is one copy too many.
+// belongs to policy.js: the same distinction (a marketing opt-in vs everything
+// else) has to hold for the planner and the recipe too, and two copies of a
+// safety rule is one copy too many.
 
 function _labelTextFor(box) {
     return (
@@ -64,18 +64,12 @@ function _labelTextFor(box) {
  * audit trail for consent given on the user's behalf. Marketing/optional boxes
  * are left alone, always.
  */
-function _tickConsent(consentDelegated) {
+function _tickConsent() {
     const accepted = [];
-    // Delegation is passed IN, never assumed here. It comes from the apply
-    // session, which the background sets from the batch-start modal — the only
-    // place the user actually granted it. Hard-coding `true` would have made this
-    // function's safety depend on nobody ever calling it from a flow that had no
-    // modal.
-    const ctx = { source: 'login', formKind: 'signup', consentDelegated: !!consentDelegated };
     for (const b of [...document.querySelectorAll('input[type="checkbox"]')].filter(_vis)) {
         if (b.checked) continue;
         const raw = _labelTextFor(b);
-        if (!evaluateConsent({ text: raw, label: raw, type: 'checkbox' }, ctx).allowed) continue;
+        if (!evaluateConsent({ text: raw, label: raw, type: 'checkbox' }).allowed) continue;
         safeActivate(b, { source: 'login', activation: 'widget-option' });
         if (!b.checked) { b.checked = true; b.dispatchEvent(new Event('change', { bubbles: true })); }
         // Trimmed + capped: evidence of WHAT was accepted, not a DOM dump.
@@ -85,23 +79,18 @@ function _tickConsent(consentDelegated) {
 }
 
 /**
- * A required consent we could NOT classify — e.g. a country-specific declaration
- * the user must personally affirm. Distinct from the terms box: the user
- * delegated the standard terms, not an arbitrary legal statement about them.
+ * A required consent still unticked after the pass above.
+ *
+ * The pass ticks everything that is not marketing, so in practice this catches
+ * two things: a required MARKETING box (an opt-in we will not give, and a signup
+ * that demands one is a signup we do not complete), and a box the tick did not
+ * take. Either way the account cannot be created without the user, and saying so
+ * beats submitting a form whose required consent is blank.
  */
 function _hasUnhandledRequiredConsent() {
     return [...document.querySelectorAll('input[type="checkbox"][required], input[type="checkbox"][aria-required="true"]')]
         .filter(_vis)
-        .some((b) => {
-            if (b.checked) return false;
-            const raw = _labelTextFor(b);
-            // Anything that is neither the delegated terms box nor a marketing
-            // opt-in blocks the signup: a personal declaration ('declaration') and
-            // a box we cannot place ('other') both need the user, so the test is
-            // "not one of the two we know how to handle" rather than a single kind.
-            const kind = classifyConsent({ text: raw, label: raw });
-            return kind !== 'terms' && kind !== 'marketing';
-        });
+        .some(b => !b.checked);
 }
 
 // A form-switch toggle link ("Already have an account? Sign In" on a create form,
@@ -211,7 +200,7 @@ export async function handleLoginWall(creds, login, operation = 'login', opts = 
 
     let consentAccepted = null;
     if (isCreate) {
-        consentAccepted = _tickConsent(opts.consentDelegated);
+        consentAccepted = _tickConsent();
         await sleep(150);
         // A required box we can't classify is the user's call, not ours.
         if (_hasUnhandledRequiredConsent()) {

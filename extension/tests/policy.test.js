@@ -91,33 +91,37 @@ describe('apply-verb collision (vi)', () => {
     });
 });
 
-// ── consent: one delegated case, everything else stays with the user ───────
+// ── consent: ticked, because the boundary is submission ────────────────────
 describe('consent', () => {
-    // The gate is DELEGATION (did the batch-start modal run?), not which form the
-    // box sits on — the modal's wording covers "điều khoản ứng tuyển bắt buộc".
-    const signupLogin = { source: 'login', formKind: 'signup', consentDelegated: true };
-    const delegated = { source: 'planner', consentDelegated: true };
+    // Every consent box worth arguing about is one that is MANDATORY to advance,
+    // so a policy that refuses it is not leaving the user a decision — it is
+    // stranding the application one step short of the review page where they were
+    // going to make that decision. They still make it: they read the review and
+    // press Submit, which the agent never does.
+    for (const label of [
+        'I agree to the Terms and Conditions',
+        'I have read and consent to the Terms and Conditions',
+        'I certify I have never been convicted of a felony',
+        'Include me in the alumni directory',
+        'Tôi đồng ý với điều khoản sử dụng',
+    ]) {
+        test(`ticked: ${label}`, () => {
+            assert.equal(evaluateConsent(el(label)).allowed, true);
+        });
+    }
 
-    test('terms on a create-account form are delegated', () => {
-        const v = evaluateConsent(el('I agree to the Terms and Conditions'), signupLogin);
-        assert.equal(v.allowed, true);
+    test('no caller context is needed to reach that answer', () => {
+        // The delegation flag this used to hinge on came from a modal that only
+        // ran on ATSes needing an account, so SmartRecruiters — which needs none —
+        // could never tick a required box at all.
+        assert.equal(evaluateConsent(el('I agree to the Terms and Conditions')).allowed, true);
     });
 
-    test('mandatory apply terms are covered too — Workday cannot reach review otherwise', () => {
-        const v = evaluateConsent(
-            el('I have read and consent to the Terms and Conditions'), delegated);
-        assert.equal(v.allowed, true);
-    });
-
-    test('without the modal there is no delegation, so the box stays with the user', () => {
-        // The SmartRecruiters shape: no account needed, so no modal ever ran.
-        const v = evaluateConsent(el('I agree to the Terms and Conditions'), planner);
-        assert.equal(v.allowed, false);
-        assert.equal(v.code, DENY.APPLICATION_CONSENT);
-    });
-
-    test('marketing is refused even inside the delegated signup flow', () => {
-        const v = evaluateConsent(el('I agree to receive marketing updates'), signupLogin);
+    test('marketing is refused, always', () => {
+        // Not because it is riskier — because it is never required to advance, so
+        // ticking it buys nothing and signs the user up for mail they did not ask
+        // for. This is the one thing the batch-start modal promises outright.
+        const v = evaluateConsent(el('I agree to receive marketing updates'));
         assert.equal(v.allowed, false);
         assert.equal(v.code, DENY.MARKETING_CONSENT);
     });
@@ -125,20 +129,8 @@ describe('consent', () => {
     test('marketing wins when a label claims to be both', () => {
         assert.equal(classifyConsent(el('I agree to the terms and to receive newsletters')), 'marketing');
         assert.equal(
-            evaluateConsent(el('I agree to the terms and to receive newsletters'), delegated).code,
+            evaluateConsent(el('I agree to the terms and to receive newsletters')).code,
             DENY.MARKETING_CONSENT);
-    });
-
-    test('a personal attestation is refused even in the delegated flow', () => {
-        const v = evaluateConsent(el('I certify I have never been convicted of a felony'), signupLogin);
-        assert.equal(v.allowed, false);
-        assert.equal(v.consentKind, 'declaration');
-    });
-
-    test('a box we cannot place at all is still the user\'s call', () => {
-        const v = evaluateConsent(el('Include me in the alumni directory'), signupLogin);
-        assert.equal(v.allowed, false);
-        assert.equal(v.consentKind, 'other');
     });
 
     test('vietnamese terms wording is recognised', () => {
@@ -249,12 +241,11 @@ describe('over-restriction regressions', () => {
         // account creation entirely.
         assert.equal(classifyConsent(el('I certify that I have read and accept the Terms and Conditions')), 'terms');
         assert.equal(
-            evaluateConsent(el('I certify that I have read the Privacy Policy'),
-                { source: 'login', formKind: 'signup', consentDelegated: true }).allowed,
+            evaluateConsent(el('I certify that I have read the Privacy Policy')).allowed,
             true);
     });
 
-    test('demographic self-ID stays non-delegable even beside policy wording', () => {
+    test('demographic self-ID still classifies apart from policy wording', () => {
         // "In accordance with our EEO policy, please self-identify…" contains a
         // document word; the personal-data rule must not be exemptible by it.
         assert.equal(
@@ -349,6 +340,9 @@ describe('defaults', () => {
     test('an undeclared caller is treated as the planner, not waved through', () => {
         assert.equal(evaluateClick(el('Submit')).allowed, false);
         assert.equal(evaluateFill({ type: 'password' }).allowed, false);
-        assert.equal(evaluateConsent(el('I agree to the terms')).allowed, false);
+        // Consent no longer reads context at all — it is ticked either way. What
+        // must survive a caller that passes nothing is the refusal that does not
+        // depend on context: a marketing opt-in.
+        assert.equal(evaluateConsent(el('I agree to receive our newsletter')).allowed, false);
     });
 });

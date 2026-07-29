@@ -68,27 +68,19 @@ export const MARKETING_RE =
     /marketing|newsletter|promotion|advertis|subscribe|updates about|job alerts|third[- ]part|nhận tin|nhan tin|khuyến mãi|khuyen mai|quảng cáo|quang cao|thông báo việc làm|thong bao viec lam/i;
 
 /**
- * A statement ABOUT the user rather than an agreement to someone's terms: a
- * certification ("I certify the information is accurate"), or the demographic
- * self-identification ATS collect for EEO reporting (disability, veteran status,
- * race, gender identity).
+ * Demographic self-identification, which ATS collect for EEO reporting.
  *
- * These are never delegable. The batch-start modal delegates accepting a
- * company's mandatory terms — it does not, and could not, delegate asserting
- * facts about the person. Demographic answers additionally belong to the user by
- * law in several jurisdictions, and "prefer not to say" is a real answer that
- * only they can choose.
+ * These still classify separately even though consent is now ticked either way,
+ * because the classification feeds the ANSWER side too: what a demographic field
+ * should say is "prefer not to say", which is a real answer only the person can
+ * choose, and no phrasing exempts them from that.
  */
-/** Demographic self-identification, which ATS collect for EEO reporting. Never
- *  delegable and never inferable: "prefer not to say" is a real answer, and only
- *  the person can choose it. No phrasing exempts these. */
 const PERSONAL_DATA_RE =
     /self[- ]identif|disability status|veteran status|protected veteran|race\/ethnicity|\bethnicity\b|gender identity|sexual orientation|dân tộc|dan toc|tôn giáo|ton giao/i;
 
 // Asserting a fact about oneself. The verbs are matched on their own rather than
 // as "i certify": real labels put words in between ("I agree and certify that…",
-// "I hereby declare…"), and an attestation wrapped in agreement wording must not
-// read as a delegable terms box. `\bcertify\b` does not match "certificate", so
+// "I hereby declare…"). `\bcertify\b` does not match "certificate", so
 // document-upload copy is unaffected.
 const ATTESTATION_RE =
     /\b(certify|certifies|declare|attest|affirm)\b|under penalty|to the best of my knowledge|i confirm that i\b|cam đoan|cam doan|cam kết|cam ket|tôi xác nhận rằng|toi xac nhan rang/i;
@@ -275,9 +267,8 @@ export function isSensitiveField(d) {
  * @property {boolean} [atFinalStep]  the ATS's review step is on screen
  * @property {string}  [submitSelector] recipe's known submit control
  * @property {'signup'|'signin'|'application'} [formKind]
- *   Which form the control belongs to. Only 'signup' unlocks the terms
- *   delegation, and only for source 'login'.
- * @property {boolean} [consentDelegated] the user accepted the batch-start modal
+ *   Which form the control belongs to. Lets the account-creation refusal stand
+ *   down inside the sanctioned login flow.
  */
 
 /**
@@ -346,36 +337,30 @@ export function evaluateClick(d, ctx = {}) {
 /**
  * May we tick this checkbox?
  *
- * The gate is DELEGATION, not the kind of form. The batch-start credentials modal
- * says, in the user's own flow: "Bấm Tiếp tục nghĩa là bạn đồng ý để Copo chấp
- * nhận điều khoản ứng tuyển bắt buộc của từng công ty thay bạn" — that covers the
- * application's mandatory terms, not merely a signup's. Gating on
- * `formKind === 'signup'` instead would have been stricter than what the user
- * actually agreed to, and would have stalled Workday at Voluntary Disclosures,
- * whose required acknowledgement is the only way to reach the review step.
+ * The boundary is SUBMISSION, so consent is ticked. Every earlier gate here —
+ * terms-only, then delegation — was a gate on a box that is mandatory to
+ * advance, which means it was really a gate on finishing at all: measured on
+ * Mondelez, `acceptTermsAndAgreements` is required on Voluntary Disclosures and
+ * is the last thing between a filled application and the review page. Refusing
+ * it does not leave the user a decision to make, it leaves them a half-filled
+ * form one step short of the page where they were going to make it.
  *
- * The inverse matters just as much: a batch that never showed the modal (every
- * ATS that needs no account — SmartRecruiters among them) carries no delegation,
- * so its consent box stays with the user. That is exactly what the SR recipe
- * already does by leaving consent out of its field list.
+ * The user still decides. They read the review, and nothing reaches the employer
+ * until they press Submit — which the agent never does.
+ *
+ * The one exception is a marketing opt-in. It is refused not because it is
+ * riskier but because it is never required to advance, so ticking it buys
+ * nothing and signs the user up for mail they did not ask for. That is also what
+ * the batch-start modal promises in as many words: "Copo không bao giờ đăng ký
+ * nhận email quảng cáo thay bạn."
  *
  * Whatever is ticked is recorded (login.js returns the labels as
- * `consentAccepted`, stored with the auth attempt) — a delegation with no
- * evidence of what was accepted is not a delegation anyone can audit.
+ * `consentAccepted`, stored with the auth attempt) — consent with no evidence of
+ * what was accepted is not something anyone can audit afterwards.
  */
-export function evaluateConsent(d, ctx = {}) {
-    const kind = classifyConsent(d);
-
-    // Never, under any delegation: a mailing list is not required to apply, and
-    // nobody asked us to sign them up for one.
-    if (kind === 'marketing') return deny(DENY.MARKETING_CONSENT);
-
-    // Anything that is not plainly the terms box — a personal declaration, or a
-    // box we simply cannot place — stays with the user.
-    if (kind !== 'terms') return deny(DENY.APPLICATION_CONSENT, { consentKind: kind });
-
-    if (ctx.consentDelegated === true) return allow();
-    return deny(DENY.APPLICATION_CONSENT, { consentKind: kind });
+export function evaluateConsent(d) {
+    if (classifyConsent(d) === 'marketing') return deny(DENY.MARKETING_CONSENT);
+    return allow();
 }
 
 /**
@@ -435,8 +420,8 @@ function isThirdPartyApplyDescriptor(d) {
 
 /** Resolve the text an `aria-labelledby` / `aria-describedby` points at. Workday
  *  labels its consent checkboxes this way rather than with a <label for>, so
- *  without this the box arrives unlabelled and classifies as an ordinary
- *  question — the delegation could never apply to the one box it exists for. */
+ *  without this the box arrives unlabelled, so a marketing opt-in reads as an
+ *  ordinary consent and gets ticked — the one thing this file will not do. */
 function ariaReferencedText(el) {
     const ids = [
         el.getAttribute?.('aria-labelledby') || '',

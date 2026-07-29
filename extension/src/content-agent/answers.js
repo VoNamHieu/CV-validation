@@ -100,11 +100,12 @@ export const ANSWER_RULES = [
     },
     {
         kind: 'acknowledgement',
-        // "I have read and understand…" — mandatory to advance, and the batch's
-        // consent delegation is what covers it.
+        // "I have read and understand…" — mandatory to advance, so it is answered.
+        // The boundary is submission: the user reads the review and presses Submit
+        // themselves, and gating this instead only stopped the application one step
+        // short of that review.
         match: /acknowledg|i have read|i understand|confirm(ed)? that i have read|tôi đã đọc/i,
         candidates: ['yes', 'i agree', 'i acknowledge', 'đồng ý', 'có'],
-        requiresDelegation: true,
     },
     {
         // Knowable only to the candidate. Unlike a degree — which the institution,
@@ -140,12 +141,11 @@ export function ruleFor(questionText) {
  * @param {object}   field    `{ label, questionText }` — whatever names the question
  * @param {string[]} options  the options the form actually offers (empty for free text)
  * @param {object}   profile  the synced candidate profile
- * @param {object}   opts     `{ consentDelegated }`
  * @returns {{value: string, source: string, kind: string}|null}
  *   null means "we have no defensible answer" — the caller leaves the field
  *   alone and it shows up in the review's outstanding list.
  */
-export function resolveAnswer(field, options = [], profile = {}, opts = {}) {
+export function resolveAnswer(field, options = [], profile = {}) {
     const question = field?.questionText || field?.label || '';
     const rule = ruleFor(question);
     const offered = options.map(o => ({ raw: o, n: norm(o) })).filter(o => o.n);
@@ -165,9 +165,6 @@ export function resolveAnswer(field, options = [], profile = {}, opts = {}) {
     }
 
     if (!rule) return null;
-
-    // An acknowledgement is only ours to give when the user delegated it.
-    if (rule.requiresDelegation && opts.consentDelegated !== true) return null;
 
     // 2/3. The first candidate the form actually offers. Exact match first so a
     // list containing both "No" and "Not applicable" cannot resolve "no" to the

@@ -165,7 +165,6 @@ export function compareValues(expected, actual) {
  *
  * @param {object[]} fields  observed form fields (from observePageState)
  * @param {{profile?: object, cv?: object}} data  the candidate's own data
- * @param {{consentDelegated?: boolean}} [opts]
  * @returns {{fill: object[], verify: object[], gaps: object[]}}
  *   `fill`   — empty fields we can answer deterministically, with provenance
  *   `verify` — filled fields checked against canonical data (mismatches included)
@@ -175,7 +174,7 @@ export function compareValues(expected, actual) {
  *              be corrected unambiguously. A mismatch that is not safely
  *              correctable stays in `verify` for the review to name.
  */
-export function buildManifest(fields = [], data = {}, opts = {}) {
+export function buildManifest(fields = [], data = {}) {
     const fill = []; const verify = []; const gaps = []; const override = [];
 
     // How many fields on THIS page ask for the same concept. A page with two
@@ -232,7 +231,7 @@ export function buildManifest(fields = [], data = {}, opts = {}) {
 
         // Nothing stored answers it. A rule might (Yes/No screening, disclosures).
         const options = (f.options || []).map(o => o.text || o.value).filter(Boolean);
-        const ruled = resolveAnswer({ label, questionText: label }, options, data.profile || {}, opts);
+        const ruled = resolveAnswer({ label, questionText: label }, options, data.profile || {});
         if (ruled) {
             fill.push({
                 selector: f.selector, label, key: pattern?.key ?? ruled.kind,

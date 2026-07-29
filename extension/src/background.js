@@ -33,9 +33,6 @@ let currentTabId = null;
 let isProcessing = false;
 let jobSafetyTimer = null;  // per-job watchdog handle, re-armed by agent heartbeats
 let jobStartedAt = 0;       // when the current job's tab was opened
-// Whether THIS batch's user has delegated accepting mandatory apply terms (i.e.
-// completed the batch-start credentials modal). Read by every job's session.
-let batchConsentDelegated = false;
 // Union of the field gaps every job in this batch reported.
 const batchFieldGaps = new Map();
 const TAB_DELAY_MS = 3000; // Delay between opening tabs
@@ -82,7 +79,6 @@ function adoptPersistedState(data) {
     currentTabId = data.currentTabId ?? null;
     jobStartedAt = typeof data.jobStartedAt === 'number' ? data.jobStartedAt : Date.now();
     lastHeartbeatAt = typeof data.lastHeartbeatAt === 'number' ? data.lastHeartbeatAt : 0;
-    batchConsentDelegated = !!data.applySession?.consentDelegated;
     applySessionId = data.applySession?.sessionId ?? null;
     applyTabId = data.applySession?.tabId ?? applyTabId;
     // Per-tenant verdicts + the attempt budget. Losing these was not a cosmetic
@@ -139,7 +135,6 @@ function abortBatch(reason, { keepQueue = true } = {}) {
     currentTabId = null;
     currentJobIndex = keepQueue ? currentJobIndex : -1;
     if (!keepQueue) applyQueue = [];
-    batchConsentDelegated = false;
     clearJobSafetyTimer();
     atsCoord.endBatch();
     endApplySession();
@@ -337,10 +332,6 @@ function prepareApplySession(jobUrl, cv, opts = {}) {
         applySession: {
             sessionId, tabId: null, jobHost, startedAt: Date.now(),
             // Did the user grant the agent permission to accept a company's
-            // MANDATORY apply terms on their behalf? True only when the
-            // batch-start credentials modal has been completed; the policy layer
-            // refuses every consent tick without it.
-            consentDelegated: !!opts.consentDelegated,
         },
     };
     if (cv?.base64 && cv?.fileName) {
@@ -998,18 +989,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             const resolved = await atsBackend.resolveTenants(jobs);
             atsCoord.beginBatch(`batch-${Date.now()}`, resolved.states);
             persistAtsRuntime();
-            // Consent delegation comes from the batch-start modal, and that modal
-            // only appears when the batch actually contains account-gated jobs.
-            //
-            // `hasDefaultCredential` alone is NOT that signal: resolveTenants
-            // returns it as `true` when there is nothing to resolve, meaning
-            // "nothing to check" rather than "the user agreed to anything". Using
-            // it bare granted delegation to a batch of jobs that never showed a
-            // modal — e.g. SmartRecruiters, whose consent box is deliberately left
-            // for the user to tick.
-            const hasAccountGatedJob = jobs.some((j) => !!tenantRefFor(j.jobUrl));
-            batchConsentDelegated = hasAccountGatedJob && !!resolved.hasDefaultCredential;
-
             // Group jobs by tenant so one company's jobs run back to back — the
             // first probes, the rest inherit the verdict.
             applyQueue = sortJobsByTenant(jobs).map((job, idx) => ({
@@ -1261,9 +1240,7 @@ function processNextJob() {
     const jobCv = job.cvFileBase64 && job.cvFileName
         ? { base64: job.cvFileBase64, fileName: job.cvFileName }
         : null;
-    const { sessionId, fragment } = prepareApplySession(job.jobUrl, jobCv, {
-        consentDelegated: batchConsentDelegated,
-    });
+    const { sessionId, fragment } = prepareApplySession(job.jobUrl, jobCv);
     const storage = {
         jobfitProfile: job.profile,
         pendingAutoApply: true,

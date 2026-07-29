@@ -92,14 +92,13 @@ describe('the two we refuse to guess', () => {
     });
 });
 
-describe('acknowledgements need the delegation', () => {
-    const label = 'I have read and understand the above';
-    test('answered when the batch modal granted it', () => {
-        const a = resolveAnswer(q(label), ['Yes', 'No'], {}, { consentDelegated: true });
+describe('acknowledgements', () => {
+    // Mandatory to advance, so answered — the boundary is submission, and the
+    // user reads the review before pressing it. Gating this behind a delegation
+    // flag stopped the application one step short of that review.
+    test('answered', () => {
+        const a = resolveAnswer(q('I have read and understand the above'), ['Yes', 'No'], {});
         assert.equal(a.value, 'Yes');
-    });
-    test('left alone when it did not', () => {
-        assert.equal(resolveAnswer(q(label), ['Yes', 'No'], {}, { consentDelegated: false }), null);
     });
 });
 
