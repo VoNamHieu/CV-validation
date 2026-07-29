@@ -179,3 +179,27 @@ describe('every profileKey a pattern reads actually exists', () => {
         assert.deepEqual(orphans, [], 'a pattern with no source can only ever be a gap');
     });
 });
+
+// ── requiredness comes from the page, never from config ────────────────────
+describe('gaps follow the form, not a schema', () => {
+    test('a field the page marks required becomes a gap; the same field optional does not', () => {
+        // The same automation id is optional at one company and mandatory at the
+        // next, so requiredness cannot live in shared per-ATS config. Measured on
+        // Mondelez: My Experience marks six fields required that the recipe's
+        // (3M-derived) list never mentioned.
+        const asRequired = buildManifest([field({ label: 'Overall Result (GPA)', required: true })], DATA);
+        assert.equal(asRequired.gaps.length, 1);
+
+        const asOptional = buildManifest([field({ label: 'Overall Result (GPA)', required: false })], DATA);
+        assert.equal(asOptional.gaps.length, 0, 'optional on this tenant → not a gap');
+    });
+
+    test('a field no pattern recognises is still reported when the page requires it', () => {
+        // The point of scanning first: a concept nothing in our config has ever
+        // seen still reaches the user by name instead of vanishing.
+        const m = buildManifest([field({ label: 'Employee referral code', required: true })], DATA);
+        assert.equal(m.gaps.length, 1);
+        assert.equal(m.gaps[0].label, 'Employee referral code');
+        assert.equal(m.gaps[0].key, null, 'unclassified, but not invisible');
+    });
+});

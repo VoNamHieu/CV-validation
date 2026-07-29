@@ -474,6 +474,86 @@ async function runAgentLoop(profile) {
                 return;
             }
 
+            // ── NEEDS PASS: scan the form FIRST, then decide what data to pull ──
+            //
+            // Runs ahead of the recipe on purpose. A recipe is a per-ATS list of
+            // selectors with requiredness baked in, and requiredness is per-TENANT:
+            // "How Did You Hear About Us?" is a button at 3M and a search box at
+            // Mondelez, My Experience wants one field at one company and six at the
+            // next. Anything derived from that list is wrong somewhere by
+            // construction.
+            //
+            // So the page decides what is needed, and the recipe that follows only
+            // contributes exact selectors for controls whose labels are ambiguous,
+            // plus the step/advance structure. Filling is idempotent, so whatever
+            // this pass already answered the recipe simply skips.
+            //
+            // One pass replaces what used to be three disconnected ones: the
+            // recipe bound selectors to values, a rule table answered screening
+            // questions, and nothing at all checked what the ATS had already
+            // filled. That last gap is the expensive one — the recipe treats any
+            // non-empty value as finished, so a parser that read the job title as
+            // "Consultant" when the CV says "Product Owner" was left standing.
+            {
+                const manifest = buildManifest(state.formFields, { profile, cv: cvStructured }, { consentDelegated });
+
+                // The candidate's own data wins. A mismatch the pipeline can
+                // correct unambiguously IS corrected; one it cannot (a repeated
+                // concept, a committed dropdown) is reported instead, because
+                // there the risk is not our data but our aim.
+                const correctable = new Set(manifest.override.map(o => o.selector));
+                for (const v of manifest.verify) {
+                    if (v.verdict !== VERDICT.MISMATCH) continue;
+                    const willFix = correctable.has(v.selector);
+                    reviewAnswers.set(`mismatch::${v.label}`, {
+                        field: v.label, value: willFix ? v.expected : v.actual,
+                        source: willFix ? 'CORRECTED' : 'ATS_PARSED',
+                        expected: v.expected, wasParsedAs: v.actual, verdict: v.verdict,
+                    });
+                    console.warn(`[Copo Needs] ${willFix ? '✎ correcting' : '⚠ flagged'} ${v.label}: `
+                        + `form "${String(v.actual).slice(0, 28)}" vs CV "${String(v.expected).slice(0, 28)}"`);
+                }
+
+                if (manifest.gaps.length) {
+                    const g = summarizeGaps(manifest);
+                    console.log('[Copo Needs] gaps →', JSON.stringify({ userOnly: g.userOnly, inferable: g.inferable }));
+                }
+
+                // Corrections go out with the fills, in the same pass.
+                const todo = [...manifest.override, ...manifest.fill];
+                if (todo.length) {
+                    console.log('[Copo Needs] applying:', todo.map(a => `${a.label}=${String(a.value).slice(0, 20)}[${a.source}]`).join(' · '));
+                    showProgress(i + 1, AGENT_MAX_ITERATIONS,
+                        manifest.override.length
+                            ? `Sửa ${manifest.override.length} trường lệch + điền ${manifest.fill.length}…`
+                            : `Điền ${manifest.fill.length} trường từ hồ sơ…`);
+                    const instructions = todo.map(a => ({
+                        selector: a.selector,
+                        action: a.componentType === 'radio-group' ? 'radio'
+                            : a.componentType === 'checkbox' ? 'checkbox'
+                            : a.componentType === 'native-select' ? 'select'
+                            : (a.componentType && a.componentType !== 'native') ? 'custom-select' : 'fill',
+                        value: a.value, componentType: a.componentType, fieldLabel: a.label,
+                    }));
+                    for (const a of manifest.fill) {
+                        reviewAnswers.set(`answer::${a.label}`, { field: a.label, value: a.value, source: a.source });
+                    }
+                    // Remember what this page asked for that stored data could not
+                    // answer, so the app can collect it ONCE instead of stalling at
+                    // every company that asks.
+                    for (const g of manifest.gaps) {
+                        fieldGaps.set(g.key || g.label, { key: g.key, label: g.label, userOnly: g.userOnly });
+                    }
+                    const n = await executeFillInstructions(instructions, cvData, policyCtx('recipe'));
+                    if (n > 0) {
+                        actionsTaken++;
+                        history.push({ iteration: i, plan: { action: 'NEEDS', reason: 'deterministic field resolution' }, result: { filled: n } });
+                        await sleep(600);
+                        continue;   // re-observe before spending an LLM call
+                    }
+                }
+            }
+
             // ── RECIPE PRE-FILL: for a known ATS (Workday…), fill the standardized
             // text fields with exact verified selectors BEFORE the LLM plans. It's
             // idempotent (skips already-filled inputs) so it goes quiet once the
@@ -644,74 +724,6 @@ async function runAgentLoop(profile) {
             } else {
                 sameStateCount = 0;
                 prevStateHash = stateHash;
-            }
-
-            // ── NEEDS PASS: what this page asks for, and what answers it ──
-            //
-            // One pass replaces what used to be three disconnected ones: the
-            // recipe bound selectors to values, a rule table answered screening
-            // questions, and nothing at all checked what the ATS had already
-            // filled. That last gap is the expensive one — the recipe treats any
-            // non-empty value as finished, so a parser that read the job title as
-            // "Consultant" when the CV says "Product Owner" was left standing.
-            {
-                const manifest = buildManifest(state.formFields, { profile, cv: cvStructured }, { consentDelegated });
-
-                // The candidate's own data wins. A mismatch the pipeline can
-                // correct unambiguously IS corrected; one it cannot (a repeated
-                // concept, a committed dropdown) is reported instead, because
-                // there the risk is not our data but our aim.
-                const correctable = new Set(manifest.override.map(o => o.selector));
-                for (const v of manifest.verify) {
-                    if (v.verdict !== VERDICT.MISMATCH) continue;
-                    const willFix = correctable.has(v.selector);
-                    reviewAnswers.set(`mismatch::${v.label}`, {
-                        field: v.label, value: willFix ? v.expected : v.actual,
-                        source: willFix ? 'CORRECTED' : 'ATS_PARSED',
-                        expected: v.expected, wasParsedAs: v.actual, verdict: v.verdict,
-                    });
-                    console.warn(`[Copo Needs] ${willFix ? '✎ correcting' : '⚠ flagged'} ${v.label}: `
-                        + `form "${String(v.actual).slice(0, 28)}" vs CV "${String(v.expected).slice(0, 28)}"`);
-                }
-
-                if (manifest.gaps.length) {
-                    const g = summarizeGaps(manifest);
-                    console.log('[Copo Needs] gaps →', JSON.stringify({ userOnly: g.userOnly, inferable: g.inferable }));
-                }
-
-                // Corrections go out with the fills, in the same pass.
-                const todo = [...manifest.override, ...manifest.fill];
-                if (todo.length) {
-                    console.log('[Copo Needs] applying:', todo.map(a => `${a.label}=${String(a.value).slice(0, 20)}[${a.source}]`).join(' · '));
-                    showProgress(i + 1, AGENT_MAX_ITERATIONS,
-                        manifest.override.length
-                            ? `Sửa ${manifest.override.length} trường lệch + điền ${manifest.fill.length}…`
-                            : `Điền ${manifest.fill.length} trường từ hồ sơ…`);
-                    const instructions = todo.map(a => ({
-                        selector: a.selector,
-                        action: a.componentType === 'radio-group' ? 'radio'
-                            : a.componentType === 'checkbox' ? 'checkbox'
-                            : a.componentType === 'native-select' ? 'select'
-                            : (a.componentType && a.componentType !== 'native') ? 'custom-select' : 'fill',
-                        value: a.value, componentType: a.componentType, fieldLabel: a.label,
-                    }));
-                    for (const a of manifest.fill) {
-                        reviewAnswers.set(`answer::${a.label}`, { field: a.label, value: a.value, source: a.source });
-                    }
-                    // Remember what this page asked for that stored data could not
-                    // answer, so the app can collect it ONCE instead of stalling at
-                    // every company that asks.
-                    for (const g of manifest.gaps) {
-                        fieldGaps.set(g.key || g.label, { key: g.key, label: g.label, userOnly: g.userOnly });
-                    }
-                    const n = await executeFillInstructions(instructions, cvData, policyCtx('recipe'));
-                    if (n > 0) {
-                        actionsTaken++;
-                        history.push({ iteration: i, plan: { action: 'NEEDS', reason: 'deterministic field resolution' }, result: { filled: n } });
-                        await sleep(600);
-                        continue;   // re-observe before spending an LLM call
-                    }
-                }
             }
 
             // ── 3. PLAN: Ask LLM what to do next ──

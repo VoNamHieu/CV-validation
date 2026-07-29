@@ -46,6 +46,33 @@ export async function scrollAndCollect() {
 }
 
 /**
+ * Is this control REQUIRED? Read from the DOM, never from a recipe.
+ *
+ * Requiredness is per-tenant, not per-ATS: the same automation id is optional at
+ * one company and mandatory at the next, so a list baked into shared config is
+ * wrong somewhere by construction. The page is the only authority.
+ *
+ * Four signals because no single one is reliable. Measured on Mondelez: the
+ * REQUIRED Degree and Language dropdowns carry `required=false` AND
+ * `aria-required=null` — their asterisk lives in an <abbr> inside the field
+ * wrapper. Reading only the input's own attributes made every required custom
+ * select invisible, so `unfilledRequired` was empty on a step that could not
+ * advance, and the planner was told there was nothing left to do.
+ */
+export function isRequiredField(el) {
+    try {
+        if (el.required || el.getAttribute('aria-required') === 'true') return true;
+        const wrap = el.closest(
+            '[data-automation-id^="formField-"], .form-group, .form-field, .ant-form-item, .MuiFormControl-root');
+        if (!wrap) return false;
+        if (wrap.querySelector('abbr')) return true;               // Workday's marker
+        if (wrap.querySelector('[aria-required="true"]')) return true;
+        const label = wrap.querySelector('label, legend');
+        return !!label && /\*/.test(label.textContent || '');      // the universal one
+    } catch { return false; }
+}
+
+/**
  * Extract form fields from a DOM root (document, modal, or iframe doc).
  */
 export function extractFieldsFromRoot(root) {
@@ -90,7 +117,7 @@ export function extractFieldsFromRoot(root) {
                 el.value || '';
             group.options.push({ value: el.value, text: optLabel });
             if (el.checked) group.value = el.value;
-            if (el.required || el.getAttribute('aria-required') === 'true') group.required = true;
+            if (isRequiredField(el)) group.required = true;
             if (!group.label) group.label = findLabelFor(el, root);
             if (!group.nearbyText) group.nearbyText = getNearbyText(el);
             continue;
@@ -114,7 +141,7 @@ export function extractFieldsFromRoot(root) {
                 ariaLabel: el.getAttribute('aria-label') || '',
                 classes: el.className?.toString().substring(0, 100) || '',
                 value: el.checked ? 'true' : 'false',
-                required: el.required || el.getAttribute('aria-required') === 'true',
+                required: isRequiredField(el),
                 componentType: 'checkbox',
                 selector,
             });
@@ -181,7 +208,7 @@ export function extractFieldsFromRoot(root) {
             classes,
             value,
             options: options.length > 0 ? options.slice(0, 30) : undefined,
-            required: el.required || el.getAttribute('aria-required') === 'true',
+            required: isRequiredField(el),
             componentType,
             selector,
         });
