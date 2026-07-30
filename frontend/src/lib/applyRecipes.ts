@@ -96,6 +96,13 @@ export interface RecipeField {
     // shadow-text  = text input inside a web-component shadow root (SmartRecruiters spl-input)
     // autocomplete = type-to-search field that must commit a picked suggestion (SR city)
     type?: 'text' | 'select' | 'custom-select' | 'shadow-text' | 'autocomplete' | 'date' | 'file' | 'radio' | 'checkbox';
+    /** Reshape the resolved value before filling. 'name' = one capital per word
+     *  for ALL-CAPS words only. The web app already normalises names when it
+     *  builds the profile, but that runs at SYNC time — a profile synced before
+     *  that shipped still shouts, and re-syncing is a step nobody should need to
+     *  know about. Applying it at fill time makes the result independent of when
+     *  the profile was last synced. Never applied to a fixed `value`. */
+    normalize?: 'name';
     required?: boolean;
 }
 export interface RecipeStep {
@@ -176,8 +183,8 @@ const WORKDAY: ApplyRecipe = {
                 // Western-script name — the required, always-present pair (a tenant
                 // that also enables local-script names adds *--firstNameLocal, which
                 // we leave to the LLM since we have no romanization-split for it).
-                { label: 'First name', selector: '[data-automation-id="formField-legalName--firstName"] input', profileKey: 'firstName', type: 'text', required: true },
-                { label: 'Last name', selector: '[data-automation-id="formField-legalName--lastName"] input', profileKey: 'lastName', type: 'text', required: true },
+                { label: 'First name', selector: '[data-automation-id="formField-legalName--firstName"] input', profileKey: 'firstName', type: 'text', required: true, normalize: 'name' },
+                { label: 'Last name', selector: '[data-automation-id="formField-legalName--lastName"] input', profileKey: 'lastName', type: 'text', required: true, normalize: 'name' },
                 // REQUIRED on Mondelez (measured), and the flat profile carries them
                 // only if the user typed them in — a CV states an address but nothing
                 // extracts it into those two keys. Profile-only, the planner hit two

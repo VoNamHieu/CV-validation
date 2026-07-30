@@ -49,8 +49,8 @@ export const FALLBACK_RECIPES = [
                 name: 'My Information',
                 detect: '[data-automation-id="formField-legalName--firstName"]',
                 fields: [
-                    { label: 'First name', selector: '[data-automation-id="formField-legalName--firstName"] input', profileKey: 'firstName', type: 'text', required: true },
-                    { label: 'Last name', selector: '[data-automation-id="formField-legalName--lastName"] input', profileKey: 'lastName', type: 'text', required: true },
+                    { label: 'First name', selector: '[data-automation-id="formField-legalName--firstName"] input', profileKey: 'firstName', type: 'text', required: true, normalize: 'name' },
+                    { label: 'Last name', selector: '[data-automation-id="formField-legalName--lastName"] input', profileKey: 'lastName', type: 'text', required: true, normalize: 'name' },
                     // REQUIRED on Mondelez (measured), and the flat profile carries
                     // them only if the user filled them in by hand — a CV states an
                     // address but nothing extracts it into those two keys. When they
@@ -981,12 +981,40 @@ function readCvPath(cv, path) {
  *   3. a `cvPath` into the structured CV, for everything the flat shape cannot hold
  *   4. the recipe `default`
  */
+/**
+ * One capital per word, for words that are shouting.
+ *
+ * The web app normalises this when it BUILDS the profile — but that runs at sync
+ * time, so every profile synced before that shipped still carries "HIEU
+ * (CHARLES)", and re-syncing is a step nobody should have to know about. Doing it
+ * again here makes the result independent of when the profile was last synced.
+ *
+ * Only ALL-CAPS words are re-cased: title-casing everything quietly damages names
+ * whose capitals are correct (McDonald → Mcdonald, MacLeod → Macleod), and a
+ * legal-name field is the wrong place to be clever. Single letters are left alone
+ * so a middle initial survives. Mirrors normalizeNameCase in
+ * frontend/src/lib/extension-profile.ts.
+ */
+function normalizeNameCase(raw) {
+    return String(raw ?? '')
+        .split(/(\s+)/)
+        .map((word) => {
+            const letters = word.replace(/[^\p{L}]/gu, '');
+            if (letters.length < 2 || word !== word.toUpperCase()) return word;
+            return word.toLowerCase()
+                .replace(/(^|[^\p{L}])(\p{L})/gu, (_m, sep, ch) => sep + ch.toUpperCase());
+        })
+        .join('');
+}
+
 function recipeFieldValue(f, profile, cv) {
+    // A fixed `value` is the recipe author's literal choice — never rewritten.
     if (f.value != null && f.value !== '') return f.value;
+    const shape = (v) => (f.normalize === 'name' ? normalizeNameCase(v) : v);
     const p = profile?.[f.profileKey];
-    if (p != null && String(p).trim() !== '') return p;
+    if (p != null && String(p).trim() !== '') return shape(p);
     const fromCv = readCvPath(cv, f.cvPath);
-    if (fromCv != null && String(fromCv).trim() !== '') return String(fromCv);
+    if (fromCv != null && String(fromCv).trim() !== '') return shape(String(fromCv));
     return f.default ?? '';
 }
 
