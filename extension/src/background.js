@@ -18,6 +18,39 @@ import { initFixture, readFixtureCredential } from './fixtures/dummy.js';
 // already filled, so repeating it costs one read.
 initFixture();
 
+/**
+ * Drive ONE wizard page from the service-worker console.
+ *
+ *   copoStep()                  fill the step on screen, stop
+ *   copoStep({fill:false})      only report what the agent sees, touch nothing
+ *   copoStep({advance:true})    fill, then click Next once
+ *
+ * Testing a single step through the whole flow costs a login, an upload and two
+ * or three pages before reaching it — paid again for every fix, and the failure
+ * arrives buried in three pages of unrelated trace. This runs the step where it
+ * already is.
+ *
+ * It cannot submit: the advance goes through the same policy choke point as the
+ * agent's own click, which refuses the review step and the submit control.
+ *
+ * Lives here rather than on the page because this is the console already open for
+ * copoFixture, and a content script's globals are not reachable from the page
+ * console without switching execution context.
+ */
+self.copoStep = async (opts = {}) => {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) { console.warn('[Copo] no active tab'); return null; }
+    try {
+        const r = await chrome.tabs.sendMessage(tab.id, { type: 'AGENT_TEST_STEP', opts });
+        console.log('[Copo] step →', r);
+        return r;
+    } catch (e) {
+        // The usual cause, and it has its own fix: no content script in that tab.
+        console.warn('[Copo] no agent in that tab — reload the page (F5) and retry.', e?.message);
+        return null;
+    }
+};
+
 // Dev triggers (run in the service-worker console against your live session):
 //   copoWdApi('<apply url>')        — create/fill an application (uses jobfitProfile)
 //   copoWdReadForm('<apply url>')   — dump the WHOLE form (all sections + questionnaire)

@@ -1409,9 +1409,91 @@ async function runMode1() {
     }
 }
 
+/**
+ * Run ONE pass on whatever page is already open, and report what happened.
+ *
+ * Debugging a single step through the full flow costs a login, a résumé upload
+ * and two or three wizard pages before the step under test is even reached — and
+ * every fix to that step pays the toll again. Worse, the toll is where most of
+ * the noise lives, so a failure on page 4 arrives wrapped in three pages of
+ * unrelated trace.
+ *
+ * So this deliberately does LESS than the agent: no login wall, no gateway click,
+ * no navigation, no iteration, and no advance unless asked for by name. It fills
+ * the recipe step for the current page once and describes the result. Nothing
+ * here can submit — `advance` goes through the same policy choke point as the
+ * agent's own click, which refuses the review step and the submit control.
+ *
+ * @param {{fill?: boolean, advance?: boolean}} opts
+ *   `fill:false` observes without touching the page (what does the agent SEE?).
+ *   `advance:true` clicks the step's Next once, after filling.
+ */
+async function runSingleStep(opts = {}) {
+    const { fill = true, advance = false } = opts;
+    try {
+        const [profile, cvStructured] = await Promise.all([
+            new Promise(r => chrome.storage.local.get('jobfitProfile', d => r(d.jobfitProfile || null))),
+            new Promise(r => chrome.storage.local.get('jobfitCv', d => r(d.jobfitCv || null))),
+        ]);
+        if (!profile) return { ok: false, error: 'no jobfitProfile in storage — sync from the web app first' };
+        const { cv: cvData } = await loadSessionCv();
+
+        const recipes = await loadRecipes();
+        const recipe = recipeForUrl(recipes, location.href);
+        if (!recipe) return { ok: false, error: `no recipe matches ${location.host}` };
+
+        const before = await observePageState();
+        const step = (recipe.steps || []).find(s => s.detect && document.querySelector(s.detect));
+        const manifest = buildManifest(before.formFields, { profile, cv: cvStructured });
+        const gaps = summarizeGaps(manifest);
+
+        let rf = null;
+        if (fill) rf = await applyRecipeFields(recipe, profile, cvData, cvStructured);
+        const after = fill ? await observePageState() : before;
+
+        let advanced = null;
+        if (advance && step?.advance) {
+            const btn = document.querySelector(step.advance);
+            advanced = btn ? safeActivate(btn, policyCtxFor(recipe), step.advance) : false;
+        }
+
+        return {
+            ok: true,
+            url: location.pathname.slice(-60),
+            recipe: `${recipe.label} v${recipe.version}`,
+            step: step?.name || '(no recipe step matches this page)',
+            atFinalStep: atFinalStep(recipe),
+            filled: rf?.filled ?? null,
+            fields: after.formFields.length,
+            unfilledRequired: after.unfilledRequired,
+            errors: after.errors.map(e => `${e.field || '?'}: ${e.message}`.slice(0, 90)),
+            mismatches: gaps.mismatches.map(m => `${m.field}: ours="${m.expected}" page="${m.actual}"`),
+            gapsUserOnly: gaps.userOnly,
+            gapsInferable: gaps.inferable,
+            advanced,
+            hint: 'trace steps are in the console above; copoStep({advance:true}) to move on',
+        };
+    } catch (e) {
+        return { ok: false, error: (e && e.message) || String(e) };
+    }
+}
+
+/** Policy context for a manual single-step run — same rules, source declared. */
+function policyCtxFor(recipe) {
+    return {
+        source: 'recipe',
+        atFinalStep: recipe ? atFinalStep(recipe) : false,
+        submitSelector: recipe?.submitSelector,
+    };
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type === 'RUN_MODE1') {
         runMode1().then(sendResponse);
+        return true; // async
+    }
+    if (message?.type === 'AGENT_TEST_STEP') {
+        runSingleStep(message.opts || {}).then(sendResponse);
         return true; // async
     }
 });
