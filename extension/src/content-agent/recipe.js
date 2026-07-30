@@ -1108,14 +1108,42 @@ async function fillCustomSelect(f, value) {
      * one option matches it. Anything else is ambiguous and answers nothing,
      * which the review then names.
      */
-    const uniqueMatch = (list, wanted) => {
-        const exact = list.filter(o => txt(o) === wanted);
-        if (exact.length) return exact[0];
-        const prefix = list.filter(o => txt(o).startsWith(wanted));
-        if (prefix.length === 1) return prefix[0];
-        const contains = list.filter(o => txt(o).includes(wanted));
-        return contains.length === 1 ? contains[0] : null;
+    /**
+     * EVERY node that could be the wanted option, best first.
+     *
+     * Returning one node was the bug. Workday keeps several elements carrying the
+     * same option text in the document at once — measured on "How Did You Hear
+     * About Us?", where "Company Website" existed both inside the open popup and
+     * again elsewhere — and `exact[0]` takes whichever comes first in DOM order.
+     * Click the wrong one and nothing happens at all: no error, no change, and the
+     * old code reported success. That is this field failing on every single run.
+     *
+     * Which duplicate is live cannot be decided by looking at it (they are all
+     * "visible" by offsetParent), so the caller tries them in order and keeps the
+     * one that actually commits. Nodes with a real box come first as the cheapest
+     * useful ordering — a zero-size node is never the one the user would click.
+     */
+    const matchAll = (list, wanted) => {
+        const tier = (pred) => list.filter(pred);
+        let cands = tier(o => txt(o) === wanted);
+        if (!cands.length) {
+            const prefix = tier(o => txt(o).startsWith(wanted));
+            // A prefix/substring tier still has to be UNAMBIGUOUS as a set: many
+            // DIFFERENT labels matching means we cannot tell which the user meant,
+            // and "Marketing" must never resolve to "Marketing Research".
+            const distinct = (l) => new Set(l.map(txt)).size;
+            if (prefix.length && distinct(prefix) === 1) cands = prefix;
+            else {
+                const contains = tier(o => txt(o).includes(wanted));
+                if (contains.length && distinct(contains) === 1) cands = contains;
+            }
+        }
+        return cands.sort((a, b) => {
+            const box = (o) => { const r = o.getBoundingClientRect(); return r.width > 0 && r.height > 0 ? 0 : 1; };
+            return box(a) - box(b);
+        });
     };
+    const uniqueMatch = (list, wanted) => matchAll(list, wanted)[0] || null;
 
     let opt = null;
     let matched = '';
@@ -1157,54 +1185,74 @@ async function fillCustomSelect(f, value) {
             reason: `option-not-found (${shown.length} shown${ladder.length ? `, tried ${ladder.length} candidate(s)` : ''})`,
         };
     }
-    // Multiselect rows carry their own radio/checkbox and commit only when THAT
-    // is clicked. Measured on Mondelez's Field of Study: a click on the row's
-    // centre hit-tested as the row and did nothing at all; the control inside it
-    // committed "Marketing" on the first try.
-    const hit = opt.querySelector('input[type="radio"], input[type="checkbox"]') || opt;
-    const activated = safeActivate(hit, { source: 'recipe', activation: 'widget-option' }, f.selector);
-    trace('list.commit', {
-        field: f.label,
-        picked: matched,
-        clickedInnerControl: hit !== opt,
-        activated,
-    });
-    if (!activated) return { ok: false, reason: 'policy-denied' };
-    await sleep(250);
-    // A MULTI-select stays OPEN after a pick (so you can add more) — and its popup
-    // overlays the page footer, SWALLOWING the agent's later "Next" click, so the
-    // step looks stuck even though the field is filled ("× Vietnam (+84)" is set but
-    // the list is still open). Close it. (Single-selects already close on pick.)
-    if (f.multi) {
-        trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-        try { trigger.blur?.(); } catch { /* noop */ }
-        await sleep(150);
-    }
-    // Did the pick STICK? A click that Workday accepted leaves a chip or a button
-    // label; one it ignored leaves the field exactly as it was — and this function
-    // has been returning ok:true for both, so a required dropdown could read as
-    // filled while the page still showed "Select One". That matters most here:
-    // these prompts are the widgets suspected of committing only on trusted
-    // events, so proof-after-the-fact is the only honest verdict.
-    const committed = (() => {
+    /** What the field shows right now — a chip, or a button label that is not the
+     *  placeholder. This is the ONLY evidence that a click was accepted. */
+    const readCommitted = () => {
         try {
             const chips = [...wrap.querySelectorAll('[data-automation-id="selectedItem"]')];
             if (chips.length) return chips.map(c => (c.textContent || '').trim()).join(' | ');
-            const txt = (wrap.querySelector('button')?.textContent || '').trim();
-            return txt && !/select one/i.test(txt) ? txt : '';
+            const t = (wrap.querySelector('button')?.textContent || '').trim();
+            return t && !/select one/i.test(t) ? t : '';
         } catch { return ''; }
-    })();
-    // Only a wrapper we could actually read is allowed to fail the fill. Without
-    // `wrap` there is no field state to inspect, and turning "cannot tell" into
-    // "did not work" would break every widget whose selector is not inside a
-    // formField — so that case keeps the old optimistic verdict and says so.
+    };
+    // Without a wrapper there is no field state to read. "Cannot tell" must not
+    // become "did not work", or every widget whose selector sits outside a
+    // formField breaks — so that case clicks once and trusts it, and says so.
     if (!wrap) {
+        const only = opt.querySelector('input[type="radio"], input[type="checkbox"]') || opt;
+        const okOnce = safeActivate(only, { source: 'recipe', activation: 'widget-option' }, f.selector);
         trace('list.result', { field: f.label, picked: matched, onPage: '(no wrapper to verify)', stuck: null });
-        return { ok: true, matched };
+        return okOnce ? { ok: true, matched } : { ok: false, reason: 'policy-denied' };
     }
-    trace('list.result', { field: f.label, picked: matched, onPage: committed || '(still empty)', stuck: !!committed });
-    if (!committed) return { ok: false, reason: `click accepted but nothing committed (wanted "${matched}")` };
-    return { ok: true, matched };
+
+    // TRY each node that carries this label, and keep whichever actually commits.
+    //
+    // The failure this fixes had no symptom to read: Workday keeps several elements
+    // with the same option text in the document at once, only one of them wired to
+    // the open popup. Clicking a dead twin does nothing — no error, no change — and
+    // the code took the click as proof and moved on. "How Did You Hear About Us?"
+    // failed that way on every run, reported as filled, and the page kept saying
+    // the field was required.
+    //
+    // Inner control before the row itself: measured on Field of Study, where a
+    // click on the row's centre hit-tested as the row and did nothing, while the
+    // radio inside it committed on the first try.
+    const before = readCommitted();
+    const candidates = matchAll(visibleOptions(), matched).slice(0, 4);
+    const attempts = [];
+    for (const node of (candidates.includes(opt) ? candidates : [opt, ...candidates]).slice(0, 4)) {
+        const hit = node.querySelector('input[type="radio"], input[type="checkbox"]') || node;
+        const activated = safeActivate(hit, { source: 'recipe', activation: 'widget-option' }, f.selector);
+        if (!activated) { attempts.push('policy-denied'); continue; }
+        await sleep(250);
+        if (f.multi) {
+            // A MULTI-select stays OPEN after a pick and its popup overlays the page
+            // footer, swallowing the later "Next" click — the step then looks stuck
+            // with the field correctly filled. Close it before reading.
+            trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+            try { trigger.blur?.(); } catch { /* noop */ }
+            await sleep(150);
+        }
+        const now = readCommitted();
+        attempts.push(now && now !== before ? `stuck:${now}` : 'no-effect');
+        if (now && now !== before) {
+            trace('list.result', {
+                field: f.label, picked: matched, onPage: now,
+                triedNodes: attempts.length, stuck: true,
+            });
+            return { ok: true, matched };
+        }
+        // Reopen for the next candidate — the failed click may still have closed it.
+        if (!visibleOptions().length) {
+            safeActivate(trigger, { source: 'recipe', activation: 'widget-open' }, f.selector);
+            await sleep(400);
+        }
+    }
+    trace('list.result', {
+        field: f.label, picked: matched, onPage: readCommitted() || '(still empty)',
+        triedNodes: attempts.length, attempts: attempts.join(', '), stuck: false,
+    });
+    return { ok: false, reason: `no clickable node committed "${matched}" (${attempts.join(', ')})` };
 }
 
 /**

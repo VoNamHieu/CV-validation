@@ -115,6 +115,8 @@ async function runAgentLoop(profile) {
     // after we actually did something count as a submitted application.
     let baselineSignals = null;
     let actionsTaken = 0;
+    // Transient planner failures tolerated before giving up on the job.
+    let planFailures = 0;
     // For the two-signal submitted check: a form we have actually seen, and where
     // we started, so "the form is gone" and "we are on a confirmation URL" are
     // statements about a change rather than about the first page we happened to load.
@@ -896,6 +898,19 @@ async function runAgentLoop(profile) {
                         reportResult(false, `LLM error: ${fallbackErr.message}`);
                         return;
                     }
+                } else if (/timed? ?out|network|failed to fetch|429|50\d/i.test(err.message || '')
+                    && ++planFailures < 3) {
+                    // A slow model is not a broken form. This used to end the job
+                    // outright on any iteration past the first, so one overloaded
+                    // LLM call threw away a completed login and a filled step — and
+                    // the recipe, which needs no planner at all, never got its next
+                    // pass. Let the loop come round again: the recipe re-runs every
+                    // iteration and is idempotent, so it keeps making progress while
+                    // the planner is unavailable.
+                    trace('plan.transient', { attempt: planFailures, error: err.message });
+                    showProgress(i + 1, AGENT_MAX_ITERATIONS, 'AI phản hồi chậm — thử lại…');
+                    await sleep(1500);
+                    continue;
                 } else {
                     removeProgress();
                     showToast(`❌ Lỗi AI: ${err.message}`, 5000);
