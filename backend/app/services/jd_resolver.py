@@ -118,10 +118,44 @@ def _successfactors_detail(jd_url: str) -> str | None:
     return body or None
 
 
+def _smartrecruiters_detail(jd_url: str) -> str | None:
+    # jobs/careers.smartrecruiters.com/{slug}/{numeric-id} — the SmartRecruiters
+    # search adapter lists postings without a JD (description=""), and a generic
+    # crawl of the public posting page pulls in page chrome (browser-upgrade
+    # banner, "I'm interested" apply buttons, WeChat share widget, privacy/legal
+    # boilerplate). The public API returns the JD as clean sections, so assemble
+    # those instead.
+    m = re.search(r"smartrecruiters\.com/([A-Za-z0-9._-]+)/(\d{6,})", jd_url)
+    if not m:
+        return None
+    slug, jid = m.group(1), m.group(2)
+    try:
+        r = requests.get(
+            f"https://api.smartrecruiters.com/v1/companies/{slug}/postings/{jid}",
+            headers={"User-Agent": _UA, "Accept": "application/json"}, timeout=_TIMEOUT,
+        )
+        if r.status_code != 200:
+            return None
+        d = r.json()
+    except Exception:
+        return None
+    secs = ((d or {}).get("jobAd") or {}).get("sections") or {}
+    parts = []
+    for k in ("jobDescription", "qualifications", "companyDescription", "additionalInformation"):
+        t = _strip_html(((secs.get(k) or {}).get("text")) or "")
+        if t:
+            parts.append(t)
+    body = "\n\n".join(parts).strip()
+    if len(body) < _MIN_DESC:
+        return None
+    return f"Job Title: {d.get('name', '')}\n\n{body}".strip()
+
+
 _DETAIL_ADAPTERS = (
     ("mbbank", _mbbank_detail),
     ("greenhouse", _greenhouse_detail),
     ("successfactors", _successfactors_detail),
+    ("smartrecruiters", _smartrecruiters_detail),
 )
 
 
