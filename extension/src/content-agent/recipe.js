@@ -1239,28 +1239,50 @@ async function fillCustomSelect(f, value) {
         return '';
     };
 
-    const candidates = matchAll(visibleOptions(), matched).slice(0, 4);
+    /**
+     * Walk DOWN the prompt, one level per click, until the value commits.
+     *
+     * This prompt is a CASCADING menu, not a flat list. Level 1 shows categories,
+     * each with a "›" chevron and no radio; clicking one opens level 2, which
+     * carries a "‹ Company Website" breadcrumb and the real selectable row with a
+     * radio in it. Only that second click commits.
+     *
+     * The agent clicked level 1, saw no chip — correctly, nothing was selected
+     * yet — and reported failure. Then the retry loop clicked the same label
+     * again, which walked back out. It never once reached the row that answers
+     * the question.
+     *
+     * Re-matching after every click matters: the submenu renders the SAME label,
+     * so the node from the previous level is stale the moment it opens.
+     */
     const attempts = [];
-    for (const node of (candidates.includes(opt) ? candidates : [opt, ...candidates]).slice(0, 4)) {
-        // Never click again into a field that has already answered — that is
-        // exactly how the retry loop deselected its own pick.
+    for (let level = 0; level < 4; level++) {
+        // A field that has already answered is never clicked again — that is how
+        // the retry loop used to deselect its own pick.
         const settled = readCommitted();
         if (settled && settled !== before) {
-            trace('list.result', { field: f.label, picked: matched, onPage: settled, triedNodes: attempts.length, stuck: true });
+            trace('list.result', { field: f.label, picked: matched, onPage: settled, levels: level, stuck: true });
             return { ok: true, matched };
         }
-        // Preference order, innermost meaningful control first. A Workday prompt
-        // row nests menuItem[role=option] › promptLeafNode › promptOption, and the
-        // agent was matching only the outer and inner of those three — the leaf
-        // between them, which is what a real click lands on, was never touched.
+        const cands = level === 0 && !matchAll(visibleOptions(), matched).length
+            ? [opt] : matchAll(visibleOptions(), matched);
+        if (!cands.length) { attempts.push(`level${level}:no-row`); break; }
+
+        const node = cands[0];
+        // Innermost meaningful control first. A row nests
+        // menuItem[role=option] › promptLeafNode › promptOption; the radio only
+        // exists once we are deep enough to be looking at a real choice.
         const hit = node.querySelector('input[type="radio"], input[type="checkbox"]')
             || node.querySelector('[data-automation-id="promptLeafNode"]')
             || node;
+        const isLeaf = !!node.querySelector('input[type="radio"], input[type="checkbox"]');
+        const beforeRows = renderedRows(visibleOptions).join('|');
         const activated = safeActivate(hit, { source: 'recipe', activation: 'widget-option' }, f.selector);
-        if (!activated) { attempts.push('policy-denied'); continue; }
-        const now = await waitForCommit();
-        attempts.push(now ? `stuck:${now}` : 'no-effect');
+        if (!activated) { attempts.push(`level${level}:policy-denied`); break; }
+
+        const now = await waitForCommit(isLeaf ? 2500 : 1200);
         if (now) {
+            attempts.push(`level${level}:stuck`);
             if (f.multi) {
                 // A MULTI-select stays OPEN after a pick and its popup overlays the
                 // page footer, swallowing the later "Next" click — the step then
@@ -1269,20 +1291,32 @@ async function fillCustomSelect(f, value) {
                 try { trigger.blur?.(); } catch { /* noop */ }
                 await sleep(150);
             }
-            trace('list.result', { field: f.label, picked: matched, onPage: now, triedNodes: attempts.length, stuck: true });
+            trace('list.result', { field: f.label, picked: matched, onPage: now, levels: level + 1, stuck: true });
             return { ok: true, matched };
         }
-        // Reopen for the next candidate — the failed click may still have closed it.
-        if (!visibleOptions().length) {
-            safeActivate(trigger, { source: 'recipe', activation: 'widget-open' }, f.selector);
-            await sleep(400);
+        // No commit. Did the click DRILL IN instead? A changed row set means a
+        // submenu opened and the next pass should match inside it.
+        await sleep(350);
+        const afterRows = renderedRows(visibleOptions).join('|');
+        const drilled = afterRows !== beforeRows && !!visibleOptions().length;
+        attempts.push(`level${level}:${drilled ? 'drilled-in' : 'no-effect'}`);
+        trace('list.drill', { field: f.label, level, wasLeaf: isLeaf, drilled, rows: visibleOptions().length });
+        if (!drilled) {
+            // Nothing committed and nothing opened. Reopen once in case the click
+            // merely closed the popup, then give up rather than toggling blindly.
+            if (!visibleOptions().length) {
+                safeActivate(trigger, { source: 'recipe', activation: 'widget-open' }, f.selector);
+                await sleep(400);
+                continue;
+            }
+            break;
         }
     }
     trace('list.result', {
         field: f.label, picked: matched, onPage: readCommitted() || '(still empty)',
-        triedNodes: attempts.length, attempts: attempts.join(', '), stuck: false,
+        levels: attempts.length, attempts: attempts.join(', '), stuck: false,
     });
-    return { ok: false, reason: `no clickable node committed "${matched}" (${attempts.join(', ')})` };
+    return { ok: false, reason: `never committed "${matched}" (${attempts.join(', ')})` };
 }
 
 /**
