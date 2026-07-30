@@ -61,3 +61,37 @@ describe('real validation messages are kept', () => {
         assert.equal(isLikelyValidationError('   ', { inFieldWrapper: true }), false);
     });
 });
+
+// ── an advisory is not a failure ───────────────────────────────────────────
+// Measured on a real My Information step: a legal name in capitals raises an
+// "Alerts Found" panel. Nothing is wrong and Next works — but the deterministic
+// advance requires errors.length === 0, so counting an advisory as an error
+// withholds the click for as long as the advisory is on screen. A step that fills
+// perfectly and then never moves, with no failure anywhere to point at.
+describe('Workday alerts vs errors', () => {
+    const ADVISORIES = [
+        'Alert - Family Name - Western Script',
+        'Verify that the field Family Name is correctly capitalized because it contains more than 2 capital letters.',
+        'Please verify your phone number',
+        'Xác nhận lại số điện thoại',
+    ];
+    for (const text of ADVISORIES) {
+        test(`advisory, not an error: "${text.slice(0, 40)}…"`, () => {
+            assert.equal(isLikelyValidationError(text), false);
+            assert.equal(isLikelyValidationError(text, { inFieldWrapper: true }), false,
+                'the field-wrapper path treated anything non-status as an error');
+        });
+    }
+
+    test('a real error is still an error', () => {
+        assert.equal(isLikelyValidationError('Error: The field How Did You Hear About Us? is required and must have a value.'), true);
+        assert.equal(isLikelyValidationError('Please enter a valid email'), true);
+    });
+
+    test('"verify" wording does not swallow a genuine required error', () => {
+        // The advisory check runs first, so it must not match an error that merely
+        // shares a word with one.
+        assert.equal(isLikelyValidationError('This field is required'), true);
+        assert.equal(isLikelyValidationError('Postal Code is invalid'), true);
+    });
+});

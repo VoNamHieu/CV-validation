@@ -334,6 +334,28 @@ const STATUS_TEXT_RE =
     /\bis loaded\b|\bloaded\b|\bloading\b|\bpage\b.*\b(loaded|ready)\b|results? (found|updated|loaded)|\bsaved\b|\bsuccess/i;
 
 /**
+ * An ADVISORY, not a validation failure.
+ *
+ * Workday distinguishes the two and the agent did not. Measured on a real My
+ * Information step: a legal name in capitals raises
+ *
+ *   "Alert - Family Name … Verify that the field Family Name is correctly
+ *    capitalized because it contains more than 2 capital letters."
+ *
+ * in an "Alerts Found" panel. Nothing is wrong and Next works — but the
+ * deterministic advance requires `errors.length === 0`, so counting an advisory
+ * as an error withholds the click for as long as the advisory is on screen, i.e.
+ * forever. That is a step that fills perfectly and then never moves, with no
+ * failure anywhere to point at.
+ *
+ * Checked BEFORE the error vocabulary, because these sentences legitimately
+ * contain error-ish words ("must", "cannot") while asking the user to confirm
+ * something rather than fix it.
+ */
+const ADVISORY_TEXT_RE =
+    /^alert\b|\balert -|verify that|please (verify|confirm|review)|we recommend|for your information|xác nhận lại|kiểm tra lại/i;
+
+/**
  * Does this live-region text actually report a validation problem?
  *
  * Split out as a pure function because it is a judgement about language, and the
@@ -350,6 +372,9 @@ const STATUS_TEXT_RE =
 export function isLikelyValidationError(text, { inFieldWrapper = false } = {}) {
     const t = String(text || '').trim();
     if (!t) return false;
+    // An advisory is not a failure, wherever it is rendered — including inside a
+    // field wrapper, where the old rule treated anything non-status as an error.
+    if (ADVISORY_TEXT_RE.test(t)) return false;
     if (inFieldWrapper) return !STATUS_TEXT_RE.test(t);
     if (STATUS_TEXT_RE.test(t)) return false;
     return ERROR_TEXT_RE.test(t);
@@ -394,6 +419,13 @@ export function detectErrors() {
             let field = '';
             const wd = el.closest('[data-automation-id^="formField-"]');
             if (ambiguous && !isLikelyValidationError(msg, { inFieldWrapper: !!wd })) continue;
+            // An advisory is skipped even from a selector NAMED for errors.
+            // Workday renders its "Alerts Found" summary in the same furniture as
+            // its error summary, so trusting the selector name here would let a
+            // capitalization advisory withhold the step advance indefinitely —
+            // `errors.length === 0` is a precondition for it. Wording decides,
+            // not the container.
+            if (!ambiguous && ADVISORY_TEXT_RE.test(msg)) continue;
             seen.add(msg);
             if (wd) {
                 nearFieldSelector = `[data-automation-id="${wd.getAttribute('data-automation-id')}"]`;

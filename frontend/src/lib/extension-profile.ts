@@ -37,13 +37,80 @@ export interface ExtensionProfile {
     skills: string;
 }
 
+/**
+ * The ~20 Vietnamese family names that cover the large majority of the country,
+ * with and without diacritics.
+ *
+ * Used only to decide WHICH END of a name is the family name. Vietnamese writes
+ * family-name-first ("Võ Nam Hiếu"), English CVs routinely rewrite the same
+ * person given-name-first ("Hieu Vo"), and a name string alone cannot tell you
+ * which convention was used — so the ONE reliable signal is that Vietnamese
+ * family names are a small closed set. If the last token is one of these, the
+ * name is in Western order.
+ */
+const VN_FAMILY_NAMES = new Set([
+    "nguyen", "nguyễn", "tran", "trần", "le", "lê", "pham", "phạm",
+    "hoang", "hoàng", "huynh", "huỳnh", "phan", "vu", "vũ", "vo", "võ",
+    "dang", "đặng", "bui", "bùi", "do", "đỗ", "ho", "hồ", "ngo", "ngô",
+    "duong", "dương", "truong", "trương", "dinh", "đinh",
+    // Deliberately NOT here: Mai, Cao, Chu, Lâm, Lương, Lý, Tạ. Each is a real
+    // family name and also a common GIVEN name, so including them makes both ends
+    // of "Mai Tran" look like a family name — which lands it in the ambiguous
+    // branch and keeps the wrong reading. Entries that weaken the signal cost more
+    // than the coverage they add.
+]);
+
+/**
+ * Split a CV's name into the given/family pair an ATS asks for.
+ *
+ * Two defects this exists to fix, both measured on a real Workday application:
+ *
+ *   1. The pair came out SWAPPED. The old rule took the last token as the given
+ *      name — correct for "Võ Nam Hiếu", wrong for a CV that writes the same
+ *      person as "HIEU (CHARLES) VO", which submitted Family Name = "HIEU" and
+ *      Given Name = "VO" to a real employer. The family-name set above decides
+ *      the order instead of assuming one.
+ *   2. A parenthesised English nickname rode along into the legal name. Workday
+ *      raised two capitalization alerts on "HIEU (CHARLES)", and a legal-name
+ *      field is the one place a nickname does not belong.
+ *
+ * When neither end is a recognised family name the behaviour is unchanged —
+ * Vietnamese order assumed — because that is the right default for this product's
+ * users and guessing the other way would be no better founded.
+ */
+export function splitLegalName(raw: string): { firstName: string; lastName: string } {
+    // "HIEU (CHARLES) VO" → "HIEU VO". Also drops the bracketed forms CVs use
+    // for the same purpose.
+    const cleaned = (raw ?? "")
+        .replace(/[（(\[][^）)\]]*[）)\]]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    const parts = cleaned.split(" ").filter(Boolean);
+    if (parts.length === 0) return { firstName: "", lastName: "" };
+    if (parts.length === 1) return { firstName: parts[0], lastName: "" };
+
+    const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}]/gu, "");
+    const lastIsFamily = VN_FAMILY_NAMES.has(norm(parts[parts.length - 1]));
+    const firstIsFamily = VN_FAMILY_NAMES.has(norm(parts[0]));
+
+    // Western order — family name last. Only when the END looks like a family
+    // name and the START does not, so "Nguyen Van Le" (both ends plausible) keeps
+    // the Vietnamese reading rather than flipping on a coin toss.
+    if (lastIsFamily && !firstIsFamily) {
+        return {
+            firstName: parts.slice(0, -1).join(" "),
+            lastName: parts[parts.length - 1],
+        };
+    }
+    // Vietnamese order — family name first, given name last.
+    return { firstName: parts[parts.length - 1], lastName: parts.slice(0, -1).join(" ") };
+}
+
 // `coverLetterOverride` is the per-job tailored letter (from /api/ai/cover-letter),
 // preferred over the generic CV summary so the auto-apply agent fills a letter
 // written for THIS job. Falls back to the summary when no letter was generated.
 export function cvToExtensionProfile(cv: CVData, coverLetterOverride?: string): ExtensionProfile {
-    const nameParts = (cv.name ?? "").trim().split(/\s+/);
-    const firstName = nameParts.length > 0 ? nameParts[nameParts.length - 1] : "";
-    const lastName = nameParts.slice(0, -1).join(" ");
+    const { firstName, lastName } = splitLegalName(cv.name ?? "");
 
     const contact = cv.contact ?? ({} as CVData["contact"]);
     const personal = cv.personal ?? ({} as CVData["personal"]);
