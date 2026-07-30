@@ -320,24 +320,56 @@ function nudgeScroll(sc) {
  * Returns null when the whole list has been walked without an unambiguous match —
  * still no guessing.
  */
-async function findInList(getShown, match) {
+async function findInList(getShown, match, label = '') {
     let opt = match(getShown());
     if (opt) return opt;
     const sc = optionScroller(getShown()[0]);
-    if (!sc) return null;
+    if (!sc) {
+        trace('list.noScroller', { field: label, shown: getShown().length });
+        return null;
+    }
     const step = Math.max(40, sc.clientHeight * 0.8);
     const seen = new Set();
+    const edge = (rows) => (rows.length ? `${rows[0]}…${rows[rows.length - 1]}` : '(empty)');
+    let firstWindow = null;
+    let lastWindow = null;
+    let rounds = 0;
     for (let pos = 0; pos <= sc.scrollHeight; pos += step) {
         sc.scrollTop = pos;
         nudgeScroll(sc);
         await sleep(120);
+        rounds++;
         const shown = getShown();
-        const key = shown.map(o => (o.textContent || '').trim()).join('|');
+        const rows = shown.map(o => (o.textContent || '').trim());
+        if (firstWindow === null) firstWindow = edge(rows);
+        lastWindow = edge(rows);
+        const key = rows.join('|');
         if (seen.has(key)) continue;   // same window re-rendered; already matched it
         seen.add(key);
         opt = match(shown);
-        if (opt) return opt;
+        if (opt) {
+            trace('list.found', { field: label, rounds, windows: seen.size, at: sc.scrollTop });
+            return opt;
+        }
     }
+    // The diagnosis this exists for. A virtualiser that ignores a SYNTHETIC scroll
+    // renders the same rows no matter what scrollTop says — measured on Mondelez's
+    // Field of Study, where 40 programmatic scrollTop writes never got past "A" and
+    // only a real (trusted) wheel refreshed them. `windows: 1` with a scrollHeight
+    // many times clientHeight is that failure exactly, and it is a different
+    // problem from "the option genuinely is not in this list".
+    trace('list.exhausted', {
+        field: label,
+        rounds,
+        windows: seen.size,
+        clientH: sc.clientHeight,
+        scrollH: sc.scrollHeight,
+        firstWindow,
+        lastWindow,
+        verdict: seen.size <= 1 && sc.scrollHeight > sc.clientHeight * 2
+            ? 'VIRTUALISER IGNORED SYNTHETIC SCROLL — rendered rows never changed'
+            : 'walked the whole list, no unambiguous match',
+    });
     return null;
 }
 
@@ -352,16 +384,26 @@ async function findInList(getShown, match) {
  * element matched a moment ago may since have become a different major — hence
  * the re-resolve by text rather than trusting the old reference.
  */
-async function revealOption(opt, getShown, match) {
+async function revealOption(opt, getShown, match, label = '') {
     const sc = optionScroller(opt);
     if (sc) {
         const or = opt.getBoundingClientRect();
         const cr = sc.getBoundingClientRect();
         if (or.top < cr.top || or.bottom > cr.bottom) {
+            trace('list.reveal', {
+                field: label,
+                optTop: Math.round(or.top),
+                clip: `${Math.round(cr.top)}..${Math.round(cr.bottom)}`,
+                why: 'row rendered outside the list clip rect',
+            });
             sc.scrollTop += (or.top - cr.top) - (cr.height / 2 - or.height / 2);
             nudgeScroll(sc);
             await sleep(200);
-            return match(getShown()) || opt;   // rows may have been recycled
+            const after = match(getShown());
+            // A recycled row that no longer matches is worth knowing about: the
+            // click then lands on a DIFFERENT major with a plausible-looking name.
+            if (!after) trace('list.revealLostRow', { field: label, note: 'row recycled; falling back to the stale reference' });
+            return after || opt;
         }
         return opt;
     }
@@ -883,7 +925,17 @@ async function fillCustomSelect(f, value) {
     {
         const deadline = Date.now() + 4000;
         while (!visibleOptions().length && Date.now() < deadline) await sleep(150);
-        if (!visibleOptions().length) return { ok: false, reason: 'listbox-timeout' };
+        if (!visibleOptions().length) {
+            // Distinguish "the widget never opened" from "it opened and the option
+            // was not in it". Both surface as an unfilled required dropdown.
+            trace('list.timeout', {
+                field: f.label,
+                trigger: trigger.tagName + (trigger.getAttribute('aria-haspopup') ? '[haspopup]' : ''),
+                anyOptionsOnPage: document.querySelectorAll(OPTION_SEL).length,
+                note: 'widget did not open, or its options are outside this formField',
+            });
+            return { ok: false, reason: 'listbox-timeout' };
+        }
     }
     await sleep(150);
     const want = String(value || '').trim().toLowerCase();
@@ -944,17 +996,24 @@ async function fillCustomSelect(f, value) {
             // Typing does not narrow every prompt. Mondelez's Field of Study
             // takes the text and still lists all majors from "Accounting" —
             // so the typed rung has to be searched for, not just read off.
-            opt = await findInList(visibleOptions, (list) => uniqueMatch(list, wanted));
+            opt = await findInList(visibleOptions, (list) => uniqueMatch(list, wanted), `${f.label}:${wanted}`);
             if (opt) { matched = wanted; break; }
         }
     } else {
         for (const wanted of ladder) {
-            opt = await findInList(visibleOptions, (list) => uniqueMatch(list, wanted));
+            opt = await findInList(visibleOptions, (list) => uniqueMatch(list, wanted), `${f.label}:${wanted}`);
             if (opt) { matched = wanted; break; }
         }
     }
-    if (opt) opt = await revealOption(opt, visibleOptions, (list) => uniqueMatch(list, matched));
+    if (opt) opt = await revealOption(opt, visibleOptions, (list) => uniqueMatch(list, matched), f.label);
     if (!opt) {
+        trace('list.noMatch', {
+            field: f.label,
+            tried: ladder.join(' → '),
+            shown: shown.length,
+            sample: shown.slice(0, 4).map(o => (o.textContent || '').trim().slice(0, 22)).join(' | '),
+            typedInto: !!filter,
+        });
         trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); // close, don't block
         return {
             ok: false,
@@ -966,9 +1025,14 @@ async function fillCustomSelect(f, value) {
     // centre hit-tested as the row and did nothing at all; the control inside it
     // committed "Marketing" on the first try.
     const hit = opt.querySelector('input[type="radio"], input[type="checkbox"]') || opt;
-    if (!safeActivate(hit, { source: 'recipe', activation: 'widget-option' }, f.selector)) {
-        return { ok: false, reason: 'policy-denied' };
-    }
+    const activated = safeActivate(hit, { source: 'recipe', activation: 'widget-option' }, f.selector);
+    trace('list.commit', {
+        field: f.label,
+        picked: matched,
+        clickedInnerControl: hit !== opt,
+        activated,
+    });
+    if (!activated) return { ok: false, reason: 'policy-denied' };
     await sleep(250);
     // A MULTI-select stays OPEN after a pick (so you can add more) — and its popup
     // overlays the page footer, SWALLOWING the agent's later "Next" click, so the
@@ -979,6 +1043,30 @@ async function fillCustomSelect(f, value) {
         try { trigger.blur?.(); } catch { /* noop */ }
         await sleep(150);
     }
+    // Did the pick STICK? A click that Workday accepted leaves a chip or a button
+    // label; one it ignored leaves the field exactly as it was — and this function
+    // has been returning ok:true for both, so a required dropdown could read as
+    // filled while the page still showed "Select One". That matters most here:
+    // these prompts are the widgets suspected of committing only on trusted
+    // events, so proof-after-the-fact is the only honest verdict.
+    const committed = (() => {
+        try {
+            const chips = [...wrap.querySelectorAll('[data-automation-id="selectedItem"]')];
+            if (chips.length) return chips.map(c => (c.textContent || '').trim()).join(' | ');
+            const txt = (wrap.querySelector('button')?.textContent || '').trim();
+            return txt && !/select one/i.test(txt) ? txt : '';
+        } catch { return ''; }
+    })();
+    // Only a wrapper we could actually read is allowed to fail the fill. Without
+    // `wrap` there is no field state to inspect, and turning "cannot tell" into
+    // "did not work" would break every widget whose selector is not inside a
+    // formField — so that case keeps the old optimistic verdict and says so.
+    if (!wrap) {
+        trace('list.result', { field: f.label, picked: matched, onPage: '(no wrapper to verify)', stuck: null });
+        return { ok: true, matched };
+    }
+    trace('list.result', { field: f.label, picked: matched, onPage: committed || '(still empty)', stuck: !!committed });
+    if (!committed) return { ok: false, reason: `click accepted but nothing committed (wanted "${matched}")` };
     return { ok: true, matched };
 }
 
