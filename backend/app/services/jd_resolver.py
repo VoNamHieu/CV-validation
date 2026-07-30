@@ -151,11 +151,42 @@ def _smartrecruiters_detail(jd_url: str) -> str | None:
     return f"Job Title: {d.get('name', '')}\n\n{body}".strip()
 
 
+def _workday_detail(jd_url: str) -> str | None:
+    # {tenant}.wdN.myworkdayjobs.com/[locale/]{site}/job/… — like SmartRecruiters,
+    # the Workday search adapter lists postings with description="", and a generic
+    # crawl of the SPA posting page pulls in page chrome ("Welcome to our new
+    # career portal", Apply/Save-job, cookie banner, "© Workday, Inc." footer).
+    # The public CXS API returns the JD as clean HTML.
+    m = re.match(
+        r"https?://([^.]+)\.(wd\d+)\.myworkdayjobs\.com/(?:[a-z]{2}-[A-Z]{2}/)?([^/]+)(/job/.+)$",
+        jd_url)
+    if not m:
+        return None
+    tenant, wd, site, ext = m.group(1), m.group(2), m.group(3), m.group(4)
+    base = f"https://{tenant}.{wd}.myworkdayjobs.com"
+    try:
+        r = requests.get(
+            f"{base}/wday/cxs/{tenant}/{site}{ext}",
+            headers={"User-Agent": _UA, "Accept": "application/json"}, timeout=_TIMEOUT,
+        )
+        if r.status_code != 200:
+            return None
+        d = r.json()
+    except Exception:
+        return None
+    info = (d or {}).get("jobPostingInfo") or {}
+    body = _strip_html(info.get("jobDescription", ""))
+    if len(body) < _MIN_DESC:
+        return None
+    return f"Job Title: {info.get('title', '')}\n\n{body}".strip()
+
+
 _DETAIL_ADAPTERS = (
     ("mbbank", _mbbank_detail),
     ("greenhouse", _greenhouse_detail),
     ("successfactors", _successfactors_detail),
     ("smartrecruiters", _smartrecruiters_detail),
+    ("workday", _workday_detail),
 )
 
 
