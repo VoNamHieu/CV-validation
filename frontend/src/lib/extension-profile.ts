@@ -61,6 +61,38 @@ const VN_FAMILY_NAMES = new Set([
 ]);
 
 /**
+ * One capital per word, for words that are shouting.
+ *
+ * CVs are routinely typed in caps ("HIEU VO"), and Workday says so out loud:
+ * "Verify that the field Family Name is correctly capitalized because it contains
+ * more than 2 capital letters." Filtering that advisory out of the agent's error
+ * list stops it blocking the step; normalising the name stops the advisory being
+ * raised at all, which is the better half of the fix.
+ *
+ * Only ALL-CAPS words are re-cased. Title-casing everything would quietly damage
+ * names whose capitals are correct — McDonald → Mcdonald, MacLeod → Macleod,
+ * DeSantis → Desantis — and a legal-name field is the wrong place to be clever.
+ * Single letters are left alone so a middle initial ("Nguyễn Văn A") survives.
+ *
+ * Internal separators start a new word: NGUYEN-TRAN → Nguyen-Tran, O'BRIEN →
+ * O'Brien. Diacritics come through unharmed — VÕ → Võ, NGUYỄN → Nguyễn.
+ */
+export function normalizeNameCase(raw: string): string {
+    return (raw ?? "")
+        .split(/(\s+)/)
+        .map((word) => {
+            const letters = word.replace(/[^\p{L}]/gu, "");
+            // Leave it exactly as written unless it is all caps and long enough
+            // for the casing to be a choice rather than an initial.
+            if (letters.length < 2 || word !== word.toUpperCase()) return word;
+            return word
+                .toLowerCase()
+                .replace(/(^|[^\p{L}])(\p{L})/gu, (_m, sep, ch) => sep + ch.toUpperCase());
+        })
+        .join("");
+}
+
+/**
  * Split a CV's name into the given/family pair an ATS asks for.
  *
  * Two defects this exists to fix, both measured on a real Workday application:
@@ -87,7 +119,7 @@ export function splitLegalName(raw: string): { firstName: string; lastName: stri
         .trim();
     const parts = cleaned.split(" ").filter(Boolean);
     if (parts.length === 0) return { firstName: "", lastName: "" };
-    if (parts.length === 1) return { firstName: parts[0], lastName: "" };
+    if (parts.length === 1) return { firstName: normalizeNameCase(parts[0]), lastName: "" };
 
     const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}]/gu, "");
     const lastIsFamily = VN_FAMILY_NAMES.has(norm(parts[parts.length - 1]));
@@ -98,12 +130,15 @@ export function splitLegalName(raw: string): { firstName: string; lastName: stri
     // the Vietnamese reading rather than flipping on a coin toss.
     if (lastIsFamily && !firstIsFamily) {
         return {
-            firstName: parts.slice(0, -1).join(" "),
-            lastName: parts[parts.length - 1],
+            firstName: normalizeNameCase(parts.slice(0, -1).join(" ")),
+            lastName: normalizeNameCase(parts[parts.length - 1]),
         };
     }
     // Vietnamese order — family name first, given name last.
-    return { firstName: parts[parts.length - 1], lastName: parts.slice(0, -1).join(" ") };
+    return {
+        firstName: normalizeNameCase(parts[parts.length - 1]),
+        lastName: normalizeNameCase(parts.slice(0, -1).join(" ")),
+    };
 }
 
 // `coverLetterOverride` is the per-job tailored letter (from /api/ai/cover-letter),
@@ -125,7 +160,9 @@ export function cvToExtensionProfile(cv: CVData, coverLetterOverride?: string): 
         employment.highest_degree || cv.education?.[0]?.degree || "";
 
     return {
-        fullName: cv.name ?? "",
+        // Same normalisation as the split pair, or the two disagree on the
+        // same form (fullName feeds ATS that ask for one field, not two).
+        fullName: normalizeNameCase(cv.name ?? ""),
         firstName,
         lastName,
         email: contact.email ?? "",
