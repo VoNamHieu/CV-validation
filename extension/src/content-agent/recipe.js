@@ -286,7 +286,7 @@ export const FALLBACK_RECIPES = [
  * promptOption alone found zero options there — on a listbox that had opened
  * correctly — so every custom-select on that tenant failed as "listbox-timeout".
  */
-const OPTION_SEL = '[data-automation-id="promptOption"], [role="option"]';
+const OPTION_SEL = '[data-automation-id="promptOption"], [data-automation-id="promptLeafNode"], [role="option"]';
 
 /** The element that actually scrolls a prompt's option list, if any. */
 function optionScroller(opt) {
@@ -1221,7 +1221,13 @@ async function fillCustomSelect(f, value) {
     const candidates = matchAll(visibleOptions(), matched).slice(0, 4);
     const attempts = [];
     for (const node of (candidates.includes(opt) ? candidates : [opt, ...candidates]).slice(0, 4)) {
-        const hit = node.querySelector('input[type="radio"], input[type="checkbox"]') || node;
+        // Preference order, innermost meaningful control first. A Workday prompt
+        // row nests menuItem[role=option] › promptLeafNode › promptOption, and the
+        // agent was matching only the outer and inner of those three — the leaf
+        // between them, which is what a real click lands on, was never touched.
+        const hit = node.querySelector('input[type="radio"], input[type="checkbox"]')
+            || node.querySelector('[data-automation-id="promptLeafNode"]')
+            || node;
         const activated = safeActivate(hit, { source: 'recipe', activation: 'widget-option' }, f.selector);
         if (!activated) { attempts.push('policy-denied'); continue; }
         await sleep(250);
