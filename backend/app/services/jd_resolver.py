@@ -181,12 +181,69 @@ def _workday_detail(jd_url: str) -> str | None:
     return f"Job Title: {info.get('title', '')}\n\n{body}".strip()
 
 
+def _oracle_hcm_detail(jd_url: str) -> str | None:
+    # {origin}/hcmUI/CandidateExperience/{locale}/sites/{site}/job/{jid}. The
+    # Oracle-HCM list adapter only carries ShortDescriptionStr (often empty); the
+    # full JD lives in the requisition-details REST API. A generic crawl of the
+    # SPA page instead pulls in portal chrome.
+    m = re.search(
+        r"(https?://[^/]+)/hcmUI/CandidateExperience/[^/]+/sites/([^/]+)/job/([^/?#]+)", jd_url)
+    if not m:
+        return None
+    origin, site, jid = m.group(1), m.group(2), m.group(3)
+    try:
+        r = requests.get(
+            f"{origin}/hcmRestApi/resources/latest/recruitingCEJobRequisitionDetails",
+            headers={"User-Agent": _UA, "Accept": "application/json"},
+            params={"onlyData": "true", "expand": "all",
+                    "finder": f'ById;Id="{jid}",siteNumber={site}'}, timeout=_TIMEOUT,
+        )
+        if r.status_code != 200:
+            return None
+        it = ((r.json() or {}).get("items") or [None])[0]
+    except Exception:
+        return None
+    if not it:
+        return None
+    parts = [_strip_html(it.get("ExternalDescriptionStr", "")),
+             _strip_html(it.get("ExternalQualificationsStr", "")),
+             _strip_html(it.get("ExternalResponsibilitiesStr", ""))]
+    body = "\n\n".join(p for p in parts if p).strip()
+    if len(body) < _MIN_DESC:
+        return None
+    return f"Job Title: {it.get('Title', '')}\n\n{body}".strip()
+
+
+def _eightfold_detail(jd_url: str) -> str | None:
+    # {origin}/careers/job/{id} (or ?pid={id}). The list adapter has no JD; the
+    # public apply API returns it cleanly.
+    m = re.search(r"(https?://[^/]+).*?(?:/job/|[?&]pid=)(\d{6,})", jd_url)
+    if not m:
+        return None
+    origin, jid = m.group(1), m.group(2)
+    try:
+        r = requests.get(f"{origin}/api/apply/v2/jobs/{jid}",
+                         headers={"User-Agent": _UA, "Accept": "application/json"}, timeout=_TIMEOUT)
+        if r.status_code != 200:
+            return None
+        d = r.json()
+    except Exception:
+        return None
+    job = d.get("job", d) if isinstance(d, dict) else {}
+    body = _strip_html(job.get("job_description") or job.get("description") or "")
+    if len(body) < _MIN_DESC:
+        return None
+    return f"Job Title: {job.get('name') or job.get('title', '')}\n\n{body}".strip()
+
+
 _DETAIL_ADAPTERS = (
     ("mbbank", _mbbank_detail),
     ("greenhouse", _greenhouse_detail),
     ("successfactors", _successfactors_detail),
     ("smartrecruiters", _smartrecruiters_detail),
     ("workday", _workday_detail),
+    ("oracle-hcm", _oracle_hcm_detail),
+    ("eightfold", _eightfold_detail),
 )
 
 
