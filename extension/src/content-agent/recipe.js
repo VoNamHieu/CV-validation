@@ -320,13 +320,99 @@ function nudgeScroll(sc) {
  * Returns null when the whole list has been walked without an unambiguous match —
  * still no guessing.
  */
-async function findInList(getShown, match, label = '') {
+/** The rendered rows, de-duplicated — Workday emits each option twice. */
+const renderedRows = (getShown) =>
+    [...new Set(getShown().map(o => (o.textContent || '').trim()).filter(Boolean))];
+
+/**
+ * Wait for the rendered window to actually change after a scroll.
+ *
+ * Measured on Mondelez's Field of Study: one scroll step costs ~550ms, not the
+ * 120ms the walk used to sleep — the container lazily loads more options as it
+ * moves (its scrollHeight grows while you scroll it). Reading the rows too early
+ * means comparing against the PREVIOUS window, which makes a bisect step decide
+ * on stale evidence and walk the wrong way.
+ */
+async function settleAfterScroll(sc, getShown, beforeKey, budgetMs = 1600) {
+    const deadline = Date.now() + budgetMs;
+    while (Date.now() < deadline) {
+        await sleep(120);
+        const now = renderedRows(getShown).join('|');
+        if (now !== beforeKey) return now;
+    }
+    return renderedRows(getShown).join('|');
+}
+
+/**
+ * Jump to a value in an ALPHABETICAL list instead of walking to it.
+ *
+ * Measured, and the reason this exists: Field of Study holds ~1000 majors, the
+ * container lazily grows past 9900px, and stepping through it at 80% of a 313px
+ * viewport takes ~40 rounds at ~550ms each — around 22 seconds for ONE field,
+ * against a 120s watchdog for the whole job. Bisecting on the rendered window's
+ * first and last row found "Marketing" in THREE rounds.
+ *
+ * Only used when the rendered rows are actually ordered (checked, not assumed) —
+ * an unordered list falls back to the linear walk, which is slow but correct.
+ */
+async function bisectList(sc, getShown, match, wanted, label) {
+    const cmp = (a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' });
+    const want = String(wanted).trim().toLowerCase();
+    let lo = 0;
+    let hi = sc.scrollHeight;
+    let rounds = 0;
+    const trail = [];
+    while (rounds < 12 && hi - lo > sc.clientHeight / 2) {
+        const mid = Math.round((lo + hi) / 2);
+        const before = renderedRows(getShown).join('|');
+        sc.scrollTop = mid;
+        nudgeScroll(sc);
+        await settleAfterScroll(sc, getShown, before);
+        rounds++;
+        const rows = renderedRows(getShown);
+        if (!rows.length) break;
+        const first = rows[0].toLowerCase();
+        const last = rows[rows.length - 1].toLowerCase();
+        trail.push(`${mid}:${first.slice(0, 12)}…${last.slice(0, 12)}`);
+        const hit = match(getShown());
+        if (hit) {
+            trace('list.bisect', { field: label, rounds, at: mid, trail: trail.join(' → '), found: true });
+            return hit;
+        }
+        // Narrow on the window we can see. If the target sorts inside this window
+        // and still is not here, bisecting further cannot help — hand over.
+        if (cmp(want, first) < 0) hi = mid;
+        else if (cmp(want, last) > 0) lo = mid;
+        else break;
+    }
+    trace('list.bisect', { field: label, rounds, trail: trail.join(' → '), found: false, next: 'linear walk' });
+    return null;
+}
+
+/** True when the rendered rows are in ascending order — cheap and checkable. */
+function looksAlphabetical(getShown) {
+    const rows = renderedRows(getShown);
+    if (rows.length < 3) return false;
+    for (let i = 1; i < rows.length; i++) {
+        if (rows[i - 1].localeCompare(rows[i], 'en', { sensitivity: 'base' }) > 0) return false;
+    }
+    return true;
+}
+
+async function findInList(getShown, match, label = '', wanted = '') {
     let opt = match(getShown());
     if (opt) return opt;
     const sc = optionScroller(getShown()[0]);
     if (!sc) {
         trace('list.noScroller', { field: label, shown: getShown().length });
         return null;
+    }
+    // Bisect first when the list earns it. The walk below is the fallback, not the
+    // plan — it is ~40 rounds where this is ~3, and the difference is the job
+    // finishing versus the watchdog killing it mid-field.
+    if (wanted && looksAlphabetical(getShown)) {
+        opt = await bisectList(sc, getShown, match, wanted, label);
+        if (opt) return opt;
     }
     const step = Math.max(40, sc.clientHeight * 0.8);
     const seen = new Set();
@@ -335,9 +421,13 @@ async function findInList(getShown, match, label = '') {
     let lastWindow = null;
     let rounds = 0;
     for (let pos = 0; pos <= sc.scrollHeight; pos += step) {
+        const before = renderedRows(getShown).join('|');
         sc.scrollTop = pos;
         nudgeScroll(sc);
-        await sleep(120);
+        // Measured ~550ms per step, not 120ms — the container lazily loads as it
+        // moves. A fixed short sleep read the PREVIOUS window and counted it as a
+        // repeat, which is how a walk "exhausts" a list it never actually saw.
+        await settleAfterScroll(sc, getShown, before);
         rounds++;
         const shown = getShown();
         const rows = shown.map(o => (o.textContent || '').trim());
@@ -996,12 +1086,12 @@ async function fillCustomSelect(f, value) {
             // Typing does not narrow every prompt. Mondelez's Field of Study
             // takes the text and still lists all majors from "Accounting" —
             // so the typed rung has to be searched for, not just read off.
-            opt = await findInList(visibleOptions, (list) => uniqueMatch(list, wanted), `${f.label}:${wanted}`);
+            opt = await findInList(visibleOptions, (list) => uniqueMatch(list, wanted), `${f.label}:${wanted}`, wanted);
             if (opt) { matched = wanted; break; }
         }
     } else {
         for (const wanted of ladder) {
-            opt = await findInList(visibleOptions, (list) => uniqueMatch(list, wanted), `${f.label}:${wanted}`);
+            opt = await findInList(visibleOptions, (list) => uniqueMatch(list, wanted), `${f.label}:${wanted}`, wanted);
             if (opt) { matched = wanted; break; }
         }
     }
