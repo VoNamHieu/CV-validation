@@ -1218,9 +1218,37 @@ async function fillCustomSelect(f, value) {
     // click on the row's centre hit-tested as the row and did nothing, while the
     // radio inside it committed on the first try.
     const before = readCommitted();
+
+    /**
+     * Wait for the field to answer, instead of assuming how long it takes.
+     *
+     * A fixed 250ms read here was worse than no verification at all. This widget
+     * was measured at ~550ms to respond, so the read landed BEFORE the chip
+     * appeared, a working click was recorded as "no-effect", and the loop moved on
+     * to the next node carrying the same label — which TOGGLED OFF what the first
+     * click had just selected. The field ended empty and required, while one click
+     * by hand worked every time. The verification was undoing its own success.
+     */
+    const waitForCommit = async (budgetMs = 2500) => {
+        const deadline = Date.now() + budgetMs;
+        while (Date.now() < deadline) {
+            const now = readCommitted();
+            if (now && now !== before) return now;
+            await sleep(150);
+        }
+        return '';
+    };
+
     const candidates = matchAll(visibleOptions(), matched).slice(0, 4);
     const attempts = [];
     for (const node of (candidates.includes(opt) ? candidates : [opt, ...candidates]).slice(0, 4)) {
+        // Never click again into a field that has already answered — that is
+        // exactly how the retry loop deselected its own pick.
+        const settled = readCommitted();
+        if (settled && settled !== before) {
+            trace('list.result', { field: f.label, picked: matched, onPage: settled, triedNodes: attempts.length, stuck: true });
+            return { ok: true, matched };
+        }
         // Preference order, innermost meaningful control first. A Workday prompt
         // row nests menuItem[role=option] › promptLeafNode › promptOption, and the
         // agent was matching only the outer and inner of those three — the leaf
@@ -1230,22 +1258,18 @@ async function fillCustomSelect(f, value) {
             || node;
         const activated = safeActivate(hit, { source: 'recipe', activation: 'widget-option' }, f.selector);
         if (!activated) { attempts.push('policy-denied'); continue; }
-        await sleep(250);
-        if (f.multi) {
-            // A MULTI-select stays OPEN after a pick and its popup overlays the page
-            // footer, swallowing the later "Next" click — the step then looks stuck
-            // with the field correctly filled. Close it before reading.
-            trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-            try { trigger.blur?.(); } catch { /* noop */ }
-            await sleep(150);
-        }
-        const now = readCommitted();
-        attempts.push(now && now !== before ? `stuck:${now}` : 'no-effect');
-        if (now && now !== before) {
-            trace('list.result', {
-                field: f.label, picked: matched, onPage: now,
-                triedNodes: attempts.length, stuck: true,
-            });
+        const now = await waitForCommit();
+        attempts.push(now ? `stuck:${now}` : 'no-effect');
+        if (now) {
+            if (f.multi) {
+                // A MULTI-select stays OPEN after a pick and its popup overlays the
+                // page footer, swallowing the later "Next" click — the step then
+                // looks stuck with the field correctly filled. Close it.
+                trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+                try { trigger.blur?.(); } catch { /* noop */ }
+                await sleep(150);
+            }
+            trace('list.result', { field: f.label, picked: matched, onPage: now, triedNodes: attempts.length, stuck: true });
             return { ok: true, matched };
         }
         // Reopen for the next candidate — the failed click may still have closed it.
