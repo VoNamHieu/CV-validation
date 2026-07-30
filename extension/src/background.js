@@ -37,16 +37,50 @@ initFixture();
  * copoFixture, and a content script's globals are not reachable from the page
  * console without switching execution context.
  */
+/**
+ * The tab the user means.
+ *
+ * NOT `currentWindow` — called from the service-worker console, the "current
+ * window" IS the DevTools window, which owns no tabs, so the query comes back
+ * empty every time. Ask the browser for its normal windows instead and take the
+ * active tab, preferring one the agent can actually run on.
+ */
+async function debugTargetTab(tabId) {
+    if (tabId) return await chrome.tabs.get(tabId).catch(() => null);
+    const wins = await chrome.windows.getAll({ populate: true, windowTypes: ['normal'] }).catch(() => []);
+    const active = wins.flatMap(w => (w.tabs || []).filter(t => t.active).map(t => ({ t, focused: w.focused })));
+    if (!active.length) return null;
+    // A tab the agent is injected into beats whichever window happens to be focused.
+    const applyable = active.filter(({ t }) => /myworkdayjobs|myworkdaysite|smartrecruiters/i.test(t.url || ''));
+    const pool = applyable.length ? applyable : active;
+    return (pool.find(x => x.focused) || pool[0]).t;
+}
+
+/** List the tabs copoStep could target, so an ambiguous case is visible. */
+self.copoTabs = async () => {
+    const wins = await chrome.windows.getAll({ populate: true, windowTypes: ['normal'] }).catch(() => []);
+    const rows = wins.flatMap(w => (w.tabs || []).map(t => ({
+        tabId: t.id, active: t.active, focusedWindow: w.focused, url: (t.url || '').slice(0, 90),
+    })));
+    console.table(rows);
+    return rows;
+};
+
 self.copoStep = async (opts = {}) => {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.id) { console.warn('[Copo] no active tab'); return null; }
+    const tab = await debugTargetTab(opts.tabId);
+    if (!tab?.id) {
+        console.warn('[Copo] no candidate tab — run copoTabs() to see what is open, '
+            + 'then copoStep({tabId: <id>}).');
+        return null;
+    }
     try {
         const r = await chrome.tabs.sendMessage(tab.id, { type: 'AGENT_TEST_STEP', opts });
-        console.log('[Copo] step →', r);
+        console.log(`[Copo] step on tab ${tab.id} →`, r);
         return r;
     } catch (e) {
         // The usual cause, and it has its own fix: no content script in that tab.
-        console.warn('[Copo] no agent in that tab — reload the page (F5) and retry.', e?.message);
+        console.warn(`[Copo] no agent in tab ${tab.id} (${(tab.url || '').slice(0, 60)}) — `
+            + 'reload that page (F5) and retry.', e?.message);
         return null;
     }
 };
