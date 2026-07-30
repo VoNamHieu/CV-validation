@@ -236,9 +236,41 @@ def _eightfold_detail(jd_url: str) -> str | None:
     return f"Job Title: {job.get('name') or job.get('title', '')}\n\n{body}".strip()
 
 
+def _phenom_detail(jd_url: str) -> str | None:
+    # Phenom SSR job page: {origin}/job/{slug}/{numeric-id}/. The Phenom list
+    # adapter has no JD and a full-page crawl adds portal chrome, but the JD is
+    # server-rendered inside a schema.org itemprop="description" element — extract
+    # just that. Gated to the Phenom /job/{slug}/{id}/ URL shape (base.vn's bare
+    # /job/{id} has no slug segment and won't match).
+    if not re.search(r"/job/[^/]+/\d{5,}/?(?:[?#]|$)", jd_url):
+        return None
+    try:
+        r = requests.get(jd_url, headers={"User-Agent": _UA}, timeout=_TIMEOUT)
+        if r.status_code != 200:
+            return None
+        h = r.text
+    except Exception:
+        return None
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(h, "html.parser")
+    el = (soup.select_one('[itemprop="description"]')
+          or soup.select_one('[class*="job-description" i], [class*="jobdescription" i]'))
+    if not el:
+        return None
+    body = _strip_html(str(el))
+    if len(body) < _MIN_DESC:
+        return None
+    return body
+
+
 _DETAIL_ADAPTERS = (
     ("mbbank", _mbbank_detail),
     ("greenhouse", _greenhouse_detail),
+    # phenom before successfactors: the SF gate ("jobdescription"/"data-careersite"
+    # markers) also fires on a Phenom page and returns a TRUNCATED element, so it
+    # must not run first. phenom only matches /job/{slug}/{digits}/ — never the SF
+    # URL shape /job/{ut}/{jid}-{locale} — so this reorder is safe.
+    ("phenom", _phenom_detail),
     ("successfactors", _successfactors_detail),
     ("smartrecruiters", _smartrecruiters_detail),
     ("workday", _workday_detail),
