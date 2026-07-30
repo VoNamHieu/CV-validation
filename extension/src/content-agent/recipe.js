@@ -344,59 +344,76 @@ async function settleAfterScroll(sc, getShown, beforeKey, budgetMs = 1600) {
 }
 
 /**
- * Jump to a value in an ALPHABETICAL list instead of walking to it.
+ * The widget's own option array, read off the React fiber.
  *
- * Measured, and the reason this exists: Field of Study holds ~1000 majors, the
- * container lazily grows past 9900px, and stepping through it at 80% of a 313px
- * viewport takes ~40 rounds at ~550ms each — around 22 seconds for ONE field,
- * against a 120s watchdog for the whole job. Bisecting on the rendered window's
- * first and last row found "Marketing" in THREE rounds.
+ * Workday's prompt is a `react-virtualized` Grid (its inner element carries the
+ * library's own `ReactVirtualized__Grid__innerScrollContainer` class), which means
+ * the FULL ordered list lives in a prop while only ~22 rows exist in the DOM.
+ * Measured on Field of Study: 327 entries, each `{label, ariaLabel, index, id,
+ * isSelected}`, about ten fiber levels above the scroll container.
  *
- * Only used when the rendered rows are actually ordered (checked, not assumed) —
- * an unordered list falls back to the linear walk, which is slow but correct.
+ * That array is the whole game. With it, the option's row index is a lookup rather
+ * than something to be discovered by scrolling — and since react-virtualized
+ * positions row N at `top = N × rowHeight`, the index gives an exact scroll offset.
+ * "Marketing" reads as index 200, i.e. scrollTop 6400: precisely the number found
+ * by hand after four manual jumps.
+ *
+ * Returns null freely. This reads a minified library's internals, and it was
+ * observed to come back empty moments after succeeding (React swaps to its
+ * `alternate` tree on re-render, and a collapsing list has no rows at all), so
+ * every caller must have a DOM path to fall back to.
  */
-async function bisectList(sc, getShown, match, wanted, label) {
-    const cmp = (a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' });
-    const want = String(wanted).trim().toLowerCase();
-    let lo = 0;
-    let hi = sc.scrollHeight;
-    let rounds = 0;
-    const trail = [];
-    while (rounds < 12 && hi - lo > sc.clientHeight / 2) {
-        const mid = Math.round((lo + hi) / 2);
-        const before = renderedRows(getShown).join('|');
-        sc.scrollTop = mid;
-        nudgeScroll(sc);
-        await settleAfterScroll(sc, getShown, before);
-        rounds++;
-        const rows = renderedRows(getShown);
-        if (!rows.length) break;
-        const first = rows[0].toLowerCase();
-        const last = rows[rows.length - 1].toLowerCase();
-        trail.push(`${mid}:${first.slice(0, 12)}…${last.slice(0, 12)}`);
-        const hit = match(getShown());
-        if (hit) {
-            trace('list.bisect', { field: label, rounds, at: mid, trail: trail.join(' → '), found: true });
-            return hit;
+function readVirtualItems(sc) {
+    try {
+        const key = Object.keys(sc).find(k => /^__reactFiber\$|^__reactInternalInstance\$/.test(k));
+        if (!key) return null;
+        const looksLikeItems = (v) => Array.isArray(v) && v.length > 20 && v[0]
+            && typeof v[0] === 'object' && 'label' in v[0] && 'index' in v[0];
+        let f = sc[key];
+        for (let d = 0; f && d < 30; d++, f = f.return) {
+            for (const node of [f, f.alternate]) {
+                if (!node) continue;
+                for (const bag of [node.memoizedProps, node.memoizedState]) {
+                    if (!bag || typeof bag !== 'object') continue;
+                    for (const v of Object.values(bag)) if (looksLikeItems(v)) return v;
+                }
+            }
         }
-        // Narrow on the window we can see. If the target sorts inside this window
-        // and still is not here, bisecting further cannot help — hand over.
-        if (cmp(want, first) < 0) hi = mid;
-        else if (cmp(want, last) > 0) lo = mid;
-        else break;
-    }
-    trace('list.bisect', { field: label, rounds, trail: trail.join(' → '), found: false, next: 'linear walk' });
+    } catch { /* internals moved — the DOM path still works */ }
     return null;
 }
 
-/** True when the rendered rows are in ascending order — cheap and checkable. */
-function looksAlphabetical(getShown) {
-    const rows = renderedRows(getShown);
-    if (rows.length < 3) return false;
-    for (let i = 1; i < rows.length; i++) {
-        if (rows[i - 1].localeCompare(rows[i], 'en', { sensitivity: 'base' }) > 0) return false;
-    }
-    return true;
+/** Uniform row height, read from the absolute offsets react-virtualized writes. */
+function virtualRowHeight(sc) {
+    const inner = sc.firstElementChild;
+    if (!inner) return 0;
+    const tops = [...inner.children]
+        .map(c => parseInt(c.style.top || '', 10))
+        .filter(n => Number.isFinite(n))
+        .sort((a, b) => a - b);
+    for (let i = 1; i < tops.length; i++) if (tops[i] > tops[i - 1]) return tops[i] - tops[i - 1];
+    return 0;
+}
+
+/**
+ * Scroll straight to a known row index and hand back its option element.
+ *
+ * One scroll, no search. The alternative that this replaces walked the list in
+ * ~40 steps at ~550ms each — about 22 seconds for a single field, against a 120s
+ * watchdog for the whole job.
+ */
+async function jumpToIndex(sc, getShown, match, index, rowHeight, label) {
+    const target = Math.max(0, index * rowHeight - Math.round(sc.clientHeight / 2) + rowHeight);
+    const before = renderedRows(getShown).join('|');
+    sc.scrollTop = target;
+    nudgeScroll(sc);
+    await settleAfterScroll(sc, getShown, before);
+    const hit = match(getShown());
+    trace('list.jump', {
+        field: label, index, rowHeight, scrolledTo: target,
+        landedOn: Math.round(sc.scrollTop), found: !!hit,
+    });
+    return hit;
 }
 
 async function findInList(getShown, match, label = '', wanted = '') {
@@ -407,13 +424,43 @@ async function findInList(getShown, match, label = '', wanted = '') {
         trace('list.noScroller', { field: label, shown: getShown().length });
         return null;
     }
-    // Bisect first when the list earns it. The walk below is the fallback, not the
-    // plan — it is ~40 rounds where this is ~3, and the difference is the job
-    // finishing versus the watchdog killing it mid-field.
-    if (wanted && looksAlphabetical(getShown)) {
-        opt = await bisectList(sc, getShown, match, wanted, label);
-        if (opt) return opt;
+
+    // Ask the widget where the row is, rather than looking for it.
+    //
+    // An earlier version of this bisected on the rendered window's first and last
+    // row, which is faster than walking but UNSOUND: the list is not sorted the way
+    // localeCompare sorts it. Nine order breaks measured on this very list —
+    // "African-American Studies" before "African Languages…", "Humanities" before
+    // "Human Resources Management" — because Workday collates punctuation and
+    // spaces differently. A bisect that trusts localeCompare walks the wrong way at
+    // those points and reports a value that IS present as missing.
+    const items = wanted ? readVirtualItems(sc) : null;
+    const rowHeight = items ? virtualRowHeight(sc) : 0;
+    if (items && rowHeight) {
+        const want = String(wanted).trim().toLowerCase();
+        const norm = (s) => String(s == null ? '' : s).trim().toLowerCase();
+        const exact = items.filter(it => norm(it.label) === want || norm(it.ariaLabel) === want);
+        const loose = items.filter(it => norm(it.label).includes(want));
+        // Same unambiguity rule the DOM matcher uses: exact wins, and a substring
+        // only counts when exactly one row carries it. "Marketing" must not resolve
+        // by prefix to "Marketing Research" on a real application.
+        const pick = exact[0] || (loose.length === 1 ? loose[0] : null);
+        if (pick) {
+            const at = Number.isFinite(pick.index) ? pick.index : items.indexOf(pick);
+            opt = await jumpToIndex(sc, getShown, match, at, rowHeight, label);
+            if (opt) return opt;
+        } else {
+            trace('list.jumpNoRow', {
+                field: label, wanted, total: items.length,
+                exact: exact.length, substring: loose.length,
+                note: loose.length > 1 ? 'ambiguous — refusing to guess' : 'not in the widget list at all',
+            });
+            // The widget told us its entire contents and the value is not in them.
+            // Walking the DOM cannot find what the source array does not hold.
+            return null;
+        }
     }
+
     const step = Math.max(40, sc.clientHeight * 0.8);
     const seen = new Set();
     const edge = (rows) => (rows.length ? `${rows[0]}…${rows[rows.length - 1]}` : '(empty)');
