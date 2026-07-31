@@ -1389,6 +1389,42 @@ export function skillFallbacks(term) {
 }
 
 /**
+ * Wait for a search to finish, not merely to start.
+ *
+ * The obvious rule — wait until the rendered rows CHANGE — is wrong, and was the
+ * bug behind half the skills coming back "found it, clicked it, nothing
+ * happened". After Enter the list goes stale → empty/loading → results, so the
+ * first change is usually the EMPTY state. Matching there finds nothing, or worse
+ * finds a leftover row belonging to the previous term and clicks something that
+ * is no longer part of any list.
+ *
+ * So: wait for the rows to be non-empty AND unchanged across two consecutive
+ * reads. A search that genuinely returns nothing settles on empty and the caller
+ * reports no-match, which is a real answer rather than an artefact of reading too
+ * early.
+ */
+async function waitForResults(readKey, budgetMs = 4000) {
+    const deadline = Date.now() + budgetMs;
+    let last = null;
+    let stable = 0;
+    while (Date.now() < deadline) {
+        await sleep(180);
+        const now = readKey();
+        if (last && now.key === last.key) {
+            stable++;
+            // Non-empty and steady → the search has answered.
+            if (stable >= 2 && now.rows > 0) return now;
+            // Empty and steady for longer → it answered with nothing.
+            if (stable >= 4) return now;
+        } else {
+            stable = 0;
+            last = now;
+        }
+    }
+    return last;
+}
+
+/**
  * Fill a type-to-search multi-select: Workday's Skills field.
  *
  * It refuses free text. Typing "SQL" and moving on leaves the box empty — the
@@ -1413,6 +1449,18 @@ async function fillSearchMulti(f, value, ctx = {}) {
     const wanted = splitSkillList(value).slice(0, f.max || 8);
     if (!wanted.length) return { ok: false, reason: 'no value' };
 
+    // Signature of what the results list currently shows, so "has it settled?"
+    // is a question about the ROWS rather than about elapsed time.
+    const readResultKey = () => {
+        const rows = [...document.querySelectorAll(OPTION_SEL)]
+            .filter(o => o.offsetParent !== null)
+            .filter(o => o.getAttribute('data-automation-id') !== 'selectedItem')
+            .filter(o => !o.closest('[data-automation-id="selectedItemList"]'))
+            .map(o => (o.textContent || '').trim())
+            .filter(t => t && !/^no items\.?$/i.test(t));
+        return { rows: rows.length, key: rows.join('|'), toString() { return this.key; } };
+    };
+
     let added = 0;
     const notes = [];
     for (const term of wanted) {
@@ -1430,18 +1478,7 @@ async function fillSearchMulti(f, value, ctx = {}) {
                 bubbles: true, cancelable: true, composed: true,
             }));
         }
-        // Wait for the results to CHANGE rather than for a fixed time. A stale
-        // list from the previous term looks exactly like a result set, and a row
-        // matched out of it is clicked while belonging to another search.
-        const staleKey = [...document.querySelectorAll(OPTION_SEL)]
-            .filter(o => o.offsetParent !== null).map(o => (o.textContent || '').trim()).join('|');
-        const resultsBy = Date.now() + 2500;
-        while (Date.now() < resultsBy) {
-            await sleep(150);
-            const now = [...document.querySelectorAll(OPTION_SEL)]
-                .filter(o => o.offsetParent !== null).map(o => (o.textContent || '').trim()).join('|');
-            if (now !== staleKey) break;
-        }
+        await waitForResults(readResultKey);
         const opts = [...document.querySelectorAll(OPTION_SEL)]
             .filter(o => o.offsetParent !== null)
             .filter(o => o.getAttribute('data-automation-id') !== 'selectedItem')
