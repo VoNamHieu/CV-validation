@@ -132,6 +132,12 @@ export interface RecipeStep {
     // when a CV is actually in play, so a text-only apply cannot deadlock waiting
     // for an upload that was never going to happen.
     advanceWhen?: string;
+    /** Repeating sections that must have an entry before their fields exist.
+     *  Measured on Mondelez: "Work Experience" renders an Add button and nothing
+     *  else until it is pressed — and the same step on another job of the same
+     *  company came pre-filled, because the résumé parse created a row there. The
+     *  section heading identifies the button; all of them share one automation id. */
+    ensureSections?: string[];
 }
 // A non-form gateway the agent must click to reach the form (e.g. Workday's
 // "Start Your Application" modal, rendered as <a role="button"> the generic scan
@@ -263,6 +269,7 @@ const WORKDAY: ApplyRecipe = {
             // step marker made My Experience match the Application Questions page
             // first — and those fields were never filled on any job.
             detect: '[data-automation-id="formField-degree"]',
+            ensureSections: ['Work Experience'],
             fields: [
                 {
                     label: 'Degree', selector: '[data-automation-id="formField-degree"] button',

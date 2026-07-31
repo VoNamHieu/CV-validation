@@ -144,3 +144,25 @@ describe('languages and skills', () => {
         assert.ok(!by('Skills').required);
     });
 });
+
+// ── a section that starts empty ────────────────────────────────────────────
+describe('repeating sections are created before they are filled', () => {
+    const wd = FALLBACK_RECIPES.find(r => r.ats === 'workday');
+    const exp = wd.steps.find(s => s.name === 'My Experience');
+
+    test('Work Experience is ensured', () => {
+        // Measured on two jobs at the SAME company: one rendered Job Title,
+        // Company and the dates, the other rendered an Add button and nothing
+        // else, because Workday's résumé parse had created a row on the first and
+        // not the second. The recipe cannot fill a row that does not exist, and it
+        // cannot assume either shape.
+        assert.deepEqual(exp.ensureSections, ['Work Experience']);
+    });
+
+    test('the fields it unlocks are declared', () => {
+        const labels = exp.fields.map(f => f.label);
+        for (const need of ['Job Title', 'Company', 'Work From']) {
+            assert.ok(labels.includes(need), `${need} is what ensuring the section is FOR`);
+        }
+    });
+});

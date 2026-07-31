@@ -135,6 +135,12 @@ export const FALLBACK_RECIPES = [
                 // fields were never filled on any job.
                 name: 'My Experience',
                 detect: '[data-automation-id="formField-degree"]',
+                // Work Experience starts EMPTY on some jobs — measured: the section
+                // shows an Add button and no fields at all, while the same step on
+                // another job of the same company had them, because Workday's
+                // résumé parse created a row there. Mondelez varies the form per
+                // job, so the recipe cannot assume either shape.
+                ensureSections: ['Work Experience'],
                 fields: [
                     // Also a claim about the candidate, so also no `pickAny`: the
                     // first option in a degree list is as likely to be "High
@@ -821,6 +827,14 @@ export async function applyRecipeFields(recipe, profile, cvData, cv) {
     // Fields are filled in array order (Country BEFORE Province — picking Country
     // re-renders the region field). Custom-selects re-query fresh each pass, so a
     // field that isn't rendered yet is simply retried next iteration.
+    // Sections that must EXIST before their fields can be filled. A repeating
+    // block starts empty on some jobs and pre-filled on others (Workday's résumé
+    // parse decides), and the recipe cannot fill a row that is not there.
+    for (const sectionName of step.ensureSections || []) {
+        const r = ensureSectionEntry(sectionName);
+        if (r.ok) await sleep(900);   // let the new row render before filling it
+    }
+
     const outcomes = [];   // [label, status, note] per field → debug summary below
     // Provenance for the review hand-off: which answers came from the user's own
     // data, and which are values the agent chose to get the step to validate. The
@@ -949,6 +963,44 @@ export async function applyRecipeFields(recipe, profile, cvData, cv) {
     });
 
     return { matched: true, filled, step: step.name, answers };
+}
+
+/**
+ * Create a repeating entry when a section is empty.
+ *
+ * Measured on Mondelez: My Experience shows "Work Experience" with an Add button
+ * and NOTHING else — Job Title, Company and the dates do not exist in the DOM
+ * until that button is pressed. On a job where Workday's résumé parse happened to
+ * create a row they were there, and on one where it did not the recipe filled
+ * nothing and reported nothing, because there was nothing to find. Same step,
+ * same recipe, opposite outcomes.
+ *
+ * All four Add buttons on that page share `data-automation-id="add-button"`, so
+ * the SECTION HEADING is the only thing that tells them apart — press the wrong
+ * one and the application grows an empty education or website row.
+ */
+function ensureSectionEntry(sectionName) {
+    const vis = (e) => !!(e && e.offsetParent !== null);
+    const heads = [...document.querySelectorAll('h2, h3, h4')].filter(vis);
+    const head = heads.find(h => (h.textContent || '').trim().toLowerCase() === sectionName.toLowerCase());
+    if (!head) return { ok: false, reason: 'section-absent' };
+
+    // The section's own subtree: walk up until the block holds more than its title.
+    let block = head.parentElement;
+    for (let i = 0; i < 4 && block; i++) {
+        if ((block.innerText || '').trim().length > sectionName.length + 10) break;
+        block = block.parentElement;
+    }
+    if (!block) return { ok: false, reason: 'section-absent' };
+
+    // Already has an entry → nothing to do. Adding a second would submit a blank row.
+    if (block.querySelector('[data-automation-id^="formField-"]')) return { ok: false, reason: 'already-present' };
+
+    const btn = [...block.querySelectorAll('[data-automation-id="add-button"]')].filter(vis)[0];
+    if (!btn) return { ok: false, reason: 'no add button' };
+    const ok = safeActivate(btn, { source: 'recipe', activation: 'page-action' }, '[data-automation-id="add-button"]');
+    trace('section.add', { section: sectionName, clicked: ok });
+    return ok ? { ok: true } : { ok: false, reason: 'policy-denied' };
 }
 
 /**
