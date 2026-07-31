@@ -117,6 +117,8 @@ async function runAgentLoop(profile) {
     let actionsTaken = 0;
     // Transient planner failures tolerated before giving up on the job.
     let planFailures = 0;
+    // Passes spent waiting for a wizard page to render before planning against it.
+    let emptyPageWaits = 0;
     // For the two-signal submitted check: a form we have actually seen, and where
     // we started, so "the form is gone" and "we are on a confirmation URL" are
     // statements about a change rather than about the first page we happened to load.
@@ -743,6 +745,29 @@ async function runAgentLoop(profile) {
                     await sleep(1500);
                     continue;
                 }
+                // A wizard page that has not rendered yet is not a page to plan
+                // against. The comment two branches up says exactly this — "rather
+                // than handing the empty page to the LLM" — but that guard sat
+                // inside `if (recipe.singlePage)`, so it only ever protected
+                // SmartRecruiters. On Workday an empty Create Account/Sign In step
+                // went straight to the planner, which correctly reported that there
+                // was nothing to fill and no credentials in the profile, and
+                // NEED_HUMAN ended the run. One iteration later the password fields
+                // exist and the login flow handles it — measured: pwTotal 0 on pass
+                // 1, five fields on pass 2.
+                if (!rf.matched && state.formFields.length === 0 && emptyPageWaits < 4) {
+                    emptyPageWaits++;
+                    trace('page.settling', {
+                        pass: emptyPageWaits,
+                        buttons: state.buttons.length,
+                        step: state.stepIndicator
+                            ? `${state.stepIndicator.current}/${state.stepIndicator.total}` : null,
+                    });
+                    showProgress(i + 1, AGENT_MAX_ITERATIONS, 'Chờ form ứng tuyển…');
+                    await sleep(1500);
+                    continue;
+                }
+
                 // Recipe step fully filled (nothing new this pass) + nothing required
                 // left → ADVANCE deterministically instead of burning a slow/overloaded
                 // LLM call just to click "Save and Continue". Close a leftover dropdown
@@ -821,6 +846,10 @@ async function runAgentLoop(profile) {
                 persistentlyUnfilled.clear();
                 prevStepCurrent = curStep;
                 prevUrl = state.url;
+                // A new page gets its own grace to render. Without this the budget
+                // is spent by whichever step happened to be slow first, and every
+                // later step is planned against before it exists.
+                emptyPageWaits = 0;
             }
 
             // Detect fields the LLM previously tried to fill but stayed empty.
