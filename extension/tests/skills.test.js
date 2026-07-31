@@ -9,7 +9,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { pickSearchResult } from '../src/content-agent/recipe.js';
+import { pickSearchResult, skillFallbacks, splitSkillList } from '../src/content-agent/recipe.js';
 
 const pick = (results, term) => pickSearchResult(results, term);
 
@@ -69,5 +69,50 @@ describe('it reads whatever the caller says the label is', () => {
         // must not care.
         const rows = [{ t: 'Scrum' }, { t: 'Scrum Master' }];
         assert.deepEqual(pickSearchResult(rows, 'Scrum', r => r.t), rows[0]);
+    });
+});
+
+// ── splitting a skills string ──────────────────────────────────────────────
+describe('a skill is never cut in half', () => {
+    test('commas inside brackets do not separate', () => {
+        // The measured defect: "unit economics (CPI, CAC, LTV)" split into three
+        // pieces, and one of them — "CAC" — was found in the employer's taxonomy
+        // and ADDED. A fragment of a phrase became a claim on a real application,
+        // which is worse than having skipped the skill.
+        assert.deepEqual(
+            splitSkillList('unit economics (CPI, CAC, LTV), SQL'),
+            ['unit economics (CPI, CAC, LTV)', 'SQL'],
+        );
+    });
+
+    test('ordinary separators still separate', () => {
+        assert.deepEqual(splitSkillList('SQL, Figma; Agile|Scrum'), ['SQL', 'Figma', 'Agile', 'Scrum']);
+    });
+
+    test('nested and unbalanced brackets do not lose the tail', () => {
+        assert.deepEqual(splitSkillList('a (b [c, d]), e'), ['a (b [c, d])', 'e']);
+        assert.deepEqual(splitSkillList('a (b, c'), ['a (b, c']);
+    });
+
+    test('blank entries are dropped', () => {
+        assert.deepEqual(splitSkillList('SQL,,  ,Figma'), ['SQL', 'Figma']);
+        assert.deepEqual(splitSkillList(''), []);
+        assert.deepEqual(splitSkillList(null), []);
+    });
+});
+
+describe('a compound skill falls back to its parts', () => {
+    test('a slash names two skills', () => {
+        // Measured: "Agile/Scrum" is not in the taxonomy; Agile and Scrum are.
+        assert.deepEqual(skillFallbacks('Agile/Scrum'), ['Agile', 'Scrum']);
+    });
+
+    test('a parenthetical is dropped before giving up', () => {
+        assert.deepEqual(skillFallbacks('unit economics (CPI, CAC, LTV)'), ['unit economics']);
+    });
+
+    test('nothing is invented for a plain skill', () => {
+        assert.deepEqual(skillFallbacks('SQL'), []);
+        assert.deepEqual(skillFallbacks(''), []);
     });
 });

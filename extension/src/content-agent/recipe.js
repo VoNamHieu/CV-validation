@@ -1346,6 +1346,49 @@ export function pickSearchResult(results, term, label = (r) => String(r)) {
 }
 
 /**
+ * Split a skills string without cutting a skill in half.
+ *
+ * A plain `split(',')` broke "unit economics (CPI, CAC, LTV)" into three pieces
+ * and one of them — "CAC" — was found in the employer's taxonomy and ADDED. A
+ * fragment of a phrase became a claim on a real application, which is worse than
+ * having skipped the skill entirely.
+ *
+ * So separators inside brackets do not separate. Everything else does.
+ */
+export function splitSkillList(value) {
+    const text = String(value ?? '');
+    const out = [];
+    let buf = '';
+    let depth = 0;
+    for (const ch of text) {
+        if ('([{'.includes(ch)) depth++;
+        else if (')]}'.includes(ch)) depth = Math.max(0, depth - 1);
+        if (depth === 0 && (ch === ',' || ch === ';' || ch === '|')) { out.push(buf); buf = ''; continue; }
+        buf += ch;
+    }
+    out.push(buf);
+    return out.map(v => v.trim()).filter(Boolean);
+}
+
+/**
+ * The narrower forms of a compound skill, best first.
+ *
+ * An employer's taxonomy carries "Agile" and "Scrum" but often not
+ * "Agile/Scrum", and a slash is the candidate naming two things rather than one.
+ * Only tried after the whole phrase has failed, so an exact entry always wins.
+ */
+export function skillFallbacks(term) {
+    const t = String(term || '').trim();
+    const out = [];
+    // "Agile/Scrum" → Agile, Scrum. Not applied to dates or fractions.
+    if (/[a-z]\s*\/\s*[a-z]/i.test(t)) out.push(...t.split('/').map(v => v.trim()));
+    // "unit economics (CPI, CAC, LTV)" → the phrase without its parenthetical.
+    const bare = t.replace(/[（(\[][^）)\]]*[）)\]]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (bare && bare !== t) out.push(bare);
+    return [...new Set(out.filter(v => v && v !== t && v.length > 1))];
+}
+
+/**
  * Fill a type-to-search multi-select: Workday's Skills field.
  *
  * It refuses free text. Typing "SQL" and moving on leaves the box empty — the
@@ -1367,7 +1410,7 @@ async function fillSearchMulti(f, value, ctx = {}) {
 
     const chips = () => [...wrap.querySelectorAll('[data-automation-id="selectedItem"]')]
         .map(c => (c.textContent || '').replace(/\s*×\s*/g, '').trim()).filter(Boolean);
-    const wanted = String(value).split(/[,;|]/).map(v => v.trim()).filter(Boolean).slice(0, f.max || 8);
+    const wanted = splitSkillList(value).slice(0, f.max || 8);
     if (!wanted.length) return { ok: false, reason: 'no value' };
 
     let added = 0;
@@ -1392,7 +1435,31 @@ async function fillSearchMulti(f, value, ctx = {}) {
             .filter(o => o.offsetParent !== null)
             .filter(o => o.getAttribute('data-automation-id') !== 'selectedItem')
             .filter(o => !o.closest('[data-automation-id="selectedItemList"]'));
-        const pick = pickSearchResult(opts, term, o => (o.textContent || '').trim());
+        let pick = pickSearchResult(opts, term, o => (o.textContent || '').trim());
+        // The whole phrase is not in the taxonomy — try the narrower forms the
+        // candidate actually named. "Agile/Scrum" is two skills written as one, and
+        // an employer list carries them separately. Only after the exact phrase has
+        // failed, so a real entry always wins.
+        if (!pick) {
+            for (const alt of skillFallbacks(term)) {
+                setNativeValue(input, '');
+                await sleep(150);
+                await simulateTyping(input, alt);
+                for (const type of ['keydown', 'keypress', 'keyup']) {
+                    input.dispatchEvent(new KeyboardEvent(type, {
+                        key: 'Enter', code: 'Enter', keyCode: 13, which: 13,
+                        bubbles: true, cancelable: true, composed: true,
+                    }));
+                }
+                await sleep(1200);
+                const retryOpts = [...document.querySelectorAll(OPTION_SEL)]
+                    .filter(o => o.offsetParent !== null)
+                    .filter(o => o.getAttribute('data-automation-id') !== 'selectedItem')
+                    .filter(o => !o.closest('[data-automation-id="selectedItemList"]'));
+                pick = pickSearchResult(retryOpts, alt, o => (o.textContent || '').trim());
+                if (pick) { notes.push(`${term}→${alt}`); break; }
+            }
+        }
         if (!pick) { notes.push(`${term}:no-match`); setNativeValue(input, ''); await sleep(200); continue; }
         const hit = pick.querySelector('input[type="checkbox"], input[type="radio"]')
             || pick.querySelector('[data-automation-id="promptLeafNode"]') || pick;
