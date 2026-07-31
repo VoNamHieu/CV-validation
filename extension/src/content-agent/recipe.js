@@ -1292,9 +1292,33 @@ async function fillCustomSelect(f, value) {
             trace('list.result', { field: f.label, picked: matched, onPage: settled, levels: level, stuck: true });
             return { ok: true, matched };
         }
-        const cands = level === 0 && !matchAll(visibleOptions(), matched).length
+        let cands = level === 0 && !matchAll(visibleOptions(), matched).length
             ? [opt] : matchAll(visibleOptions(), matched);
         if (!cands.length) { attempts.push(`level${level}:no-row`); break; }
+
+        // Inside a submenu the wanted label appears TWICE: once on the "‹ Company
+        // Website" breadcrumb that walks back OUT, and once on the row that
+        // answers. The breadcrumb comes first in document order, so matching by
+        // text alone picked it, went back a level, and the walk ping-ponged until
+        // it ran out of levels — stuck, with the field still empty.
+        //
+        // The row that answers is the one carrying a radio. When any candidate has
+        // one, only those are candidates.
+        const withControl = cands.filter(c => c.querySelector('input[type="radio"], input[type="checkbox"]'));
+        if (withControl.length) cands = withControl;
+        else {
+            // No radios yet — still at a category level. Drop anything that reads
+            // as a way back rather than a way in.
+            const isBackControl = (el) => {
+                const label = (el.getAttribute('aria-label') || '').toLowerCase();
+                if (/^back\b|go back|previous/.test(label)) return true;
+                // Workday renders the breadcrumb inside the list's header, above
+                // the scrollable option area.
+                return !!el.closest('[data-automation-id="menuHeader"], header');
+            };
+            const forward = cands.filter(c => !isBackControl(c));
+            if (forward.length) cands = forward;
+        }
 
         const node = cands[0];
         // Innermost meaningful control first. A row nests
