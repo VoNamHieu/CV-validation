@@ -384,3 +384,6 @@ export function initFixture() {
         },
     };
 }
+
+/** This bundle DOES read a locally stored ATS credential. */
+export const FIXTURE_CREDS_SUPPORTED = true;

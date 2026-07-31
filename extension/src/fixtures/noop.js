@@ -32,3 +32,6 @@ export function initFixture() {
 export async function readFixtureCredential() {
     return null;
 }
+
+/** Production: this bundle never reads a locally stored credential. */
+export const FIXTURE_CREDS_SUPPORTED = false;

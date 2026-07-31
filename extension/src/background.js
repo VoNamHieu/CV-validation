@@ -8,7 +8,7 @@ import { tenantRefFor, sortJobsByTenant } from './ats/tenant.js';
 import { BLOCKING_STATES } from './ats/states.js';
 import * as atsBackend from './ats/backend.js';
 import * as atsCoord from './ats/coordinator.js';
-import { initFixture, readFixtureCredential } from './fixtures/dummy.js';
+import { FIXTURE_CREDS_SUPPORTED as fixtureCredsSupported, initFixture, readFixtureCredential } from './fixtures/dummy.js';
 
 // Seeds a fake candidate in `npm run build:test` bundles, and does nothing at all
 // in a normal one — build.mjs resolves this import to fixtures/noop.js, so there
@@ -1190,6 +1190,27 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 return;
             }
             if (!cred.ok) {
+                // A production bundle deliberately ignores `jobfitApplyCredentials`
+                // — it must never turn a password sitting in storage into a login.
+                // But when that key IS present and the backend has nothing, the
+                // failure looks like a broken agent rather than the wrong build,
+                // and that cost real debugging time. Name it. Only the key's
+                // PRESENCE is read here; the value is never touched.
+                if (cred.missing && !fixtureCredsSupported) {
+                    const has = await chrome.storage.local.get('jobfitApplyCredentials')
+                        .then(d => !!d?.jobfitApplyCredentials).catch(() => false);
+                    if (has) {
+                        console.warn('[Copo ATS] jobfitApplyCredentials is set, but THIS IS A '
+                            + 'PRODUCTION BUILD and ignores it. Run `npm run build:test` for the '
+                            + 'bundle that reads it, or store the credential on the backend.');
+                        sendResponse({
+                            ok: false, reason: 'manual',
+                            detail: 'Bản production không dùng thông tin đăng nhập lưu cục bộ — '
+                                + 'dùng bản test (npm run build:test) hoặc lưu credential trên server.',
+                        });
+                        return;
+                    }
+                }
                 // Distinguish "your session expired" from "this tenant is blocked":
                 // the first is fixable by re-opening the web app, the second isn't.
                 const detail = cred.auth ? 'Phiên đăng nhập hết hạn — mở Copo và đồng bộ lại.'

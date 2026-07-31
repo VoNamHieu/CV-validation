@@ -166,3 +166,14 @@ describe('nothing here can be mistaken for a person', () => {
         assert.equal(DUMMY_CV.personal.gender, '');
     });
 });
+
+describe('a build says whether it reads local credentials', () => {
+    test('the two modules disagree, on purpose', () => {
+        // Switching dist from build:test to build silently removed the local
+        // credential path, and the agent then failed with "no credential for this
+        // site" — which reads as a broken agent rather than the wrong bundle. The
+        // flag is what lets the failure name itself.
+        assert.equal(dummy.FIXTURE_CREDS_SUPPORTED, true);
+        assert.equal(noop.FIXTURE_CREDS_SUPPORTED, false);
+    });
+});
