@@ -1289,6 +1289,30 @@ async function inferOptionViaLLM(f, options, profile, cv) {
 }
 
 /**
+ * Which search result — if any — is the skill the candidate wrote?
+ *
+ * Split out from the DOM work because this is the part that can put a claim on a
+ * real application. An employer's skills taxonomy is theirs, not the candidate's:
+ * typing "SQL" can return SQL, SQL Server, MySQL and PL/SQL, and three of those
+ * are things the candidate never said. So an exact label wins, a partial match
+ * counts only when every result says the SAME thing, and anything else resolves
+ * to nothing — the skill is dropped rather than approximated.
+ *
+ * `label` is injected so the rule can be exercised without a DOM.
+ */
+export function pickSearchResult(results, term, label = (r) => String(r)) {
+    const want = String(term || '').trim().toLowerCase();
+    if (!want || !results?.length) return null;
+    const txt = (r) => label(r).trim().toLowerCase();
+    const exact = results.filter(r => txt(r) === want);
+    if (exact.length) return exact[0];
+    const near = results.filter(r => txt(r).includes(want));
+    if (!near.length) return null;
+    // Several DIFFERENT labels contain the term → we cannot tell which was meant.
+    return new Set(near.map(txt)).size === 1 ? near[0] : null;
+}
+
+/**
  * Fill a type-to-search multi-select: Workday's Skills field.
  *
  * It refuses free text. Typing "SQL" and moving on leaves the box empty — the
@@ -1324,10 +1348,7 @@ async function fillSearchMulti(f, value, ctx = {}) {
             .filter(o => o.offsetParent !== null)
             .filter(o => o.getAttribute('data-automation-id') !== 'selectedItem')
             .filter(o => !o.closest('[data-automation-id="selectedItemList"]'));
-        const txt = (o) => (o.textContent || '').trim().toLowerCase();
-        const exact = opts.filter(o => txt(o) === term.toLowerCase());
-        const near = opts.filter(o => txt(o).includes(term.toLowerCase()));
-        const pick = exact[0] || (new Set(near.map(txt)).size === 1 ? near[0] : null);
+        const pick = pickSearchResult(opts, term, o => (o.textContent || '').trim());
         if (!pick) { notes.push(`${term}:no-match`); setNativeValue(input, ''); await sleep(200); continue; }
         const hit = pick.querySelector('input[type="checkbox"], input[type="radio"]')
             || pick.querySelector('[data-automation-id="promptLeafNode"]') || pick;
