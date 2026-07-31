@@ -171,3 +171,27 @@ describe('repeating sections are created before they are filled', () => {
         }
     });
 });
+
+// ── the level a form actually offers ───────────────────────────────────────
+describe('language proficiency maps onto the offered rungs', () => {
+    const wd = FALLBACK_RECIPES.find(r => r.ats === 'workday');
+    const level = wd.steps.find(s => s.name === 'My Experience').fields
+        .find(f => f.label === 'Language level');
+
+    test('Native comes first, then what the form has', () => {
+        // Measured: the list is "1 - Beginner / 2 - Intermediate / 3 - Fluent".
+        // There is no Native row, and a CV that says Native — a first language —
+        // matched nothing and blocked a required field.
+        assert.deepEqual(level.valuePriority,
+            ['Native', 'Fluent', 'Advanced', 'Intermediate', 'Beginner']);
+    });
+
+    test('the ladder only ever steps DOWN', () => {
+        // A native speaker is fluent, so falling to Fluent claims nothing extra.
+        // The reverse — promoting Beginner to Fluent — would be a lie, so the
+        // order matters and is asserted rather than assumed.
+        const rank = ['Native', 'Fluent', 'Advanced', 'Intermediate', 'Beginner'];
+        assert.deepEqual(level.valuePriority, rank,
+            'each rung must be no stronger than the one before it');
+    });
+});

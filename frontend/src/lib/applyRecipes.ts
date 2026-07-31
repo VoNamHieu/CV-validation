@@ -306,7 +306,16 @@ const WORKDAY: ApplyRecipe = {
                 // (proficiency) are both REQUIRED, and "Overall" carries a
                 // per-tenant GUID for an automation id — hence labelMatch.
                 { label: 'Language', selector: '[data-automation-id="formField-language"] button', cvPath: 'languages[0].language', type: 'custom-select', required: true },
-                { label: 'Language level', labelMatch: 'overall', cvPath: 'languages[0].level', type: 'custom-select', required: true },
+                {
+                    // Measured: the list is "1 - Beginner / 2 - Intermediate /
+                    // 3 - Fluent" — no "Native" row, so a CV stating a first
+                    // language matched nothing and blocked a required field. The
+                    // ladder steps DOWN only: a native speaker is fluent, so this
+                    // claims nothing extra, and nothing higher exists to claim.
+                    label: 'Language level', labelMatch: 'overall', cvPath: 'languages[0].level',
+                    valuePriority: ['Native', 'Fluent', 'Advanced', 'Intermediate', 'Beginner'],
+                    type: 'custom-select', required: true,
+                },
                 // Skills refuses free text: typing leaves the box empty and the
                 // value only exists once a SEARCH RESULT is clicked.
                 // Measured id, and measured behaviour: on this tenant the field

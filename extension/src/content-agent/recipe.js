@@ -15,6 +15,7 @@
 
 import { deepFindControl, deepQuery, deepQueryAll, dropFileOnZone, safeActivate, setFileOnInput, setNativeValue, simulateTyping, sleep, waitForElement } from './dom.js';
 import { isThirdPartyApply } from './detect.js';
+import { showToast } from './ui.js';
 import { trace, traceOnce } from './trace.js';
 import { callAgentPlan } from './llm.js';
 
@@ -197,7 +198,18 @@ export const FALLBACK_RECIPES = [
                     // substring rule; no ladder needed, and no fallback invented
                     // if the CV states no level.
                     { label: 'Language', selector: '[data-automation-id="formField-language"] button', cvPath: 'languages[0].language', type: 'custom-select', required: true },
-                    { label: 'Language level', labelMatch: 'overall', cvPath: 'languages[0].level', type: 'custom-select', required: true },
+                    {
+                        // Measured: the list is "1 - Beginner / 2 - Intermediate /
+                        // 3 - Fluent" — there is NO "Native" row, and a CV that says
+                        // Native (a first language) found nothing and blocked the
+                        // step. The ladder maps down to the highest rung the form
+                        // actually offers. That is not an overclaim in either
+                        // direction: a native speaker IS fluent, and nothing higher
+                        // exists to claim.
+                        label: 'Language level', labelMatch: 'overall', cvPath: 'languages[0].level',
+                        valuePriority: ['Native', 'Fluent', 'Advanced', 'Intermediate', 'Beginner'],
+                        type: 'custom-select', required: true,
+                    },
                     // Skills refuses free text: typing leaves the box empty and the
                     // value only exists once a SEARCH RESULT is clicked. Each skill
                     // is its own type → pick → confirm cycle.
@@ -872,6 +884,11 @@ export async function applyRecipeFields(recipe, profile, cvData, cv) {
                 if (r.ok) { filled++; outcomes.push([f.label, 'OK', String(val).slice(0, 40)]); }
                 else if (r.reason === 'field-absent' || r.reason === 'no search box') outcomes.push([f.label, 'absent', 'not rendered yet']);
                 else if (r.reason === 'no value') outcomes.push([f.label, 'skip', 'no value']);
+                // EVERY term returning nothing is the employer's taxonomy being
+                // empty, not a fault here. Measured on Mondelez: typing a single
+                // letter returns "No Items." There is nothing to pick, and calling
+                // that FAILED buries the real failures in the same line.
+                else if (r.emptyTaxonomy) outcomes.push([f.label, 'skip', 'no results for any term']);
                 else outcomes.push([f.label, 'FAIL', r.reason]);
             } else if (f.type === 'date') {
                 const r = fillDateField(f, val);
@@ -1295,6 +1312,13 @@ async function inferOptionViaLLM(f, options, profile, cv) {
         // fixed by re-syncing the app.
         const why = (e && e.message) || 'failed';
         trace('list.infer', { field: f.label, error: why });
+        // An expired token is not this field's problem — it disables EVERY
+        // inference and every planner call for the whole run, and reading it as
+        // "Degree not found" sends the next hour into the wrong file. Say what it
+        // is and what fixes it.
+        if (/hết hạn|expired|401|unauthor/i.test(why)) {
+            return { value: null, authExpired: true, why: 'ĐĂNG NHẬP HẾT HẠN — mở Copo và đồng bộ lại' };
+        }
         return { value: null, why: `inference failed: ${why.slice(0, 60)}` };
     }
 }
@@ -1373,7 +1397,10 @@ async function fillSearchMulti(f, value, ctx = {}) {
         await sleep(250);
     }
     trace('skills.fill', { field: f.label, wanted: wanted.length, added, detail: notes.join(', ') });
-    if (!added) return { ok: false, reason: `nothing committed (${notes.join(', ')})` };
+    if (!added) {
+        const allNoMatch = notes.length > 0 && notes.every(n => n.endsWith(':no-match'));
+        return { ok: false, emptyTaxonomy: allNoMatch, reason: `nothing committed (${notes.join(', ')})` };
+    }
     return { ok: true };
 }
 
@@ -1545,6 +1572,10 @@ async function fillCustomSelect(f, value, ctx = {}) {
         const r = await inferOptionViaLLM(
             f, visibleOptions().map(o => (o.textContent || '').trim()), ctx.profile, ctx.cv);
         inferNote = r?.why || 'not attempted';
+        if (r?.authExpired) {
+            showToast('🔑 Phiên đăng nhập Copo đã hết hạn — mở web app và đồng bộ lại, '
+                + 'rồi chạy lại. AI không suy luận được trường nào cho tới lúc đó.', 12000);
+        }
         if (r?.value) {
             matched = r.value.toLowerCase();
             opt = uniqueMatch(visibleOptions(), matched)
