@@ -1430,7 +1430,18 @@ async function fillSearchMulti(f, value, ctx = {}) {
                 bubbles: true, cancelable: true, composed: true,
             }));
         }
-        await sleep(1200);
+        // Wait for the results to CHANGE rather than for a fixed time. A stale
+        // list from the previous term looks exactly like a result set, and a row
+        // matched out of it is clicked while belonging to another search.
+        const staleKey = [...document.querySelectorAll(OPTION_SEL)]
+            .filter(o => o.offsetParent !== null).map(o => (o.textContent || '').trim()).join('|');
+        const resultsBy = Date.now() + 2500;
+        while (Date.now() < resultsBy) {
+            await sleep(150);
+            const now = [...document.querySelectorAll(OPTION_SEL)]
+                .filter(o => o.offsetParent !== null).map(o => (o.textContent || '').trim()).join('|');
+            if (now !== staleKey) break;
+        }
         const opts = [...document.querySelectorAll(OPTION_SEL)]
             .filter(o => o.offsetParent !== null)
             .filter(o => o.getAttribute('data-automation-id') !== 'selectedItem')
@@ -1466,9 +1477,23 @@ async function fillSearchMulti(f, value, ctx = {}) {
         safeActivate(hit, { source: 'recipe', activation: 'widget-option' }, f.selector || f.labelMatch);
         // The chip is the only proof. A click this widget ignored looks identical
         // to one it took, and reporting the difference is the whole point.
-        const deadline = Date.now() + 2000;
+        const deadline = Date.now() + 2500;
         while (Date.now() < deadline && chips().length === before) await sleep(150);
-        if (chips().length > before) { added++; notes.push(`${term}:ok`); } else notes.push(`${term}:no-effect`);
+        if (chips().length > before) { added++; notes.push(`${term}:ok`); } else {
+            notes.push(`${term}:no-effect`);
+            // WHICH row was clicked, and what was on offer. "Found it and the click
+            // did nothing" is the same sentence whether the row was the right one,
+            // a stale leftover from the previous term's search, or a header that
+            // merely contains the words — and those need different fixes.
+            trace('skills.noEffect', {
+                term,
+                clickedText: (pick.textContent || '').trim().slice(0, 40),
+                clickedAid: pick.getAttribute('data-automation-id') || pick.tagName,
+                hitWasInner: hit !== pick,
+                resultsOnScreen: opts.length,
+                offered: [...new Set(opts.map(o => (o.textContent || '').trim()))].slice(0, 6).join(' | '),
+            });
+        }
         setNativeValue(input, '');
         await sleep(250);
     }
