@@ -213,12 +213,11 @@ export const FALLBACK_RECIPES = [
                     // Skills refuses free text: typing leaves the box empty and the
                     // value only exists once a SEARCH RESULT is clicked. Each skill
                     // is its own type → pick → confirm cycle.
-                    // Measured id, and measured behaviour: on this tenant the field
-                    // exists but its taxonomy is EMPTY — typing "Excel", "Procurement"
-                    // or even a single letter returns "No Items." with real
-                    // keystrokes. So it fills nothing here and must not be treated
-                    // as a failure; on a tenant that has configured skills the same
-                    // code searches and picks normally.
+                    // Measured id. The search runs on ENTER, not on typing: without
+                    // it the list says "No Items." for every term, which I first
+                    // mistook for an empty taxonomy. A field that returns nothing
+                    // for every term is still reported as a skip rather than a
+                    // failure — the employer may genuinely have configured none.
                     { label: 'Skills', selector: '[data-automation-id="formField-skills"] input', profileKey: 'skills', type: 'search-multi', max: 8 },
                 ],
                 advance: '[data-automation-id="pageFooterNextButton"]',
@@ -884,10 +883,9 @@ export async function applyRecipeFields(recipe, profile, cvData, cv) {
                 if (r.ok) { filled++; outcomes.push([f.label, 'OK', String(val).slice(0, 40)]); }
                 else if (r.reason === 'field-absent' || r.reason === 'no search box') outcomes.push([f.label, 'absent', 'not rendered yet']);
                 else if (r.reason === 'no value') outcomes.push([f.label, 'skip', 'no value']);
-                // EVERY term returning nothing is the employer's taxonomy being
-                // empty, not a fault here. Measured on Mondelez: typing a single
-                // letter returns "No Items." There is nothing to pick, and calling
-                // that FAILED buries the real failures in the same line.
+                // Every term returning nothing means the employer configured no
+                // matching skills. That is not a fault here, and calling it FAILED
+                // buries the real failures in the same line.
                 else if (r.emptyTaxonomy) outcomes.push([f.label, 'skip', 'no results for any term']);
                 else outcomes.push([f.label, 'FAIL', r.reason]);
             } else if (f.type === 'date') {
@@ -1378,7 +1376,18 @@ async function fillSearchMulti(f, value, ctx = {}) {
         if (chips().some(c => c.toLowerCase() === term.toLowerCase())) { notes.push(`${term}:already`); continue; }
         const before = chips().length;
         await simulateTyping(input, term);
-        await sleep(700);
+        // ENTER is what runs the search. Typing alone leaves the list showing
+        // "No Items." no matter what the term is — I read that as an empty
+        // taxonomy and was wrong: the query had simply never been submitted.
+        // A search box that needs a keystroke to fire is not the same as a
+        // search box with nothing behind it.
+        for (const type of ['keydown', 'keypress', 'keyup']) {
+            input.dispatchEvent(new KeyboardEvent(type, {
+                key: 'Enter', code: 'Enter', keyCode: 13, which: 13,
+                bubbles: true, cancelable: true, composed: true,
+            }));
+        }
+        await sleep(1200);
         const opts = [...document.querySelectorAll(OPTION_SEL)]
             .filter(o => o.offsetParent !== null)
             .filter(o => o.getAttribute('data-automation-id') !== 'selectedItem')

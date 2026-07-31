@@ -318,9 +318,9 @@ const WORKDAY: ApplyRecipe = {
                 },
                 // Skills refuses free text: typing leaves the box empty and the
                 // value only exists once a SEARCH RESULT is clicked.
-                // Measured id, and measured behaviour: on this tenant the field
-                // exists but its taxonomy is EMPTY — typing "Excel", "Procurement" or
-                // even one letter returns "No Items." with real keystrokes.
+                // Measured id. The search runs on ENTER, not on typing — without it
+                // the list reads "No Items." for every term, which is easy to mistake
+                // for an empty taxonomy.
                 { label: 'Skills', selector: '[data-automation-id="formField-skills"] input', profileKey: 'skills', type: 'search-multi', max: 8 },
             ],
             advance: '[data-automation-id="pageFooterNextButton"]',
