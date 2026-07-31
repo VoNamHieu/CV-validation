@@ -1504,7 +1504,43 @@ async function fillSearchMulti(f, value, ctx = {}) {
             .filter(o => o.offsetParent !== null)
             .filter(o => o.getAttribute('data-automation-id') !== 'selectedItem')
             .filter(o => !o.closest('[data-automation-id="selectedItemList"]'));
+        // Match on the WHOLE result set, not the rendered window.
+        //
+        // These results scroll: the exact row can sit below the fold, and judging
+        // ambiguity from a partial view is worse than missing it — three visible
+        // near-matches read as "cannot tell" while the exact one waits offscreen.
+        // The widget's own item array gives the full list when it can be read; a
+        // paged walk covers the rest.
         let pick = pickSearchResult(opts, term, o => (o.textContent || '').trim());
+        if (!pick && opts.length) {
+            const sc = optionScroller(opts[0]);
+            const all = sc ? readVirtualItems(sc) : null;
+            if (all) {
+                const chosen = pickSearchResult(all, term, it => String(it.label ?? it.ariaLabel ?? ''));
+                if (chosen) {
+                    trace('skills.offscreen', { term, index: chosen.index, total: all.length });
+                    const rowHeight = virtualRowHeight(sc);
+                    const at = Number.isFinite(chosen.index) ? chosen.index : all.indexOf(chosen);
+                    if (rowHeight) {
+                        pick = await jumpToIndex(sc, () => [...document.querySelectorAll(OPTION_SEL)]
+                            .filter(o => o.offsetParent !== null)
+                            .filter(o => !o.closest('[data-automation-id="selectedItemList"]')),
+                        (list) => pickSearchResult(list, String(chosen.label ?? ''), o => (o.textContent || '').trim()),
+                        at, rowHeight, `Skills:${term}`);
+                    }
+                }
+            }
+            // No item array (not virtualised) — walk the list instead.
+            if (!pick && sc) {
+                pick = await findInList(
+                    () => [...document.querySelectorAll(OPTION_SEL)]
+                        .filter(o => o.offsetParent !== null)
+                        .filter(o => o.getAttribute('data-automation-id') !== 'selectedItem')
+                        .filter(o => !o.closest('[data-automation-id="selectedItemList"]')),
+                    (list) => pickSearchResult(list, term, o => (o.textContent || '').trim()),
+                    `Skills:${term}`, term);
+            }
+        }
         // The whole phrase is not in the taxonomy — try the narrower forms the
         // candidate actually named. "Agile/Scrum" is two skills written as one, and
         // an employer list carries them separately. Only after the exact phrase has

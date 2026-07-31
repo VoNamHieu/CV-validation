@@ -116,3 +116,23 @@ describe('a compound skill falls back to its parts', () => {
         assert.deepEqual(skillFallbacks(''), []);
     });
 });
+
+// ── the rule must hold on the FULL list, not a rendered window ─────────────
+describe('matching a partial view is worse than missing', () => {
+    test('an exact row beats near-matches wherever it sits', () => {
+        // The live results scroll. If only the near-matches are rendered, the rule
+        // says "cannot tell" and the skill is dropped while the exact row waits
+        // offscreen. Feeding it the whole list is what makes the answer right —
+        // the rule itself was always order-independent, and this pins that.
+        const full = ['SQL Server', 'MySQL', 'PL/SQL', 'SQL'];
+        assert.equal(pick(full, 'SQL'), 'SQL');
+        assert.equal(pick([...full].reverse(), 'SQL'), 'SQL');
+    });
+
+    test('a window showing only near-matches correctly refuses', () => {
+        // And this is why the partial view is dangerous rather than merely
+        // incomplete: judged alone, these three are ambiguous and must be refused
+        // — never resolved to whichever happened to render first.
+        assert.equal(pick(['SQL Server', 'MySQL', 'PL/SQL'], 'SQL'), null);
+    });
+});
