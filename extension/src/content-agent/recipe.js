@@ -1404,6 +1404,10 @@ export function skillFallbacks(term) {
  * early.
  */
 async function waitForResults(readKey, budgetMs = 4000) {
+    // A short budget is a "let it go quiet" call rather than "wait for an
+    // answer", so it must be allowed to settle on empty without burning the
+    // whole window.
+    const emptyStableNeeded = budgetMs <= 2500 ? 2 : 4;
     const deadline = Date.now() + budgetMs;
     let last = null;
     let stable = 0;
@@ -1415,7 +1419,7 @@ async function waitForResults(readKey, budgetMs = 4000) {
             // Non-empty and steady → the search has answered.
             if (stable >= 2 && now.rows > 0) return now;
             // Empty and steady for longer → it answered with nothing.
-            if (stable >= 4) return now;
+            if (stable >= emptyStableNeeded) return now;
         } else {
             stable = 0;
             last = now;
@@ -1461,6 +1465,23 @@ async function fillSearchMulti(f, value, ctx = {}) {
         return { rows: rows.length, key: rows.join('|'), toString() { return this.key; } };
     };
 
+
+    /**
+     * Empty the box and let the widget go quiet before the next term.
+     *
+     * Clearing and typing straight on was the remaining race: the next search
+     * fires while the previous one is still settling, so its results arrive
+     * against the wrong query — and the term after that reads rows belonging to
+     * the term before. Waiting for the list to fall back to empty is what makes
+     * each skill an independent transaction rather than a queue of overlapping
+     * ones.
+     */
+    const resetSearchBox = async () => {
+        setNativeValue(input, '');
+        await sleep(200);
+        await waitForResults(readResultKey, 2000);
+    };
+
     let added = 0;
     const notes = [];
     for (const term of wanted) {
@@ -1490,8 +1511,7 @@ async function fillSearchMulti(f, value, ctx = {}) {
         // failed, so a real entry always wins.
         if (!pick) {
             for (const alt of skillFallbacks(term)) {
-                setNativeValue(input, '');
-                await sleep(150);
+                await resetSearchBox();
                 await simulateTyping(input, alt);
                 for (const type of ['keydown', 'keypress', 'keyup']) {
                     input.dispatchEvent(new KeyboardEvent(type, {
@@ -1508,7 +1528,7 @@ async function fillSearchMulti(f, value, ctx = {}) {
                 if (pick) { notes.push(`${term}→${alt}`); break; }
             }
         }
-        if (!pick) { notes.push(`${term}:no-match`); setNativeValue(input, ''); await sleep(200); continue; }
+        if (!pick) { notes.push(`${term}:no-match`); await resetSearchBox(); continue; }
         const hit = pick.querySelector('input[type="checkbox"], input[type="radio"]')
             || pick.querySelector('[data-automation-id="promptLeafNode"]') || pick;
         safeActivate(hit, { source: 'recipe', activation: 'widget-option' }, f.selector || f.labelMatch);
@@ -1531,8 +1551,7 @@ async function fillSearchMulti(f, value, ctx = {}) {
                 offered: [...new Set(opts.map(o => (o.textContent || '').trim()))].slice(0, 6).join(' | '),
             });
         }
-        setNativeValue(input, '');
-        await sleep(250);
+        await resetSearchBox();
     }
     trace('skills.fill', { field: f.label, wanted: wanted.length, added, detail: notes.join(', ') });
     if (!added) {
