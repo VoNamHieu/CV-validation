@@ -179,10 +179,15 @@ export const FALLBACK_RECIPES = [
                     // the CV held all of them. Matched by LABEL rather than by
                     // automation id: the labels are the part measured verbatim from
                     // a real run, and guessing ids is how earlier fixes failed.
-                    { label: 'Job Title', labelMatch: 'job title', cvPath: 'experience[0].title', type: 'text', required: true },
-                    { label: 'Company', labelMatch: 'company', cvPath: 'experience[0].company', type: 'text', required: true },
-                    { label: 'Work From', labelMatch: 'from', cvPath: 'experience[0].start_date', type: 'date', required: true },
-                    { label: 'Work To', labelMatch: 'to', cvPath: 'experience[0].end_date', type: 'date' },
+                    { label: 'Job Title', selector: '[data-automation-id="formField-jobTitle"] input', cvPath: 'experience[0].title', type: 'text', required: true },
+                    { label: 'Company', selector: '[data-automation-id="formField-companyName"] input', cvPath: 'experience[0].company', type: 'text', required: true },
+                    { label: 'Role description', selector: '[data-automation-id="formField-roleDescription"] textarea', cvPath: 'experience[0].description', type: 'text' },
+                    // startDate/endDate hold TWO inputs — dateSectionMonth-input and
+                    // dateSectionYear-input — so the wrapper is the selector and the
+                    // date filler finds both. A single fill enters half a date and
+                    // leaves the step invalid.
+                    { label: 'Work From', selector: '[data-automation-id="formField-startDate"]', cvPath: 'experience[0].start_date', type: 'date', required: true },
+                    { label: 'Work To', selector: '[data-automation-id="formField-endDate"]', cvPath: 'experience[0].end_date', type: 'date' },
                     { label: 'School or University', selector: '[data-automation-id="formField-schoolName"] input', cvPath: 'education[0].institution', type: 'text', required: true },
                     { label: 'Field of Study', selector: '[data-automation-id="formField-fieldOfStudy"] input', cvPath: 'education[0].degree', type: 'text', required: true },
                     // The Languages block. Measured on Mondelez: Language and
@@ -191,12 +196,18 @@ export const FALLBACK_RECIPES = [
                     // "Fluent" resolves to "3 - Fluent" through the unambiguous
                     // substring rule; no ladder needed, and no fallback invented
                     // if the CV states no level.
-                    { label: 'Language', labelMatch: 'language', cvPath: 'languages[0].language', type: 'custom-select', required: true },
+                    { label: 'Language', selector: '[data-automation-id="formField-language"] button', cvPath: 'languages[0].language', type: 'custom-select', required: true },
                     { label: 'Language level', labelMatch: 'overall', cvPath: 'languages[0].level', type: 'custom-select', required: true },
                     // Skills refuses free text: typing leaves the box empty and the
                     // value only exists once a SEARCH RESULT is clicked. Each skill
                     // is its own type → pick → confirm cycle.
-                    { label: 'Skills', labelMatch: 'skill', profileKey: 'skills', type: 'search-multi', max: 8 },
+                    // Measured id, and measured behaviour: on this tenant the field
+                    // exists but its taxonomy is EMPTY — typing "Excel", "Procurement"
+                    // or even a single letter returns "No Items." with real
+                    // keystrokes. So it fills nothing here and must not be treated
+                    // as a failure; on a tenant that has configured skills the same
+                    // code searches and picks normally.
+                    { label: 'Skills', selector: '[data-automation-id="formField-skills"] input', profileKey: 'skills', type: 'search-multi', max: 8 },
                 ],
                 advance: '[data-automation-id="pageFooterNextButton"]',
             },

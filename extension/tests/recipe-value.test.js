@@ -50,6 +50,7 @@ describe('work experience is fillable from the CV', () => {
         for (const label of ['Job Title', 'Company', 'Work From', 'Work To']) {
             const f = exp.fields.find(x => x.label === label);
             assert.match(f.cvPath, /^experience\[0\]\./, `${label} must come from the CV`);
+            assert.ok(f.selector && !f.labelMatch, `${label} has a measured id — a label guess is not good enough`);
         }
     });
 
@@ -126,9 +127,12 @@ describe('languages and skills', () => {
         assert.equal(by('Language level').required, true);
     });
 
-    test('they are addressed by label, because the id is a per-tenant GUID', () => {
+    test('only the GUID field is addressed by label', () => {
+        // Language has a stable id, measured. "Overall" does not — its id is a
+        // per-tenant GUID, so a selector would work on one company only.
         assert.equal(by('Language level').labelMatch, 'overall');
         assert.ok(!by('Language level').selector, 'a GUID selector would work on one tenant only');
+        assert.match(by('Language').selector, /formField-language/);
     });
 
     test('skills is a search field, not a text field', () => {
@@ -136,6 +140,7 @@ describe('languages and skills', () => {
         // value exists only once a search RESULT is clicked.
         assert.equal(by('Skills').type, 'search-multi');
         assert.equal(typeof by('Skills').max, 'number', 'a long skills list must not be typed in full');
+        assert.match(by('Skills').selector, /formField-skills/, 'measured id, not a label guess');
     });
 
     test('skills is not required', () => {
