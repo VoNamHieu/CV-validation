@@ -260,6 +260,15 @@ const WORKDAY: ApplyRecipe = {
                 },
                 // Measured as REQUIRED on Mondelez and left blank by Workday's own
                 // résumé parse, so the step could not advance without them.
+                // The Work Experience block — REQUIRED on Mondelez and matched by
+                // nothing here, so five required fields sat empty and the planner
+                // reported the dates as "not in the user profile" when the CV held
+                // all of them. Matched by LABEL rather than automation id: the
+                // labels are what a real run measured verbatim.
+                { label: 'Job Title', labelMatch: 'job title', cvPath: 'experience[0].title', type: 'text', required: true },
+                { label: 'Company', labelMatch: 'company', cvPath: 'experience[0].company', type: 'text', required: true },
+                { label: 'Work From', labelMatch: 'from', cvPath: 'experience[0].start_date', type: 'date', required: true },
+                { label: 'Work To', labelMatch: 'to', cvPath: 'experience[0].end_date', type: 'date' },
                 { label: 'School or University', selector: '[data-automation-id="formField-schoolName"] input', cvPath: 'education[0].institution', type: 'text', required: true },
                 { label: 'Field of Study', selector: '[data-automation-id="formField-fieldOfStudy"] input', cvPath: 'education[0].degree', type: 'text', required: true },
             ],

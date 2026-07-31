@@ -161,6 +161,16 @@ export const FALLBACK_RECIPES = [
                     // Measured as REQUIRED on Mondelez, and left blank by Workday's
                     // own résumé parse — so the step could not advance without them
                     // even though the CV states both.
+                    // The Work Experience block — REQUIRED on Mondelez and matched by
+                    // nothing here, so five required fields sat empty and the
+                    // planner reported the dates as "not in the user profile" when
+                    // the CV held all of them. Matched by LABEL rather than by
+                    // automation id: the labels are the part measured verbatim from
+                    // a real run, and guessing ids is how earlier fixes failed.
+                    { label: 'Job Title', labelMatch: 'job title', cvPath: 'experience[0].title', type: 'text', required: true },
+                    { label: 'Company', labelMatch: 'company', cvPath: 'experience[0].company', type: 'text', required: true },
+                    { label: 'Work From', labelMatch: 'from', cvPath: 'experience[0].start_date', type: 'date', required: true },
+                    { label: 'Work To', labelMatch: 'to', cvPath: 'experience[0].end_date', type: 'date' },
                     { label: 'School or University', selector: '[data-automation-id="formField-schoolName"] input', cvPath: 'education[0].institution', type: 'text', required: true },
                     { label: 'Field of Study', selector: '[data-automation-id="formField-fieldOfStudy"] input', cvPath: 'education[0].degree', type: 'text', required: true },
                 ],
@@ -809,7 +819,13 @@ export async function applyRecipeFields(recipe, profile, cvData, cv) {
         const provenance = f.answerSource
             || (f.profileKey && profile[f.profileKey] ? 'PROFILE' : 'AGENT_DEFAULT');
         try {
-            if (f.type === 'radio') {
+            if (f.type === 'date') {
+                const r = fillDateField(f, val);
+                if (r.ok) { filled++; outcomes.push([f.label, 'OK', String(val)]); answers.push({ field: f.label, value: val, source: provenance }); }
+                else if (r.reason === 'already-selected') outcomes.push([f.label, 'done', 'already filled']);
+                else if (r.reason === 'field-absent') outcomes.push([f.label, 'absent', 'not rendered yet']);
+                else outcomes.push([f.label, 'FAIL', r.reason]);
+            } else if (f.type === 'radio') {
                 const r = fillRadio(f, val);
                 if (r.ok) { filled++; outcomes.push([f.label, 'OK', String(val)]); answers.push({ field: f.label, value: val, source: provenance }); }
                 else if (r.reason === 'already-selected') outcomes.push([f.label, 'done', 'already selected']);
@@ -901,6 +917,58 @@ export async function applyRecipeFields(recipe, profile, cvData, cv) {
     });
 
     return { matched: true, filled, step: step.name, answers };
+}
+
+/**
+ * Fill a Workday date, which is not one input but two.
+ *
+ * "From" and "To" each render a month box and a year box inside one labelled
+ * wrapper, so a single setNativeValue fills half a date and the step stays
+ * invalid — the trace showed five required fields with no labels the scanner
+ * could name, and the planner then reported the dates as missing from the
+ * profile when the CV had them all along ("03/2024").
+ *
+ * Accepts what CVs actually write: 03/2024, 2024-03, Mar 2024, 2024. A value
+ * that names no year is not a date and is left alone rather than half-entered.
+ */
+function fillDateField(f, val) {
+    const wrap = f.labelMatch ? findWrapperByLabel(f.labelMatch) : document.querySelector(f.selector);
+    if (!wrap) return { ok: false, reason: 'field-absent' };
+
+    const text = String(val).trim();
+    if (/^(hiện tại|present|current|now)$/i.test(text)) return { ok: false, reason: 'no value' };
+    const year = (text.match(/\b(19|20)\d{2}\b/) || [])[0];
+    if (!year) return { ok: false, reason: `no year in "${text}"` };
+    const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+    let month = (text.match(/\b(0?[1-9]|1[0-2])\b(?!\d)/) || [])[0];
+    if (!month) {
+        const named = MONTHS.findIndex(m => new RegExp(`\\b${m}`, 'i').test(text));
+        if (named >= 0) month = String(named + 1);
+    }
+
+    const inputs = [...wrap.querySelectorAll('input')].filter(i => i.offsetParent !== null);
+    const pick = (re) => inputs.find(i => re.test(
+        `${i.getAttribute('data-automation-id') || ''} ${i.getAttribute('aria-label') || ''} ${i.name || ''}`));
+    const monthEl = pick(/month/i) || inputs[0];
+    const yearEl = pick(/year/i) || inputs[1];
+    if (!yearEl) return { ok: false, reason: 'no year input in wrapper' };
+    if (String(yearEl.value || '').trim()) return { ok: false, reason: 'already-selected' };
+
+    if (month && monthEl && monthEl !== yearEl) setNativeValue(monthEl, month.padStart(2, '0'));
+    setNativeValue(yearEl, year);
+    return String(yearEl.value || '').trim() ? { ok: true } : { ok: false, reason: 'value did not stick' };
+}
+
+/** The formField WRAPPER whose legend/label contains `want` — findFieldByLabel
+ *  returns the first control inside, which is not enough for a split date. */
+function findWrapperByLabel(want) {
+    const w = String(want).toLowerCase();
+    for (const wrap of document.querySelectorAll('[data-automation-id^="formField-"]')) {
+        if (wrap.offsetParent === null) continue;
+        const lbl = (wrap.querySelector('legend, label')?.textContent || '').toLowerCase();
+        if (lbl.includes(w)) return wrap;
+    }
+    return null;
 }
 
 /**

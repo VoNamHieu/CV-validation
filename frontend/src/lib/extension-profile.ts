@@ -156,8 +156,19 @@ export function cvToExtensionProfile(cv: CVData, coverLetterOverride?: string): 
         employment.current_title || cv.experience?.[0]?.title || "";
     const yearsOfExperience =
         employment.years_of_experience || cv.experience?.length || 0;
+    // `education[0].degree` holds whatever the CV wrote on that line, which for
+    // most CVs is the SUBJECT ("Marketing"), not the qualification. Feeding that
+    // to an ATS degree dropdown — 19 named qualifications, B.S. / B.B.A. /
+    // L.L.B. — can never match, and the agent spent ten seconds per iteration
+    // proving it before giving up, eight iterations running. An unusable value is
+    // worse than none: empty makes the field a gap the review names, which is the
+    // honest outcome when the CV never stated a qualification.
+    const looksLikeQualification = (v: string) =>
+        /bachelor|master|doctor|phd|associate|diploma|certificate|high school|b\.?[sae]\b|m\.?[sa]\b|mba|llb|cử nhân|thạc sĩ|tiến sĩ|kỹ sư|cao đẳng|trung cấp/i
+            .test(v);
+    const degreeFromCv = cv.education?.[0]?.degree ?? "";
     const highestDegree =
-        employment.highest_degree || cv.education?.[0]?.degree || "";
+        employment.highest_degree || (looksLikeQualification(degreeFromCv) ? degreeFromCv : "");
 
     return {
         // Same normalisation as the split pair, or the two disagree on the
