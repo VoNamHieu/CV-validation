@@ -1796,6 +1796,18 @@ async function fillCustomSelect(f, value, ctx = {}) {
     // onto an international list that never names it.
     let inferNote = '';
     if (!opt && f.infer) {
+        // Re-open BEFORE asking. The model is sent the options that are on screen,
+        // and by the time the ladder has exhausted itself the list has often
+        // closed — so `offered` came back empty and the call was skipped
+        // entirely, reported as "inference: not attempted" beside a count of 18
+        // options read moments earlier. Re-opening afterwards, which is what I
+        // added last, fixes the click and not the asking.
+        if (!visibleOptions().length) {
+            safeActivate(trigger, { source: 'recipe', activation: 'widget-open' }, f.selector);
+            const by = Date.now() + 4000;
+            while (!visibleOptions().length && Date.now() < by) await sleep(150);
+            trace('list.reopen', { field: f.label, why: 'closed before the model could be asked', rows: visibleOptions().length });
+        }
         const r = await inferOptionViaLLM(
             f, visibleOptions().map(o => (o.textContent || '').trim()), ctx.profile, ctx.cv);
         inferNote = r?.why || 'not attempted';
