@@ -232,21 +232,34 @@ export function setNativeValue(el, value) {
 /**
  * Simulate typing character by character (nuclear option for stubborn frameworks).
  */
-export async function simulateTyping(el, text) {
+export async function simulateTyping(el, text, { commit = false } = {}) {
     el.focus();
-    el.value = '';
+    // Through the NATIVE setter, not `el.value =`. React keeps a value-tracker on
+    // the input and dedupes against it, so a direct assignment leaves the
+    // component's state disagreeing with the DOM — the box shows one string and
+    // the search runs on another. Every other fill in this file already goes
+    // through setNativeValue; this one did not, which is why typed terms came out
+    // wrong.
+    setNativeValue(el, '');
     el.dispatchEvent(new Event('focus', { bubbles: true }));
 
+    let typed = '';
     for (const char of text) {
         el.dispatchEvent(new KeyboardEvent('keydown', { key: char, bubbles: true }));
-        el.value += char;
-        el.dispatchEvent(new Event('input', { bubbles: true }));
+        typed += char;
+        setNativeValue(el, typed);
         el.dispatchEvent(new KeyboardEvent('keyup', { key: char, bubbles: true }));
         await sleep(30);
     }
 
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-    el.dispatchEvent(new Event('blur', { bubbles: true }));
+    // NO blur by default. Blurring a search box closes its result list, so the
+    // old unconditional blur cleared the options a beat after asking for them —
+    // the caller then searched an empty popup it had just dismissed itself.
+    // `commit` is for the fields that genuinely want the value settled.
+    if (commit) {
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        el.dispatchEvent(new Event('blur', { bubbles: true }));
+    }
 }
 
 /**

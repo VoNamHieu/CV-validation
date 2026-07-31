@@ -1403,7 +1403,7 @@ export function skillFallbacks(term) {
  * reports no-match, which is a real answer rather than an artefact of reading too
  * early.
  */
-async function waitForResults(readKey, budgetMs = 4000) {
+async function waitForResults(readKey, budgetMs = 4000, priorKey = null) {
     // A short budget is a "let it go quiet" call rather than "wait for an
     // answer", so it must be allowed to settle on empty without burning the
     // whole window.
@@ -1414,7 +1414,13 @@ async function waitForResults(readKey, budgetMs = 4000) {
     while (Date.now() < deadline) {
         await sleep(180);
         const now = readKey();
-        if (last && now.key === last.key) {
+        // The PREVIOUS term's results are stable too. Returning on "non-empty and
+        // unchanged" handed those straight back — the caller matched a row from
+        // the last search, clicked something no longer in any list, and reported
+        // no-effect. A list identical to the one before the search started has not
+        // answered yet, whatever its size.
+        const isStale = priorKey != null && now.key === priorKey && now.rows > 0;
+        if (last && now.key === last.key && !isStale) {
             stable++;
             // Non-empty and steady → the search has answered.
             if (stable >= 2 && now.rows > 0) return now;
@@ -1487,6 +1493,7 @@ async function fillSearchMulti(f, value, ctx = {}) {
     for (const term of wanted) {
         if (chips().some(c => c.toLowerCase() === term.toLowerCase())) { notes.push(`${term}:already`); continue; }
         const before = chips().length;
+        const priorResults = readResultKey().key;
         await simulateTyping(input, term);
         // ENTER is what runs the search. Typing alone leaves the list showing
         // "No Items." no matter what the term is — I read that as an empty
@@ -1499,7 +1506,7 @@ async function fillSearchMulti(f, value, ctx = {}) {
                 bubbles: true, cancelable: true, composed: true,
             }));
         }
-        await waitForResults(readResultKey);
+        await waitForResults(readResultKey, 4000, priorResults);
         const opts = [...document.querySelectorAll(OPTION_SEL)]
             .filter(o => o.offsetParent !== null)
             .filter(o => o.getAttribute('data-automation-id') !== 'selectedItem')
