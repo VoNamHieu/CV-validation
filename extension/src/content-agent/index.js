@@ -349,8 +349,18 @@ async function runAgentLoop(profile) {
                 const recipeStepPresent = recipeTargets.some((sel) => {
                     try { return !!document.querySelector(sel); } catch { return false; }
                 });
+                // A JOB POSTING is not an empty shell. It legitimately has no form
+                // fields — the form is behind its Apply button — and treating it as
+                // a broken page made the agent RELOAD it: three page loads on one
+                // URL inside twenty seconds, each reporting "trang rỗng" about a
+                // page that was fine. The reload is for a genuinely blank or
+                // wedged ATS page, so anything the agent could still act on
+                // disqualifies it.
+                const somethingToClick = (() => {
+                    try { return !!findApplyButton(); } catch { return false; }
+                })();
                 const emptyShell = state.formFields.length === 0 && !hasFormContent
-                    && !recipeStepPresent && !state.blockers.length;
+                    && !recipeStepPresent && !state.blockers.length && !somethingToClick;
                 if (errCard || emptyShell) emptyStreak++; else emptyStreak = 0;
                 // Error card → reload now; a bare empty shell → wait 2 observes first
                 // (it may still be mid-bootstrap, not actually broken).
@@ -946,7 +956,13 @@ async function runAgentLoop(profile) {
             //
             // On a host with a recipe, no fields means the page is not ready, not
             // that the application is unanswerable. Wait here rather than asking.
-            if (recipe && state.formFields.length === 0 && emptyPageWaits < 6) {
+            // Only INSIDE the apply flow. A job posting has no form fields by
+            // design and the planner's job there is to click through to the form,
+            // so waiting for fields that will never appear on that page just
+            // burns iterations. The wizard's step indicator is the discriminator:
+            // measured, a job page reports none and every apply step reports one.
+            const insideApplyFlow = !!state.stepIndicator || /\/apply(\/|$)/.test(location.pathname);
+            if (recipe && insideApplyFlow && state.formFields.length === 0 && emptyPageWaits < 6) {
                 emptyPageWaits++;
                 trace('plan.skipped', {
                     reason: 'no form fields to plan against',
