@@ -119,6 +119,8 @@ async function runAgentLoop(profile) {
     let planFailures = 0;
     // Passes spent waiting for a wizard page to render before planning against it.
     let emptyPageWaits = 0;
+    // Passes spent waiting for a step's own precondition (a CV attaching).
+    let preconditionWaits = 0;
     // For the two-signal submitted check: a form we have actually seen, and where
     // we started, so "the form is gone" and "we are on a confirmation URL" are
     // statements about a change rather than about the first page we happened to load.
@@ -799,6 +801,24 @@ async function runAgentLoop(profile) {
                     advLabel: _adv ? (_adv.textContent || '').trim().slice(0, 28) : null,
                     waitingFor: _waitingFor,
                 });
+                // Waiting on a precondition is NOT a page to plan against. The
+                // résumé-upload step withholds its Continue until the file
+                // attaches, and execution then fell straight through to the
+                // planner — which sees a page with no fields, reports that it
+                // cannot proceed, and ends the run. The same empty-page failure as
+                // before, reached down a different branch.
+                if (_waitingFor && preconditionWaits < 8) {
+                    preconditionWaits++;
+                    trace('advance.waiting', {
+                        step: _stepNow?.name || null,
+                        pass: preconditionWaits,
+                        selector: _waitingFor,
+                        filledThisPass: rf.filled,
+                    });
+                    showProgress(i + 1, AGENT_MAX_ITERATIONS, 'Chờ đính kèm CV…');
+                    await sleep(1500);
+                    continue;
+                }
                 if (rf.matched && !_waitingFor && state.unfilledRequired.length === 0
                     && state.errors.length === 0 && !atFinalStep(recipe)) {
                     const stepNow = _stepNow;
@@ -850,6 +870,7 @@ async function runAgentLoop(profile) {
                 // is spent by whichever step happened to be slow first, and every
                 // later step is planned against before it exists.
                 emptyPageWaits = 0;
+                preconditionWaits = 0;
             }
 
             // Detect fields the LLM previously tried to fill but stayed empty.
@@ -901,6 +922,26 @@ async function runAgentLoop(profile) {
             }
 
             // ── 3. PLAN: Ask LLM what to do next ──
+            //
+            // One guard at the choke point, because guarding each branch has not
+            // held: a zero-field page has now reached the planner three separate
+            // ways — an unrendered wizard step, a step whose Continue was withheld
+            // pending the CV upload, and the original Create Account page. Every
+            // time, the planner correctly reports it cannot proceed, NEED_HUMAN
+            // ends the run, and the next branch to leak is found the same way.
+            //
+            // On a host with a recipe, no fields means the page is not ready, not
+            // that the application is unanswerable. Wait here rather than asking.
+            if (recipe && state.formFields.length === 0 && emptyPageWaits < 6) {
+                emptyPageWaits++;
+                trace('plan.skipped', {
+                    reason: 'no form fields to plan against',
+                    pass: emptyPageWaits,
+                    buttons: state.buttons.length,
+                });
+                await sleep(1500);
+                continue;
+            }
             showProgress(i + 1, AGENT_MAX_ITERATIONS, `AI đang lên kế hoạch (iteration ${i + 1})...`);
 
             let plan;
