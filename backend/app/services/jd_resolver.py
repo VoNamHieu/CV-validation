@@ -263,6 +263,41 @@ def _phenom_detail(jd_url: str) -> str | None:
     return body
 
 
+def _talentnet_detail(jd_url: str) -> str | None:
+    # Talentnet talent-network SaaS (shared by PNJ / SHB / VNDIRECT / Hoa Sen /
+    # Acecook / Viettel IDC / …): SSR detail page {origin}/viec-lam/{slug}.html.
+    # The list adapter ships description=""; the page carries a schema.org
+    # JSON-LD JobPosting (clean) and a `.job-body` content div.
+    if "/viec-lam/" not in jd_url or not jd_url.endswith(".html"):
+        return None
+    try:
+        r = requests.get(jd_url, headers={"User-Agent": _UA}, timeout=_TIMEOUT)
+        if r.status_code != 200:
+            return None
+        h = r.text
+    except Exception:
+        return None
+    import json
+    for blob in re.findall(r'<script[^>]+ld\+json[^>]*>(.*?)</script>', h, re.S):
+        try:
+            d = json.loads(blob)
+        except Exception:
+            continue
+        for it in (d if isinstance(d, list) else [d]):
+            if isinstance(it, dict) and "JobPosting" in str(it.get("@type", "")):
+                body = _strip_html(it.get("description", ""))
+                if len(body) >= _MIN_DESC:
+                    title = it.get("title", "")
+                    return (f"Job Title: {title}\n\n{body}").strip() if title else body
+    from bs4 import BeautifulSoup
+    el = BeautifulSoup(h, "html.parser").select_one(".job-body, [class*='job-detail']")
+    if el:
+        body = _strip_html(str(el))
+        if len(body) >= _MIN_DESC:
+            return body
+    return None
+
+
 def _aeon_detail(jd_url: str) -> str | None:
     # tuyendung.aeon.com.vn/job-detail/{id} → the eHiring detail API returns the
     # JD in clean fields (the list adapter ships description="").
@@ -334,6 +369,7 @@ _DETAIL_ADAPTERS = (
     ("eightfold", _eightfold_detail),
     ("avature", _avature_detail),
     ("aeon", _aeon_detail),
+    ("talentnet", _talentnet_detail),
 )
 
 
