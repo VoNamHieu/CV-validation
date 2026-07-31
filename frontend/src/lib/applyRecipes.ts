@@ -95,7 +95,11 @@ export interface RecipeField {
     labelMatch?: string;  // match a dynamic-id field by its question/label text (Application Questions)
     // shadow-text  = text input inside a web-component shadow root (SmartRecruiters spl-input)
     // autocomplete = type-to-search field that must commit a picked suggestion (SR city)
-    type?: 'text' | 'select' | 'custom-select' | 'shadow-text' | 'autocomplete' | 'date' | 'file' | 'radio' | 'checkbox';
+    // search-multi = a multi-select that refuses free text (Workday Skills):
+    // each value must be typed, then picked from the search results it returns.
+    type?: 'text' | 'select' | 'custom-select' | 'shadow-text' | 'autocomplete' | 'date' | 'file' | 'radio' | 'checkbox' | 'search-multi';
+    /** Cap for a multi-value field, so a long skills list is not typed in full. */
+    max?: number;
     /** Reshape the resolved value before filling. 'name' = one capital per word
      *  for ALL-CAPS words only. The web app already normalises names when it
      *  builds the profile, but that runs at SYNC time — a profile synced before
@@ -288,6 +292,14 @@ const WORKDAY: ApplyRecipe = {
                 { label: 'Work To', labelMatch: 'to', cvPath: 'experience[0].end_date', type: 'date' },
                 { label: 'School or University', selector: '[data-automation-id="formField-schoolName"] input', cvPath: 'education[0].institution', type: 'text', required: true },
                 { label: 'Field of Study', selector: '[data-automation-id="formField-fieldOfStudy"] input', cvPath: 'education[0].degree', type: 'text', required: true },
+                // The Languages block. Measured on Mondelez: Language and "Overall"
+                // (proficiency) are both REQUIRED, and "Overall" carries a
+                // per-tenant GUID for an automation id — hence labelMatch.
+                { label: 'Language', labelMatch: 'language', cvPath: 'languages[0].language', type: 'custom-select', required: true },
+                { label: 'Language level', labelMatch: 'overall', cvPath: 'languages[0].level', type: 'custom-select', required: true },
+                // Skills refuses free text: typing leaves the box empty and the
+                // value only exists once a SEARCH RESULT is clicked.
+                { label: 'Skills', labelMatch: 'skill', profileKey: 'skills', type: 'search-multi', max: 8 },
             ],
             advance: '[data-automation-id="pageFooterNextButton"]',
         },

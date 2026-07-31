@@ -112,3 +112,35 @@ describe('Degree falls back to inference', () => {
         assert.equal(degree.accept, 'qualification');
     });
 });
+
+// ── the rest of My Experience ──────────────────────────────────────────────
+describe('languages and skills', () => {
+    const wd = FALLBACK_RECIPES.find(r => r.ats === 'workday');
+    const exp = wd.steps.find(s => s.name === 'My Experience');
+    const by = (l) => exp.fields.find(f => f.label === l);
+
+    test('both language fields exist and are required', () => {
+        // Measured on Mondelez: Language and "Overall" (proficiency) both block
+        // the step, and neither had a recipe field.
+        assert.equal(by('Language').required, true);
+        assert.equal(by('Language level').required, true);
+    });
+
+    test('they are addressed by label, because the id is a per-tenant GUID', () => {
+        assert.equal(by('Language level').labelMatch, 'overall');
+        assert.ok(!by('Language level').selector, 'a GUID selector would work on one tenant only');
+    });
+
+    test('skills is a search field, not a text field', () => {
+        // Workday's Skills refuses free text: typing leaves the box empty, and the
+        // value exists only once a search RESULT is clicked.
+        assert.equal(by('Skills').type, 'search-multi');
+        assert.equal(typeof by('Skills').max, 'number', 'a long skills list must not be typed in full');
+    });
+
+    test('skills is not required', () => {
+        // It is genuinely optional on this form, and a skill the employer's
+        // taxonomy does not contain must not become a blocker.
+        assert.ok(!by('Skills').required);
+    });
+});

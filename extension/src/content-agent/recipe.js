@@ -179,6 +179,18 @@ export const FALLBACK_RECIPES = [
                     { label: 'Work To', labelMatch: 'to', cvPath: 'experience[0].end_date', type: 'date' },
                     { label: 'School or University', selector: '[data-automation-id="formField-schoolName"] input', cvPath: 'education[0].institution', type: 'text', required: true },
                     { label: 'Field of Study', selector: '[data-automation-id="formField-fieldOfStudy"] input', cvPath: 'education[0].degree', type: 'text', required: true },
+                    // The Languages block. Measured on Mondelez: Language and
+                    // "Overall" (proficiency) are both REQUIRED, and "Overall" has
+                    // a per-tenant GUID for an automation id — hence labelMatch.
+                    // "Fluent" resolves to "3 - Fluent" through the unambiguous
+                    // substring rule; no ladder needed, and no fallback invented
+                    // if the CV states no level.
+                    { label: 'Language', labelMatch: 'language', cvPath: 'languages[0].language', type: 'custom-select', required: true },
+                    { label: 'Language level', labelMatch: 'overall', cvPath: 'languages[0].level', type: 'custom-select', required: true },
+                    // Skills refuses free text: typing leaves the box empty and the
+                    // value only exists once a SEARCH RESULT is clicked. Each skill
+                    // is its own type → pick → confirm cycle.
+                    { label: 'Skills', labelMatch: 'skill', profileKey: 'skills', type: 'search-multi', max: 8 },
                 ],
                 advance: '[data-automation-id="pageFooterNextButton"]',
             },
@@ -830,7 +842,13 @@ export async function applyRecipeFields(recipe, profile, cvData, cv) {
         const provenance = f.answerSource
             || (f.profileKey && profile[f.profileKey] ? 'PROFILE' : 'AGENT_DEFAULT');
         try {
-            if (f.type === 'date') {
+            if (f.type === 'search-multi') {
+                const r = await fillSearchMulti(f, val, { profile, cv });
+                if (r.ok) { filled++; outcomes.push([f.label, 'OK', String(val).slice(0, 40)]); }
+                else if (r.reason === 'field-absent' || r.reason === 'no search box') outcomes.push([f.label, 'absent', 'not rendered yet']);
+                else if (r.reason === 'no value') outcomes.push([f.label, 'skip', 'no value']);
+                else outcomes.push([f.label, 'FAIL', r.reason]);
+            } else if (f.type === 'date') {
                 const r = fillDateField(f, val);
                 if (r.ok) { filled++; outcomes.push([f.label, 'OK', String(val)]); answers.push({ field: f.label, value: val, source: provenance }); }
                 else if (r.reason === 'already-selected') outcomes.push([f.label, 'done', 'already filled']);
@@ -1218,8 +1236,67 @@ async function inferOptionViaLLM(f, options, profile, cv) {
     }
 }
 
+/**
+ * Fill a type-to-search multi-select: Workday's Skills field.
+ *
+ * It refuses free text. Typing "SQL" and moving on leaves the box empty — the
+ * value only exists once a SEARCH RESULT is clicked, and the results only appear
+ * after typing. So each value is its own small transaction: type, wait for the
+ * list, pick the row that matches, confirm a chip appeared, clear the box, next.
+ *
+ * Values that return no match are skipped rather than forced. A skills taxonomy
+ * is the employer's, not the candidate's — "Figma" may simply not be in it, and
+ * inventing the nearest-looking entry puts a claim on the application that the
+ * candidate never made.
+ */
+async function fillSearchMulti(f, value, ctx = {}) {
+    const wrap = f.labelMatch ? findWrapperByLabel(f.labelMatch)
+        : document.querySelector(f.selector)?.closest('[data-automation-id^="formField-"]');
+    if (!wrap) return { ok: false, reason: 'field-absent' };
+    const input = wrap.querySelector('input[type="text"], input:not([type])');
+    if (!input || input.offsetParent === null) return { ok: false, reason: 'no search box' };
+
+    const chips = () => [...wrap.querySelectorAll('[data-automation-id="selectedItem"]')]
+        .map(c => (c.textContent || '').replace(/\s*×\s*/g, '').trim()).filter(Boolean);
+    const wanted = String(value).split(/[,;|]/).map(v => v.trim()).filter(Boolean).slice(0, f.max || 8);
+    if (!wanted.length) return { ok: false, reason: 'no value' };
+
+    let added = 0;
+    const notes = [];
+    for (const term of wanted) {
+        if (chips().some(c => c.toLowerCase() === term.toLowerCase())) { notes.push(`${term}:already`); continue; }
+        const before = chips().length;
+        await simulateTyping(input, term);
+        await sleep(700);
+        const opts = [...document.querySelectorAll(OPTION_SEL)]
+            .filter(o => o.offsetParent !== null)
+            .filter(o => o.getAttribute('data-automation-id') !== 'selectedItem')
+            .filter(o => !o.closest('[data-automation-id="selectedItemList"]'));
+        const txt = (o) => (o.textContent || '').trim().toLowerCase();
+        const exact = opts.filter(o => txt(o) === term.toLowerCase());
+        const near = opts.filter(o => txt(o).includes(term.toLowerCase()));
+        const pick = exact[0] || (new Set(near.map(txt)).size === 1 ? near[0] : null);
+        if (!pick) { notes.push(`${term}:no-match`); setNativeValue(input, ''); await sleep(200); continue; }
+        const hit = pick.querySelector('input[type="checkbox"], input[type="radio"]')
+            || pick.querySelector('[data-automation-id="promptLeafNode"]') || pick;
+        safeActivate(hit, { source: 'recipe', activation: 'widget-option' }, f.selector || f.labelMatch);
+        // The chip is the only proof. A click this widget ignored looks identical
+        // to one it took, and reporting the difference is the whole point.
+        const deadline = Date.now() + 2000;
+        while (Date.now() < deadline && chips().length === before) await sleep(150);
+        if (chips().length > before) { added++; notes.push(`${term}:ok`); } else notes.push(`${term}:no-effect`);
+        setNativeValue(input, '');
+        await sleep(250);
+    }
+    trace('skills.fill', { field: f.label, wanted: wanted.length, added, detail: notes.join(', ') });
+    if (!added) return { ok: false, reason: `nothing committed (${notes.join(', ')})` };
+    return { ok: true };
+}
+
 async function fillCustomSelect(f, value, ctx = {}) {
-    const trigger = document.querySelector(f.selector);
+    // Some prompts have no stable id at all — Workday gives the language
+    // proficiency field a per-tenant GUID — so they are addressed by their label.
+    const trigger = f.labelMatch ? findFieldByLabel(f.labelMatch) : document.querySelector(f.selector);
     if (!trigger || trigger.offsetParent === null) return { ok: false, reason: 'trigger-absent' };
     const wrap = trigger.closest('[data-automation-id^="formField-"]');
     // Idempotency. Three shapes, all seen in the wild:
