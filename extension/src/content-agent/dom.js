@@ -446,3 +446,49 @@ export function setFileOnInput(el, base64Data, fileName, mimeType = 'application
 // ═══════════════════════════════════════════════════════════════════
 // Phase 3 + 5 + 6: Execute Fill Instructions (enhanced)
 // ═══════════════════════════════════════════════════════════════════
+
+/**
+ * A prompt listbox that is genuinely OPEN — not a committed chip, not a leftover.
+ *
+ * The test used to be `querySelector('[data-automation-id="promptOption"]')`,
+ * which is true on almost every filled Workday page: a COMMITTED chip contains a
+ * promptOption too (measured — the chip for "Company Website" holds
+ * `<p data-automation-id="promptOption">`). So the Escape meant to close a
+ * leftover dropdown fired constantly, and on Workday Escape closes the ACTIVE
+ * MODAL. The agent opened the "Start Your Application" modal, dismissed it on the
+ * next pass, and then reported a modal it could no longer see.
+ *
+ * A real open list has an activeListContainer, or at minimum an option that is
+ * not part of a selected-item chip.
+ */
+export function openPromptListbox() {
+    const vis = (e) => !!(e && e.offsetParent !== null);
+    try {
+        const live = [...document.querySelectorAll('[data-automation-id="activeListContainer"]')].filter(vis);
+        if (live.length) return live[0];
+        const opt = [...document.querySelectorAll('[data-automation-id="promptOption"], [role="option"]')]
+            .filter(vis)
+            .filter(o => o.getAttribute('data-automation-id') !== 'selectedItem')
+            .filter(o => !o.closest('[data-automation-id="selectedItemList"]'));
+        return opt[0] || null;
+    } catch { return null; }
+}
+
+/**
+ * Escape ONLY a dropdown, never a modal.
+ *
+ * Escape is a blunt key: it closes whatever is topmost. When the thing on screen
+ * is the apply-flow modal rather than a listbox, pressing it throws away the step
+ * the agent was about to act on.
+ */
+export function closeOpenDropdown() {
+    const list = openPromptListbox();
+    if (!list) return false;
+    const modal = findActiveModal();
+    // A listbox rendered INSIDE the modal is safe to close; one that is not means
+    // the modal is the topmost layer and Escape would take that instead.
+    if (modal && !modal.contains(list)) return false;
+    (document.activeElement || document.body)?.dispatchEvent?.(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    return true;
+}

@@ -15,7 +15,7 @@
  */
 
 import { AGENT_MAX_ITERATIONS, APPLY_SESSION_TTL_MS, FILL_RETRY_THRESHOLD, POST_ACTION_WAIT_MS } from './constants.js';
-import { safeActivate, sleep } from './dom.js';
+import { closeOpenDropdown, safeActivate, sleep } from './dom.js';
 import { removeProgress, showConfirmation, showProgress, showToast } from './ui.js';
 import { callAgentPlan, callLLMMapping } from './llm.js';
 import { executeFillInstructions } from './fill.js';
@@ -446,11 +446,27 @@ async function runAgentLoop(profile) {
             // Your Application" modal, whose options are <a role="button"> the generic
             // scan misses) to reach the form. Before login/fill; capped so it can't loop.
             if (recipe) {
-                const gw = clickRecipeGateway(recipe, hasCV, gatewayClicks);
+                let gw = clickRecipeGateway(recipe, hasCV, gatewayClicks);
                 if (gw.clicked) {
                     actionsTaken++;
                     showProgress(i + 1, AGENT_MAX_ITERATIONS, `Tiếp tục: ${gw.label}`);
-                    await sleep(1500);
+                    trace('gateway.click', { label: gw.label, chained: 0 });
+                    // A gateway usually OPENS the next gateway — "Apply" raises the
+                    // "Start Your Application" modal, whose own option is the thing
+                    // that actually reaches the form. Take it in the SAME pass while
+                    // it is on screen, instead of dropping out to a full re-observe
+                    // and hoping the modal survives the round trip. It often did not:
+                    // anything that pressed Escape in between dismissed it, and the
+                    // agent then reported a modal that was no longer there.
+                    for (let chain = 1; chain <= 2; chain++) {
+                        await sleep(900);
+                        gw = clickRecipeGateway(recipe, hasCV, gatewayClicks);
+                        if (!gw.clicked) break;
+                        actionsTaken++;
+                        trace('gateway.click', { label: gw.label, chained: chain });
+                        showProgress(i + 1, AGENT_MAX_ITERATIONS, `Tiếp tục: ${gw.label}`);
+                    }
+                    await sleep(1200);
                     continue; // re-observe the screen the gateway led to
                 }
             }
@@ -824,11 +840,9 @@ async function runAgentLoop(profile) {
                     const stepNow = _stepNow;
                     const adv = _adv;
                     if (adv && adv.offsetParent !== null) {
-                        if (document.querySelector('[data-automation-id="promptOption"]')) {
-                            (document.activeElement || document.body)?.dispatchEvent?.(
-                                new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-                            await sleep(250);
-                        }
+                        // Only a real open listbox, and never when the modal is the
+                        // topmost layer — Escape would dismiss the step instead.
+                        if (closeOpenDropdown()) await sleep(250);
                         console.log(`[Copo Apply] recipe advance → ${stepNow.advance}`);
                         // The surrounding condition already excludes the review
                         // step; the policy re-checks it anyway, because on Workday
@@ -1087,11 +1101,7 @@ async function runAgentLoop(profile) {
                     }
                     // A leftover open Workday dropdown popup overlays the page footer
                     // and eats the Next/Continue click — close it before clicking.
-                    if (info.openDropdownOptions > 0) {
-                        (document.activeElement || document.body)?.dispatchEvent?.(
-                            new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-                        await sleep(250);
-                    }
+                    if (info.openDropdownOptions > 0 && closeOpenDropdown()) await sleep(250);
                     // Overlay-aware: Workday covers Next/Continue/Submit buttons with
                     // a "click_filter" div that owns the handler — a plain .click() on
                     // the button is swallowed, so the agent could never advance a step.
