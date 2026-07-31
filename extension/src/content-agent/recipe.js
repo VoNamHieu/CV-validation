@@ -1483,7 +1483,7 @@ async function fillSearchMulti(f, value, ctx = {}) {
      * ones.
      */
     const resetSearchBox = async () => {
-        setNativeValue(input, '');
+        setNativeValue(input, '', { quiet: true });
         await sleep(200);
         await waitForResults(readResultKey, 2000);
     };
@@ -1753,7 +1753,7 @@ async function fillCustomSelect(f, value, ctx = {}) {
             // proficiency field, which opened with three rows and reported
             // "0 shown" because the first rung, "native", is not one of them and
             // narrowed the list to nothing for every rung after it.
-            setNativeValue(filter, '');
+            setNativeValue(filter, '', { quiet: true });
             await sleep(200);
             await simulateTyping(filter, wanted);
             await sleep(450);
@@ -1763,7 +1763,7 @@ async function fillCustomSelect(f, value, ctx = {}) {
             // 3 - Fluent", and no rung of a proficiency ladder is a substring of
             // more than one of them. Fall back to the unfiltered list.
             if (!shown.length) {
-                setNativeValue(filter, '');
+                setNativeValue(filter, '', { quiet: true });
                 await sleep(350);
                 shown = visibleOptions();
             }
@@ -1776,7 +1776,7 @@ async function fillCustomSelect(f, value, ctx = {}) {
         // Every rung typed and nothing matched — try once against the list as it
         // stands with an empty box, in case the filter was the obstacle.
         if (!opt) {
-            setNativeValue(filter, '');
+            setNativeValue(filter, '', { quiet: true });
             await sleep(400);
             for (const wanted of ladder) {
                 opt = uniqueMatch(visibleOptions(), wanted);

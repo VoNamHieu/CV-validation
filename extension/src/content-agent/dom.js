@@ -211,7 +211,7 @@ export function buildUniqueSelector(el) {
 /**
  * Set a value on an input using the native setter to trigger React/Vue reactivity.
  */
-export function setNativeValue(el, value) {
+export function setNativeValue(el, value, { quiet = false } = {}) {
     // Pick the setter for the ELEMENT's own type — calling HTMLInputElement's value
     // setter on a <textarea> (or vice-versa) throws "Illegal invocation" (this hit
     // SmartRecruiters' message <textarea> in a shadow root).
@@ -225,8 +225,15 @@ export function setNativeValue(el, value) {
         el.value = value;
     }
     el.dispatchEvent(new Event('input', { bubbles: true }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-    el.dispatchEvent(new Event('blur', { bubbles: true }));
+    // `quiet` fires input ONLY. change and blur both close a prompt's result
+    // list, so a search box must never be written with them — I rewrote
+    // simulateTyping to route each character through here and it began blurring
+    // after every keystroke, which shut the list before the search could answer
+    // and turned three working fields into "0 shown".
+    if (!quiet) {
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        el.dispatchEvent(new Event('blur', { bubbles: true }));
+    }
 }
 
 /**
@@ -240,14 +247,14 @@ export async function simulateTyping(el, text, { commit = false } = {}) {
     // the search runs on another. Every other fill in this file already goes
     // through setNativeValue; this one did not, which is why typed terms came out
     // wrong.
-    setNativeValue(el, '');
+    setNativeValue(el, '', { quiet: true });
     el.dispatchEvent(new Event('focus', { bubbles: true }));
 
     let typed = '';
     for (const char of text) {
         el.dispatchEvent(new KeyboardEvent('keydown', { key: char, bubbles: true }));
         typed += char;
-        setNativeValue(el, typed);
+        setNativeValue(el, typed, { quiet: true });
         el.dispatchEvent(new KeyboardEvent('keyup', { key: char, bubbles: true }));
         await sleep(30);
     }
