@@ -305,6 +305,25 @@ async def list_unembedded(*, limit: int = 1000) -> list[dict]:
     return rows_to_dicts(rows)
 
 
+async def list_missing_jd(*, limit: int = 500) -> list[dict]:
+    """Active jobs with an empty/thin stored description (JD backfill queue)."""
+    pool = await get_pool()
+    rows = await pool.fetch(
+        "SELECT id, source_url FROM jobs "
+        "WHERE is_active AND length(coalesce(description, '')) < 100 "
+        "AND coalesce(source_url, '') <> '' ORDER BY created_at DESC LIMIT $1",
+        limit,
+    )
+    return rows_to_dicts(rows)
+
+
+async def set_description(job_id: str, description: str) -> None:
+    pool = await get_pool()
+    await pool.execute(
+        "UPDATE jobs SET description = $2 WHERE id = $1", job_id, description,
+    )
+
+
 async def set_embedding(job_id: str, embedding: Sequence[float]) -> None:
     pool = await get_pool()
     await pool.execute(
