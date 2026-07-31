@@ -1202,10 +1202,19 @@ async function inferOptionViaLLM(f, options, profile, cv) {
         // when no such row exists must not become a search for one.
         const match = offered.find(o => o.toLowerCase() === chosen.toLowerCase());
         trace('list.infer', { field: f.label, asked: offered.length, replied: chosen.slice(0, 40), accepted: !!match });
-        return match || null;
+        return {
+            value: match || null,
+            why: match ? 'ok'
+                : chosen ? `model answered "${chosen.slice(0, 30)}" which is not on the list`
+                    : 'model returned no value',
+        };
     } catch (e) {
-        trace('list.infer', { field: f.label, error: (e && e.message) || 'failed' });
-        return null;
+        // The reason matters more than the failure. An expired token and a model
+        // that answered off-list are both "no degree", and only one of them is
+        // fixed by re-syncing the app.
+        const why = (e && e.message) || 'failed';
+        trace('list.infer', { field: f.label, error: why });
+        return { value: null, why: `inference failed: ${why.slice(0, 60)}` };
     }
 }
 
@@ -1370,13 +1379,16 @@ async function fillCustomSelect(f, value, ctx = {}) {
     // choose from the options that are on screen right now — this is the case a
     // string rule cannot serve, where a Vietnamese qualification has to be mapped
     // onto an international list that never names it.
+    let inferNote = '';
     if (!opt && f.infer) {
-        const inferred = await inferOptionViaLLM(
+        const r = await inferOptionViaLLM(
             f, visibleOptions().map(o => (o.textContent || '').trim()), ctx.profile, ctx.cv);
-        if (inferred) {
-            matched = inferred.toLowerCase();
+        inferNote = r?.why || 'not attempted';
+        if (r?.value) {
+            matched = r.value.toLowerCase();
             opt = uniqueMatch(visibleOptions(), matched)
                 || await findInList(visibleOptions, (l) => uniqueMatch(l, matched), `${f.label}:inferred`, matched);
+            if (!opt) inferNote = `model chose "${r.value}" but the row could not be reached`;
         }
     }
     if (!opt) {
@@ -1390,7 +1402,8 @@ async function fillCustomSelect(f, value, ctx = {}) {
         trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); // close, don't block
         return {
             ok: false,
-            reason: `option-not-found (${shown.length} shown${ladder.length ? `, tried ${ladder.length} candidate(s)` : ''})`,
+            reason: `option-not-found (${shown.length} shown${ladder.length ? `, tried ${ladder.length}: ${ladder.join('/')}` : ''}`
+                + `${inferNote ? `; inference: ${inferNote}` : ''})`,
         };
     }
     /** What the field shows right now — a chip, or a button label that is not the
