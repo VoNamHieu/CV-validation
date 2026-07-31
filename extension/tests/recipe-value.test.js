@@ -90,3 +90,25 @@ describe('Degree refuses a subject', () => {
         assert.equal(degree.profileKey, 'highestDegree');
     });
 });
+
+// ── the case no string rule can serve ──────────────────────────────────────
+describe('Degree falls back to inference', () => {
+    const wd = FALLBACK_RECIPES.find(r => r.ats === 'workday');
+    const degree = wd.steps.find(s => s.name === 'My Experience').fields
+        .find(f => f.label === 'Degree');
+
+    test('it is allowed to be inferred', () => {
+        // A Vietnamese CV says "Cử nhân Marketing" and the dropdown offers B.S. /
+        // B.B.A. / L.L.B. and sixteen more. Matching "Bachelor" hits eleven of
+        // them; picking the first invents a discipline. The model chooses, from
+        // the options actually on screen, given the education.
+        assert.equal(degree.infer, true);
+    });
+
+    test('inference does not replace the accept gate', () => {
+        // Both, in order: a value that IS a qualification is used as-is, and only
+        // an unusable one reaches the model. The gate is what stops "Marketing"
+        // being searched for in a list of qualifications.
+        assert.equal(degree.accept, 'qualification');
+    });
+});

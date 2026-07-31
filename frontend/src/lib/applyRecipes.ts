@@ -109,6 +109,12 @@ export interface RecipeField {
      *  starts, at ten seconds an iteration. A rejected value resolves to empty,
      *  which leaves a gap the review names instead. */
     accept?: 'qualification';
+    /** When nothing matches, ask the model to choose from the options actually on
+     *  screen, given the candidate's education. For fields where no string rule
+     *  can work: a Vietnamese qualification ("Cử nhân Marketing") has to be mapped
+     *  onto a list that never names it (B.S. / B.B.A. / L.L.B.). The reply is
+     *  discarded unless it is one of the offered options. */
+    infer?: boolean;
     required?: boolean;
 }
 export interface RecipeStep {
@@ -267,7 +273,7 @@ const WORKDAY: ApplyRecipe = {
                     // SUBJECT on the degree line, so highestDegree arrives as
                     // "Marketing" and the search of a qualification list is doomed
                     // before it starts — ten seconds an iteration, every iteration.
-                    type: 'custom-select', required: true, accept: 'qualification',
+                    type: 'custom-select', required: true, accept: 'qualification', infer: true,
                 },
                 // Measured as REQUIRED on Mondelez and left blank by Workday's own
                 // résumé parse, so the step could not advance without them.

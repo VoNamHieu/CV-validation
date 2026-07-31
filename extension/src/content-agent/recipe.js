@@ -16,6 +16,7 @@
 import { deepFindControl, deepQuery, deepQueryAll, dropFileOnZone, safeActivate, setFileOnInput, setNativeValue, simulateTyping, sleep, waitForElement } from './dom.js';
 import { isThirdPartyApply } from './detect.js';
 import { trace, traceOnce } from './trace.js';
+import { callAgentPlan } from './llm.js';
 
 // Keep in sync with frontend/src/lib/applyRecipes.ts (WORKDAY). Fields verified
 // against real 3M Workday captures (My Information, 2026-07-15 / -22). The
@@ -156,7 +157,12 @@ export const FALLBACK_RECIPES = [
                         // profile this IS the user's answer, and hard-coding
                         // AGENT_DEFAULT flagged their own degree for review. The
                         // ladder only applies when the profile has nothing.
-                        type: 'custom-select', required: true, accept: 'qualification',
+                        // Vietnamese qualifications do not appear on this list at
+                        // all — a CV says "Cử nhân Marketing" and the dropdown
+                        // offers B.S. / B.B.A. / L.L.B. No string rule bridges
+                        // that, so when nothing matches the model is asked to pick
+                        // from the options actually on screen, given the education.
+                        type: 'custom-select', required: true, accept: 'qualification', infer: true,
                     },
                     // Measured as REQUIRED on Mondelez, and left blank by Workday's
                     // own résumé parse — so the step could not advance without them
@@ -813,7 +819,12 @@ export async function applyRecipeFields(recipe, profile, cvData, cv) {
     for (const f of step.fields || []) {
         const val = recipeFieldValue(f, profile, cv);
         const hasLadder = Array.isArray(f.valuePriority) && f.valuePriority.length > 0;
-        if ((val == null || String(val).trim() === '') && !hasLadder) { outcomes.push([f.label, 'skip', 'no value']); continue; }
+        // A field that may be INFERRED is not skipped for having no value — no
+        // value is precisely when the model is worth asking. Everything else with
+        // nothing to fill is left alone.
+        if ((val == null || String(val).trim() === '') && !hasLadder && !f.infer) {
+            outcomes.push([f.label, 'skip', 'no value']); continue;
+        }
         // A fixed `value`/`default` the profile did not supply is the agent's own
         // choice; anything resolved from the profile is the user's.
         const provenance = f.answerSource
@@ -824,6 +835,9 @@ export async function applyRecipeFields(recipe, profile, cvData, cv) {
                 if (r.ok) { filled++; outcomes.push([f.label, 'OK', String(val)]); answers.push({ field: f.label, value: val, source: provenance }); }
                 else if (r.reason === 'already-selected') outcomes.push([f.label, 'done', 'already filled']);
                 else if (r.reason === 'field-absent') outcomes.push([f.label, 'absent', 'not rendered yet']);
+                // "Hiện tại" is not a date. A current role HAS no end date, so
+                // there is nothing to fill and nothing failed.
+                else if (r.reason === 'no value') outcomes.push([f.label, 'skip', 'no end date (current role)']);
                 else outcomes.push([f.label, 'FAIL', r.reason]);
             } else if (f.type === 'radio') {
                 const r = fillRadio(f, val);
@@ -832,7 +846,7 @@ export async function applyRecipeFields(recipe, profile, cvData, cv) {
                 else if (r.reason === 'group-absent') outcomes.push([f.label, 'absent', 'not rendered yet']);
                 else outcomes.push([f.label, 'FAIL', r.reason]);
             } else if (f.type === 'custom-select') {
-                const r = await fillCustomSelect(f, val);
+                const r = await fillCustomSelect(f, val, { profile, cv });
                 if (r.ok) {
                     filled++;
                     outcomes.push([f.label, 'OK', String(r.matched || val)]);
@@ -1140,7 +1154,62 @@ function findFieldByLabel(labelMatch) {
  * actually landed, so the caller can record whether the answer came from the
  * profile or from an agent default.
  */
-async function fillCustomSelect(f, value) {
+/**
+ * Ask the model which of THESE options the candidate's education means.
+ *
+ * Vietnamese qualifications do not line up with the list an international ATS
+ * offers: a CV says "Cử nhân Marketing" or just "Marketing", and the dropdown
+ * offers B.S. / B.B.A. / L.L.B. and sixteen more. No string rule bridges that —
+ * matching "Bachelor" hits eleven of them, and picking the first is inventing a
+ * discipline the candidate never claimed.
+ *
+ * So the choice is made by the model, constrained three ways: it may only answer
+ * with an option the page is actually offering, it is given the education rather
+ * than asked to guess, and a reply that is not on the list is discarded. The
+ * agent-plan route already receives `credentials` (education + languages) for
+ * exactly this inference, so this needs no new endpoint.
+ */
+async function inferOptionViaLLM(f, options, profile, cv) {
+    const offered = [...new Set(options.map(o => String(o).trim()).filter(Boolean))].slice(0, 60);
+    if (offered.length < 2) return null;
+    try {
+        const plan = await callAgentPlan(
+            {
+                url: location.href,
+                formFields: [{
+                    label: f.label,
+                    selector: f.selector,
+                    required: true,
+                    componentType: 'custom-select',
+                    value: '',
+                    options: offered.map(t => ({ value: t, text: t })),
+                }],
+                buttons: [], errors: [], blockers: [], unfilledRequired: [f.label],
+            },
+            profile,
+            [],
+            false,
+            {
+                education: (cv?.education || []).slice(0, 4),
+                languages: (cv?.languages || []).slice(0, 4),
+            },
+        );
+        const raw = (plan?.instructions || [])
+            .map(i => i && (i.value ?? i.text))
+            .find(v => v != null && String(v).trim() !== '');
+        const chosen = raw == null ? '' : String(raw).trim();
+        // Only an option the page offers. A model answering "Bachelor's Degree"
+        // when no such row exists must not become a search for one.
+        const match = offered.find(o => o.toLowerCase() === chosen.toLowerCase());
+        trace('list.infer', { field: f.label, asked: offered.length, replied: chosen.slice(0, 40), accepted: !!match });
+        return match || null;
+    } catch (e) {
+        trace('list.infer', { field: f.label, error: (e && e.message) || 'failed' });
+        return null;
+    }
+}
+
+async function fillCustomSelect(f, value, ctx = {}) {
     const trigger = document.querySelector(f.selector);
     if (!trigger || trigger.offsetParent === null) return { ok: false, reason: 'trigger-absent' };
     const wrap = trigger.closest('[data-automation-id^="formField-"]');
@@ -1297,6 +1366,19 @@ async function fillCustomSelect(f, value) {
         }
     }
     if (opt) opt = await revealOption(opt, visibleOptions, (list) => uniqueMatch(list, matched), f.label);
+    // Nothing matched. If the field is allowed to be INFERRED, ask the model to
+    // choose from the options that are on screen right now — this is the case a
+    // string rule cannot serve, where a Vietnamese qualification has to be mapped
+    // onto an international list that never names it.
+    if (!opt && f.infer) {
+        const inferred = await inferOptionViaLLM(
+            f, visibleOptions().map(o => (o.textContent || '').trim()), ctx.profile, ctx.cv);
+        if (inferred) {
+            matched = inferred.toLowerCase();
+            opt = uniqueMatch(visibleOptions(), matched)
+                || await findInList(visibleOptions, (l) => uniqueMatch(l, matched), `${f.label}:inferred`, matched);
+        }
+    }
     if (!opt) {
         trace('list.noMatch', {
             field: f.label,
