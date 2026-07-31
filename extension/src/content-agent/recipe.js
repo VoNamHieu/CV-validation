@@ -1798,6 +1798,18 @@ async function fillCustomSelect(f, value, ctx = {}) {
         }
         if (r?.value) {
             matched = r.value.toLowerCase();
+            // RE-OPEN first. Asking the model takes seconds, and the prompt does
+            // not stay open through them — measured: inference returned a valid
+            // option and then every click reported no-effect at all four levels,
+            // because by then there was no list to click in. The deterministic
+            // path never hit this: it decides in milliseconds, with the list still
+            // on screen.
+            if (!visibleOptions().length) {
+                trace('list.reopen', { field: f.label, why: 'prompt closed while the model was asked' });
+                safeActivate(trigger, { source: 'recipe', activation: 'widget-open' }, f.selector);
+                const reopenBy = Date.now() + 4000;
+                while (!visibleOptions().length && Date.now() < reopenBy) await sleep(150);
+            }
             opt = uniqueMatch(visibleOptions(), matched)
                 || await findInList(visibleOptions, (l) => uniqueMatch(l, matched), `${f.label}:inferred`, matched);
             if (!opt) inferNote = `model chose "${r.value}" but the row could not be reached`;
@@ -1903,6 +1915,15 @@ async function fillCustomSelect(f, value, ctx = {}) {
         // item array, else a paged walk) belongs on every level, not just the
         // first; using a bare match inside a submenu meant anything past the first
         // rendered window read as "not there".
+        // A closed list is not a missing option. Re-open before concluding
+        // anything, or four clicks land on nothing and report it as the row
+        // refusing them.
+        if (!visibleOptions().length) {
+            safeActivate(trigger, { source: 'recipe', activation: 'widget-open' }, f.selector);
+            const by = Date.now() + 3000;
+            while (!visibleOptions().length && Date.now() < by) await sleep(150);
+            if (!visibleOptions().length) { attempts.push(`level${level}:list-closed`); break; }
+        }
         let cands = matchAll(visibleOptions(), matched);
         if (!cands.length && level > 0) {
             const found = await findInList(
