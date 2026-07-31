@@ -404,6 +404,22 @@ def _urls_match(target: str, candidate: str) -> bool:
     return target == candidate or candidate.startswith(target) or target.startswith(candidate)
 
 
+def resolve_jd_detail_only(jd_url: str) -> str | None:
+    """Just the fast by-URL detail adapters (each gates on the URL first, so a
+    non-matching URL returns None with no HTTP). No list-fetch fallback — for the
+    JD backfill, where the fallback is useless (those list adapters ship
+    description="") and its pagination would make the backfill slow."""
+    for name, fn in _DETAIL_ADAPTERS:
+        try:
+            txt = fn(jd_url)
+        except Exception as e:  # never break the backfill
+            logger.info(f"[jd_resolver:{name}] {jd_url} → {str(e)[:80]}")
+            txt = None
+        if txt and len(txt) >= _MIN_DESC:
+            return txt
+    return None
+
+
 def resolve_jd_via_ats(jd_url: str) -> str | None:
     """Return JD text for `jd_url` via a known ATS API, or None on any miss."""
     # Fast path: by-URL detail adapters (single job, one request) for platforms

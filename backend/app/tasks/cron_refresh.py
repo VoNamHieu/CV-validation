@@ -172,6 +172,15 @@ async def _run() -> None:
         await incidents_svc.report("cron_error", module="cron.embed_backfill", error=e)
 
     try:
+        from app.services.jd_backfill import jd_backfill
+        logger.info("[cron] JD backfill starting…")
+        jd_filled = await jd_backfill()
+        logger.info("[cron] JD backfill done: %d job(s) got a stored JD", jd_filled)
+    except Exception as e:
+        logger.exception("[cron] JD backfill failed — continuing with remaining steps")
+        await incidents_svc.report("cron_error", module="cron.jd_backfill", error=e)
+
+    try:
         from app.services.seniority_backfill import seniority_backfill
         logger.info("[cron] seniority backfill starting…")
         filled = await seniority_backfill()
