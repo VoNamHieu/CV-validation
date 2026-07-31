@@ -103,6 +103,12 @@ export interface RecipeField {
      *  know about. Applying it at fill time makes the result independent of when
      *  the profile was last synced. Never applied to a fixed `value`. */
     normalize?: 'name';
+    /** Values the field can possibly take. A degree dropdown lists
+     *  QUALIFICATIONS, and CVs write the SUBJECT on the same line — so
+     *  `highestDegree` arrives as "Marketing" and the search is doomed before it
+     *  starts, at ten seconds an iteration. A rejected value resolves to empty,
+     *  which leaves a gap the review names instead. */
+    accept?: 'qualification';
     required?: boolean;
 }
 export interface RecipeStep {
@@ -256,7 +262,12 @@ const WORKDAY: ApplyRecipe = {
                     // Degree", so a fallback rung would pick a DISCIPLINE the
                     // candidate never claimed. Only their own stated degree may
                     // match; absent that the field goes to them at review.
-                    type: 'custom-select', required: true,
+                    //
+                    // `accept` is what stops the OTHER failure: a CV writes the
+                    // SUBJECT on the degree line, so highestDegree arrives as
+                    // "Marketing" and the search of a qualification list is doomed
+                    // before it starts — ten seconds an iteration, every iteration.
+                    type: 'custom-select', required: true, accept: 'qualification',
                 },
                 // Measured as REQUIRED on Mondelez and left blank by Workday's own
                 // résumé parse, so the step could not advance without them.

@@ -67,3 +67,26 @@ describe('work experience is fillable from the CV', () => {
         assert.ok(!exp.fields.find(f => f.label === 'Work To').required);
     });
 });
+
+// ── a value the field cannot take is worse than none ───────────────────────
+describe('Degree refuses a subject', () => {
+    const wd = FALLBACK_RECIPES.find(r => r.ats === 'workday');
+    const degree = wd.steps.find(s => s.name === 'My Experience').fields
+        .find(f => f.label === 'Degree');
+
+    test('it declares what it can accept', () => {
+        // A degree dropdown lists QUALIFICATIONS. CVs write the SUBJECT on the
+        // same line, so highestDegree arrives as "Marketing" and the search cannot
+        // succeed — at ten seconds an iteration, every iteration, before reporting
+        // option-not-found. Empty leaves a gap the review names instead.
+        assert.equal(degree.accept, 'qualification');
+    });
+
+    test('the gate is at FILL time, not only at sync time', () => {
+        // The web app applies the same rule when it builds the profile, but that
+        // runs at sync — a profile synced before it shipped still says
+        // "Marketing", and "re-sync from the web app" is not a fix a user should
+        // have to know about.
+        assert.equal(degree.profileKey, 'highestDegree');
+    });
+});

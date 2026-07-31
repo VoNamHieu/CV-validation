@@ -156,7 +156,7 @@ export const FALLBACK_RECIPES = [
                         // profile this IS the user's answer, and hard-coding
                         // AGENT_DEFAULT flagged their own degree for review. The
                         // ladder only applies when the profile has nothing.
-                        type: 'custom-select', required: true,
+                        type: 'custom-select', required: true, accept: 'qualification',
                     },
                     // Measured as REQUIRED on Mondelez, and left blank by Workday's
                     // own résumé parse — so the step could not advance without them
@@ -1075,14 +1075,44 @@ function normalizeNameCase(raw) {
         .join('');
 }
 
+/**
+ * Values a field will accept at all.
+ *
+ * A degree dropdown lists QUALIFICATIONS — B.S., B.B.A., L.L.B. — and CVs
+ * routinely write the SUBJECT on the same line, so `highestDegree` arrives as
+ * "Marketing". Searching a qualification list for a subject cannot succeed, and
+ * the failure is expensive: ten seconds of paging per iteration, every
+ * iteration, before reporting option-not-found.
+ *
+ * The web app was taught the same rule, but that runs at SYNC time — a profile
+ * synced before it shipped still says "Marketing", and telling the user to
+ * re-sync is not a fix. Checking here makes it independent of that.
+ */
+const ACCEPTS = {
+    qualification: /bachelor|master|doctor|phd|associate|diploma|certificate|high school|\bb\.?[sae]\b|\bm\.?[sa]\b|mba|llb|cử nhân|thạc sĩ|tiến sĩ|kỹ sư|cao đẳng|trung cấp/i,
+};
+
 function recipeFieldValue(f, profile, cv) {
     // A fixed `value` is the recipe author's literal choice — never rewritten.
     if (f.value != null && f.value !== '') return f.value;
-    const shape = (v) => (f.normalize === 'name' ? normalizeNameCase(v) : v);
+    const gate = f.accept ? ACCEPTS[f.accept] : null;
+    // A value the field cannot possibly take is worse than none: empty leaves a
+    // gap the review names, where a wrong one buys a doomed search.
+    const shape = (v) => {
+        const out = f.normalize === 'name' ? normalizeNameCase(v) : v;
+        if (gate && !gate.test(String(out))) return null;
+        return out;
+    };
     const p = profile?.[f.profileKey];
-    if (p != null && String(p).trim() !== '') return shape(p);
+    if (p != null && String(p).trim() !== '') {
+        const v = shape(p);
+        if (v != null) return v;
+    }
     const fromCv = readCvPath(cv, f.cvPath);
-    if (fromCv != null && String(fromCv).trim() !== '') return shape(String(fromCv));
+    if (fromCv != null && String(fromCv).trim() !== '') {
+        const v = shape(String(fromCv));
+        if (v != null) return v;
+    }
     return f.default ?? '';
 }
 
