@@ -1360,8 +1360,19 @@ async function fillCustomSelect(f, value) {
             trace('list.result', { field: f.label, picked: matched, onPage: settled, levels: level, stuck: true });
             return { ok: true, matched };
         }
-        let cands = level === 0 && !matchAll(visibleOptions(), matched).length
-            ? [opt] : matchAll(visibleOptions(), matched);
+        // A SUBMENU can be as long as the top level — "Job Board" opens onto
+        // hundreds of named boards — so the row may be off-screen here exactly as
+        // it can be at level 0. The scroll stack (index jump off the widget's own
+        // item array, else a paged walk) belongs on every level, not just the
+        // first; using a bare match inside a submenu meant anything past the first
+        // rendered window read as "not there".
+        let cands = matchAll(visibleOptions(), matched);
+        if (!cands.length && level > 0) {
+            const found = await findInList(
+                visibleOptions, (list) => uniqueMatch(list, matched), `${f.label}@L${level}`, matched);
+            if (found) cands = matchAll(visibleOptions(), matched);
+        }
+        if (!cands.length && level === 0) cands = [opt];
         if (!cands.length) { attempts.push(`level${level}:no-row`); break; }
 
         // Inside a submenu the wanted label appears TWICE: once on the "‹ Company
