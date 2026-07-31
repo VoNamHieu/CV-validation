@@ -263,6 +263,37 @@ def _phenom_detail(jd_url: str) -> str | None:
     return body
 
 
+def _avature_detail(jd_url: str) -> str | None:
+    # Avature detail: {host}/{locale}/(externaljobs|jobs)/JobDetail/[{slug}/]{id}.
+    # The list adapter has no JD and a full-page crawl adds chrome. The JD lives in
+    # the Avature `.article__content__view` field(s) inside `.section--details`
+    # (the sibling `.article__content` sidebar holds only Job-ID/Posted-since
+    # metadata), so extract just those, skipping metadata-headed fields.
+    if "/JobDetail/" not in jd_url:
+        return None
+    try:
+        r = requests.get(jd_url, headers={"User-Agent": _UA}, timeout=_TIMEOUT)
+        if r.status_code != 200:
+            return None
+        h = r.text
+    except Exception:
+        return None
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(h, "html.parser")
+    sec = soup.select_one(".section--details") or soup
+    meta = re.compile(r"^\s*(job id|posted since|organization|company)\b", re.I)
+    parts, seen = [], set()
+    for el in sec.select(".article__content__view"):
+        t = _strip_html(str(el))
+        if len(t) > 250 and not meta.match(t) and t not in seen:
+            seen.add(t)
+            parts.append(t)
+    body = "\n\n".join(parts).strip()
+    if len(body) < _MIN_DESC:
+        return None
+    return body
+
+
 _DETAIL_ADAPTERS = (
     ("mbbank", _mbbank_detail),
     ("greenhouse", _greenhouse_detail),
@@ -276,6 +307,7 @@ _DETAIL_ADAPTERS = (
     ("workday", _workday_detail),
     ("oracle-hcm", _oracle_hcm_detail),
     ("eightfold", _eightfold_detail),
+    ("avature", _avature_detail),
 )
 
 
