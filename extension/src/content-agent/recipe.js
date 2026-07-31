@@ -1704,14 +1704,41 @@ async function fillCustomSelect(f, value, ctx = {}) {
         // prompt is nothing at all, so a required field like "How Did You Hear
         // About Us?" could never be answered on tenants that render it this way.
         for (const wanted of ladder) {
+            // CLEAR between rungs. Without this each rung types on top of the
+            // last, and on a prompt that really does filter the box ends up
+            // holding "nativenativefluent…" — measured on the language
+            // proficiency field, which opened with three rows and reported
+            // "0 shown" because the first rung, "native", is not one of them and
+            // narrowed the list to nothing for every rung after it.
+            setNativeValue(filter, '');
+            await sleep(200);
             await simulateTyping(filter, wanted);
             await sleep(450);
             shown = visibleOptions();
+            // A filter that narrowed to NOTHING has hidden the answer rather than
+            // found it: this prompt's rows are "1 - Beginner / 2 - Intermediate /
+            // 3 - Fluent", and no rung of a proficiency ladder is a substring of
+            // more than one of them. Fall back to the unfiltered list.
+            if (!shown.length) {
+                setNativeValue(filter, '');
+                await sleep(350);
+                shown = visibleOptions();
+            }
             // Typing does not narrow every prompt. Mondelez's Field of Study
             // takes the text and still lists all majors from "Accounting" —
             // so the typed rung has to be searched for, not just read off.
             opt = await findInList(visibleOptions, (list) => uniqueMatch(list, wanted), `${f.label}:${wanted}`, wanted);
             if (opt) { matched = wanted; break; }
+        }
+        // Every rung typed and nothing matched — try once against the list as it
+        // stands with an empty box, in case the filter was the obstacle.
+        if (!opt) {
+            setNativeValue(filter, '');
+            await sleep(400);
+            for (const wanted of ladder) {
+                opt = uniqueMatch(visibleOptions(), wanted);
+                if (opt) { matched = wanted; break; }
+            }
         }
     } else {
         for (const wanted of ladder) {
