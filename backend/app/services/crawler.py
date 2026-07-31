@@ -286,7 +286,8 @@ def clean_html(html: str) -> str:
     """Strip noise before analysis — reduces 60-80% of content."""
     soup = BeautifulSoup(html, "html.parser")
 
-    for tag in soup(["script", "style", "nav", "footer", "header", "aside", "noscript", "svg", "iframe"]):
+    for tag in soup(["script", "style", "nav", "footer", "header", "aside", "noscript",
+                     "svg", "iframe", "button"]):
         tag.decompose()
 
     # Match WHOLE class tokens, never bare substrings. A substring match on a
@@ -295,7 +296,9 @@ def clean_html(html: str) -> str:
     # page → empty text. Word boundaries keep real noise (nav/footer/…) while
     # leaving content wrappers intact.
     _NOISE_RX = re.compile(
-        r"\b(nav|navbar|navigation|footer|header|sidebar|advert|ads|cookie|banner|popup)\b",
+        r"\b(nav|navbar|navigation|footer|header|sidebar|advert|ads|cookie|banner|popup|"
+        r"share|social|breadcrumb|related|similar|subscribe|newsletter|toolbar|pagination|"
+        r"skip-?link|consent|modal|overlay|back-?to-?top|apply-?bar|apply-?button|job-actions)\b",
         re.I,
     )
     # A class match alone must NOT remove the page's content. Two false-positive
@@ -315,7 +318,24 @@ def clean_html(html: str) -> str:
 
     text = soup.get_text(separator="\n", strip=True)
     lines = [l.strip() for l in text.splitlines() if l.strip()]
+    # Drop page-chrome lines that survive the DOM pass (inline banners, apply/share
+    # CTAs, cookie/legal footers) — gated to SHORT lines so a JD sentence that
+    # merely starts with one of these words is never cut.
+    lines = [l for l in lines if not (len(l) < 60 and _CHROME_LINE.search(l))]
     return "\n".join(lines)
+
+
+# Surgical: only matches unambiguous chrome, and only applied to short lines.
+_CHROME_LINE = re.compile(
+    r"(google chrome|microsoft edge|apple safari|mozilla firefox|internet explorer"
+    r"|skip to (?:main )?content|all rights reserved|©\s*\d{4}|powered by workday"
+    r"|i'?m interested|apply now|apply for this|save (?:this )?job|add to job cart"
+    r"|share this|refer a friend|copy to clipboard|open wechat|scan qr code|copy the link"
+    r"|follow us|new career portal|create your (?:new )?profile"
+    r"|privacy notice|cookie (?:notice|settings|policy)|we use cookies"
+    r"|back to (?:search|results|top))",
+    re.I,
+)
 
 
 # ── ORCHESTRATOR ──────────────────────────────────────────────────────────────
