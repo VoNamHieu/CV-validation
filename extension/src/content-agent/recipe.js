@@ -1572,12 +1572,27 @@ async function fillSearchMulti(f, value, ctx = {}) {
             }
         }
         if (!pick) { notes.push(`${term}:no-match`); await resetSearchBox(); continue; }
-        const hit = pick.querySelector('input[type="checkbox"], input[type="radio"]')
-            || pick.querySelector('[data-automation-id="promptLeafNode"]') || pick;
-        safeActivate(hit, { source: 'recipe', activation: 'widget-option' }, f.selector || f.labelMatch);
-        // The chip is the only proof. A click this widget ignored looks identical
-        // to one it took, and reporting the difference is the whole point.
+        // Try each plausible target and keep the one that takes.
+        //
+        // A result row nests a styled checkbox, a leaf node and a label, and which
+        // of them owns the handler is not visible from the markup — measured:
+        // "Product Roadmapping" matched exactly, the row highlighted, the checkbox
+        // stayed empty and no chip appeared, while two other skills committed on
+        // the same code path. Clicking the input directly is a guess, and it was
+        // the wrong one often enough to lose skills silently.
+        const targets = [
+            pick.querySelector('[data-automation-id="promptLeafNode"]'),
+            pick.querySelector('input[type="checkbox"], input[type="radio"]'),
+            pick.querySelector('label'),
+            pick,
+        ].filter((el, i, arr) => el && arr.indexOf(el) === i);
         const deadline = Date.now() + 2500;
+        for (const target of targets) {
+            safeActivate(target, { source: 'recipe', activation: 'widget-option' }, f.selector || f.labelMatch);
+            const tryBy = Date.now() + 900;
+            while (Date.now() < tryBy && chips().length === before) await sleep(120);
+            if (chips().length > before) break;
+        }
         while (Date.now() < deadline && chips().length === before) await sleep(150);
         if (chips().length > before) { added++; notes.push(`${term}:ok`); } else {
             notes.push(`${term}:no-effect`);
@@ -1587,6 +1602,7 @@ async function fillSearchMulti(f, value, ctx = {}) {
             // merely contains the words — and those need different fixes.
             trace('skills.noEffect', {
                 term,
+                triedTargets: targets.map(t => t.getAttribute?.('data-automation-id') || t.tagName).join(' → '),
                 clickedText: (pick.textContent || '').trim().slice(0, 40),
                 clickedAid: pick.getAttribute('data-automation-id') || pick.tagName,
                 hitWasInner: hit !== pick,
