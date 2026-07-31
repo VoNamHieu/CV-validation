@@ -263,6 +263,31 @@ def _phenom_detail(jd_url: str) -> str | None:
     return body
 
 
+def _aeon_detail(jd_url: str) -> str | None:
+    # tuyendung.aeon.com.vn/job-detail/{id} → the eHiring detail API returns the
+    # JD in clean fields (the list adapter ships description="").
+    m = re.search(r"tuyendung\.aeon\.com\.vn/job-detail/(\d+)", jd_url)
+    if not m:
+        return None
+    try:
+        r = requests.get(f"https://api-tuyendung.aeon.com.vn/api/hiring/{m.group(1)}",
+                         headers={"User-Agent": _UA, "Accept": "application/json"}, timeout=_TIMEOUT)
+        if r.status_code != 200:
+            return None
+        d = (r.json() or {}).get("data") or {}
+    except Exception:
+        return None
+    if not isinstance(d, dict):
+        return None
+    parts = [_strip_html(d.get(k) or "") for k in (
+        "description", "role_and_responsibilities", "key_activity",
+        "qualification_and_requirement", "preferred_skills", "benefit")]
+    body = "\n\n".join(p for p in parts if p).strip()
+    if len(body) < _MIN_DESC:
+        return None
+    return f"Job Title: {d.get('title', '')}\n\n{body}".strip()
+
+
 def _avature_detail(jd_url: str) -> str | None:
     # Avature detail: {host}/{locale}/(externaljobs|jobs)/JobDetail/[{slug}/]{id}.
     # The list adapter has no JD and a full-page crawl adds chrome. The JD lives in
@@ -308,6 +333,7 @@ _DETAIL_ADAPTERS = (
     ("oracle-hcm", _oracle_hcm_detail),
     ("eightfold", _eightfold_detail),
     ("avature", _avature_detail),
+    ("aeon", _aeon_detail),
 )
 
 
