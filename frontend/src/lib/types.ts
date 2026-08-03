@@ -64,6 +64,10 @@ export interface PersonalInfo {
     date_of_birth: string;
     gender: string;
     nationality: string;
+    // Ethnic group ("Kinh") — VN forms (and Workday VN tenants' Race/Ethnicity
+    // prompt) ask it as an administrative fact; the decline phrasings the agent
+    // otherwise uses don't exist in that country-specific option list.
+    ethnicity: string;
     marital_status: string;
 }
 
@@ -138,7 +142,7 @@ export const EMPTY_CONTACT: ContactInfo = {
 };
 
 export const EMPTY_PERSONAL: PersonalInfo = {
-    date_of_birth: '', gender: '', nationality: '', marital_status: '',
+    date_of_birth: '', gender: '', nationality: '', ethnicity: '', marital_status: '',
 };
 
 export const EMPTY_EMPLOYMENT: EmploymentInfo = {

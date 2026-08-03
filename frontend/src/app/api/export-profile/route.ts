@@ -22,6 +22,7 @@ export async function GET() {
             dateOfBirth: 'string (YYYY-MM-DD)',
             gender: 'string',
             nationality: 'string',
+            ethnicity: 'string (ethnic group, e.g. Kinh)',
             maritalStatus: 'string',
             addressProvince: 'string',
             addressDistrict: 'string',
@@ -32,6 +33,7 @@ export async function GET() {
             highestDegree: 'string',
             postalCode: 'string',
             noticePeriod: 'string',
+            gpa: 'string (education GPA, e.g. 3.6/4.0)',
             workAuthorized: 'string',
             requiresSponsorship: 'string',
             currentSalary: 'string',
@@ -40,6 +42,7 @@ export async function GET() {
             desiredLocations: 'string',
             desiredSalary: 'string',
             coverLetter: 'string',
+            applyMessage: 'string (short note for an ATS message-to-hiring-team box)',
             skills: 'string (comma-separated)',
         } satisfies Record<keyof ExtensionProfile, string>,
     });

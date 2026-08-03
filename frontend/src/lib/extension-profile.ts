@@ -13,6 +13,7 @@ export interface ExtensionProfile {
     dateOfBirth: string;
     gender: string;
     nationality: string;
+    ethnicity: string;
     maritalStatus: string;
     addressProvince: string;
     addressDistrict: string;
@@ -26,6 +27,11 @@ export interface ExtensionProfile {
     // guessing, so they can be collected once and reused everywhere.
     postalCode: string;
     noticePeriod: string;
+    // education[0].gpa — Workday asks "Overall Result (GPA)" as REQUIRED on
+    // some tenants and no résumé parse supplies it; the extension's grade rule
+    // answers ONLY from this (never invented — a plausible number is a
+    // fabricated academic record).
+    gpa: string;
     workAuthorized: string;
     requiresSponsorship: string;
     currentSalary: string;
@@ -34,6 +40,13 @@ export interface ExtensionProfile {
     desiredLocations: string;
     desiredSalary: string;
     coverLetter: string;
+    // The short note for an ATS's free-text "message to the hiring team" box.
+    // Deliberately SEPARATE from coverLetter: the two are different lengths for
+    // different destinations, and pointing that box at the letter (or worse, at
+    // the CV summary, which is what it fell back to) puts the wrong shape of
+    // text on a real application. Empty when nothing was generated — the agent
+    // leaves an optional box empty rather than filling it with something else.
+    applyMessage: string;
     skills: string;
 }
 
@@ -144,7 +157,12 @@ export function splitLegalName(raw: string): { firstName: string; lastName: stri
 // `coverLetterOverride` is the per-job tailored letter (from /api/ai/cover-letter),
 // preferred over the generic CV summary so the auto-apply agent fills a letter
 // written for THIS job. Falls back to the summary when no letter was generated.
-export function cvToExtensionProfile(cv: CVData, coverLetterOverride?: string): ExtensionProfile {
+// `applyMessageOverride` is the short per-job note for an ATS message box.
+export function cvToExtensionProfile(
+    cv: CVData,
+    coverLetterOverride?: string,
+    applyMessageOverride?: string,
+): ExtensionProfile {
     const { firstName, lastName } = splitLegalName(cv.name ?? "");
 
     const contact = cv.contact ?? ({} as CVData["contact"]);
@@ -181,6 +199,8 @@ export function cvToExtensionProfile(cv: CVData, coverLetterOverride?: string): 
         dateOfBirth: personal.date_of_birth ?? "",
         gender: personal.gender ?? "",
         nationality: personal.nationality ?? "",
+        ethnicity: personal.ethnicity ?? "",
+        gpa: cv.education?.[0]?.gpa ?? "",
         maritalStatus: personal.marital_status ?? "",
         addressProvince: contact.address_province ?? "",
         addressDistrict: contact.address_district ?? "",
@@ -199,6 +219,15 @@ export function cvToExtensionProfile(cv: CVData, coverLetterOverride?: string): 
         workAuthorized: preferences.work_authorized ?? "",
         requiresSponsorship: preferences.requires_sponsorship ?? "",
         coverLetter: (coverLetterOverride && coverLetterOverride.trim()) || (cv.summary ?? ""),
+        // A generated message wins; a letter the user wrote is an acceptable
+        // second (long, but genuinely addressed to this employer). The CV
+        // summary is NOT a third option — it is written about the candidate in
+        // the abstract and says nothing to a hiring team, which is exactly the
+        // text that has been going into these boxes.
+        applyMessage:
+            (applyMessageOverride && applyMessageOverride.trim())
+            || (coverLetterOverride && coverLetterOverride.trim())
+            || "",
         skills: (cv.skills ?? []).join(", "),
     };
 }

@@ -19,7 +19,9 @@ import { applyCvFieldEdit } from '@/lib/cv-inline-edit';
 import { diffCvChanges, type CvImprovement, type CvSuggestion } from '@/lib/cv-improvements';
 import CvTemplatePicker from '@/components/CvTemplatePicker';
 import ScoreRing from '@/components/ScoreRing';
-import { optimizeCvVariants, renderCvPdf, generateCoverLetter } from '@/lib/api';
+import { optimizeCvVariants, renderCvPdf, generateCoverLetter, generateApplyMessage } from '@/lib/api';
+import { recipeWantsApplyMessage } from '@/lib/applyRecipes';
+import { detectJdLang } from '@/lib/jd-lang';
 import type {
     CVData, JDData, MatchResult, CategoryScore, RequirementStatus,
     ContactInfo, PersonalInfo, EmploymentInfo, JobPreferences,
@@ -572,8 +574,47 @@ export default function StepEditCv() {
     const buildProfile = useCallback(
         // coverLetter (per-job, on-demand) overrides the generic CV summary so
         // the auto-apply agent fills a letter tailored to THIS job.
-        (cv: CVData, coverLetter?: string) => cvToExtensionProfile(mergeProfile(cv), coverLetter),
+        // applyMessage is the short note for an ATS free-text box (see below).
+        (cv: CVData, coverLetter?: string, applyMessage?: string) =>
+            cvToExtensionProfile(mergeProfile(cv), coverLetter, applyMessage),
         [mergeProfile],
+    );
+
+    /* ─── The note for an ATS's "message to the hiring team" box ───
+       Written from the CV + THIS job's JD, automatically, at dispatch — there is
+       no button, because the box is on a form the user never sees before the
+       agent reaches it, and a manual step there is a step nobody would take.
+
+       Three guards keep it from being wasteful or wrong:
+       · only when the target's recipe actually HAS such a box (generation costs
+         a credit, and most forms have none);
+       · only once — cached on the entry, so a retry or a second apply is free;
+       · never blocking — a failure logs and the apply proceeds with the box
+         empty, which is what an OPTIONAL field should degrade to. Losing an
+         application over an optional note would be the worse bug.
+
+       Returns the message to use, or undefined. */
+    const ensureApplyMessage = useCallback(
+        async (entry: JDEntry | undefined | null): Promise<string | undefined> => {
+            if (!entry) return undefined;
+            if (entry.applyMessage?.trim()) return entry.applyMessage;
+            if (!entry.jdData) return undefined;
+            if (!recipeWantsApplyMessage(entry.applyUrl || entry.source)) return undefined;
+            const cv = entry.optimizedCv ?? cvData;
+            if (!cv) return undefined;
+            // The posting's own language, not the editor's letter picker — this
+            // text is read by whoever wrote the ad, and nobody is choosing for it.
+            const lang = detectJdLang(entry.jdData);
+            try {
+                const msg = await generateApplyMessage(cv, entry.jdData, entry.matchResult, lang);
+                updateJdEntry(entry.id, { applyMessage: msg, applyMessageLang: lang });
+                return msg;
+            } catch (err) {
+                console.warn('[Copo] ensureApplyMessage failed:', err);
+                return undefined;
+            }
+        },
+        [cvData, updateJdEntry],
     );
 
     /* ─── Ensure a job entry has a rendered CV PDF ───
@@ -638,10 +679,11 @@ export default function StepEditCv() {
             return;
         }
 
-        const profile = buildProfile(cv, currentEntry?.coverLetter);
-
         setAutoApplyStatus('checking');
         setAutoApplyMessage('Đang kiểm tra Extension...');
+
+        const applyMessage = await ensureApplyMessage(currentEntry);
+        const profile = buildProfile(cv, currentEntry?.coverLetter, applyMessage);
 
         try {
             // No pre-flight liveness gate here: the job was already crawled +
@@ -768,11 +810,14 @@ export default function StepEditCv() {
                 missingCv.push(entry.jobTitle || entry.company || entry.label || 'Job');
                 continue;
             }
+            // Per job, and only for the ones whose form has a message box —
+            // a batch of ten jobs on message-less forms generates nothing.
+            const applyMessage = await ensureApplyMessage(entry);
             jobs.push({
                 jobUrl: entry.applyUrl || entry.source!,
                 jobTitle: entry.jobTitle || 'Unknown',
                 company: entry.company || entry.label || '',
-                profile: buildProfile(entry.optimizedCv!, entry.coverLetter),
+                profile: buildProfile(entry.optimizedCv!, entry.coverLetter, applyMessage),
                 cvFileBase64: pdf.base64,
                 cvFileName: pdf.fileName,
             });
@@ -864,11 +909,12 @@ export default function StepEditCv() {
                     base64 = data.base64;
                     outFilename = data.filename;
                 }
+                const applyMessage = await ensureApplyMessage(entry);
                 jobs.push({
                     jobUrl: entry.applyUrl || entry.source!,
                     jobTitle: entry.jobTitle || 'Unknown',
                     company: entry.company || entry.label || '',
-                    profile: buildProfile(cv, entry.coverLetter),
+                    profile: buildProfile(cv, entry.coverLetter, applyMessage),
                     cvFileBase64: base64,
                     cvFileName: outFilename,
                 });
@@ -1119,7 +1165,10 @@ export default function StepEditCv() {
                             // base cvData so the extension still gets something.
                             const cv = currentEntry?.optimizedCv ?? cvData;
                             if (!cv) return;
-                            const profile = buildProfile(cv, currentEntry?.coverLetter);
+                            // Cached message only — a manual sync is not an apply,
+                            // and generating one here would spend a credit on a
+                            // button the user pressed to copy their profile.
+                            const profile = buildProfile(cv, currentEntry?.coverLetter, currentEntry?.applyMessage);
                             navigator.clipboard.writeText(JSON.stringify(profile, null, 2)).catch(() => { });
 
                             // Wait for the extension's real ACK — a fire-and-forget
@@ -2619,6 +2668,8 @@ export function PersonalInfoSection({
                         onChange={(v) => patchPersonal({ gender: v })} />
                     <ProfileInput label="Quốc tịch" value={personal.nationality}
                         onChange={(v) => patchPersonal({ nationality: v })} />
+                    <ProfileInput label="Dân tộc" value={personal.ethnicity}
+                        onChange={(v) => patchPersonal({ ethnicity: v })} placeholder="Kinh" />
                     <ProfileInput label="Tình trạng hôn nhân" value={personal.marital_status}
                         onChange={(v) => patchPersonal({ marital_status: v })} />
 

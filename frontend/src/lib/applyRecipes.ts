@@ -119,6 +119,15 @@ export interface RecipeField {
      *  onto a list that never names it (B.S. / B.B.A. / L.L.B.). The reply is
      *  discarded unless it is one of the offered options. */
     infer?: boolean;
+    /** Free-text the agent WRITES when the profile carries none, instead of
+     *  leaving the box empty. Only 'message' so far: the note an ATS asks for
+     *  the hiring team, which no stored field can answer because it has to be
+     *  about THIS job. The web app normally generates it before dispatch (it
+     *  holds the JD); this is the fallback for an apply that never went through
+     *  the editor, and it is why the field is not simply skipped for having no
+     *  value. Bound by the same anti-fabrication rule as every other generator:
+     *  CV facts only. */
+    generate?: 'message';
     required?: boolean;
 }
 export interface RecipeStep {
@@ -383,7 +392,11 @@ const WORKDAY: ApplyRecipe = {
 const SMARTRECRUITERS: ApplyRecipe = {
     ats: 'smartrecruiters',
     label: 'SmartRecruiters',
-    version: 1,
+    // v2: the Message box reads `applyMessage` and can be written by the agent.
+    // Must match the bundled recipe's version in the extension — the merge takes
+    // the remote whenever remoteV >= bundledV, so a stale deploy here silently
+    // downgrades the field the extension just shipped.
+    version: 2,
     verified: false,
     singlePage: true,
     hostPattern: 'smartrecruiters\\.com',
@@ -413,8 +426,13 @@ const SMARTRECRUITERS: ApplyRecipe = {
                 { label: 'Phone', selector: '[data-test="personal-info-phone"]', control: 'input[type="tel"]', profileKey: 'phone', type: 'shadow-text', required: true },
                 // City autocomplete (≥3 chars → async place lookup → pick a match).
                 { label: 'Location', selector: '[data-test="location-autocomplete"]', profileKey: 'addressProvince', default: 'Ho Chi Minh City', type: 'autocomplete', required: true },
-                // Optional free-text note to the hiring manager → use the tailored letter.
-                { label: 'Message', selector: '[data-test="hiring-manager-message-text"], [data-test="hiring-manager-message-container"]', profileKey: 'coverLetter', type: 'shadow-text' },
+                // Optional free-text note to the hiring team. Verified live on a
+                // Bosch posting (2026-08-01): <oc-textarea data-test=…> wraps an
+                // <spl-textarea> whose SHADOW root holds the real 10-row
+                // <textarea>; aria-required=false, no maxlength. Filled from the
+                // short per-job message the web app generates, or written by the
+                // agent when it dispatched without one.
+                { label: 'Message', selector: '[data-test="hiring-manager-message-text"], [data-test="hiring-manager-message-container"]', profileKey: 'applyMessage', type: 'shadow-text', generate: 'message' },
             ],
             // No `advance`: single-page form. The agent stops after filling.
         },
@@ -441,4 +459,21 @@ export function recipeForUrl(url?: string | null): ApplyRecipe | null {
     let host = '';
     try { host = new URL(url).host.toLowerCase(); } catch { host = String(url).toLowerCase(); }
     return APPLY_RECIPES.find(r => new RegExp(r.hostPattern, 'i').test(host)) || null;
+}
+
+/**
+ * Does this URL's form have a free-text box worth writing a message for?
+ *
+ * The web app generates that message before dispatch, and generation costs a
+ * credit — so it must not run for the many forms that have no such box. The
+ * recipe already knows, field by field, so asking it is both free and exactly
+ * as correct as the recipe is. An unrecognised host answers false: no recipe
+ * means the generic agent path, where the extension decides at fill time
+ * (it can see the form; we cannot).
+ */
+export function recipeWantsApplyMessage(url?: string | null): boolean {
+    const recipe = recipeForUrl(url);
+    if (!recipe) return false;
+    return (recipe.steps || []).some(step =>
+        (step.fields || []).some(f => f.profileKey === 'applyMessage' || f.generate === 'message'));
 }
