@@ -127,6 +127,32 @@ describe('source question', () => {
             resolveAnswer(q('How did you hear about us?'), ['Employee Referral', 'Recruiter'], {}),
             null);
     });
+
+    test('falls back to Other when the catalogue has no website entry at all', () => {
+        // Measured on P&G: their source list simply has no company-website
+        // option. "Other" is a truthful neutral claim; a stranded required
+        // field helps nobody (user decision 2026-08-03).
+        const a = resolveAnswer(
+            q('How did you hear about us?'),
+            ['Employee Referral', 'Recruiter', 'Job Fair', 'Other'],
+            {});
+        assert.equal(a.value, 'Other');
+        assert.equal(a.source, ANSWER_SOURCE.AGENT_DEFAULT);
+    });
+
+    test('the Other rung never matches by substring', () => {
+        // "another" CONTAINS "other" — an anchored rung must not resolve to
+        // "Another job board", which is a different claim entirely.
+        assert.equal(
+            resolveAnswer(q('How did you hear about us?'), ['Employee Referral', 'Another job board'], {}),
+            null);
+    });
+
+    test('a real website option still beats Other', () => {
+        const a = resolveAnswer(
+            q('How did you hear about us?'), ['Other', 'Careers Website'], {});
+        assert.equal(a.value, 'Careers Website');
+    });
 });
 
 describe('company-relationship questions default to No', () => {

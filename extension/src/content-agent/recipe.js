@@ -94,10 +94,17 @@ export const FALLBACK_RECIPES = [
                         // (placeholder "Search"). Measured on both. The comma list
                         // matches whichever exists — only one does per tenant.
                         label: 'How did you hear',
-                        selector: '[data-automation-id="formField-source"] input, [data-automation-id="formField-source"] button',
+                        selector: '[data-automation-id="formField-source"] input, [data-automation-id="formField-source"] button, [data-automation-id="formField-source"] select',
                         valuePriority: [
                             'Company Website', 'Company Careers Website', 'Employer Website',
                             'Careers Website', 'Company Webpage', 'Website', 'Webpage', 'Online',
+                            // Final rung by user decision (2026-08-03, hit on P&G where
+                            // the catalogue has no company-website entry at all):
+                            // "Other" is a truthful neutral claim, better than a
+                            // stranded required field. '=' anchors the match — a plain
+                            // substring tier would resolve "other" to "Another job
+                            // board" via the letters inside "another".
+                            '=Other', '=Khác',
                         ],
                         type: 'custom-select', required: true, answerSource: 'AGENT_DEFAULT',
                     },
@@ -971,7 +978,20 @@ export async function inferFillDynamicField(gap, profile, cv) {
 // A field is RELEASED to the generic layers only on structured failure: the
 // recipe exhausted its strategies (FAIL) or its selector found nothing
 // (absent) — so a stale recipe cannot hold a field hostage either.
-const _fieldStatus = new Map();   // field label → { status, why, at }
+const _fieldStatus = new Map();   // field label → { status, why, at, fails, tried[] }
+
+/**
+ * How many passes a field may keep failing before the recipe stops holding the
+ * step for it.
+ *
+ * Two is deliberate. One pass is not evidence — half the widgets on a Workday
+ * step legitimately fail their first attempt because the row had not rendered,
+ * a stale popup covered it, or the section was still being added, and all of
+ * those fix themselves on the next pass. A THIRD identical failure is not going
+ * to become a success; by then the field needs a different actor, not another
+ * try with the same one.
+ */
+export const FIELD_FAIL_BUDGET = 2;
 
 /** Last recipe verdict for a field, as recorded by the most recent pass. */
 export function recipeFieldStatus(label) { return _fieldStatus.get(label) || null; }
@@ -981,6 +1001,64 @@ export function recipeReleased(label) {
     const s = _fieldStatus.get(label);
     return !!s && (s.status === 'FAIL' || s.status === 'absent');
 }
+
+/**
+ * Fields that FAILED this pass and still have retries left.
+ *
+ * The step must not advance while this is non-empty. Advancing is how a failed
+ * field became invisible: the recipe reported FAIL, nothing consumed that
+ * verdict, the observer did not list the widget as unfilled-required (it shows
+ * a value, or the tenant did not mark it required), and the loop clicked
+ * "Save and Continue" over the top of it. The application went to the next step
+ * carrying a field the agent KNEW it had not filled.
+ *
+ * Bounded on purpose: once a field is out of budget it drops off this list, the
+ * step is allowed to move, and the failure travels to the user in the review
+ * instead of deadlocking the run. Blocking forever and advancing blindly are
+ * both wrong; the budget is where they meet.
+ */
+export function recipeBlockingFields() {
+    const out = [];
+    for (const [label, s] of _fieldStatus) {
+        if (s.status === 'FAIL' && (s.fails || 0) <= FIELD_FAIL_BUDGET) {
+            out.push({ label, why: s.why, fails: s.fails || 1 });
+        }
+    }
+    return out;
+}
+
+/**
+ * Record one pass's verdicts, counting how many times each field has failed IN A
+ * ROW and what it failed with.
+ *
+ * The streak is the part that was missing. Every pass re-ran the identical
+ * strategy against the identical widget and re-derived the identical failure,
+ * with nothing anywhere noticing that it had seen this before — so "try
+ * something else" had no trigger to fire on, and the loop's only remaining move
+ * was to advance. `tried` keeps the distinct reasons so the escalation can say
+ * what has already been ruled out rather than starting from nothing.
+ */
+export function recordOutcomes(outcomes) {
+    for (const [label, status, why] of outcomes) {
+        const prev = _fieldStatus.get(label);
+        if (status === 'FAIL') {
+            const tried = prev?.status === 'FAIL' ? [...(prev.tried || [])] : [];
+            if (why && !tried.includes(why)) tried.push(why);
+            const fails = (prev?.status === 'FAIL' ? (prev.fails || 0) : 0) + 1;
+            _fieldStatus.set(label, { status, why, at: Date.now(), fails, tried });
+            trace('field.fail', { field: label, why, streak: fails, budget: FIELD_FAIL_BUDGET, tried: tried.join(' → ') });
+        } else {
+            // Any non-FAIL verdict ends the streak — including 'absent', because a
+            // widget that stopped resolving is a different situation from one that
+            // resolves and refuses, and carrying the old count into it would spend
+            // a budget the new situation never used.
+            _fieldStatus.set(label, { status, why, at: Date.now(), fails: 0, tried: [] });
+        }
+    }
+}
+
+/** Forget every field verdict — a new step/page starts its own budget. */
+export function resetFieldStatus() { _fieldStatus.clear(); }
 
 /** formField wrapper element → recipe field label. MENU-wide, matching the
  *  fill scope: any known field whose control resolves on THIS page is the
@@ -1009,17 +1087,45 @@ export function recipeOwnedWrappers(recipe) {
  * like a stray one). Refuse rather than queue — a caller that collided wants to
  * know, and the loop simply retries next iteration.
  */
-let _fillInFlight = null;
+// The lock lives on `window`, NOT in this module.
+//
+// A module-scoped lock only guards callers that share this module — and the case
+// it was written for does not. A document can end up with two copies of the
+// content script (declarative injection plus a programmatic re-inject after a
+// redirect), each with its own module scope and therefore its own lock, and the
+// two passes then interleave on the same widgets: a skill picked from the other
+// pass's still-settling result list, a language committed twice, two summaries
+// for one step disagreeing about what happened. `window` is shared by every copy
+// in this document's isolated world, so a lock there is the only one that holds.
+//
+// The `init()` claim in index.js closes the same race one level up; this is the
+// backstop, because a lost race there costs a wrong entry on a submitted
+// application and the cost of an extra guard is a boolean.
+const LOCK = '__copoFillLock';
+// A pass that throws past its own `finally` (context invalidated mid-fill) must
+// not wedge the page forever. Longer than any real pass: the slowest measured is
+// a full My Experience with a virtualized language list, well under a minute.
+const LOCK_STALE_MS = 120000;
 
 export async function applyRecipeFields(recipe, profile, cvData, cv) {
-    if (_fillInFlight) {
+    const held = window[LOCK];
+    if (held && Date.now() - held.at < LOCK_STALE_MS) {
         console.warn('[Copo Recipe] a fill is already running on this page — skipping this one. '
-            + '(Auto Apply loop + copoStep() at the same time? Let one finish.)');
-        trace('recipe.busy', { url: location.pathname.slice(-40) });
+            + '(Two agent instances, or the Auto Apply loop + copoStep() at once? Let one finish.)');
+        trace('recipe.busy', { url: location.pathname.slice(-40), heldForMs: Date.now() - held.at });
         return { matched: false, filled: 0, busy: true };
     }
-    _fillInFlight = _applyRecipeFields(recipe, profile, cvData, cv);
-    try { return await _fillInFlight; } finally { _fillInFlight = null; }
+    if (held) trace('recipe.lockStale', { heldForMs: Date.now() - held.at });
+    // Claimed synchronously — no await between reading the lock and taking it.
+    const token = { at: Date.now() };
+    window[LOCK] = token;
+    try {
+        return await _applyRecipeFields(recipe, profile, cvData, cv);
+    } finally {
+        // Only release OUR claim: a stale-takeover means someone else owns it now,
+        // and clearing it blindly would hand the page to a third pass.
+        if (window[LOCK] === token) window[LOCK] = null;
+    }
 }
 
 async function _applyRecipeFields(recipe, profile, cvData, cv) {
@@ -1379,11 +1485,17 @@ async function _applyRecipeFields(recipe, profile, cvData, cv) {
     // FAIL for every recipe field each pass (why filled=0 etc.).
     // The ownership registry: what the generic layers consult before touching a
     // field this recipe covers (see recipeReleased above).
-    for (const [label, status, why] of outcomes) _fieldStatus.set(label, { status, why, at: Date.now() });
+    recordOutcomes(outcomes);
     console.log(`[Copo Recipe] "${stepName}" fields →`, outcomes.map(([l, s]) => `${l}:${s}`).join('  ·  '));
     if (failed.length) {
+        // The streak, not just the reason: "Language — no-row" on its own reads as
+        // a fresh problem every pass, and the whole point is to see that it is the
+        // same one for the third time.
         console.warn(`[Copo Recipe] ✗ FAILED (${stepName}):`,
-            failed.map(([l, , why]) => `${l} — ${why}`).join('  |  '));
+            failed.map(([l, , why]) => {
+                const n = _fieldStatus.get(l)?.fails || 1;
+                return `${l} — ${why}${n > 1 ? ` [lần ${n}/${FIELD_FAIL_BUDGET + 1}${n > FIELD_FAIL_BUDGET ? ', hết lượt → nhường cho lớp khác' : ''}]` : ''}`;
+            }).join('  |  '));
     }
     // The same verdicts into the trace. A step that will not advance is always
     // one of these: a field the recipe never had, one whose selector no longer
@@ -1810,6 +1922,139 @@ function deriveLanguages(cv, profile) {
 }
 
 /**
+ * One entry per language, whatever the CV called it.
+ *
+ * The derive step already refuses to add a language the CV's own section names,
+ * but nothing deduped that section against ITSELF — and CVs write the same
+ * language twice all the time: "Vietnamese" beside "Tiếng Việt", "English"
+ * beside "English (IELTS 7.5)". Every entry got a row, and Workday refuses the
+ * whole step: "Duplicate language entries are not allowed."
+ *
+ * Folded by language, not by string. Vietnamese and English are named
+ * explicitly because their two spellings share no substring; everything else
+ * folds on the bare name, so a parenthesised score or a dashed certificate
+ * cannot claim a row of its own. Where two entries fold together the one that
+ * states a level wins — that is the entry with something to say.
+ */
+export function dedupeLanguages(langs) {
+    const canon = (name) => {
+        const s = String(name || '').trim().toLowerCase();
+        if (/vietnamese|tiếng việt|tieng viet/.test(s)) return 'vietnamese';
+        if (/english|tiếng anh|tieng anh/.test(s)) return 'english';
+        return s.replace(/[(（].*$/, '').replace(/[-–—:,].*$/, '').replace(/\s+/g, ' ').trim();
+    };
+    const byName = new Map();
+    for (const l of langs || []) {
+        const k = canon(l?.language);
+        if (!k) continue;
+        const prev = byName.get(k);
+        if (!prev || (!prev.level && l.level)) byName.set(k, l);
+    }
+    return [...byName.values()];
+}
+
+/**
+ * The per-row Delete control of a repeating section, given any field in the row.
+ *
+ * Workday renders one per panel; tenants disagree about the automation id and
+ * about whether it is labelled or icon-only, so this asks the question three
+ * ways and takes the first answer INSIDE the row's own panel. Scoping matters
+ * more than matching: a delete button found outside the panel belongs to a
+ * different row, and pressing it removes the wrong entry.
+ */
+function rowDeleteButton(fieldWrap) {
+    const panel = fieldWrap?.closest?.(
+        '[data-automation-id="panelSet-Item"], [data-automation-id^="panelSet"], li, fieldset, section');
+    if (!panel) return null;
+    const vis = (e) => !!(e && e.offsetParent !== null);
+    const byId = [...panel.querySelectorAll('[data-automation-id*="elete"]')].filter(vis)
+        .find(b => b.tagName === 'BUTTON' || b.getAttribute('role') === 'button');
+    if (byId) return byId;
+    return [...panel.querySelectorAll('button, [role="button"]')].filter(vis).find(b => {
+        const t = `${b.getAttribute('aria-label') || ''} ${b.textContent || ''}`.trim().toLowerCase();
+        return /^delete\b|^remove\b|^xo[áa]\b/.test(t);
+    }) || null;
+}
+
+/**
+ * Remove language rows that cannot validate: duplicates, and blanks past what
+ * the CV needs.
+ *
+ * Filling more carefully does not fix a section that is ALREADY wrong — Workday
+ * refuses the whole step on "Duplicate language entries are not allowed", and a
+ * blank row is a required Language* nobody can answer. Whatever produced them
+ * (an earlier build that over-grew the section, two passes racing each other,
+ * the candidate's own half-finished edit), the only move that lets the step
+ * advance is to take them out.
+ *
+ * Conservative by construction: the FIRST row holding a given language always
+ * stays, only later copies go. A row holding a language the CV never mentioned
+ * is left alone — the candidate may have added it themselves, and deleting
+ * someone's own answer is worse than leaving a row we did not plan.
+ */
+async function pruneLanguageRows(wantRows, outcomes) {
+    const vis = (e) => !!(e && e.offsetParent !== null);
+    const wraps = () => [...document.querySelectorAll('[data-automation-id="formField-language"]')].filter(vis);
+    const valueOf = (w) => {
+        const btn = w.querySelector('button[aria-haspopup="listbox"], button');
+        const t = String(btn?.textContent || w.querySelector('input')?.value || '').trim();
+        return /^select one$|^$/i.test(t) ? '' : t;
+    };
+    if (wraps().length < 2) return;
+
+    let removed = 0;
+    for (let guard = 0; guard < 4; guard++) {
+        const rows = wraps();
+        const seen = new Set();
+        let victim = null; let why = '';
+        for (const w of rows) {
+            const v = valueOf(w).toLowerCase();
+            if (v) {
+                // First occurrence keeps the language; a second one is the row
+                // the form is complaining about.
+                if (seen.has(v)) { victim = w; why = `duplicate "${valueOf(w)}"`; break; }
+                seen.add(v);
+            }
+        }
+        // No duplicate left — drop blanks only while there are more rows than the
+        // CV has languages. A blank row inside the wanted count is about to be
+        // filled, not surplus.
+        if (!victim && rows.length > Math.max(1, wantRows)) {
+            const blank = [...rows].reverse().find(w => !valueOf(w));
+            if (blank) { victim = blank; why = 'surplus blank row'; }
+        }
+        if (!victim) break;
+
+        const del = rowDeleteButton(victim);
+        if (!del) {
+            trace('lang.prune', { action: why, result: 'no delete control on the row' });
+            outcomes.push(['Languages (prune)', 'FAIL', `${why} — no delete control`]);
+            break;
+        }
+        const before = rows.length;
+        if (!safeActivate(del, { source: 'recipe', activation: 'page-action' }, '[lang-row-delete]')) {
+            trace('lang.prune', { action: why, result: 'policy-denied' });
+            break;
+        }
+        const by = Date.now() + 3000;
+        while (wraps().length >= before && Date.now() < by) await sleep(150);
+        if (wraps().length >= before) {
+            // The click did nothing. Stop rather than hammering a control that
+            // is not the one — repeated presses on the wrong button is how a row
+            // the candidate wanted disappears.
+            trace('lang.prune', { action: why, result: 'row count unchanged — giving up' });
+            break;
+        }
+        removed++;
+        trace('lang.prune', { action: why, result: 'removed', rowsLeft: wraps().length });
+    }
+    if (removed) {
+        outcomes.push(['Languages (prune)', 'OK', `removed ${removed} row(s)`]);
+        console.warn(`[Copo Recipe] dọn ${removed} dòng Languages thừa/trùng`);
+    }
+}
+
+/**
  * EVERY language the CV names, each row consistent with itself.
  *
  * Two measured defects: the Languages schema was single-row (English with an
@@ -1841,6 +2086,19 @@ async function fillLanguageRows(cv, outcomes, profile) {
     else {
         langs.push({ language: 'Vietnamese', level: 'Native' });
         trace('lang.derived', { language: 'Vietnamese', level: 'Native', evidence: 'VN-market default' });
+    }
+
+    // ── ONE ENTRY PER LANGUAGE, BEFORE ANYTHING TOUCHES THE FORM ──
+    {
+        const deduped = dedupeLanguages(langs);
+        if (deduped.length !== langs.length) {
+            trace('lang.dedup', {
+                before: langs.map(l => l.language).join(', '),
+                after: deduped.map(l => l.language).join(', '),
+            });
+        }
+        langs.length = 0;
+        langs.push(...deduped);
     }
     const vis = (e) => !!(e && e.offsetParent !== null);
     const langWraps = () => [...document.querySelectorAll('[data-automation-id="formField-language"]')].filter(vis);
@@ -1875,20 +2133,46 @@ async function fillLanguageRows(cv, outcomes, profile) {
         return { plans, remaining };
     };
 
-    // Grow the section until every unclaimed language has a row — cap 3 rows.
-    let { remaining } = buildPlans();
-    let guard = 0;
-    while (remaining.length && langWraps().length < 3 && guard < 5) {
-        guard++;
+    // ── GROW ONLY WHEN THERE IS NOWHERE TO PUT THE NEXT LANGUAGE ──
+    //
+    // This loop used to read `remaining` ONCE, before it started, and never
+    // recompute it — and `buildPlans` skips empty rows entirely (`if (!v)
+    // continue`), so a blank row already on the page counted for nothing. A CV
+    // with a single language therefore kept clicking Add against a condition
+    // that could not change, until it hit the cap: three rows for one language.
+    //
+    // Those spare blanks are what the duplicate came out of. Each is a row the
+    // form marks Language*, and each looked to the next pass like somewhere to
+    // put an unclaimed language.
+    //
+    // The question is capacity, not row count: how many languages still have no
+    // home, versus how many rows are free to take one. Recomputed every
+    // iteration so the row just added is counted.
+    const freeRowCount = () => langWraps().filter(w => !rowValue(w)).length;
+    const growGuard = 5;
+    for (let g = 0; g < growGuard; g++) {
+        const { remaining: unplaced } = buildPlans();
+        const need = unplaced.length - freeRowCount();
+        if (need <= 0) break;                       // a blank row is already waiting
+        if (langWraps().length >= 3) break;         // cap
         const btn = sectionAddButton('Languages');
         if (!btn) break;
         if (!safeActivate(btn, { source: 'recipe', activation: 'page-action' }, '[data-automation-id="add-button"]')) break;
         const had = langWraps().length;
         const by = Date.now() + 4000;
         while (langWraps().length <= had && Date.now() < by) await sleep(200);
-        if (langWraps().length <= had) break;
-        trace('section.addRow', { section: 'Languages', rows: langWraps().length, want: Math.min(langs.length, 3) });
+        if (langWraps().length <= had) break;       // click added nothing — don't spin
+        trace('section.addRow', {
+            section: 'Languages', rows: langWraps().length,
+            unplaced: unplaced.length, free: freeRowCount(), want: Math.min(langs.length, 3),
+        });
     }
+
+    // Whatever the cause — an earlier build's over-growing, two passes racing, a
+    // half-finished manual edit — a section that already carries duplicate or
+    // surplus rows will not validate, and no amount of careful filling fixes it.
+    // Clean it before filling.
+    await pruneLanguageRows(langs.length, outcomes);
 
     const scope = sectionScope('Languages');
     const inScope = scope ? scope.inSection : () => true;
@@ -1904,9 +2188,11 @@ async function fillLanguageRows(cv, outcomes, profile) {
     let filled = 0;
     // Rebuilt AFTER growing: adding a row can re-render the section, and a
     // plan keyed to a replaced node would silently drop its row.
+    // Rebuilt after growing AND after pruning — both change the row set, and a
+    // plan keyed to a node either of them replaced would silently drop its row.
     const rebuilt = buildPlans();
     const plans = rebuilt.plans;
-    remaining = rebuilt.remaining;
+    const remaining = rebuilt.remaining;
     const rows = langWraps();
     for (let i = 0; i < rows.length; i++) {
         const wrap = rows[i];
@@ -2890,11 +3176,54 @@ async function fillSearchMulti(f, value, ctx = {}) {
     return { satisfied: false, changed: false, reason: `unresolved (${notes.join(', ')})` };
 }
 
+/**
+ * The ONE-ACTION select shape: a native <select> has no popup to open and no
+ * option nodes to hunt — choose, fire change, read back. Measured on P&G,
+ * where the source question is a plain <select> and the prompt path spent its
+ * whole open-timeout waiting for a listbox that never exists. Same ladder,
+ * same matching discipline: exact, then unambiguous prefix, then unambiguous
+ * substring — and an anchored '=' rung never reaches the substring tier.
+ */
+function fillNativeSelect(sel, f, value) {
+    const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const options = [...sel.options]
+        .filter(o => norm(o.textContent) && !/^select one$|^-+$/.test(norm(o.textContent)));
+    const current = sel.selectedIndex >= 0 ? sel.options[sel.selectedIndex] : null;
+    if (current && String(current.value || '').trim() !== ''
+        && norm(current.textContent) && norm(current.textContent) !== 'select one') {
+        return { ok: false, reason: 'already-selected' };
+    }
+    const ladder = [...new Set([norm(value), ...(f.valuePriority || []).map(norm)].filter(Boolean))];
+    for (const rung of ladder) {
+        const anchored = rung.startsWith('=');
+        const w = anchored ? rung.slice(1) : rung;
+        const set = (l) => new Set(l.map(o => norm(o.textContent))).size;
+        let hit = options.find(o => norm(o.textContent) === w) || null;
+        if (!hit) {
+            const prefix = options.filter(o => norm(o.textContent).startsWith(w));
+            if (prefix.length && set(prefix) === 1) hit = prefix[0];
+        }
+        if (!hit && !anchored) {
+            const contains = options.filter(o => norm(o.textContent).includes(w));
+            if (contains.length && set(contains) === 1) hit = contains[0];
+        }
+        if (hit) {
+            setNativeValue(sel, hit.value);   // input + change + blur — the framework path
+            trace('list.result', { field: f.label, picked: norm(hit.textContent), onPage: 'native-select', stuck: sel.value === hit.value });
+            if (sel.value === hit.value) return { ok: true, matched: (hit.textContent || '').trim() };
+            return { ok: false, reason: 'select did not take the value' };
+        }
+    }
+    return { ok: false, reason: `option-not-found (native select, ${options.length} options, tried ${ladder.length}: ${ladder.join('/')})` };
+}
+
 async function fillCustomSelect(f, value, ctx = {}) {
     // Some prompts have no stable id at all — Workday gives the language
     // proficiency field a per-tenant GUID — so they are addressed by their label.
     const trigger = f.labelMatch ? findFieldByLabel(f.labelMatch, f.labelDeny) : document.querySelector(f.selector);
     if (!trigger || trigger.offsetParent === null) return { ok: false, reason: 'trigger-absent' };
+    // The one-action shape needs none of the prompt machinery below.
+    if (trigger.tagName === 'SELECT') return fillNativeSelect(trigger, f, value);
     const wrap = trigger.closest('[data-automation-id^="formField-"]');
     // Idempotency. Three shapes, all seen in the wild:
     //   · a button-select stores the chosen option's id in the button's `value`
@@ -3050,7 +3379,12 @@ async function fillCustomSelect(f, value, ctx = {}) {
     // "Thái" vs a hypothetical "Thai") resolving exactly as before.
     const fold = (s) => String(s).normalize('NFD').replace(/[\u0300-\u036f]/g, '')
         .replace(/\u0111/g, 'd').replace(/[\u2018\u2019\u0060]/g, "'");
-    const matchAll = (list, wanted) => {
+    const matchAll = (list, rawWanted) => {
+        // A rung written '=Other' is ANCHORED: exact or prefix only, never the
+        // contains tier — "other" lives inside "another", and a substring hit
+        // on "Another job board" is a wrong claim, not a fallback.
+        const anchored = rawWanted.startsWith('=');
+        const wanted = anchored ? rawWanted.slice(1) : rawWanted;
         const tier = (pred) => list.filter(pred);
         const wf = fold(wanted);
         let cands = tier(o => txt(o) === wanted);
@@ -3065,7 +3399,7 @@ async function fillCustomSelect(f, value, ctx = {}) {
             let prefix = tier(o => txt(o).startsWith(wanted));
             if (!prefix.length) prefix = tier(o => fold(txt(o)).startsWith(wf));
             if (prefix.length && distinct(prefix) === 1) cands = prefix;
-            else {
+            else if (!anchored) {
                 let contains = tier(o => txt(o).includes(wanted));
                 if (!contains.length) contains = tier(o => fold(txt(o)).includes(wf));
                 if (contains.length && distinct(contains) === 1) cands = contains;
@@ -3096,7 +3430,7 @@ async function fillCustomSelect(f, value, ctx = {}) {
             // narrowed the list to nothing for every rung after it.
             setNativeValue(filter, '', { quiet: true });
             await sleep(200);
-            await simulateTyping(filter, wanted);
+            await simulateTyping(filter, wanted.replace(/^=/, ''));   // the '=' anchors matching, it is not text
             await sleep(450);
             // Enter RUNS the search on a search-shaped filter (Field of Study:
             // typing alone leaves the 300-row catalogue unfiltered) — but on a
@@ -3234,7 +3568,7 @@ async function fillCustomSelect(f, value, ctx = {}) {
         const only = opt.querySelector('input[type="radio"], input[type="checkbox"]') || opt;
         const okOnce = safeActivate(only, { source: 'recipe', activation: 'widget-option' }, f.selector);
         trace('list.result', { field: f.label, picked: matched, onPage: '(no wrapper to verify)', stuck: null });
-        return okOnce ? { ok: true, matched } : { ok: false, reason: 'policy-denied' };
+        return okOnce ? { ok: true, matched: matched.replace(/^=/, '') } : { ok: false, reason: 'policy-denied' };
     }
 
     // TRY each node that carries this label, and keep whichever actually commits.
@@ -3294,7 +3628,7 @@ async function fillCustomSelect(f, value, ctx = {}) {
         const settled = readCommitted();
         if (settled && settled !== before) {
             trace('list.result', { field: f.label, picked: matched, onPage: settled, levels: level, stuck: true });
-            return { ok: true, matched };
+            return { ok: true, matched: matched.replace(/^=/, '') };
         }
         // A SUBMENU can be as long as the top level — "Job Board" opens onto
         // hundreds of named boards — so the row may be off-screen here exactly as
@@ -3372,7 +3706,7 @@ async function fillCustomSelect(f, value, ctx = {}) {
                 await sleep(150);
             }
             trace('list.result', { field: f.label, picked: matched, onPage: now, levels: level + 1, stuck: true });
-            return { ok: true, matched };
+            return { ok: true, matched: matched.replace(/^=/, '') };
         }
         // No commit. Did the click DRILL IN instead? A changed row set means a
         // submenu opened and the next pass should match inside it.
@@ -3444,7 +3778,7 @@ async function fillCustomSelect(f, value, ctx = {}) {
                 if (now2) {
                     attempts.push('keyboard:committed');
                     trace('list.result', { field: f.label, picked: matched, onPage: now2, levels: attempts.length, via: 'keyboard', stuck: true });
-                    return { ok: true, matched };
+                    return { ok: true, matched: matched.replace(/^=/, '') };
                 }
                 break;
             }

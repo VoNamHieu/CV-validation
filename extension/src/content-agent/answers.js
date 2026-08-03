@@ -152,6 +152,11 @@ export const ANSWER_RULES = [
         candidates: [
             'company website', 'company careers website', 'employer website',
             'careers website', 'company webpage', 'website', 'webpage', 'online',
+            // Final rung by user decision (2026-08-03, hit on P&G whose catalogue
+            // has no company-website entry): "Other" is a truthful neutral claim.
+            // '=' anchors the match — substring would resolve "other" to
+            // "Another job board" via the letters inside "another".
+            '=other', '=khác',
         ],
     },
 ];
@@ -196,16 +201,21 @@ export function resolveAnswer(field, options = [], profile = {}) {
 
     // 2/3. The first candidate the form actually offers. Exact match first so a
     // list containing both "No" and "Not applicable" cannot resolve "no" to the
-    // wrong entry by substring.
-    for (const cand of rule.candidates) {
-        const hit = offered.find(o => o.n === cand) || offered.find(o => o.n.includes(cand));
+    // wrong entry by substring. A candidate written '=other' is ANCHORED: exact
+    // or prefix only — "other" lives inside "another", and a substring hit on
+    // "Another job board" is a wrong claim, not a fallback.
+    for (const raw of rule.candidates) {
+        const anchored = raw.startsWith('=');
+        const cand = anchored ? raw.slice(1) : raw;
+        const hit = offered.find(o => o.n === cand)
+            || offered.find(o => (anchored ? o.n.startsWith(cand) : o.n.includes(cand)));
         if (hit) return { value: hit.raw, source: ANSWER_SOURCE.AGENT_DEFAULT, kind: rule.kind };
     }
 
     // A free-text field with a rule but no options: only answer when the rule has
     // a single unambiguous candidate (Yes/No questions rendered as text are rare).
     if (offered.length === 0 && rule.candidates.length) {
-        return { value: rule.candidates[0], source: ANSWER_SOURCE.AGENT_DEFAULT, kind: rule.kind };
+        return { value: rule.candidates[0].replace(/^=/, ''), source: ANSWER_SOURCE.AGENT_DEFAULT, kind: rule.kind };
     }
 
     // 4. Nothing defensible. Better an empty field the review names than an

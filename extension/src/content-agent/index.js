@@ -23,7 +23,7 @@ import { auditRequiredBlockers, observePageState, scrollAndCollect } from './obs
 import { findApplyButton, isApplicationFormPage, summarizeState, waitForJobPageSignal } from './detect.js';
 import { detectLoginWall, handleLoginWall } from './login.js';
 import { trace, traceClear, traceDump, traceOnce } from './trace.js';
-import { applyRecipeFields, atFinalStep, clickRecipeGateway, inferFillDynamicField, loadRecipes, recipeForUrl, recipeOwnedWrappers, recipeReleased } from './recipe.js';
+import { applyRecipeFields, atFinalStep, clickRecipeGateway, FIELD_FAIL_BUDGET, inferFillDynamicField, loadRecipes, recipeBlockingFields, recipeForUrl, recipeOwnedWrappers, recipeReleased, resetFieldStatus } from './recipe.js';
 import { checkClick, logDenial } from './policy.js';
 import { buildManifest, summarizeGaps, VERDICT } from './needs.js';
 import { tenantRefFor } from '../ats/tenant.js';
@@ -32,7 +32,7 @@ import { tenantRefFor } from '../ats/tenant.js';
 // you can confirm (in the PAGE / tab console, NOT the service-worker console) that
 // the freshly-built dist is actually loaded. If you don't see this line on the
 // apply tab, the new build isn't injected (reload the extension + refresh the tab).
-const COPO_BUILD = 'prod-final-2026-08-03n';
+const COPO_BUILD = 'prod-final-2026-08-03o';
 try { console.log(`%c[Copo] content-agent build ${COPO_BUILD} loaded → ${location.host}`, 'color:#c43b2e;font-weight:700'); } catch { /* noop */ }
 
 /**
@@ -941,8 +941,31 @@ async function runAgentLoop(profile) {
                     await sleep(1500);
                     continue;
                 }
+                // ── A FIELD THE RECIPE KNOWS IT DID NOT FILL HOLDS THE STEP ──
+                // The two conditions above only see what the PAGE admits: fields it
+                // marks required-and-empty, and errors it chose to render. Neither
+                // covers the case this loop kept producing — the recipe reports
+                // "Language — never committed", the widget still shows something, the
+                // tenant never marked it required, so the step looks complete and the
+                // agent clicks Continue over a field it had just told itself it
+                // failed. That is the "cứ bấm continue mãi" behaviour: not a missing
+                // retry (the recipe re-runs every pass) but a missing CONSUMER for
+                // the failure verdict.
+                //
+                // Holding is bounded by FIELD_FAIL_BUDGET, so a widget nobody can
+                // drive costs a few passes and then lets go rather than deadlocking
+                // the run — the failure reaches the user in the review instead.
+                const _blocking = recipeBlockingFields();
+                if (_blocking.length) {
+                    trace('advance.blocked', {
+                        step: _stepNow?.name || null,
+                        fields: _blocking.map(b => `${b.label}(${b.fails}/${FIELD_FAIL_BUDGET + 1}): ${String(b.why).slice(0, 50)}`).join(' | '),
+                    });
+                    console.warn('[Copo Apply] không bấm Continue — còn field recipe tự báo thất bại:',
+                        _blocking.map(b => `${b.label} (lần ${b.fails})`).join(', '));
+                }
                 if (rf.matched && !_waitingFor && state.unfilledRequired.length === 0
-                    && state.errors.length === 0 && !atFinalStep(recipe)) {
+                    && state.errors.length === 0 && !_blocking.length && !atFinalStep(recipe)) {
                     const stepNow = _stepNow;
                     const adv = _adv;
                     if (adv && adv.offsetParent !== null) {
@@ -986,8 +1009,13 @@ async function runAgentLoop(profile) {
                 const stepMatched = !!(recipe && (recipe.steps || []).find(s => s.detect && document.querySelector(s.detect)));
                 const onReview = (recipe && atFinalStep(recipe))
                     || !!document.querySelector('[data-automation-id="applyFlowReviewPage"]');
+                // Same gate as the recipe advance above: a page no step recognises
+                // can still hold recipe-owned widgets that just reported failure,
+                // and clicking a generic "Continue" over them loses the field
+                // exactly as clicking the recipe's own Next did.
                 if (insideApply && !stepMatched && !onReview
                     && state.unfilledRequired.length === 0 && state.errors.length === 0
+                    && !recipeBlockingFields().length
                     && state.formFields.length > 0) {
                     const adv = document.querySelector('[data-automation-id="pageFooterNextButton"]')
                         || [...document.querySelectorAll('button, [role="button"]')]
@@ -1016,6 +1044,11 @@ async function runAgentLoop(profile) {
                 fieldRecovery.clear();
                 needsAttempts.clear();
                 errorStreak.clear();
+                // A new step gets its own fail budget. Carrying the old step's
+                // verdicts forward would hold the NEXT step for a widget that is no
+                // longer on the page — and, once the budget ran out there, would
+                // also mean the new step's first real failure had no retries left.
+                resetFieldStatus();
                 prevStepCurrent = curStep;
                 prevUrl = state.url;
                 // A new page gets its own grace to render. Without this the budget
@@ -1574,6 +1607,34 @@ async function init() {
             const sess = data.applySession || {};
             const fresh = sess.startedAt && (Date.now() - sess.startedAt < APPLY_SESSION_TTL_MS);
 
+            // ── CLAIM THE DOCUMENT BEFORE THE FIRST await, NOT AFTER ──
+            // This used to read the flag below, after the IS_APPLY_TAB round-trip.
+            // That is check-then-act across an await, and when a document holds two
+            // copies of this script (declarative content_scripts PLUS a programmatic
+            // re-inject after a redirect) BOTH copies reached the await, both came
+            // back with isApplyTab, both saw the flag still false, and both started a
+            // loop. Two loops, two module scopes — so `_fillInFlight` in recipe.js,
+            // which is module-scoped, guards neither against the other.
+            //
+            // What that looks like on a real form: two fill passes ~80ms apart on the
+            // same widgets. The second types into the Skills search box while the
+            // first's results are still settling, so a row belonging to the previous
+            // query gets picked (a skill nobody asked for), and a language commits
+            // twice (a duplicate row). It also produces two contradictory summaries
+            // for one step — one reporting Language FAIL, the next reporting it OK —
+            // because each pass sees the other's half-finished widget state.
+            //
+            // `window` is shared by every copy of the script in this document's
+            // isolated world, so claiming it synchronously is what makes the check
+            // atomic: the second copy cannot observe the gap, because there is none.
+            // Released again below if this turns out not to be a tab we should run in.
+            const claimed = !window.__copoAgentStarted;
+            if (claimed) window.__copoAgentStarted = true;
+            if (!claimed) {
+                console.log('[Copo Agent] this document already has an agent — not starting a second one');
+                return;
+            }
+
             // Tab-scope guard: only auto-run in the tab the user actually launched
             // auto-apply in (or one it redirected / spawned into). Otherwise a
             // still-live pendingAutoApply flag fires the agent on ANY known-host
@@ -1588,17 +1649,14 @@ async function init() {
 
             if (!fresh) {
                 // Stale flag → clear and fall through to manual mode.
+                window.__copoAgentStarted = false;   // not running after all
                 chrome.storage.local.remove(['pendingAutoApply', 'autoApplyJobUrl', 'batchMode', 'applySession']);
             } else if (!isApplyTab) {
                 // Live apply session, but this is NOT its tab — do NOT auto-run.
                 // Leave the flag intact for the real apply tab; behave as manual mode here.
+                window.__copoAgentStarted = false;   // not running after all
                 console.log('[Copo Agent] pendingAutoApply is set but this is not the apply tab — skipping auto-run', location.hostname);
-            } else if (window.__copoAgentStarted) {
-                // This document already has an agent running (e.g. declarative +
-                // a programmatic re-inject after a redirect) — don't double-run.
-                return;
             } else {
-                window.__copoAgentStarted = true;
                 const isBatch = data.batchMode === true;
 
                 // IMPORTANT: do NOT clear pendingAutoApply here. It must survive a
