@@ -1,6 +1,6 @@
 // AUTO-SPLIT from content-agent.js (Phase 2). Part of the Copo apply agent.
 import { SCROLL_PAUSE_MS, SCROLL_STEP_PX } from './constants.js';
-import { buildUniqueSelector, detectComponentType, findActiveModal, findLabelFor, getNearbyText, readFileCommitState, sleep } from './dom.js';
+import { FIELD_ERROR_SEL, buildUniqueSelector, detectComponentType, findActiveModal, findLabelFor, getNearbyText, readFileCommitState, sleep } from './dom.js';
 import { isThirdPartyApply } from './detect.js';
 
 /**
@@ -414,7 +414,12 @@ export function detectErrors() {
         // Workday: a failed field renders an errorMessage node inside its formField
         // wrapper; page-level issues use errorSummary. Without these the agent was
         // blind to why "Next" wouldn't advance and looped until it stalled.
+        // `inputAlert` is the same verdict on other tenants (measured mdlz: it is
+        // the ONLY per-field idiom — "Error: The field From is required…" was
+        // invisible to every selector below it). Advisory wording is filtered
+        // the same way ("Alert: Verify that…"), so the id alone does not decide.
         '[data-automation-id="errorMessage"]', '[data-automation-id="formFieldError"]',
+        '[data-automation-id="inputAlert"]',
         '[data-automation-id="errorSummary"]',
     ];
     // Selectors that are a DELIVERY MECHANISM, not a verdict — see
@@ -523,7 +528,7 @@ export function auditRequiredBlockers() {
     //    the same way detectErrors filters it — otherwise the "blockers" report
     //    the agent shows the user when it gives up would name a page-load
     //    announcement as the reason the step won't advance.
-    for (const e of document.querySelectorAll('[data-automation-id="errorMessage"], [data-automation-id="errorSummary"], [role="alert"]')) {
+    for (const e of document.querySelectorAll(`${FIELD_ERROR_SEL}, [data-automation-id="errorSummary"], [role="alert"]`)) {
         if (e.offsetParent === null) continue;
         const t = (e.textContent || '').replace(/\s+/g, ' ').trim();
         if (!t) continue;
@@ -531,6 +536,10 @@ export function auditRequiredBlockers() {
         if (isLiveRegion && !isLikelyValidationError(t, {
             inFieldWrapper: !!e.closest?.('[data-automation-id^="formField-"]'),
         })) continue;
+        // Same wording gate detectErrors applies: an inputAlert carries
+        // advisories too ("Alert: Verify that…"), and an advisory must not be
+        // named as the reason a step won't advance.
+        if (ADVISORY_TEXT_RE.test(t)) continue;
         push(t.slice(0, 60), 'error');
     }
     return out;

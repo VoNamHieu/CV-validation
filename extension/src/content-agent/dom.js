@@ -4,6 +4,18 @@ import { checkClick, logDenial } from './policy.js';
 // ─── Helpers ───
 export function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+/**
+ * Every automation-id Workday uses for "a live validation error attached to
+ * THIS field". One list, imported everywhere, because a missing idiom is not a
+ * cosmetic gap: an error the agent cannot see turns the painted-value guard
+ * into a permanent false-done. Measured on mdlz 2026-08-03: the per-field
+ * error is `inputAlert` — errorMessage/formFieldError never appeared — so
+ * every verify that read only those two saw "0 errors" beside a red
+ * "The field From is required and must have a value."
+ */
+export const FIELD_ERROR_SEL =
+    '[data-automation-id="errorMessage"], [data-automation-id="formFieldError"], [data-automation-id="inputAlert"]';
+
 export function waitForElement(selector, timeout = 5000) {
     return new Promise((resolve) => {
         const el = document.querySelector(selector);

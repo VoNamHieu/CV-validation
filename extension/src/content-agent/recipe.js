@@ -13,7 +13,7 @@
 // pass; the recipe re-runs every iteration and is idempotent, so partial progress
 // accumulates and already-filled fields are skipped.
 
-import { deepFindControl, deepQuery, deepQueryAll, dropFileOnZone, readFileCommitState, safeActivate, setFileOnInput, setNativeValue, simulateTyping, sleep, waitForElement } from './dom.js';
+import { FIELD_ERROR_SEL, deepFindControl, deepQuery, deepQueryAll, dropFileOnZone, readFileCommitState, safeActivate, setFileOnInput, setNativeValue, simulateTyping, sleep, waitForElement } from './dom.js';
 import { isThirdPartyApply } from './detect.js';
 import { showToast } from './ui.js';
 import { trace, traceOnce } from './trace.js';
@@ -1329,7 +1329,7 @@ async function _applyRecipeFields(recipe, profile, cvData, cv) {
                 // read the painted text as done on every later pass.
                 const wrapEl = el.closest('[data-automation-id^="formField-"]');
                 const errCount = () => wrapEl
-                    ? wrapEl.querySelectorAll('[data-automation-id="errorMessage"], [data-automation-id="formFieldError"]').length
+                    ? wrapEl.querySelectorAll(FIELD_ERROR_SEL).length
                     : 0;
                 const errsBefore = errCount();
                 if (String(el.value ?? '').trim() !== '' && !errsBefore) { outcomes.push([f.label, 'done', 'already filled']); continue; }
@@ -1512,7 +1512,15 @@ async function fillWorkExperienceRows(cv, outcomes) {
             const box = wrapEl.querySelector('input:not([type="hidden"]), textarea');
             if (!box || String(box.value || '').trim()) return;       // filled → not ours to touch
             try { box.focus(); } catch { /* noop */ }
-            await simulateTyping(box, String(val));
+            // ONE input event, not one per character. Workday re-renders the
+            // whole step on every controlled change — measured 1 char/second
+            // on a 600-char Role Description, which starved the run's clock
+            // before the later rows' dates were ever reached. Plain text and
+            // textareas commit off a single native-setter write; per-char
+            // typing stays as the fallback for the odd input that ignores it.
+            setNativeValue(box, String(val), { quiet: true });
+            await sleep(120);
+            if (!String(box.value || '').trim()) await simulateTyping(box, String(val));
             try { box.dispatchEvent(new FocusEvent('focusout', { bubbles: true })); box.blur?.(); } catch { /* noop */ }
             await sleep(150);
             if (String(box.value || '').trim()) { filled++; outcomes.push([`${what} (row ${i + 1})`, 'OK', String(val).slice(0, 30)]); }
@@ -1578,7 +1586,7 @@ async function setDateOnWrap(wrap, val) {
 
     const inputs = [...wrap.querySelectorAll('input')].filter(i => i.offsetParent !== null);
     if (!inputs.length) return { ok: false, reason: 'no inputs in wrapper' };
-    const errorsIn = () => wrap.querySelectorAll('[data-automation-id="errorMessage"], [data-automation-id="formFieldError"]').length;
+    const errorsIn = () => wrap.querySelectorAll(FIELD_ERROR_SEL).length;
     const pick = (re) => inputs.find(i => re.test(
         `${i.getAttribute('data-automation-id') || ''} ${i.getAttribute('aria-label') || ''} ${i.name || ''}`));
     const single = inputs.length === 1 ? inputs[0] : null;
@@ -1587,11 +1595,26 @@ async function setDateOnWrap(wrap, val) {
     if (!yearEl) return { ok: false, reason: 'no year input in wrapper' };
     if (single && !month) return { ok: false, reason: 'combined MM/YYYY input but no month in CV value' };
 
+    // COMMITTED state, not painted DOM. A date section is a spinbutton whose
+    // aria-valuenow is rendered from Workday's own state and cannot be written
+    // from outside — .value can. Measured: "02/2023" sitting in .value with
+    // aria-valuetext still "MM" and the required-error live; reading .value
+    // called that done forever. A section that is NOT a spinbutton has no aria
+    // contract, so .value stays the best available signal there.
+    const committed = (el) => {
+        if (!el) return true;
+        if (el.getAttribute('role') === 'spinbutton') {
+            const now = el.getAttribute('aria-valuenow');
+            return now != null && String(now).trim() !== '';
+        }
+        return String(el.value || '').trim() !== '';
+    };
     const errorsBefore = errorsIn();
-    const readVal = () => String(yearEl.value || '').trim();
-    // Clean value, no live error → genuinely answered. Value + error → the DOM
-    // is painted but Workday never accepted it: fall through and re-enter.
-    if (readVal() && !errorsBefore) return { ok: false, reason: 'already-selected' };
+    // Committed value, no live error → genuinely answered. Anything else —
+    // painted text, or a value beside an error — falls through and re-enters.
+    if (committed(yearEl) && (single || !month || committed(monthEl)) && !errorsBefore) {
+        return { ok: false, reason: 'already-selected' };
+    }
 
     // Digits as REAL keystrokes, one at a time. Workday's date sections are
     // spinbuttons that consume keydown/beforeinput and write their own value —
@@ -1630,9 +1653,25 @@ async function setDateOnWrap(wrap, val) {
     } catch { /* noop */ }
     await sleep(400);
 
-    if (!readVal()) return { ok: false, reason: 'value did not stick' };
+    // The widget's own state took the digits — .value alone proves a paint,
+    // nothing more. And where the spinbutton exposes the number, it must be
+    // OUR number: "5" for "05" is fine (it strips the pad), May-for-December
+    // is not.
+    const ariaAgrees = (el, want) => {
+        const now = el?.getAttribute?.('aria-valuenow');
+        return now == null || parseInt(now, 10) === parseInt(want, 10);
+    };
+    if (!committed(yearEl) || (!single && month && monthEl && monthEl !== yearEl && !committed(monthEl))) {
+        return { ok: false, reason: 'value painted but never committed' };
+    }
+    // (Split sections only — a combined MM/YYYY input's aria text is the whole
+    // date and no single number can agree with it.)
+    if (!single && (!ariaAgrees(yearEl, year) || (month && monthEl !== yearEl && !ariaAgrees(monthEl, month)))) {
+        return { ok: false, reason: 'committed a different value' };
+    }
     // Delta verification: an error that was live before must be gone; a field
-    // that never showed one only needs the value present.
+    // that never showed one only needs the value present. (Measured on mdlz:
+    // a real commit clears the inputAlert immediately, no Continue needed.)
     if (errorsBefore > 0 && errorsIn() > 0) return { ok: false, reason: 'value shown but error persists' };
     return { ok: true };
 }
@@ -1967,7 +2006,7 @@ async function fillExperienceEndDates(cv, outcomes) {
                 return {
                     active: ins.length,
                     required: ins.some(x => x.required || x.getAttribute('aria-required') === 'true'),
-                    errors: rowScope.querySelectorAll('[data-automation-id="errorMessage"], [data-automation-id="formFieldError"]').length,
+                    errors: rowScope.querySelectorAll(FIELD_ERROR_SEL).length,
                 };
             };
             const before0 = readTo();

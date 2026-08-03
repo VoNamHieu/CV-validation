@@ -62,6 +62,7 @@ function _visibleErrorText() {
     try {
         return [...document.querySelectorAll(
             '[data-automation-id="errorMessage"], [data-automation-id*="errorMessage"], '
+            + '[data-automation-id="inputAlert"], '
             + '[role="alert"], .css-error, [data-automation-id="alertMessage"]')]
             .filter(_vis)
             .map(n => n.textContent || '')
