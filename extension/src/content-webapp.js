@@ -156,6 +156,11 @@
             relay({ type: 'GET_APPLY_PROGRESS' }, 'JOBFIT_APPLY_PROGRESS');
         }
 
+        // ─── Strip test artifacts (local-creds blob, dummy GPA) ───
+        if (event.data?.type === 'JOBFIT_CLEAR_TEST_DATA') {
+            relay({ type: 'CLEAR_TEST_DATA' }, 'JOBFIT_CLEAR_TEST_DATA_RESPONSE');
+        }
+
         // ─── Mode 1: sync rich CV JSON (needed for tailoring) ───
         if (event.data?.type === 'JOBFIT_SYNC_CV_DATA') {
             relay({

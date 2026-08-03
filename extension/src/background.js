@@ -942,6 +942,41 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     // ══════════════════════════════════════════════════════════════
+    // ── Strip TEST artifacts out of storage, keep the real data. ──
+    //    Testing leaves exactly three things behind that must not ride
+    //    into a real application: the local-creds blob (the LOCAL-CREDS
+    //    build reads it; production ignores but should not carry it),
+    //    and the dummy GPA injected to exercise the grade rule — which
+    //    the merge semantics can never clear (empty values do not
+    //    clobber, by design). Profile, CV, PDF stay: they are the
+    //    user's real data, not test data.
+    // ══════════════════════════════════════════════════════════════
+    if (message.type === 'CLEAR_TEST_DATA') {
+        (async () => {
+            const removed = [];
+            const d = await chrome.storage.local.get(['jobfitApplyCredentials', 'jobfitProfile', 'jobfitCv']);
+            if (d.jobfitApplyCredentials) {
+                await chrome.storage.local.remove('jobfitApplyCredentials');
+                removed.push('jobfitApplyCredentials');
+            }
+            const patch = {};
+            if (d.jobfitProfile?.gpa) {
+                patch.jobfitProfile = { ...d.jobfitProfile, gpa: '' };
+                removed.push('jobfitProfile.gpa');
+            }
+            if (d.jobfitCv?.education?.[0]?.gpa) {
+                const cv = structuredClone(d.jobfitCv);
+                cv.education[0].gpa = '';
+                patch.jobfitCv = cv;
+                removed.push('jobfitCv.education[0].gpa');
+            }
+            if (Object.keys(patch).length) await chrome.storage.local.set(patch);
+            sendResponse({ success: true, removed });
+        })();
+        return true;
+    }
+
+    // ══════════════════════════════════════════════════════════════
     // ── MODE 1 — Sync rich CV JSON (needed for tailoring) ──
     // ══════════════════════════════════════════════════════════════
     if (message.type === 'SAVE_CV_DATA') {
