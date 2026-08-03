@@ -64,3 +64,15 @@ export const JOB_CONTEXT_KEYWORDS = [
 // user opens later. The background clears it on result / tab-close, but this is
 // the content-side backstop.
 export const APPLY_SESSION_TTL_MS = 10 * 60 * 1000;
+
+// Tenants whose review needs a SPECIFIC human look before Submit, keyed by
+// hostname. P&G renders every address line REQUIRED in two scripts, so the
+// city fallback validates the form while the submitted address is only as
+// exact as the profile — the review must say so out loud. Other tenants skip
+// for now (user decision 2026-08-03); add entries as they are measured.
+export const TENANT_REVIEW_FLAGS = [
+    {
+        host: /pgcareers|(^|\.)pg\.wd\d+\.myworkday/i,
+        flag: 'P&G yêu cầu địa chỉ chính xác từng dòng — kiểm tra lại mục Address trước khi Submit.',
+    },
+];

@@ -14,7 +14,7 @@
  *   - Simulate keyboard typing for stubborn frameworks
  */
 
-import { AGENT_MAX_RUNTIME_MS, APPLY_SESSION_TTL_MS, FILL_RETRY_THRESHOLD, POST_ACTION_WAIT_MS } from './constants.js';
+import { AGENT_MAX_RUNTIME_MS, APPLY_SESSION_TTL_MS, FILL_RETRY_THRESHOLD, POST_ACTION_WAIT_MS, TENANT_REVIEW_FLAGS } from './constants.js';
 import { closeOpenDropdown, safeActivate, setNativeValue, sleep } from './dom.js';
 import { removeProgress, showConfirmation, showProgress, showToast } from './ui.js';
 import { callAgentPlan, callLLMMapping } from './llm.js';
@@ -32,7 +32,7 @@ import { tenantRefFor } from '../ats/tenant.js';
 // you can confirm (in the PAGE / tab console, NOT the service-worker console) that
 // the freshly-built dist is actually loaded. If you don't see this line on the
 // apply tab, the new build isn't injected (reload the extension + refresh the tab).
-const COPO_BUILD = 'prod-final-2026-08-03p';
+const COPO_BUILD = 'prod-final-2026-08-03q';
 try { console.log(`%c[Copo] content-agent build ${COPO_BUILD} loaded → ${location.host}`, 'color:#c43b2e;font-weight:700'); } catch { /* noop */ }
 
 /**
@@ -474,7 +474,7 @@ async function runAgentLoop(profile) {
             // Next click would otherwise send the application. Fill up to here only.
             if (recipe && atFinalStep(recipe)) {
                 removeProgress();
-                showToast('✅ Đã điền xong tới bước cuối — kiểm tra rồi bấm "Submit" để nộp.', 7000);
+                showToast(withTenantFlags('✅ Đã điền xong tới bước cuối — kiểm tra rồi bấm "Submit" để nộp.'), 7000);
                 reportResult(true, 'Reached review step — filled, awaiting user submit', 'filled', { review: summarizeAnswers(reviewAnswers), fieldGaps: [...fieldGaps.values()] });
                 showConfirmation(state.totalFields, state.totalFields, false);
                 return;
@@ -809,7 +809,7 @@ async function runAgentLoop(profile) {
                     if (singlePagePasses > 6) {
                         removeProgress();
                         const miss = (state.unfilledRequired || []).slice(0, 4).join(', ');
-                        showToast(`✅ Đã điền hồ sơ${miss ? ` — kiểm tra lại: ${miss}` : ''}. Tích ô đồng ý điều khoản rồi bấm "Submit" để nộp.`, 10000);
+                        showToast(withTenantFlags(`✅ Đã điền hồ sơ${miss ? ` — kiểm tra lại: ${miss}` : ''}. Tích ô đồng ý điều khoản rồi bấm "Submit" để nộp.`), 10000);
                         reportResult(true, `${recipe.label} filled (pass cap) — awaiting user consent + submit`, 'filled', { review: summarizeAnswers(reviewAnswers), fieldGaps: [...fieldGaps.values()] });
                         showConfirmation(state.totalFields, state.totalFields, false);
                         return;
@@ -852,7 +852,7 @@ async function runAgentLoop(profile) {
                         }
                         removeProgress();
                         const miss = (state.unfilledRequired || []).slice(0, 4).join(', ');
-                        showToast(`✅ Đã điền hồ sơ${miss ? ` — kiểm tra lại: ${miss}` : ''}. Tích ô đồng ý điều khoản rồi bấm "Submit" để nộp.`, 10000);
+                        showToast(withTenantFlags(`✅ Đã điền hồ sơ${miss ? ` — kiểm tra lại: ${miss}` : ''}. Tích ô đồng ý điều khoản rồi bấm "Submit" để nộp.`), 10000);
                         reportResult(true, `${recipe.label} filled — awaiting user consent + submit`, 'filled', { review: summarizeAnswers(reviewAnswers), fieldGaps: [...fieldGaps.values()] });
                         showConfirmation(state.totalFields, state.totalFields, false);
                         return;
@@ -984,7 +984,7 @@ async function runAgentLoop(profile) {
                         trace('advance.click', { selector: stepNow.advance, activated: advanced });
                         if (!advanced) {
                             removeProgress();
-                            showToast('✅ Đã điền xong — kiểm tra rồi tự bấm nộp để hoàn tất.', 8000);
+                            showToast(withTenantFlags('✅ Đã điền xong — kiểm tra rồi tự bấm nộp để hoàn tất.'), 8000);
                             reportResult(true, 'Policy stopped the step advance — awaiting user submit', 'filled', { review: summarizeAnswers(reviewAnswers), fieldGaps: [...fieldGaps.values()] });
                             showConfirmation(state.totalFields, state.totalFields, false);
                             return;
@@ -1361,7 +1361,7 @@ async function runAgentLoop(profile) {
                         if (verdict.code === 'submit_application' || verdict.code === 'final_review_step') {
                             removeProgress();
                             if (actionsTaken > 0) {
-                                showToast('✅ Đã điền xong — kiểm tra rồi tự bấm nộp để hoàn tất.', 8000);
+                                showToast(withTenantFlags('✅ Đã điền xong — kiểm tra rồi tự bấm nộp để hoàn tất.'), 8000);
                                 reportResult(true, `Policy stop at ${verdict.code} — awaiting user submit`, 'filled', { review: summarizeAnswers(reviewAnswers), fieldGaps: [...fieldGaps.values()] });
                                 showConfirmation(state.totalFields, state.totalFields, false);
                             } else {
@@ -1426,6 +1426,19 @@ async function runAgentLoop(profile) {
 //        | 'blocked'   (waiting on the USER — verify an email, supply a password;
 //                       NOT a failure, and never shown as one)
 //        | 'failed'
+/** Tenant-specific "look HERE before you submit" notes for this hostname. */
+function tenantReviewFlags() {
+    try {
+        return TENANT_REVIEW_FLAGS.filter(t => t.host.test(location.hostname)).map(t => t.flag);
+    } catch { return []; }
+}
+
+/** The done-toast, with any tenant note appended so it is read BEFORE Submit. */
+function withTenantFlags(msg) {
+    const flags = tenantReviewFlags();
+    return flags.length ? `${msg}\n⚠️ ${flags.join(' · ')}` : msg;
+}
+
 function summarizeAnswers(reviewAnswers) {
     const all = [...reviewAnswers.values()];
     const defaults = all.filter(a => a.source === 'AGENT_DEFAULT');
@@ -1444,6 +1457,9 @@ function summarizeAnswers(reviewAnswers) {
         // re-read the whole form.
         agentDefaultFields: defaults.map(a => a.field).slice(0, 10),
         corrected: all.filter(a => a.source === 'CORRECTED').length,
+        // Tenant-specific review notes (P&G: exact address) — carried in the
+        // result payload so the web app's history shows them too.
+        tenantFlags: tenantReviewFlags(),
     };
 }
 

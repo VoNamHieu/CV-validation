@@ -17,6 +17,16 @@ export const FIELD_ERROR_SEL =
     '[data-automation-id="errorMessage"], [data-automation-id="formFieldError"], [data-automation-id="inputAlert"]';
 
 /**
+ * Diacritics stripped, đ→d — "Võ Nam Hiếu" → "Vo Nam Hieu". For the WESTERN
+ * half of a dual-script pair: the "- Vietnamese" twin keeps its marks, the
+ * "- Western Script" twin is the same fact romanized.
+ */
+export function foldDiacritics(s) {
+    return String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '')
+        .replace(/đ/g, 'd').replace(/Đ/g, 'D');
+}
+
+/**
  * ALL-CAPS words → Title Case, everything else untouched. CVs write names in
  * caps ("HIEU VO") and Workday raises a capitalization advisory on every one;
  * but a mixed-case word is already someone's deliberate spelling, and a

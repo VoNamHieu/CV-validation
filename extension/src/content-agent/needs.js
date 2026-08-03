@@ -19,7 +19,7 @@
 // judgement is the part worth testing, and it needs neither.
 
 import { resolveAnswer } from './answers.js';
-import { normalizeNameCase } from './dom.js';
+import { foldDiacritics, normalizeNameCase } from './dom.js';
 
 /**
  * The middle name, when the profile's own tokens contain one. "VO NAM HIEU"
@@ -254,6 +254,24 @@ export function buildManifest(fields = [], data = {}) {
         if (k) keyCount.set(k, (keyCount.get(k) || 0) + 1);
     }
 
+    // Script-aware duplicates (measured on P&G): the "- Western Script" half
+    // of a dual-script pair takes the same fact WITHOUT diacritics; the
+    // "- Vietnamese" half keeps them. A PLAIN label is also the western half
+    // whenever its Vietnamese twin sits on the same page — P&G suffixes only
+    // the local-script address boxes ("Address Line 1 - Vietnamese" beside a
+    // bare "Address Line 1"). On a page with no twin, values pass unchanged.
+    const allLabels = fields.map(f => String(f.label || f.ariaLabel || '').trim().toLowerCase());
+    const hasViTwin = (label) => {
+        const base = String(label).trim().toLowerCase();
+        return !!base && allLabels.some(l => l !== base && l.startsWith(base) && /vietnamese|tiếng việt/.test(l));
+    };
+    const shapeScript = (label, value) => {
+        const l = String(label).toLowerCase();
+        if (/vietnamese|tiếng việt/.test(l)) return value;
+        if (/western script|romanized|latin/.test(l) || hasViTwin(label)) return foldDiacritics(value);
+        return value;
+    };
+
     for (const f of fields) {
         // A résumé dropzone is not a QUESTION. Its answer comes from cvData via
         // the recipe's upload path — never inferred from profile text or asked
@@ -293,7 +311,7 @@ export function buildManifest(fields = [], data = {}) {
             //     select is worse than a flagged one.
             const textish = !f.componentType || f.componentType === 'native';
             if (verdict === VERDICT.MISMATCH && pattern && keyCount.get(pattern.key) === 1 && textish) {
-                override.push({ ...entry, value: canonical.value, source: canonical.source, componentType: f.componentType });
+                override.push({ ...entry, value: shapeScript(label, canonical.value), source: canonical.source, componentType: f.componentType });
             }
             continue;
         }
@@ -310,7 +328,7 @@ export function buildManifest(fields = [], data = {}) {
             }
             fill.push({
                 selector: f.selector, label, key: pattern.key,
-                value: canonical.value, source: canonical.source,
+                value: shapeScript(label, canonical.value), source: canonical.source,
                 componentType: f.componentType,
             });
             continue;

@@ -95,6 +95,32 @@ describe('resolving from the candidate\'s own data', () => {
             { value: 'Hà Nội', source: SOURCE.AGENT_DEFAULT });
     });
 
+    test('a dual-script pair splits one fact into two spellings', () => {
+        // The "- Vietnamese" half keeps its diacritics; "- Western Script" is
+        // the same fact romanized. And a PLAIN label is the western half too,
+        // whenever its Vietnamese twin sits on the same page — P&G suffixes
+        // only the local-script address boxes.
+        const d = { profile: { lastName: 'Võ', addressStreet: 'Số 1 Phố Duy Tân' } };
+        const m = buildManifest([
+            field({ label: 'Family Name - Vietnamese' }),
+            field({ label: 'Family Name - Western Script', selector: '#w' }),
+            field({ label: 'Address Line 1 - Vietnamese', selector: '#av' }),
+            field({ label: 'Address Line 1', selector: '#aw' }),
+        ], d);
+        const by = (l) => m.fill.find(x => x.label === l)?.value;
+        assert.equal(by('Family Name - Vietnamese'), 'Võ');
+        assert.equal(by('Family Name - Western Script'), 'Vo');
+        assert.equal(by('Address Line 1 - Vietnamese'), 'Số 1 Phố Duy Tân');
+        assert.equal(by('Address Line 1'), 'So 1 Pho Duy Tan');
+    });
+
+    test('a page without a Vietnamese twin passes values through untouched', () => {
+        // Every other tenant: one "District or Town", diacritics intact.
+        const d = { profile: { addressDistrict: 'Cầu Giấy' } };
+        const m = buildManifest([field({ label: 'District or Town' })], d);
+        assert.equal(m.fill[0].value, 'Cầu Giấy');
+    });
+
     test('the structured CV answers what the flat profile cannot hold', () => {
         // The exact gap measured on Mondelez: School and Field of Study are
         // required, the parse left both blank, and the flat profile has no key
