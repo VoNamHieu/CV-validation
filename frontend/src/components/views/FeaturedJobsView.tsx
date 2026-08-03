@@ -13,6 +13,7 @@ import {
     ChartLineUp, SpinnerGap, Briefcase,
 } from '@phosphor-icons/react';
 import { useAppStore } from '@/store/useAppStore';
+import ApplyGuideButton from '@/components/apply-guide/ApplyGuideButton';
 import { renderJd } from '@/lib/renderJd';
 import styles from './featuredJobs.module.css';
 
@@ -300,6 +301,13 @@ export default function FeaturedJobsView() {
                                         <Link href={`/j/${selected}`} target="_blank" rel="noopener" className={styles.secondaryBtn}>
                                             <ArrowSquareOut size={16} weight="bold" /> Xem chi tiết
                                         </Link>
+                                        {/* Only renders for companies that have a guide — see
+                                            lib/apply-guides. Most jobs show nothing here. */}
+                                        <ApplyGuideButton
+                                            company={detail?.job.company_name || selCard?.company_name}
+                                            className={styles.secondaryBtn}
+                                            source="featured"
+                                        />
                                     </div>
                                 </div>
 
