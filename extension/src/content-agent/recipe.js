@@ -13,7 +13,7 @@
 // pass; the recipe re-runs every iteration and is idempotent, so partial progress
 // accumulates and already-filled fields are skipped.
 
-import { FIELD_ERROR_SEL, deepFindControl, deepQuery, deepQueryAll, dropFileOnZone, readFileCommitState, safeActivate, setFileOnInput, setNativeValue, simulateTyping, sleep, waitForElement } from './dom.js';
+import { FIELD_ERROR_SEL, deepFindControl, deepQuery, deepQueryAll, dropFileOnZone, normalizeNameCase, readFileCommitState, safeActivate, setFileOnInput, setNativeValue, simulateTyping, sleep, waitForElement } from './dom.js';
 import { isThirdPartyApply } from './detect.js';
 import { showToast } from './ui.js';
 import { trace, traceOnce } from './trace.js';
@@ -2484,32 +2484,6 @@ function readCvPath(cv, path) {
  *   3. a `cvPath` into the structured CV, for everything the flat shape cannot hold
  *   4. the recipe `default`
  */
-/**
- * One capital per word, for words that are shouting.
- *
- * The web app normalises this when it BUILDS the profile — but that runs at sync
- * time, so every profile synced before that shipped still carries "HIEU
- * (CHARLES)", and re-syncing is a step nobody should have to know about. Doing it
- * again here makes the result independent of when the profile was last synced.
- *
- * Only ALL-CAPS words are re-cased: title-casing everything quietly damages names
- * whose capitals are correct (McDonald → Mcdonald, MacLeod → Macleod), and a
- * legal-name field is the wrong place to be clever. Single letters are left alone
- * so a middle initial survives. Mirrors normalizeNameCase in
- * frontend/src/lib/extension-profile.ts.
- */
-function normalizeNameCase(raw) {
-    return String(raw ?? '')
-        .split(/(\s+)/)
-        .map((word) => {
-            const letters = word.replace(/[^\p{L}]/gu, '');
-            if (letters.length < 2 || word !== word.toUpperCase()) return word;
-            return word.toLowerCase()
-                .replace(/(^|[^\p{L}])(\p{L})/gu, (_m, sep, ch) => sep + ch.toUpperCase());
-        })
-        .join('');
-}
-
 /**
  * Values a field will accept at all.
  *

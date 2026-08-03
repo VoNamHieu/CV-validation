@@ -30,6 +30,7 @@
 export const DUMMY_PROFILE = {
     fullName: 'TEST Nguyen Van A',
     firstName: 'A',
+    middleName: 'Van',
     lastName: 'TEST Nguyen Van',
     email: 'copo.agent.test@example.invalid',
     phone: '0900000001',
@@ -40,6 +41,7 @@ export const DUMMY_PROFILE = {
     addressProvince: 'Hà Nội',
     addressDistrict: 'Cầu Giấy',
     addressStreet: '1 Duy Tan Street',
+    addressStreet2: '',
     postalCode: '100000',
     currentTitle: 'Product Owner',
     currentLevel: 'Middle',

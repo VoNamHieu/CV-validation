@@ -19,6 +19,26 @@
 // judgement is the part worth testing, and it needs neither.
 
 import { resolveAnswer } from './answers.js';
+import { normalizeNameCase } from './dom.js';
+
+/**
+ * The middle name, when the profile's own tokens contain one. "VO NAM HIEU"
+ * splits into first/last and the NAM in the middle simply vanished — while
+ * P&G renders "Intercalary (or Middle) Name" REQUIRED, in both scripts.
+ * Derivation is subtractive only: whatever full-name tokens the first and
+ * last names do not claim (parenthesised nicknames dropped first). When
+ * nothing is left, there is no middle name to state — the field stays a
+ * named gap rather than an invention.
+ */
+function deriveMiddleName(data) {
+    const p = data?.profile || {};
+    const full = String(p.fullName || '').replace(/\([^)]*\)/g, ' ');
+    if (!full.trim()) return null;
+    const tokens = (s) => String(s || '').toLowerCase().split(/\s+/).filter(Boolean);
+    const claimed = new Set([...tokens(p.firstName), ...tokens(p.lastName)]);
+    const mid = full.split(/\s+/).filter(Boolean).filter(w => !claimed.has(w.toLowerCase()));
+    return mid.length ? mid.join(' ') : null;
+}
 
 /** Where an answer came from, most trustworthy first. */
 export const SOURCE = {
@@ -45,17 +65,37 @@ export const VERDICT = {
  * set worth reporting back to the app so it can ask once and stop asking.
  */
 export const FIELD_PATTERNS = [
-    { key: 'firstName', match: /first name|given name|tên(?! đệm)/i, profileKey: 'firstName' },
-    { key: 'lastName', match: /last name|family name|surname|họ/i, profileKey: 'lastName' },
-    { key: 'fullName', match: /full name|họ (và |và tên|tên)/i, profileKey: 'fullName' },
+    // Dual-script blocks (measured on P&G VN): every Name/Address field is
+    // rendered twice — "… - Vietnamese" and "… - Western Script" — and all of
+    // them required. No dedicated handling is needed for the SUFFIX: these
+    // patterns match by substring, so both variants resolve to the same
+    // profile fact (a Vietnamese name typed without diacritics is still the
+    // candidate's name). What WAS missing: a middle-name concept, an Address
+    // Line 2 concept, and the city fallback at this layer.
+    //
+    // Before firstName: "Tên đệm" contains "tên", and first-match order is
+    // the only thing keeping the middle name out of the given-name box.
+    {
+        key: 'middleName', match: /middle name|intercalary|tên đệm/i,
+        profileKey: 'middleName', normalize: 'name', derive: deriveMiddleName,
+    },
+    { key: 'firstName', match: /first name|given name|tên(?! đệm)/i, profileKey: 'firstName', normalize: 'name' },
+    { key: 'lastName', match: /last name|family name|surname|họ/i, profileKey: 'lastName', normalize: 'name' },
+    { key: 'fullName', match: /full name|họ (và |và tên|tên)/i, profileKey: 'fullName', normalize: 'name' },
     { key: 'email', match: /e-?mail/i, profileKey: 'email' },
     // The phone NUMBER only. /phone/ also matched "Phone Extension" (the whole
     // mobile number got typed into it), "Phone Device Type" and "Country Phone
     // Code" (both flagged as mismatches against the number on every run) —
     // none of them holds a number.
     { key: 'phone', match: /phone(?!\s*extension)|mobile|điện thoại|số đt/i, deny: /extension|\bext\.?\b|máy lẻ|device\s*type|country\s*phone\s*code|loại (điện thoại|máy)/i, profileKey: 'phone' },
-    { key: 'addressStreet', match: /address line ?1|street|địa chỉ/i, profileKey: 'addressStreet' },
-    { key: 'addressDistrict', match: /district|town|city\b|quận|huyện|thành phố/i, profileKey: 'addressDistrict' },
+    // City name as the LAST resort before empty — user decision (a CV that
+    // only names "Hà Nội" still answers a required street/district box with
+    // that city rather than stalling the run). The recipe applies the same
+    // rule via fallbackProfileKey; this copy serves the label-matched fields
+    // the recipe has no selector for (the "- Vietnamese" duplicates).
+    { key: 'addressStreet', match: /address line ?1|street|địa chỉ/i, profileKey: 'addressStreet', fallbackKeys: ['addressDistrict', 'addressProvince'] },
+    { key: 'addressStreet2', match: /address line ?2/i, profileKey: 'addressStreet2', fallbackKeys: ['addressDistrict', 'addressProvince'] },
+    { key: 'addressDistrict', match: /district|town|city\b|quận|huyện|thành phố/i, profileKey: 'addressDistrict', fallbackKeys: ['addressProvince'] },
     { key: 'addressProvince', match: /province|region|state|tỉnh/i, profileKey: 'addressProvince' },
     { key: 'postalCode', match: /postal|zip|mã bưu/i, profileKey: 'postalCode' },
     { key: 'gpa', match: /\bgpa\b|grade (average|point)|overall result|điểm trung bình/i, path: 'education[0].gpa', userOnly: true },
@@ -95,8 +135,8 @@ export const FIELD_PATTERNS = [
  * before the schema caught up. tests/needs.test.js asserts the two agree.
  */
 export const PROFILE_KEYS = new Set([
-    'fullName', 'firstName', 'lastName', 'email', 'phone', 'dateOfBirth', 'gender',
-    'nationality', 'maritalStatus', 'addressProvince', 'addressDistrict', 'addressStreet',
+    'fullName', 'firstName', 'middleName', 'lastName', 'email', 'phone', 'dateOfBirth', 'gender',
+    'nationality', 'maritalStatus', 'addressProvince', 'addressDistrict', 'addressStreet', 'addressStreet2',
     'postalCode', 'currentTitle', 'currentLevel', 'yearsOfExperience', 'highestDegree',
     'currentSalary', 'currentIndustry', 'currentFields', 'desiredLocations', 'desiredSalary',
     'noticePeriod', 'workAuthorized', 'requiresSponsorship', 'coverLetter', 'applyMessage', 'skills',
@@ -128,13 +168,29 @@ export function readPath(cv, path) {
 /** What the candidate's own data says this field should contain, if anything. */
 export function canonicalValue(pattern, data) {
     if (!pattern) return null;
+    // Same rule the recipe applies via `normalize: 'name'` — ALL-CAPS names
+    // raise a Workday capitalization advisory on every application.
+    const shape = (v) => (pattern.normalize === 'name' ? normalizeNameCase(String(v)) : String(v));
     const fromProfile = pattern.profileKey ? data?.profile?.[pattern.profileKey] : undefined;
     if (fromProfile != null && String(fromProfile).trim() !== '') {
-        return { value: String(fromProfile), source: SOURCE.PROFILE };
+        return { value: shape(fromProfile), source: SOURCE.PROFILE };
     }
     const fromCv = readPath(data?.cv, pattern.path);
     if (fromCv != null && String(fromCv).trim() !== '') {
-        return { value: String(fromCv), source: SOURCE.CV };
+        return { value: shape(fromCv), source: SOURCE.CV };
+    }
+    // Derived from the user's own data (middle name out of the full name) —
+    // still their fact, just not stored under its own key.
+    if (pattern.derive) {
+        const v = pattern.derive(data);
+        if (v != null && String(v).trim() !== '') return { value: shape(v), source: SOURCE.PROFILE };
+    }
+    // Coarser profile keys as the last resort before empty (street → district
+    // → city). A vaguer truth beats a stranded required field; AGENT_DEFAULT
+    // is what makes the review name it.
+    for (const k of pattern.fallbackKeys || []) {
+        const v = data?.profile?.[k];
+        if (v != null && String(v).trim() !== '') return { value: String(v), source: SOURCE.AGENT_DEFAULT };
     }
     return null;
 }

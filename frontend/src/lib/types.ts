@@ -68,6 +68,10 @@ export interface PersonalInfo {
     // prompt) ask it as an administrative fact; the decline phrasings the agent
     // otherwise uses don't exist in that country-specific option list.
     ethnicity: string;
+    // Tên đệm ("Nam" in Võ Nam Hiếu). Some tenants (P&G) render "Intercalary
+    // (or Middle) Name" as a REQUIRED field in both scripts — and it is not
+    // derivable when the CV's own name line omits it, so it has to be askable.
+    middle_name: string;
     marital_status: string;
 }
 
@@ -142,7 +146,7 @@ export const EMPTY_CONTACT: ContactInfo = {
 };
 
 export const EMPTY_PERSONAL: PersonalInfo = {
-    date_of_birth: '', gender: '', nationality: '', ethnicity: '', marital_status: '',
+    date_of_birth: '', gender: '', nationality: '', ethnicity: '', middle_name: '', marital_status: '',
 };
 
 export const EMPTY_EMPLOYMENT: EmploymentInfo = {

@@ -35,12 +35,64 @@ describe('classifying what a field asks for', () => {
         assert.equal(classifyField({ label: 'Favourite colour' }), null);
         assert.equal(classifyField({}), null);
     });
+
+    test('a dual-script duplicate is the same concept', () => {
+        // Measured on P&G VN: every Name/Address field rendered twice, as
+        // "… - Vietnamese" and "… - Western Script", all REQUIRED. The suffix
+        // must not hide the concept.
+        assert.equal(classifyField({ label: 'Family Name - Vietnamese' }).key, 'lastName');
+        assert.equal(classifyField({ label: 'Given Name(s) - Western Script' }).key, 'firstName');
+        assert.equal(classifyField({ label: 'Intercalary (or Middle) Name - Vietnamese' }).key, 'middleName');
+        assert.equal(classifyField({ label: 'Address Line 1 - Vietnamese' }).key, 'addressStreet');
+        assert.equal(classifyField({ label: 'Address Line 2 - Vietnamese' }).key, 'addressStreet2');
+        assert.equal(classifyField({ label: 'District or Town - Vietnamese' }).key, 'addressDistrict');
+    });
+
+    test('Tên đệm is the middle name, not the given name', () => {
+        // "Tên đệm" CONTAINS "tên" — first-match order is what keeps the
+        // middle name out of the given-name box.
+        assert.equal(classifyField({ label: 'Tên đệm' }).key, 'middleName');
+    });
 });
 
 describe('resolving from the candidate\'s own data', () => {
-    test('the flat profile answers identity fields', () => {
+    test('the flat profile answers identity fields — names re-cased', () => {
+        // The profile still carries the CV's shouting caps; filling "HIEU"
+        // raises Workday's capitalization advisory on every application, so
+        // name-classified fields normalise at resolve time (same rule the
+        // recipe applies via `normalize: 'name'`).
         const v = canonicalValue(classifyField({ label: 'First Name' }), DATA);
-        assert.deepEqual(v, { value: 'HIEU', source: SOURCE.PROFILE });
+        assert.deepEqual(v, { value: 'Hieu', source: SOURCE.PROFILE });
+    });
+
+    test('a middle name hides in the full name when first/last did not claim it', () => {
+        // Profile shape after a "VO NAM HIEU" CV: firstName Hieu, lastName Vo
+        // — the NAM in the middle vanished in the split, while P&G renders
+        // "Intercalary (or Middle) Name" REQUIRED in both scripts.
+        const d = { profile: { firstName: 'Hieu', lastName: 'Vo', fullName: 'Vo Nam Hieu' } };
+        const v = canonicalValue(classifyField({ label: 'Intercalary (or Middle) Name - Western Script' }), d);
+        assert.deepEqual(v, { value: 'Nam', source: SOURCE.PROFILE });
+    });
+
+    test('no middle name in the data answers nothing — never an invention', () => {
+        const d = { profile: { firstName: 'Hieu', lastName: 'Vo', fullName: 'Hieu (Charles) Vo' } };
+        assert.equal(canonicalValue(classifyField({ label: 'Middle Name' }), d), null);
+    });
+
+    test('a required address box falls back to the city, and says so', () => {
+        // User decision: a CV that only names "Hà Nội" still answers a
+        // required street box with that city rather than stalling the run.
+        // AGENT_DEFAULT is what makes the review name it.
+        const d = { profile: { addressStreet: '', addressProvince: 'Hà Nội' } };
+        assert.deepEqual(
+            canonicalValue(classifyField({ label: 'Address Line 1 - Vietnamese' }), d),
+            { value: 'Hà Nội', source: SOURCE.AGENT_DEFAULT });
+        assert.deepEqual(
+            canonicalValue(classifyField({ label: 'Address Line 2' }), d),
+            { value: 'Hà Nội', source: SOURCE.AGENT_DEFAULT });
+        assert.deepEqual(
+            canonicalValue(classifyField({ label: 'District or Town' }), d),
+            { value: 'Hà Nội', source: SOURCE.AGENT_DEFAULT });
     });
 
     test('the structured CV answers what the flat profile cannot hold', () => {

@@ -7,6 +7,9 @@ import type { CVData } from "@/lib/types";
 export interface ExtensionProfile {
     fullName: string;
     firstName: string;
+    // Tên đệm — REQUIRED on some tenants (P&G, both scripts); not derivable
+    // when the CV's name line omits it, so it flows from the profile editor.
+    middleName: string;
     lastName: string;
     email: string;
     phone: string;
@@ -18,6 +21,9 @@ export interface ExtensionProfile {
     addressProvince: string;
     addressDistrict: string;
     addressStreet: string;
+    // Line 2 has no CV source; kept so the schema and the agent's PROFILE_KEYS
+    // agree (a key the schema lacks reads as a gap the user can never close).
+    addressStreet2: string;
     currentTitle: string;
     currentLevel: string;
     yearsOfExperience: number;
@@ -193,6 +199,7 @@ export function cvToExtensionProfile(
         // same form (fullName feeds ATS that ask for one field, not two).
         fullName: normalizeNameCase(cv.name ?? ""),
         firstName,
+        middleName: normalizeNameCase(personal.middle_name ?? ""),
         lastName,
         email: contact.email ?? "",
         phone: contact.phone ?? "",
@@ -205,6 +212,7 @@ export function cvToExtensionProfile(
         addressProvince: contact.address_province ?? "",
         addressDistrict: contact.address_district ?? "",
         addressStreet: contact.address_street ?? "",
+        addressStreet2: "",
         postalCode: contact.address_postal_code ?? "",
         currentTitle,
         currentLevel: employment.current_level ?? "",

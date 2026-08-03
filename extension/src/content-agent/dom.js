@@ -16,6 +16,26 @@ export function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 export const FIELD_ERROR_SEL =
     '[data-automation-id="errorMessage"], [data-automation-id="formFieldError"], [data-automation-id="inputAlert"]';
 
+/**
+ * ALL-CAPS words → Title Case, everything else untouched. CVs write names in
+ * caps ("HIEU VO") and Workday raises a capitalization advisory on every one;
+ * but a mixed-case word is already someone's deliberate spelling, and a
+ * legal-name field is the wrong place to be clever (McDonald → Mcdonald).
+ * Single letters are left alone so a middle initial survives. Mirrors
+ * normalizeNameCase in frontend/src/lib/extension-profile.ts.
+ */
+export function normalizeNameCase(raw) {
+    return String(raw ?? '')
+        .split(/(\s+)/)
+        .map((word) => {
+            const letters = word.replace(/[^\p{L}]/gu, '');
+            if (letters.length < 2 || word !== word.toUpperCase()) return word;
+            return word.toLowerCase()
+                .replace(/(^|[^\p{L}])(\p{L})/gu, (_m, sep, ch) => sep + ch.toUpperCase());
+        })
+        .join('');
+}
+
 export function waitForElement(selector, timeout = 5000) {
     return new Promise((resolve) => {
         const el = document.querySelector(selector);

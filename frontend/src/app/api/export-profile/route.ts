@@ -44,6 +44,8 @@ export async function GET() {
             coverLetter: 'string',
             applyMessage: 'string (short note for an ATS message-to-hiring-team box)',
             skills: 'string (comma-separated)',
+            middleName: 'string (tên đệm — some tenants require it in both scripts)',
+            addressStreet2: 'string (address line 2, usually empty)',
         } satisfies Record<keyof ExtensionProfile, string>,
     });
 }
