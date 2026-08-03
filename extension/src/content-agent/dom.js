@@ -69,6 +69,27 @@ export function detectComponentType(el) {
     if (el.getAttribute('role') === 'combobox' || el.getAttribute('role') === 'listbox') {
         return 'custom-dropdown';
     }
+    // Anything that OPENS a listbox is a select whatever its tag — Workday's
+    // single-selects are buttons with aria-haspopup and no role, and they fell
+    // through to 'native' (a text setter aimed at a button).
+    if (el.getAttribute('aria-haspopup') === 'listbox') return 'custom-dropdown';
+    // Workday's search-to-select input (measured: data-uxi-widget-type=
+    // "selectinput" on Field of Study) — free text never commits on it.
+    if (el.getAttribute?.('data-uxi-widget-type') === 'selectinput'
+        || el.getAttribute?.('data-uxi-multiselect-id')) {
+        return 'custom-dropdown';
+    }
+    // A Workday searchable prompt renders as a text INPUT, but free text never
+    // commits — the value only exists once a search result is clicked. Typing
+    // into it as 'native' leaves the field invalid while LOOKING answered
+    // (measured: "How Did You Hear About Us?" — the gap-filler's text pinned
+    // the step on a validation error for ten straight iterations).
+    if (el.tagName === 'INPUT'
+        && (el.getAttribute('aria-haspopup') === 'listbox'
+            || el.getAttribute('aria-autocomplete') === 'list'
+            || !!el.closest('[data-automation-id^="formField-"]')?.querySelector('[data-automation-id="selectedItemList"]'))) {
+        return 'custom-dropdown';
+    }
     return 'native';
 }
 
@@ -309,12 +330,14 @@ export function safeActivate(el, ctx = {}, originSelector) {
     const stack = _stackAt(point);
     let target = stack[0] || el;
     if (target !== el) {
-        const actual = checkClick(target, ctx, selector);
-        if (!actual.allowed) { logDenial(actual, target, ctx); return false; }
         if (!_sharesPath(stack, el)) {
             // The topmost element is not on the intended control's path — a modal
             // backdrop, a focus trap, a sibling overlay. Do NOT click it: it is
-            // not what the caller asked for even though it passed the policy.
+            // not what the caller asked for. Judged BEFORE its policy verdict:
+            // an unrelated cover is never clicked, so its verdict must not veto
+            // the element we were actually asked about — measured on Mondelez
+            // skills, where a selected-skill pill ("Remove …" = destructive)
+            // overlapped a legit result row and denied every attempt on it.
             //
             // Refusing outright was wrong too, and broke Workday's apply modal:
             // its overlay is a SIBLING of the button, so "Autofill with Resume"
@@ -324,6 +347,9 @@ export function safeActivate(el, ctx = {}, originSelector) {
             console.warn('[Copo] overlay at the click point is unrelated to the intended control — '
                 + 'activating the intended element directly instead');
             target = el;
+        } else {
+            const actual = checkClick(target, ctx, selector);
+            if (!actual.allowed) { logDenial(actual, target, ctx); return false; }
         }
     }
     return _dispatchOne(target, point);
@@ -345,12 +371,23 @@ function _viewportCentre(el) {
     return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
 }
 
-/** Every element under the point, topmost first. */
+/** The extension's OWN floating UI (toast, progress panel, confirm overlay).
+ *  It hovers bottom-right and, on a short window, sits exactly over Workday's
+ *  footer buttons — measured: the progress panel's copy contains "trước khi
+ *  nộp", SUBMIT_RE matched «nộp», and the policy denied our own Next click as
+ *  submit_application. Our chrome is never the click target and never policy
+ *  evidence: hit-testing looks straight through it. */
+function _isOwnUi(el) {
+    return !!el?.closest?.('#jobfit-toast, #jobfit-progress, #jobfit-confirm-overlay, #jobfit-auto-apply-btn, [id^="jobfit-agent"]');
+}
+
+/** Every element under the point, topmost first — the agent's own UI excluded. */
 function _stackAt({ x, y }) {
     try {
-        if (typeof document.elementsFromPoint === 'function') return document.elementsFromPoint(x, y) || [];
-        const one = document.elementFromPoint(x, y);
-        return one ? [one] : [];
+        const all = typeof document.elementsFromPoint === 'function'
+            ? (document.elementsFromPoint(x, y) || [])
+            : (document.elementFromPoint(x, y) ? [document.elementFromPoint(x, y)] : []);
+        return all.filter(e => !_isOwnUi(e));
     } catch { return []; }
 }
 
@@ -393,6 +430,29 @@ function _dispatchOne(target, { x, y }) {
     }
     try { target.click(); } catch { /* element detached mid-sequence */ }
     return true;
+}
+
+/**
+ * ONE definition of "the ATS has the file" — shared by the recipe (should I
+ * upload?), the observer (is this required field filled?) and any audit.
+ *
+ * Two modules answering that question differently is how a run froze: the
+ * recipe read uploadedRows=2 and skipped the upload, while the observer read
+ * input.value (which Workday clears after ingesting) and reported the SAME
+ * upload as an unfilled required field — advance withheld, planner consulted.
+ * `input.files` is the native signal; the row markers are Workday's own
+ * (file-upload-item / file-upload-successful — the ids the recipe's
+ * advanceWhen already trusts; broader wildcards stay out until measured).
+ * Rows are looked for in the input's own formField/section first, then
+ * page-wide as fallback (`scoped` says which matched).
+ */
+export function readFileCommitState(input, root = document) {
+    const ROWS = '[data-automation-id="file-upload-item"], [data-automation-id="file-upload-successful"]';
+    const scope = input?.closest?.('[data-automation-id^="formField-"], form, fieldset, section') || root;
+    const nativeFiles = input?.files?.length || 0;
+    const scopedRows = scope.querySelectorAll(ROWS).length;
+    const uploadedRows = scopedRows || root.querySelectorAll(ROWS).length;
+    return { committed: nativeFiles > 0 || uploadedRows > 0, nativeFiles, uploadedRows, scoped: scopedRows > 0 };
 }
 
 /** Build a File from base64 (shared by the input + dropzone upload paths). */

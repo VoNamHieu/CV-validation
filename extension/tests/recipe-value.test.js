@@ -6,7 +6,7 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { FALLBACK_RECIPES } from '../src/content-agent/recipe.js';
+import { FALLBACK_RECIPES, levelLadder } from '../src/content-agent/recipe.js';
 
 describe('legal-name fields declare name normalisation', () => {
     const wd = FALLBACK_RECIPES.find(r => r.ats === 'workday');
@@ -178,20 +178,26 @@ describe('language proficiency maps onto the offered rungs', () => {
     const level = wd.steps.find(s => s.name === 'My Experience').fields
         .find(f => f.label === 'Language level');
 
-    test('Native comes first, then what the form has', () => {
-        // Measured: the list is "1 - Beginner / 2 - Intermediate / 3 - Fluent".
-        // There is no Native row, and a CV that says Native — a first language —
-        // matched nothing and blocked a required field.
-        assert.deepEqual(level.valuePriority,
-            ['Native', 'Fluent', 'Advanced', 'Intermediate', 'Beginner']);
+    test('the ladder is sliced from the candidate\'s OWN level at fill time', () => {
+        // A static Native-first list overclaimed for anyone below Native: an
+        // Advanced speaker whose exact rung was absent fell UP to Native.
+        // `levelLadder: true` makes the executor build the ladder from the
+        // row's own level instead.
+        assert.equal(level.levelLadder, true);
+        assert.equal(level.valuePriority, undefined);
     });
 
     test('the ladder only ever steps DOWN', () => {
-        // A native speaker is fluent, so falling to Fluent claims nothing extra.
-        // The reverse — promoting Beginner to Fluent — would be a lie, so the
-        // order matters and is asserted rather than assumed.
-        const rank = ['Native', 'Fluent', 'Advanced', 'Intermediate', 'Beginner'];
-        assert.deepEqual(level.valuePriority, rank,
-            'each rung must be no stronger than the one before it');
+        // A native speaker is fluent, so falling to Fluent claims nothing
+        // extra. The reverse — promoting anyone to a rung above their own —
+        // would be a lie, whatever the form offers.
+        assert.deepEqual(levelLadder('Native'),
+            ['Native', 'Fluent', 'Advanced', 'Intermediate', 'Beginner']);
+        assert.deepEqual(levelLadder('Advanced'),
+            ['Advanced', 'Intermediate', 'Beginner'],
+            'measured 3-rung form (Beginner/Intermediate/Fluent): Advanced falls to Intermediate, never up to Fluent');
+        assert.deepEqual(levelLadder('nonsense'),
+            ['Fluent', 'Advanced', 'Intermediate', 'Beginner'],
+            'unknown level starts at Fluent, never claims Native');
     });
 });

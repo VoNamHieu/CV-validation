@@ -34,6 +34,24 @@ const norm = (s) => String(s ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
  */
 export const ANSWER_RULES = [
     {
+        kind: 'ethnicity',
+        // BEFORE the demographic rule (first match wins): ethnicity is the one
+        // demographic a VN candidate answers as an administrative fact, and
+        // their profile carries it ("Kinh"). Only a silent profile falls back
+        // to the decline phrasings — which a VN tenant's country-specific
+        // ethnic-group list usually doesn't offer anyway.
+        match: /race\s*\/?\s*ethnicity|\bethnicit|dân tộc/i,
+        profileKeys: ['ethnicity'],
+        // Fallback declines: the same breadth as the demographic rule below —
+        // this rule matching FIRST must never decline less well than the rule
+        // it shadows ("I don't wish to answer" needs the contraction rung).
+        candidates: [
+            'not specified', 'prefer not to say', 'decline to answer',
+            "don't wish", 'do not wish', 'decline to self-identify',
+            'not applicable', 'không muốn trả lời',
+        ],
+    },
+    {
         kind: 'demographic',
         // EEO self-identification: race, gender, disability, veteran status.
         // Every one of these forms offers a decline option BY LAW in the US, and
@@ -72,31 +90,41 @@ export const ANSWER_RULES = [
         candidates: ['no', 'không'],
     },
     {
+        kind: 'company_ties',
+        // Stock, shares, board seats, financial ties to the HIRING company.
+        // User decision 2026-08-02: "No" unless the CV states such a tie —
+        // this product's candidates left MNC employers and as a rule keep no
+        // positions in them; the answer sits in the review list like every
+        // agent default. (\bshares\b plural only: "share your…" is a verb.)
+        match: /\bstocks?\b|\bshares\b|sharehold|equity (in|of)|securities|board (member|of directors)|financial interest|affiliat(ed|ion) with|cổ phần|cổ phiếu|cổ đông/i,
+        candidates: ['no', 'không'],
+    },
+    {
         kind: 'restrictive_covenant',
         // "Do you have an agreement with your current or previous employer (e.g.
-        // non-compete…)?" — REQUIRED on Mondelez and matched by nothing, so it
-        // reached the user as an unnamed blank. Recognised here so it is reported
-        // BY NAME, but never answered: only the candidate knows what they signed,
-        // and "No" to a covenant they actually hold is a material misstatement.
+        // non-compete…)?" Formerly recognised but never answered. User decision
+        // 2026-08-02: default "No" when the CV carries no such agreement — the
+        // candidate corrects it at review if they actually signed one.
         match: /non[- ]?compete|non[- ]?solicit|restrictive covenant|agreement or requirement with your (current|previous) employer|cam kết không cạnh tranh/i,
-        candidates: [],
+        candidates: ['no', 'không'],
     },
     {
         kind: 'work_authorization',
-        // The candidate's own right to work where the job is. Answered from the
-        // profile when we hold it; otherwise NOT guessed — a wrong answer here is
-        // a material misstatement, and the review surfaces it as outstanding.
+        // Profile wins when present. Otherwise the home-market default (user
+        // decision 2026-08-02): a VN candidate on a VN-located job IS
+        // authorized. REVISIT for abroad jobs — there "yes" would be a
+        // material misstatement.
         match: /legally authoriz|legally entitled|right to work|work permit|authorized to work|được phép làm việc/i,
         profileKeys: ['workAuthorized'],
-        candidates: [],
+        candidates: ['yes', 'có'],
     },
     {
         kind: 'sponsorship',
-        // Mirror image of the above and equally material. Left to the user unless
-        // the profile says.
+        // Mirror image of the above: profile wins; home-market default "No"
+        // (same 2026-08-02 decision + the same abroad-jobs caveat).
         match: /sponsor|visa support|require sponsorship|bảo lãnh/i,
         profileKeys: ['requiresSponsorship'],
-        candidates: [],
+        candidates: ['no', 'không'],
     },
     {
         kind: 'acknowledgement',

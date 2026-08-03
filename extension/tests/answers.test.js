@@ -74,18 +74,24 @@ describe('screening questions with a safe default', () => {
     });
 });
 
-describe('the two we refuse to guess', () => {
-    // A wrong answer here is a material misstatement on a real application, and
-    // unlike a demographic question there is no neutral option that says nothing.
-    test('work authorization is left to the user when the profile is silent', () => {
-        assert.equal(resolveAnswer(q('Are you legally authorized to work in the US?'), ['Yes', 'No'], {}), null);
+describe('work authorization and sponsorship — home-market defaults', () => {
+    // Formerly refused when the profile was silent. User decision 2026-08-02:
+    // the product serves VN candidates on VN-located jobs, where "authorized:
+    // yes / sponsorship: no" is simply true — and every default lands in the
+    // review list before the user submits. REVISIT for abroad jobs.
+    test('work authorization defaults to Yes when the profile is silent', () => {
+        const a = resolveAnswer(q('Are you legally authorized to work in Vietnam?'), ['Yes', 'No'], {});
+        assert.equal(a.value, 'Yes');
+        assert.equal(a.source, ANSWER_SOURCE.AGENT_DEFAULT, 'a default is never dressed up as the user\'s own answer');
     });
 
-    test('sponsorship is left to the user when the profile is silent', () => {
-        assert.equal(resolveAnswer(q('Will you require visa sponsorship?'), ['Yes', 'No'], {}), null);
+    test('sponsorship defaults to No when the profile is silent', () => {
+        const a = resolveAnswer(q('Will you require visa sponsorship?'), ['Yes', 'No'], {});
+        assert.equal(a.value, 'No');
+        assert.equal(a.source, ANSWER_SOURCE.AGENT_DEFAULT);
     });
 
-    test('…but the profile answers them when it has the data', () => {
+    test('…and the profile still wins over the default when it has the data', () => {
         const a = resolveAnswer(q('Are you legally authorized to work?'), ['Yes', 'No'], { workAuthorized: true });
         assert.equal(a.value, 'Yes');
         assert.equal(a.source, ANSWER_SOURCE.PROFILE, 'the user\'s own answer is not an agent default');
@@ -123,24 +129,33 @@ describe('source question', () => {
     });
 });
 
-describe('questions only the candidate can answer', () => {
-    // Recognised so the review names them, never answered so the agent cannot
-    // put a claim on a real application that the candidate did not make.
-    const MATERIAL = [
+describe('company-relationship questions default to No', () => {
+    // User decision 2026-08-02: ties to the HIRING company (a covenant, stock,
+    // sponsorship needs) default to "No" when nothing stored says otherwise —
+    // this product's candidates left MNC employers and as a rule hold no such
+    // ties. Every one is AGENT_DEFAULT, so the review names it before the user
+    // submits; a candidate who DOES hold one corrects it there.
+    const DEFAULT_NO = [
         ['Do you have an agreement or requirement with your current or previous employer '
             + '(e.g. non-compete agreement, or other restrictive covenant)?', 'restrictive_covenant'],
-        ['Are you legally authorized to work in Vietnam?', 'work_authorization'],
         ['Do you currently, or will you in the future, require Mondelēz to sponsor a work visa?',
             'sponsorship'],
+        ['Do you own any stocks or shares in Mondelēz International?', 'company_ties'],
+        ['Are you a shareholder or board member of the company?', 'company_ties'],
     ];
 
-    for (const [label, kind] of MATERIAL) {
-        test(`recognised but unanswered: ${kind}`, () => {
-            assert.equal(ruleFor(label)?.kind, kind, 'a blank the user cannot see is worse than a named gap');
-            assert.equal(resolveAnswer(q(label), ['Yes', 'No'], {}), null,
-                'both answers state a fact about the candidate');
+    for (const [label, kind] of DEFAULT_NO) {
+        test(`${kind}: defaults to No`, () => {
+            assert.equal(ruleFor(label)?.kind, kind, 'the rule must recognise the question by name');
+            const a = resolveAnswer(q(label), ['Yes', 'No'], {});
+            assert.equal(a.value, 'No');
+            assert.equal(a.source, ANSWER_SOURCE.AGENT_DEFAULT, 'a default must surface in the review');
         });
     }
+
+    test('"share your…" phrasing is a verb, not a shareholding question', () => {
+        assert.equal(ruleFor('Would you like to share your salary expectations?')?.kind !== 'company_ties', true);
+    });
 });
 
 describe('unknown questions', () => {

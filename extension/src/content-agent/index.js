@@ -14,8 +14,8 @@
  *   - Simulate keyboard typing for stubborn frameworks
  */
 
-import { AGENT_MAX_ITERATIONS, APPLY_SESSION_TTL_MS, FILL_RETRY_THRESHOLD, POST_ACTION_WAIT_MS } from './constants.js';
-import { closeOpenDropdown, safeActivate, sleep } from './dom.js';
+import { AGENT_MAX_RUNTIME_MS, APPLY_SESSION_TTL_MS, FILL_RETRY_THRESHOLD, POST_ACTION_WAIT_MS } from './constants.js';
+import { closeOpenDropdown, safeActivate, setNativeValue, sleep } from './dom.js';
 import { removeProgress, showConfirmation, showProgress, showToast } from './ui.js';
 import { callAgentPlan, callLLMMapping } from './llm.js';
 import { executeFillInstructions } from './fill.js';
@@ -23,7 +23,7 @@ import { auditRequiredBlockers, observePageState, scrollAndCollect } from './obs
 import { findApplyButton, isApplicationFormPage, summarizeState, waitForJobPageSignal } from './detect.js';
 import { detectLoginWall, handleLoginWall } from './login.js';
 import { trace, traceClear, traceDump, traceOnce } from './trace.js';
-import { applyRecipeFields, atFinalStep, clickRecipeGateway, loadRecipes, recipeForUrl } from './recipe.js';
+import { applyRecipeFields, atFinalStep, clickRecipeGateway, inferFillDynamicField, loadRecipes, recipeForUrl, recipeOwnedWrappers, recipeReleased } from './recipe.js';
 import { checkClick, logDenial } from './policy.js';
 import { buildManifest, summarizeGaps, VERDICT } from './needs.js';
 import { tenantRefFor } from '../ats/tenant.js';
@@ -32,7 +32,7 @@ import { tenantRefFor } from '../ats/tenant.js';
 // you can confirm (in the PAGE / tab console, NOT the service-worker console) that
 // the freshly-built dist is actually loaded. If you don't see this line on the
 // apply tab, the new build isn't injected (reload the extension + refresh the tab).
-const COPO_BUILD = 'workday-audit-reload-2026-07-26';
+const COPO_BUILD = 'prod-final-2026-08-03l';
 try { console.log(`%c[Copo] content-agent build ${COPO_BUILD} loaded → ${location.host}`, 'color:#c43b2e;font-weight:700'); } catch { /* noop */ }
 
 /**
@@ -61,7 +61,7 @@ try { console.log(`%c[Copo] content-agent build ${COPO_BUILD} loaded → ${locat
  */
 async function loadSessionCv() {
     try {
-        const { applySession } = await chrome.storage.local.get('applySession');
+        const { applySession, pendingAutoApply } = await chrome.storage.local.get(['applySession', 'pendingAutoApply']);
         const sid = applySession?.sessionId;
         if (sid) {
             const key = `applyCv:${sid}`;
@@ -69,6 +69,14 @@ async function loadSessionCv() {
             if (scoped?.base64 && scoped?.fileName) {
                 return { cv: { base64: scoped.base64, fileName: scoped.fileName, scope: 'session' }, driven: true };
             }
+            return { cv: null, driven: true };
+        }
+        if (pendingAutoApply) {
+            // A DRIVEN flow whose session evaporated (worker recycle, sweep
+            // race) must NOT fall back to whatever blob is lying around —
+            // measured: a fixture PDF got uploaded and Workday parsed its fake
+            // employer into a real application. No session, no CV: the driven
+            // guard downstream refuses with cv_missing instead.
             return { cv: null, driven: true };
         }
         const g = await chrome.storage.local.get(['cvFileBase64', 'cvFileName']);
@@ -109,6 +117,19 @@ async function runAgentLoop(profile) {
     let prevUrl = window.location.href;
     const fillAttempts = new Map(); // selector → { count, lastValue }
     const persistentlyUnfilled = new Set();
+    // Deterministic-recovery budget per recipe field (validation error → recipe
+    // retries before the planner is asked). Reset when the wizard moves on.
+    const fieldRecovery = new Map(); // field label → retry count
+    // Needs-pass budget per selector: an instruction that "succeeds" without
+    // changing the page re-arms itself every iteration, and its `continue`
+    // starves everything downstream — measured: one mis-classified checkbox
+    // consumed 22 iterations while the recipe never ran again.
+    const needsAttempts = new Map(); // selector → attempts this page
+    // Error-persistence breaker: how many consecutive iterations each
+    // validation error has survived. A loop that cannot clear an error must
+    // SAY SO and stop — measured: "Postal code must be 5 digits" outlived 24
+    // rounds of refilling the same mis-formatted profile value.
+    const errorStreak = new Map(); // "field|message" → consecutive iterations
     // Completion signals present BEFORE we act. Job pages often contain static
     // marketing copy that matches the success regexes ("ứng tuyển thành công
     // trong 1 phút", "Cảm ơn bạn đã quan tâm..."), so only signals that APPEAR
@@ -219,12 +240,12 @@ async function runAgentLoop(profile) {
         // On an application form (e.g. Trakstar's ?apply=true) hunting for "Apply"
         // matches a third-party shortcut ("Apply with Indeed") and hijacks the
         // flow into a redirect/reload loop — so when the form is here, fill it.
-        showProgress(0, AGENT_MAX_ITERATIONS, 'Kiểm tra trang...');
+        showProgress(0, null, 'Kiểm tra trang...');
         await sleep(1000);
 
         if (isApplicationFormPage()) {
             console.log('[Copo Apply] step0: already on an application form — filling directly (skip Apply hunt)', location.href);
-            showProgress(0, AGENT_MAX_ITERATIONS, 'Đã ở form ứng tuyển, bắt đầu điền...');
+            showProgress(0, null, 'Đã ở form ứng tuyển, bắt đầu điền...');
             await sleep(300);
         } else {
             const applyBtn = findApplyButton();
@@ -235,11 +256,11 @@ async function runAgentLoop(profile) {
                 // screen, so a button reading "Nộp hồ sơ" opens one rather than
                 // sending one. (VN job boards use the same words for both.)
                 safeActivate(applyBtn, policyCtx('gateway', { openingApplication: true }), null);
-                showProgress(0, AGENT_MAX_ITERATIONS, 'Đã click nút Ứng tuyển, chờ form...');
+                showProgress(0, null, 'Đã click nút Ứng tuyển, chờ form...');
                 await sleep(2000);
             } else {
                 console.log('[Copo Apply] step0: no Apply button found — scanning current form');
-                showProgress(0, AGENT_MAX_ITERATIONS, 'Không tìm thấy nút Apply, scan form hiện tại...');
+                showProgress(0, null, 'Không tìm thấy nút Apply, scan form hiện tại...');
                 await sleep(500);
             }
         }
@@ -252,21 +273,28 @@ async function runAgentLoop(profile) {
         let singlePageIdle = 0;     // single-page recipe: consecutive passes with nothing new to fill → hand off
         let singlePagePasses = 0;   // single-page recipe: total passes on the matched form → hard cap (never spin)
 
-        for (let i = 0; i < AGENT_MAX_ITERATIONS; i++) {
+        const loopDeadline = Date.now() + AGENT_MAX_RUNTIME_MS;
+        for (let i = 0; ; i++) {
+            if (Date.now() > loopDeadline) {
+                removeProgress();
+                showToast('⚠️ Một job chạy quá 15 phút — dừng lại. Kiểm tra form rồi chạy tiếp.', 6000);
+                reportResult(false, `Quá ${Math.round(AGENT_MAX_RUNTIME_MS / 60000)} phút cho một job — dừng để không treo phiên`);
+                return;
+            }
             // Keep the background watchdog alive — an iteration can legitimately
             // take minutes (LLM call + waits), the timer should only fire when
             // this page goes silent.
             sendHeartbeat();
 
             // ── 1. OBSERVE ──
-            showProgress(i + 1, AGENT_MAX_ITERATIONS, 'Đang phân tích trang...');
+            showProgress(i + 1, null, 'Đang phân tích trang...');
             const state = await observePageState();
 
             // ── TRACE: per-iteration snapshot of what the scanner sees — so it's
             // obvious whether the page has the fields and whether they're already
             // filled (recipe + LLM act on this). ──
             const _step = state.stepIndicator ? `${state.stepIndicator.current}/${state.stepIndicator.total}` : '?';
-            console.log(`[Copo Apply] ══ iter ${i + 1}/${AGENT_MAX_ITERATIONS} ══ …${location.pathname.slice(-42)} · step ${_step} · fields=${state.formFields.length} buttons=${state.buttons.length} errors=${state.errors.length} blockers=${state.blockers.length}`);
+            console.log(`[Copo Apply] ══ iter ${i + 1} ══ …${location.pathname.slice(-42)} · step ${_step} · fields=${state.formFields.length} buttons=${state.buttons.length} errors=${state.errors.length} blockers=${state.blockers.length}`);
             if (state.formFields.length) {
                 console.log('[Copo Apply]   fields:', state.formFields.map(f =>
                     `${(f.label || f.name || f.placeholder || f.ariaLabel || '?').trim().slice(0, 22)}[${f.componentType || f.type}${f.value ? '=✓' : ''}${f.required ? ',req' : ''}]`).join('   '));
@@ -393,7 +421,7 @@ async function runAgentLoop(profile) {
                 if (wantReload && reloads < reloadBudget) {
                     try { sessionStorage.setItem('copoApplyReloads', String(reloads + 1)); } catch { /* ignore */ }
                     console.warn(`[Copo Apply] recovery: ${errCard ? 'error card' : 'empty page'} → reload ${reloads + 1}/${reloadBudget}`, location.href);
-                    showProgress(i + 1, AGENT_MAX_ITERATIONS, 'Trang lỗi/rỗng — tải lại…');
+                    showProgress(i + 1, null, 'Trang lỗi/rỗng — tải lại…');
                     await sleep(600);
                     location.reload();
                     return;   // the reload re-injects the agent on a fresh load
@@ -432,7 +460,7 @@ async function runAgentLoop(profile) {
                     newSignals[0]);
             }
             if (newSignals.length > 0 && actionsTaken > 0 && !midRecipeFlow && structuralSignal) {
-                showProgress(i + 1, AGENT_MAX_ITERATIONS, 'Phát hiện ứng tuyển thành công!');
+                showProgress(i + 1, null, 'Phát hiện ứng tuyển thành công!');
                 removeProgress();
                 reportResult(true,
                     `Submitted: "${newSignals[0]}" + ${formGone ? 'form gone' : 'confirmation URL'}`,
@@ -459,7 +487,7 @@ async function runAgentLoop(profile) {
                 let gw = clickRecipeGateway(recipe, hasCV, gatewayClicks);
                 if (gw.clicked) {
                     actionsTaken++;
-                    showProgress(i + 1, AGENT_MAX_ITERATIONS, `Tiếp tục: ${gw.label}`);
+                    showProgress(i + 1, null, `Tiếp tục: ${gw.label}`);
                     trace('gateway.click', { label: gw.label, chained: 0 });
                     // A gateway usually OPENS the next gateway — "Apply" raises the
                     // "Start Your Application" modal, whose own option is the thing
@@ -474,7 +502,7 @@ async function runAgentLoop(profile) {
                         if (!gw.clicked) break;
                         actionsTaken++;
                         trace('gateway.click', { label: gw.label, chained: chain });
-                        showProgress(i + 1, AGENT_MAX_ITERATIONS, `Tiếp tục: ${gw.label}`);
+                        showProgress(i + 1, null, `Tiếp tục: ${gw.label}`);
                     }
                     await sleep(1200);
                     continue; // re-observe the screen the gateway led to
@@ -560,7 +588,7 @@ async function runAgentLoop(profile) {
                     return;
                 }
 
-                showProgress(i + 1, AGENT_MAX_ITERATIONS,
+                showProgress(i + 1, null,
                     grant.operation === 'signup' ? 'Tạo tài khoản…' : 'Đăng nhập…');
 
                 let result = await handleLoginWall(grant.credentials, recipe?.login, grant.operation);
@@ -665,10 +693,40 @@ async function runAgentLoop(profile) {
                 }
 
                 // Corrections go out with the fills, in the same pass.
-                const todo = [...manifest.override, ...manifest.fill];
+                let todo = [...manifest.override, ...manifest.fill];
+                // Ownership: needs RESOLVES answers, but a field the active recipe
+                // step covers is the recipe's to EXECUTE — its widget knowledge is
+                // what commits a value (a generic fill typed free text into the
+                // "How Did You Hear" prompt: looked answered, committed nothing).
+                // Fields the recipe has RELEASED (FAIL/absent — stale selector,
+                // different tenant shape, exhausted strategies) fall through to
+                // needs, so the fallback flexibility is kept.
+                if (recipe && todo.length) {
+                    const owned = recipeOwnedWrappers(recipe);
+                    if (owned.size) {
+                        const deferred = [];
+                        todo = todo.filter(a => {
+                            const el = document.querySelector(a.selector);
+                            const wrap = el?.closest?.('[data-automation-id^="formField-"]');
+                            const label = wrap ? owned.get(wrap) : null;
+                            if (!label || recipeReleased(label)) return true;
+                            deferred.push(`${a.label}→${label}`);
+                            return false;
+                        });
+                        if (deferred.length) {
+                            console.log('[Copo Needs] recipe-owned, deferring to the recipe:', deferred.join(' · '));
+                        }
+                    }
+                }
+                // The starvation fuse: two tries per control per page. A fill
+                // that took would read as answered next pass and never re-arm;
+                // one that keeps re-arming is not going to work a third time,
+                // and its `continue` was costing every pass the recipe.
+                todo = todo.filter(a => (needsAttempts.get(a.selector) || 0) < 2);
                 if (todo.length) {
+                    for (const a of todo) needsAttempts.set(a.selector, (needsAttempts.get(a.selector) || 0) + 1);
                     console.log('[Copo Needs] applying:', todo.map(a => `${a.label}=${String(a.value).slice(0, 20)}[${a.source}]`).join(' · '));
-                    showProgress(i + 1, AGENT_MAX_ITERATIONS,
+                    showProgress(i + 1, null,
                         manifest.override.length
                             ? `Sửa ${manifest.override.length} trường lệch + điền ${manifest.fill.length}…`
                             : `Điền ${manifest.fill.length} trường từ hồ sơ…`);
@@ -695,6 +753,39 @@ async function runAgentLoop(profile) {
                         history.push({ iteration: i, plan: { action: 'NEEDS', reason: 'deterministic field resolution' }, result: { filled: n } });
                         await sleep(600);
                         continue;   // re-observe before spending an LLM call
+                    }
+                }
+
+                // ── FREE-ANSWER screening selects (user-approved 2026-08-02).
+                // A required dropdown nothing stored answers is no longer a user
+                // gap by default: the model reads the CV/profile and picks from
+                // the options the WIDGET actually offers — "years of experience
+                // in X?" has its answer in the CV, and stalling on it was pure
+                // friction. Selects only (a model may choose, never type);
+                // recipe-owned fields stay with the recipe until released;
+                // demographic/consent never reach the gap list at all.
+                const openSelects = (manifest.gaps || [])
+                    .filter(g => ['custom-dropdown', 'native-select', 'radio-group'].includes(g.componentType) && !g.userOnly);
+                if (openSelects.length) {
+                    const owned = recipe ? recipeOwnedWrappers(recipe) : new Map();
+                    let inferred = 0;
+                    for (const g of openSelects.slice(0, 4)) {
+                        const el = document.querySelector(g.selector);
+                        const wrap = el?.closest?.('[data-automation-id^="formField-"]');
+                        const ownerLabel = wrap ? owned.get(wrap) : null;
+                        if (ownerLabel && !recipeReleased(ownerLabel)) continue;
+                        const r = await inferFillDynamicField(g, profile, cvStructured);
+                        trace('gap.inferFill', { label: String(g.label || '').slice(0, 50), ok: !!r.ok, matched: r.matched || null, why: r.reason || null });
+                        if (r.ok) {
+                            inferred++;
+                            reviewAnswers.set(`answer::${g.label}`, { field: g.label, value: r.matched, source: 'AGENT_DEFAULT' });
+                        }
+                    }
+                    if (inferred > 0) {
+                        actionsTaken++;
+                        history.push({ iteration: i, plan: { action: 'NEEDS', reason: 'model picked from on-widget options' }, result: { filled: inferred } });
+                        await sleep(600);
+                        continue;   // re-observe with the new answers committed
                     }
                 }
             }
@@ -732,7 +823,7 @@ async function runAgentLoop(profile) {
                         result: { filled: rf.filled },
                     });
                     if (recipe.singlePage) singlePageIdle = 0;   // progress made → reset idle
-                    showProgress(i + 1, AGENT_MAX_ITERATIONS,
+                    showProgress(i + 1, null,
                         rf.uploadedParser ? '📄 Đã tải CV — chờ hệ thống tự điền hồ sơ…'
                             : `Điền tự động (${recipe.label}) — ${rf.filled} trường`);
                     // After uploading the CV to SR's parser, WAIT ~5s so it finishes
@@ -755,7 +846,7 @@ async function runAgentLoop(profile) {
                     if (rf.matched) {
                         singlePageIdle++;
                         if (singlePageIdle < 2) {
-                            showProgress(i + 1, AGENT_MAX_ITERATIONS, 'Rà soát & điền các ô còn trống…');
+                            showProgress(i + 1, null, 'Rà soát & điền các ô còn trống…');
                             await sleep(1600);
                             continue;   // give the parser another pass, then re-scan
                         }
@@ -769,7 +860,7 @@ async function runAgentLoop(profile) {
                     // Host matches but the form isn't on screen yet — wait for it to
                     // render (or for the "I'm interested" gateway to land us on it)
                     // rather than handing the empty page to the LLM.
-                    showProgress(i + 1, AGENT_MAX_ITERATIONS, 'Chờ form ứng tuyển…');
+                    showProgress(i + 1, null, 'Chờ form ứng tuyển…');
                     await sleep(1500);
                     continue;
                 }
@@ -791,7 +882,7 @@ async function runAgentLoop(profile) {
                         step: state.stepIndicator
                             ? `${state.stepIndicator.current}/${state.stepIndicator.total}` : null,
                     });
-                    showProgress(i + 1, AGENT_MAX_ITERATIONS, 'Chờ form ứng tuyển…');
+                    showProgress(i + 1, null, 'Chờ form ứng tuyển…');
                     await sleep(1500);
                     continue;
                 }
@@ -818,8 +909,13 @@ async function runAgentLoop(profile) {
                     recipeMatched: rf.matched,
                     step: _stepNow?.name || _stepNow?.detect || null,
                     unfilledRequired: state.unfilledRequired.length,
-                    unfilledLabels: state.unfilledRequired.slice(0, 5).map(f => (f.label || f.selector || '?').slice(0, 22)).join(' | '),
+                    // Full names + component type, not counts — "unfilledRequired=3"
+                    // cost a debug session that "Work To Month | …" answers, and
+                    // "? [file-upload]" names a phantom blocker instantly.
+                    unfilledLabels: state.unfilledRequired.slice(0, 6).map(f =>
+                        `${(f.label || f.placeholder || f.selector || '?').slice(0, 40)}${f.componentType ? ` [${f.componentType}]` : ''}`).join(' | '),
                     errors: state.errors.length,
+                    errorDetail: state.errors.slice(0, 4).map(e => `${e.field || '?'}: ${String(e.message || '').slice(0, 40)}`).join(' | '),
                     atFinalStep: atFinalStep(recipe),
                     advSelector: _stepNow?.advance || null,
                     advFound: !!_adv,
@@ -841,7 +937,7 @@ async function runAgentLoop(profile) {
                         selector: _waitingFor,
                         filledThisPass: rf.filled,
                     });
-                    showProgress(i + 1, AGENT_MAX_ITERATIONS, 'Chờ đính kèm CV…');
+                    showProgress(i + 1, null, 'Chờ đính kèm CV…');
                     await sleep(1500);
                     continue;
                 }
@@ -877,6 +973,35 @@ async function runAgentLoop(profile) {
                 }
             }
 
+            // ── GENERIC ADVANCE (hybrid): tenants reshape Workday's steps, and a
+            // page no recipe step recognises still has to MOVE once complete —
+            // before this, only the planner could click Next there, so an
+            // unknown page shape on an unreachable planner ended the run.
+            // pageFooterNextButton is Workday PLATFORM chrome (tenant-neutral);
+            // the text scan covers other ATSes. The policy layer judges the
+            // click as always (submit labels refused), and a visible review
+            // page is never advanced generically.
+            {
+                const insideApply = !!state.stepIndicator || /\/apply(\/|$)/.test(location.pathname);
+                const stepMatched = !!(recipe && (recipe.steps || []).find(s => s.detect && document.querySelector(s.detect)));
+                const onReview = (recipe && atFinalStep(recipe))
+                    || !!document.querySelector('[data-automation-id="applyFlowReviewPage"]');
+                if (insideApply && !stepMatched && !onReview
+                    && state.unfilledRequired.length === 0 && state.errors.length === 0
+                    && state.formFields.length > 0) {
+                    const adv = document.querySelector('[data-automation-id="pageFooterNextButton"]')
+                        || [...document.querySelectorAll('button, [role="button"]')]
+                            .filter(b => b.offsetParent !== null)
+                            .find(b => /^(save and continue|continue|next|tiếp tục|lưu và tiếp tục)$/i.test((b.textContent || '').replace(/\s+/g, ' ').trim()));
+                    if (adv && adv.offsetParent !== null) {
+                        if (closeOpenDropdown()) await sleep(250);
+                        const okAdv = safeActivate(adv, policyCtx('recipe'), '[generic-advance]');
+                        trace('advance.generic', { label: (adv.textContent || '').trim().slice(0, 28), activated: okAdv });
+                        if (okAdv) { actionsTaken++; await sleep(1500); continue; }
+                    }
+                }
+            }
+
             // Blockers (captcha, login wall) are reported to the LLM via state.blockers
             // (see line 1138). Don't bail here — let the LLM keep filling non-blocker
             // fields and decide NEED_HUMAN itself only when there's nothing left to fill.
@@ -888,6 +1013,9 @@ async function runAgentLoop(profile) {
                 prevStateHash = '';
                 fillAttempts.clear();
                 persistentlyUnfilled.clear();
+                fieldRecovery.clear();
+                needsAttempts.clear();
+                errorStreak.clear();
                 prevStepCurrent = curStep;
                 prevUrl = state.url;
                 // A new page gets its own grace to render. Without this the budget
@@ -945,6 +1073,104 @@ async function runAgentLoop(profile) {
                 prevStateHash = stateHash;
             }
 
+            // ── ERROR-PERSISTENCE BREAKER: the loop must READ its errors, not
+            // outlast them. An error that survives four straight iterations of
+            // needs + recipe + recovery + planner is not going to yield to a
+            // fifth — the VALUE is wrong for this tenant's rule ("Postal code
+            // must be 5 digits" outlived 24 rounds), and the only useful move
+            // is to stop and name it for the user.
+            {
+                const keyOf = (e) => `${String(e.field || '').toLowerCase()}|${String(e.message || '').toLowerCase()}`.slice(0, 140);
+                const nowKeys = new Set(state.errors.map(keyOf));
+                for (const k of nowKeys) errorStreak.set(k, (errorStreak.get(k) || 0) + 1);
+                for (const k of [...errorStreak.keys()]) if (!nowKeys.has(k)) errorStreak.delete(k);
+                const stubborn = state.errors.find(e => (errorStreak.get(keyOf(e)) || 0) >= 4);
+                if (stubborn) {
+                    const msg = `${stubborn.field ? stubborn.field + ': ' : ''}${(stubborn.message || '').slice(0, 140)}`;
+                    trace('error.stubborn', { error: msg, iterations: errorStreak.get(keyOf(stubborn)) });
+                    removeProgress();
+                    showToast(`⚠️ Form từ chối giá trị hiện tại — cần bạn sửa dữ liệu: ${msg}`, 10000);
+                    reportResult(false, `Need human: form keeps rejecting the value — ${msg}`,
+                        'blocked', { blockedReason: 'manual', review: summarizeAnswers(reviewAnswers), fieldGaps: [...fieldGaps.values()] });
+                    return;
+                }
+            }
+
+            // ── Deterministic recovery: a validation error on a RECIPE-OWNED
+            // field is the recipe's to fix. Re-running its pass costs seconds; a
+            // planner call costs ~25s and resolves the same field with less
+            // widget knowledge (measured: ten planner calls against one stuck
+            // "How Did You Hear"). Per-field, the evidence decides:
+            //   no commit + error → FALSE_DONE — retry the recipe (its entry
+            //                       guards clear any uncommitted rubble first)
+            //   commit + error    → the error may simply be stale: settle the
+            //                       widget (close popup, blur), let the form
+            //                       revalidate, and only a SURVIVING error next
+            //                       pass counts as real
+            // Budget 2 retries per field; exhausted or unmapped errors fall
+            // through to the planner as before.
+            if (recipe && state.errors.length) {
+                const normL = (s) => String(s || '').toLowerCase().replace(/[*:]/g, ' ').replace(/\s+/g, ' ').trim();
+                const owned = recipeOwnedWrappers(recipe);
+                const entries = [...owned.entries()];
+                const mapped = state.errors.map(e => {
+                    // Field AND message: a summary entry arrives as field="Page
+                    // Error" with the real subject only in the text ("Enter a
+                    // postal code in the valid format…").
+                    const en = normL(`${e.field || ''} ${e.message || ''}`);
+                    const hit = entries.find(([w, label]) => {
+                        // The recipe's short name rarely matches the page's long
+                        // question ("Salary expectations" vs "What is your
+                        // expected monthly salary range?") — the wrapper's OWN
+                        // legend is the page's wording, so compare both.
+                        const ln = normL(label);
+                        const pageLbl = normL(w?.querySelector?.('legend, label')?.textContent);
+                        return (ln && en && (en.includes(ln) || ln.includes(en)))
+                            || (pageLbl && en && (en.includes(pageLbl) || pageLbl.includes(en)));
+                    });
+                    return hit ? { wrap: hit[0], label: hit[1] } : null;
+                }).filter(Boolean);
+                const retryable = mapped.filter(m => (fieldRecovery.get(m.label) || 0) < 2);
+                if (retryable.length) {
+                    for (const m of retryable) fieldRecovery.set(m.label, (fieldRecovery.get(m.label) || 0) + 1);
+                    const hasCommit = (wrap) => {
+                        const chipList = wrap?.querySelector?.('[data-automation-id="selectedItemList"]');
+                        if (chipList && chipList.children.length) return true;
+                        return !!(wrap?.querySelector?.('button')?.getAttribute('value') || '').trim();
+                    };
+                    const revalidate = retryable.filter(m => hasCommit(m.wrap));
+                    if (revalidate.length) {
+                        if (closeOpenDropdown()) await sleep(200);
+                        try { document.activeElement?.blur?.(); } catch { /* noop */ }
+                    }
+                    // Attempt #2 on a persisting error: the committed VALUE is
+                    // what the form rejects, and a summary-only error ("Page
+                    // Error: postal code…") never reaches the wrapper — so the
+                    // field's own value+no-error guard keeps reading it as
+                    // done. Clear it; the next recipe pass re-enters fresh.
+                    for (const m of retryable) {
+                        if ((fieldRecovery.get(m.label) || 0) >= 2) {
+                            const inp = m.wrap?.querySelector?.('input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]), textarea');
+                            const was = inp ? String(inp.value || '').trim() : '';
+                            if (inp && was) {
+                                setNativeValue(inp, '', { quiet: true });
+                                trace('recover.cleared', { field: m.label, was: was.slice(0, 20) });
+                            }
+                        }
+                    }
+                    console.log(`[Copo Apply] recovery: ${retryable.length} error(s) on recipe fields — `
+                        + retryable.map(m => `${m.label}:${revalidate.includes(m) ? 'revalidate' : 'retry'}`).join(', ')
+                        + ' — skipping planner');
+                    trace('recover.recipe', {
+                        fields: retryable.map(m => `${m.label}#${fieldRecovery.get(m.label)}`).join(' | '),
+                        revalidating: revalidate.length,
+                        errors: state.errors.length,
+                    });
+                    await sleep(800);
+                    continue;
+                }
+            }
+
             // ── 3. PLAN: Ask LLM what to do next ──
             //
             // One guard at the choke point, because guarding each branch has not
@@ -972,7 +1198,7 @@ async function runAgentLoop(profile) {
                 await sleep(1500);
                 continue;
             }
-            showProgress(i + 1, AGENT_MAX_ITERATIONS, `AI đang lên kế hoạch (iteration ${i + 1})...`);
+            showProgress(i + 1, null, `AI đang lên kế hoạch (iteration ${i + 1})...`);
 
             let plan;
             const _planT0 = Date.now();
@@ -1008,7 +1234,7 @@ async function runAgentLoop(profile) {
                     // iteration and is idempotent, so it keeps making progress while
                     // the planner is unavailable.
                     trace('plan.transient', { attempt: planFailures, error: err.message });
-                    showProgress(i + 1, AGENT_MAX_ITERATIONS, 'AI phản hồi chậm — thử lại…');
+                    showProgress(i + 1, null, 'AI phản hồi chậm — thử lại…');
                     await sleep(1500);
                     continue;
                 } else {
@@ -1048,7 +1274,7 @@ async function runAgentLoop(profile) {
 
             // ── 5. ACT ──
             let actionResult = {};
-            showProgress(i + 1, AGENT_MAX_ITERATIONS, plan.reason || 'Đang thực hiện...');
+            showProgress(i + 1, null, plan.reason || 'Đang thực hiện...');
 
             if (plan.action === 'FILL' && plan.instructions?.length > 0) {
                 // Track each fill attempt by selector so we can detect
@@ -1149,11 +1375,6 @@ async function runAgentLoop(profile) {
             // ── 7. WAIT for page to react ──
             await sleep(plan.waitMs || POST_ACTION_WAIT_MS);
         }
-
-        // Max iterations reached
-        removeProgress();
-        showToast('⚠️ Đã chạy tối đa iterations. Kiểm tra lại form.', 5000);
-        reportResult(false, `Max iterations (${AGENT_MAX_ITERATIONS}) reached`);
 
     } catch (err) {
         removeProgress();
@@ -1560,6 +1781,12 @@ async function runSingleStep(opts = {}) {
 
         let rf = null;
         if (fill) rf = await applyRecipeFields(recipe, profile, cvData, cvStructured);
+        // Colliding with the live loop is the one failure that looks like a page
+        // bug but is ours: say so instead of reporting the other pass's numbers.
+        if (rf?.busy) {
+            return { ok: false, error: 'a fill is already running in this tab (Auto Apply loop?) — '
+                + 'stop it or wait for the pass to finish, then copoStep() again' };
+        }
         const after = fill ? await observePageState() : before;
 
         let advanced = null;

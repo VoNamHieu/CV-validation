@@ -13,11 +13,12 @@
 // pass; the recipe re-runs every iteration and is idempotent, so partial progress
 // accumulates and already-filled fields are skipped.
 
-import { deepFindControl, deepQuery, deepQueryAll, dropFileOnZone, safeActivate, setFileOnInput, setNativeValue, simulateTyping, sleep, waitForElement } from './dom.js';
+import { deepFindControl, deepQuery, deepQueryAll, dropFileOnZone, readFileCommitState, safeActivate, setFileOnInput, setNativeValue, simulateTyping, sleep, waitForElement } from './dom.js';
 import { isThirdPartyApply } from './detect.js';
 import { showToast } from './ui.js';
 import { trace, traceOnce } from './trace.js';
-import { callAgentPlan } from './llm.js';
+import { callAgentPlan, callApplyMessage } from './llm.js';
+import { isPickerShape, probeFieldShape } from './probe.js';
 
 // Keep in sync with frontend/src/lib/applyRecipes.ts (WORKDAY). Fields verified
 // against real 3M Workday captures (My Information, 2026-07-15 / -22). The
@@ -27,7 +28,7 @@ export const FALLBACK_RECIPES = [
     {
         ats: 'workday',
         label: 'Workday',
-        version: 13,
+        version: 18,
         verified: true,
         hostPattern: '\\.myworkdayjobs\\.com|\\.myworkdaysite\\.com',
         login: {
@@ -60,12 +61,19 @@ export const FALLBACK_RECIPES = [
                     // and returned NEED_HUMAN, ending the run on data the CV was
                     // holding all along. Resolution is value → profileKey → cvPath,
                     // so a filled profile still wins.
-                    { label: 'Address line 1', selector: '[data-automation-id="formField-addressLine1"] input', profileKey: 'addressStreet', cvPath: 'contact.address_street', type: 'text', required: true },
-                    { label: 'District or Town', selector: '[data-automation-id="formField-city"] input', profileKey: 'addressDistrict', cvPath: 'contact.address_district', type: 'text', required: true },
+                    // City-name fallback (user decision 2026-08-03): a CV that
+                    // only says "Hà Nội" answers street/district with the city
+                    // instead of stalling a required field.
+                    { label: 'Address line 1', selector: '[data-automation-id="formField-addressLine1"] input', profileKey: 'addressStreet', cvPath: 'contact.address_street', fallbackProfileKey: 'addressProvince', type: 'text', required: true },
+                    { label: 'District or Town', selector: '[data-automation-id="formField-city"] input', profileKey: 'addressDistrict', cvPath: 'contact.address_district', fallbackProfileKey: 'addressProvince', type: 'text', required: true },
                     // Required text input; a résumé never carries it, so autofill leaves
                     // it blank and the step's Next validation blocks. Default to the VN
                     // generic postal code.
-                    { label: 'Postal Code', selector: '[data-automation-id="formField-postalCode"] input', value: '100000', type: 'text', required: true },
+                    // 5 DIGITS, not the legacy 6 ("100000"): Vietnam switched in
+                    // 2018 (Hà Nội 10000, HCMC 70000) and Workday validates it —
+                    // "Postal code must be 5 digits" outlived 24 iterations of
+                    // this very field refilling its own hard-coded legacy value.
+                    { label: 'Postal Code', selector: '[data-automation-id="formField-postalCode"] input', value: '10000', type: 'text', required: true },
                     { label: 'Phone number', selector: '[data-automation-id="formField-phoneNumber"] input', profileKey: 'phone', type: 'text', required: true },
                     // Custom Workday dropdowns (button→listbox). Country FIRST — picking it
                     // re-renders the region/postal fields — then Province. `value`/pickAny
@@ -191,6 +199,11 @@ export const FALLBACK_RECIPES = [
                     { label: 'Work To', selector: '[data-automation-id="formField-endDate"]', cvPath: 'experience[0].end_date', type: 'date' },
                     { label: 'School or University', selector: '[data-automation-id="formField-schoolName"] input', cvPath: 'education[0].institution', type: 'text', required: true },
                     { label: 'Field of Study', selector: '[data-automation-id="formField-fieldOfStudy"] input', cvPath: 'education[0].degree', type: 'text', required: true },
+                    // "Overall Result (GPA)" — REQUIRED on some Mondelez postings.
+                    // Only the profile may answer (grade rule: a plausible-looking
+                    // number is a fabricated academic record); empty profile →
+                    // named gap, never invented.
+                    { label: 'GPA', labelMatch: 'overall result', profileKey: 'gpa', type: 'text', required: true },
                     // The Languages block. Measured on Mondelez: Language and
                     // "Overall" (proficiency) are both REQUIRED, and "Overall" has
                     // a per-tenant GUID for an automation id — hence labelMatch.
@@ -207,7 +220,15 @@ export const FALLBACK_RECIPES = [
                         // direction: a native speaker IS fluent, and nothing higher
                         // exists to claim.
                         label: 'Language level', labelMatch: 'overall', cvPath: 'languages[0].level',
-                        valuePriority: ['Native', 'Fluent', 'Advanced', 'Intermediate', 'Beginner'],
+                        // NOT the "Overall Result (GPA)" text box — measured on
+                        // Marketing Intern, where 'overall' matched it first in
+                        // DOM order and the proficiency fill spent its whole
+                        // listbox timeout clicking a text input.
+                        labelDeny: 'overall result|gpa',
+                        // Sliced DOWN from the candidate's own level at fill
+                        // time — a static Native-first list overclaimed for
+                        // anyone below Native when their exact rung was absent.
+                        levelLadder: true,
                         type: 'custom-select', required: true,
                     },
                     // Skills refuses free text: typing leaves the box empty and the
@@ -223,14 +244,74 @@ export const FALLBACK_RECIPES = [
                 advance: '[data-automation-id="pageFooterNextButton"]',
             },
             {
-                // Application Questions: the Yes/No conflict-of-interest dropdowns
-                // default to "No"; the two required free-text questions have per-job
-                // dynamic ids, so match them by question text (labelMatch).
+                // Application Questions: every field here has a per-job dynamic id,
+                // so all are matched by question text (labelMatch).
                 name: 'Application Questions',
                 detect: '[data-automation-id="applyFlowPrimaryQuestionsPage"]',
                 fields: [
                     { label: 'Notice period', labelMatch: 'notice period', value: '30 days', type: 'text' },
                     { label: 'Salary expectations', labelMatch: 'salary', profileKey: 'desiredSalary', default: 'Negotiable', type: 'text' },
+                    // The three screening dropdowns Mondelez asks on every job
+                    // (measured on R-173278; labelMatch phrasings verbatim from the
+                    // page). All three are AGENT_DEFAULT answers ABOUT the candidate,
+                    // so they surface in the review list before the user submits —
+                    // the agent itself never submits.
+                    //   · conflict-of-interest / relatives-at-company: "No" is the
+                    //     overwhelmingly-true default; a user for whom it is false
+                    //     corrects it at review.
+                    //   · visa sponsorship: "No" is correct for the home-market case
+                    //     (VN candidate, VN-located job — the only market served
+                    //     today). REVISIT before targeting abroad jobs: there this
+                    //     default would falsely waive a sponsorship need.
+                    { label: 'Conflict of interest', labelMatch: 'conflict of interest', value: 'No', type: 'custom-select', required: true, answerSource: 'AGENT_DEFAULT' },
+                    { label: 'Relatives at company', labelMatch: 'relatives currently employed', value: 'No', type: 'custom-select', required: true, answerSource: 'AGENT_DEFAULT' },
+                    { label: 'Visa sponsorship', labelMatch: 'sponsor a work visa', value: 'No', type: 'custom-select', required: true, answerSource: 'AGENT_DEFAULT' },
+                ],
+                advance: '[data-automation-id="pageFooterNextButton"]',
+            },
+            {
+                // Voluntary Disclosures — measured on Mondelez R-173278
+                // (2026-08-02): two demographic prompts and the terms-consent
+                // checkbox. This page had NO step at all, so it always fell to
+                // the planner ("no recipe step matches this page").
+                name: 'Voluntary Disclosures',
+                detect: '[data-automation-id="applyFlowVoluntaryDisclosuresPage"]',
+                fields: [
+                    // Demographics: declining is the only answer that states
+                    // nothing about the person. "Not Specified" is this tenant's
+                    // decline row (measured options: Female / Male / Not
+                    // Specified / Other); the longer rungs cover other tenants.
+                    {
+                        label: 'Gender',
+                        selector: '[data-automation-id="formField-gender"] button',
+                        valuePriority: ['Not Specified', 'Prefer not to say', 'Decline to answer', 'I do not wish to answer', 'Decline to self-identify', 'Not applicable'],
+                        type: 'custom-select', required: true, answerSource: 'AGENT_DEFAULT',
+                    },
+                    {
+                        // The candidate's own ethnicity FIRST ("Kinh"): a VN
+                        // tenant's list is the country's ethnic-group catalogue
+                        // and carries none of the decline phrasings — those stay
+                        // only as the fallback when the profile is silent.
+                        label: 'Race/Ethnicity',
+                        selector: '[data-automation-id="formField-ethnicity"] button',
+                        profileKey: 'ethnicity',
+                        valuePriority: ['Not Specified', 'Prefer not to say', 'Decline to answer', 'I do not wish to answer', 'Decline to self-identify', 'Not applicable'],
+                        type: 'custom-select',
+                    },
+                    {
+                        // The terms acknowledgement. User decision 2026-08-02:
+                        // the agent ticks it — this product's one approval
+                        // boundary is the SUBMIT button, which stays the
+                        // user's; an acknowledgement gating the review page is
+                        // answered exactly like its dropdown twin in
+                        // ANSWER_RULES, and it lands in the review list the
+                        // user reads before submitting. Marketing opt-ins stay
+                        // denied at the policy layer as before.
+                        label: 'Terms acknowledgement',
+                        selector: '[data-automation-id="formField-acceptTermsAndAgreements"] input[type="checkbox"]',
+                        value: 'Yes',
+                        type: 'checkbox', required: true, answerSource: 'AGENT_DEFAULT',
+                    },
                 ],
                 advance: '[data-automation-id="pageFooterNextButton"]',
             },
@@ -280,7 +361,12 @@ export const FALLBACK_RECIPES = [
     {
         ats: 'smartrecruiters',
         label: 'SmartRecruiters',
-        version: 1,
+        // v2: the Message box reads `applyMessage` (was `coverLetter`, which
+        // falls back to the CV summary) and generates one when none was synced.
+        // Bumped on BOTH sides deliberately: the merge takes the remote recipe
+        // whenever remoteV >= bundledV, so leaving these equal would let a web
+        // app that has not redeployed yet overwrite this with the old field.
+        version: 2,
         verified: false,
         singlePage: true,
         hostPattern: 'smartrecruiters\\.com',
@@ -311,8 +397,21 @@ export const FALLBACK_RECIPES = [
                     { label: 'Phone', selector: '[data-test="personal-info-phone"]', control: 'input[type="tel"]', profileKey: 'phone', type: 'shadow-text', required: true },
                     // City autocomplete (min 3 chars → async place lookup → pick a match).
                     { label: 'Location', selector: '[data-test="location-autocomplete"]', profileKey: 'addressProvince', default: 'Ho Chi Minh City', type: 'autocomplete', required: true },
-                    // Optional free-text note to the hiring manager → use the tailored letter.
-                    { label: 'Message', selector: '[data-test="hiring-manager-message-text"], [data-test="hiring-manager-message-container"]', profileKey: 'coverLetter', type: 'shadow-text' },
+                    // Optional free-text note to the hiring team. Verified live on a
+                    // Bosch posting (2026-08-01): <oc-textarea data-test=…> wraps an
+                    // <spl-textarea> whose SHADOW root holds the real 10-row
+                    // <textarea>; aria-required=false, no maxlength — so a ~150-word
+                    // note fits the box without scrolling.
+                    //
+                    // Filled from `applyMessage`, the short per-job note the web app
+                    // writes before dispatch. It used to read `coverLetter`, which
+                    // falls back to the CV SUMMARY when no letter was generated — so
+                    // an application whose owner never pressed "Tạo thư giới thiệu"
+                    // sent a third-person paragraph about themselves to a box asking
+                    // what they wanted to say. `generate` covers the other direction:
+                    // an apply that never passed through the editor has no message to
+                    // carry, and the agent writes one here instead.
+                    { label: 'Message', selector: '[data-test="hiring-manager-message-text"], [data-test="hiring-manager-message-container"]', profileKey: 'applyMessage', type: 'shadow-text', generate: 'message' },
                 ],
                 // No `advance`: single-page form. The agent stops after filling.
             },
@@ -346,10 +445,50 @@ const OPTION_SEL = '[data-automation-id="promptOption"], [data-automation-id="pr
 
 /** The element that actually scrolls a prompt's option list, if any. */
 function optionScroller(opt) {
+    // Prefer an ancestor that already overflows; fall back to the first ancestor
+    // STYLED to scroll. A lazy list can read scrollHeight == clientHeight until
+    // it is scrolled once, and returning null there froze the walk at window one
+    // (measured: Mondelez's Language prompt — "Vietnamese" sat past the fold and
+    // every pass reported option-not-found on a list that contained it).
+    let styled = null;
     for (let p = opt?.parentElement; p && p !== document.body; p = p.parentElement) {
         if (p.scrollHeight > p.clientHeight + 20) return p;
+        if (!styled) {
+            const oy = getComputedStyle(p).overflowY;
+            if (oy === 'auto' || oy === 'scroll') styled = p;
+        }
     }
-    return null;
+    return styled;
+}
+
+/**
+ * Close any popup left open by a PREVIOUS field before opening this one's.
+ *
+ * Workday portals every prompt's option list to the document root — no
+ * formField ancestor — so a leftover popup is indistinguishable from our own by
+ * ownership. Measured on Mondelez: the proficiency field read the still-open
+ * Language list as its own options (85 shown, none matched), and a stale skills
+ * popup covered the Degree row it was trying to click (no-effect ×4). Escape is
+ * how a user closes them, and it targets whatever currently has focus.
+ */
+async function closeStrayPopups(label) {
+    const stray = () => [...document.querySelectorAll(OPTION_SEL)]
+        .filter(o => o.offsetParent !== null)
+        .filter(o => !o.closest('[data-automation-id="selectedItemList"]'));
+    if (!stray().length) return;
+    trace('list.strayPopup', { field: label, rows: stray().length });
+    for (let round = 0; round < 2 && stray().length; round++) {
+        const at = document.activeElement && document.activeElement !== document.body
+            ? document.activeElement : document.body;
+        for (const type of ['keydown', 'keyup']) {
+            at.dispatchEvent(new KeyboardEvent(type, {
+                key: 'Escape', code: 'Escape', keyCode: 27, which: 27,
+                bubbles: true, cancelable: true, composed: true,
+            }));
+        }
+        const by = Date.now() + 800;
+        while (stray().length && Date.now() < by) await sleep(120);
+    }
 }
 
 /**
@@ -477,6 +616,23 @@ async function findInList(getShown, match, label = '', wanted = '') {
     if (opt) return opt;
     const sc = optionScroller(getShown()[0]);
     if (!sc) {
+        // No scrollable ancestor detected — let the browser do the scrolling.
+        // scrollIntoView on the last rendered row moves whatever actually scrolls
+        // (measured: Mondelez's Language list hid "Vietnamese" past the fold and
+        // reported noScroller here, so the walk below never ran). Stop as soon as
+        // a round brings in nothing new: the list is exhausted, not the budget.
+        for (let round = 0; round < 12; round++) {
+            const rows = getShown();
+            if (!rows.length) break;
+            const found = match(rows);
+            if (found) return found;
+            const beforeKey = renderedRows(getShown).join('|');
+            try { rows[rows.length - 1].scrollIntoView({ block: 'end' }); } catch { break; }
+            await sleep(300);
+            if (renderedRows(getShown).join('|') === beforeKey) break;
+        }
+        const found = match(getShown());
+        if (found) return found;
         trace('list.noScroller', { field: label, shown: getShown().length });
         return null;
     }
@@ -742,7 +898,131 @@ export function recipeForUrl(recipes, url) {
  *
  * @returns {{matched:boolean, filled:number, step?:string}}
  */
+/**
+ * Answer a DYNAMIC screening dropdown the stored data could not (user-approved
+ * 2026-08-02: these are no longer user gaps by default).
+ *
+ * "Do you have N years of experience in X?" has its answer sitting in the CV —
+ * routing it to the user was pure friction. The synthetic descriptor reuses the
+ * whole verified custom-select path: open the widget, read the options ACTUALLY
+ * offered, let the model pick from those given the CV + profile (infer), commit
+ * and verify. The model never types free text — its only power is choosing one
+ * of the employer's own options — and the answer lands in the review list as
+ * AGENT_DEFAULT, seen by the user before they submit. Demographic/consent
+ * questions never reach here: the decline-first ANSWER_RULES resolve them
+ * upstream of the gap list.
+ */
+export async function inferFillDynamicField(gap, profile, cv) {
+    const f = {
+        label: String(gap.label || '').slice(0, 70) || '(unlabelled select)',
+        selector: gap.selector,
+        type: 'custom-select',
+        required: true,
+        infer: true,
+        answerSource: 'AGENT_DEFAULT',
+    };
+    // Workday's button prompt reads its options only once opened.
+    if (!gap.componentType || gap.componentType === 'custom-dropdown') {
+        return fillCustomSelect(f, '', { profile, cv });
+    }
+    // Native <select> and radio groups already told the observer their options —
+    // ask the model to pick from EXACTLY those, then commit and verify.
+    const offered = (gap.options || []).map(o => o.text || o.value).filter(Boolean);
+    const picked = await inferOptionViaLLM(f, offered, profile, cv);
+    if (!picked?.value) return { ok: false, reason: `inference: ${picked?.why || 'no pick'}` };
+    const want = String(picked.value).trim().toLowerCase();
+    const el = document.querySelector(gap.selector);
+    if (!el) return { ok: false, reason: 'element-gone' };
+    if (gap.componentType === 'native-select') {
+        const opt = [...(el.options || [])].find(o =>
+            (o.textContent || '').trim().toLowerCase() === want || String(o.value).trim().toLowerCase() === want);
+        if (!opt) return { ok: false, reason: `model picked "${picked.value}" but the select has no such option` };
+        setNativeValue(el, opt.value);
+        return String(el.value) === String(opt.value)
+            ? { ok: true, matched: (opt.textContent || '').trim() }
+            : { ok: false, reason: 'value did not stick' };
+    }
+    if (gap.componentType === 'radio-group') {
+        const wrap = el.closest('fieldset, [data-automation-id^="formField-"]') || el.parentElement;
+        const radios = [...(wrap?.querySelectorAll('input[type="radio"]') || [])].filter(r => r.offsetParent !== null);
+        const labelOf = (r) => {
+            const byFor = r.id ? wrap.querySelector(`label[for="${CSS.escape(r.id)}"]`) : null;
+            return ((byFor || r.closest('label'))?.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+        };
+        const exact = radios.filter(r => labelOf(r) === want);
+        const loose = radios.filter(r => labelOf(r).includes(want));
+        const target = exact[0] || (loose.length === 1 ? loose[0] : null);
+        if (!target) return { ok: false, reason: `model picked "${picked.value}" but no unique radio matches` };
+        if (target.checked) return { ok: false, reason: 'already-selected' };
+        if (!safeActivate(target, { source: 'recipe', activation: 'widget-option' }, gap.selector)) {
+            return { ok: false, reason: 'policy-denied' };
+        }
+        return target.checked ? { ok: true, matched: picked.value } : { ok: false, reason: 'click did not select it' };
+    }
+    return { ok: false, reason: `unsupported shape: ${gap.componentType}` };
+}
+
+// ── Field ownership: resolve vs execute ─────────────────────────────────────
+// Any layer may RESOLVE an answer for a field the recipe covers, but only the
+// recipe EXECUTES it — its widget knowledge is what turns an answer into a
+// committed value, and a generic fill on a recipe-owned widget is how "How Did
+// You Hear" got free text typed into a searchable prompt: looked answered,
+// committed nothing, pinned the step on a validation error for ten iterations.
+// A field is RELEASED to the generic layers only on structured failure: the
+// recipe exhausted its strategies (FAIL) or its selector found nothing
+// (absent) — so a stale recipe cannot hold a field hostage either.
+const _fieldStatus = new Map();   // field label → { status, why, at }
+
+/** Last recipe verdict for a field, as recorded by the most recent pass. */
+export function recipeFieldStatus(label) { return _fieldStatus.get(label) || null; }
+
+/** True when the recipe has formally given up on the field this page-state. */
+export function recipeReleased(label) {
+    const s = _fieldStatus.get(label);
+    return !!s && (s.status === 'FAIL' || s.status === 'absent');
+}
+
+/** formField wrapper element → recipe field label. MENU-wide, matching the
+ *  fill scope: any known field whose control resolves on THIS page is the
+ *  recipe's to execute, whichever step first measured it. */
+export function recipeOwnedWrappers(recipe) {
+    const owned = new Map();
+    for (const f of (recipe?.steps || []).flatMap(s => s.fields || [])) {
+        const el = f.labelMatch ? findFieldByLabel(f.labelMatch, f.labelDeny)
+            : f.selector ? document.querySelector(f.selector) : null;
+        const wrap = el?.closest?.('[data-automation-id^="formField-"]') || el;
+        if (wrap && !owned.has(wrap)) owned.set(wrap, f.label);
+    }
+    return owned;
+}
+
+/**
+ * Only ONE fill may be in flight per page.
+ *
+ * Nothing enforced this: the auto-apply loop and copoStep() both call straight
+ * in, so a debug step fired while the loop was running put two passes on the
+ * same widgets. Measured — two "My Experience" summaries 83ms apart with
+ * opposite verdicts: one reported Language `level1:no-row` and its proficiency
+ * list `option-not-found (42 shown)` while the other reported both OK. Neither
+ * field was broken; the passes were closing each other's popups (every pass
+ * clears stray popups by design, and the other pass's open list looks exactly
+ * like a stray one). Refuse rather than queue — a caller that collided wants to
+ * know, and the loop simply retries next iteration.
+ */
+let _fillInFlight = null;
+
 export async function applyRecipeFields(recipe, profile, cvData, cv) {
+    if (_fillInFlight) {
+        console.warn('[Copo Recipe] a fill is already running on this page — skipping this one. '
+            + '(Auto Apply loop + copoStep() at the same time? Let one finish.)');
+        trace('recipe.busy', { url: location.pathname.slice(-40) });
+        return { matched: false, filled: 0, busy: true };
+    }
+    _fillInFlight = _applyRecipeFields(recipe, profile, cvData, cv);
+    try { return await _fillInFlight; } finally { _fillInFlight = null; }
+}
+
+async function _applyRecipeFields(recipe, profile, cvData, cv) {
     if (!recipe || !profile) return { matched: false, filled: 0 };
 
     let filled = 0;
@@ -781,13 +1061,21 @@ export async function applyRecipeFields(recipe, profile, cvData, cv) {
             } else if (t.selector) {
                 fileEl = document.querySelector(t.selector) || deepQuery(t.selector);
             }
-            const already = !!(fileEl && fileEl.files && fileEl.files.length);
+            // ONE commit definition, shared with the observer (readFileCommitState):
+            // `input.files` alone is not the truth — Workday ingests the file and
+            // CLEARS the input, so hasFile read false on every later pass and the
+            // agent re-uploaded the CV each iteration (measured: 5+ duplicate rows
+            // in one run). And when only the recipe knew about the uploaded rows,
+            // the observer kept counting the same upload as unfilled-required.
+            const fileState = readFileCommitState(fileEl, document);
+            const uploadedRows = fileState.uploadedRows;
+            const already = fileState.committed;
             // Diagnostic — if the CV still doesn't attach, this tells us exactly why:
             // shadow open vs closed (a closed shadow root is unreachable → we can't
             // set the <input>), and how many inputs of any type are reachable.
             const _sh = host ? (host.shadowRoot ? host.shadowRoot.mode : 'none/closed') : '-';
             const _anyInputs = host ? deepQueryAll('input', host).length : 0;
-            console.log(`[Copo Recipe] upload "${key}": host=${!!host} shadow=${_sh} fileInput=${!!fileEl} anyInputs=${_anyInputs} hasFile=${already}`);
+            console.log(`[Copo Recipe] upload "${key}": host=${!!host} shadow=${_sh} fileInput=${!!fileEl} anyInputs=${_anyInputs} hasFile=${already} uploadedRows=${uploadedRows}`);
             if (already) { if (t.once) _fileUploadedHosts.add(key); continue; }
             let ok = false;
             if (t.via === 'drop') {
@@ -821,6 +1109,7 @@ export async function applyRecipeFields(recipe, profile, cvData, cv) {
                 fileInput: !!fileEl,
                 shadow: _sh,
                 alreadyHadFile: already,
+                uploadedRows,
                 ok,
                 stopsPass: !!(ok && t.once),
             });
@@ -844,7 +1133,42 @@ export async function applyRecipeFields(recipe, profile, cvData, cv) {
     if (uploadedParser) return { matched: true, filled, step: 'résumé-parse', uploadedParser: true };
 
     const step = (recipe.steps || []).find(s => s.detect && document.querySelector(s.detect));
-    if (!step) return { matched: filled > 0, filled };  // e.g. the autofill upload page: uploaded, no text step
+
+    // ── FIELD MENU: tenants reorder and reshape Workday's steps — the same
+    // Degree prompt can sit on a differently-named page, or one page can mix
+    // fields the measured tenant spread across two. So known fields are a MENU
+    // matched against what THIS page actually renders, never a list locked to
+    // the step that first measured them. The matched step's fields go first
+    // (their array order carries real dependencies — Country re-renders
+    // Province), then every OTHER known field whose control resolves on this
+    // page joins in. On the measured tenant nothing changes: other steps'
+    // selectors simply don't resolve cross-page.
+    const stepFields = step?.fields || [];
+    const inStep = new Set(stepFields.map(f => f.label));
+    const fieldOnPage = (f) => {
+        const el = f.labelMatch ? findFieldByLabel(f.labelMatch, f.labelDeny)
+            : f.selector ? document.querySelector(f.selector) : null;
+        return !!(el && el.offsetParent !== null);
+    };
+    const menuExtras = (recipe.steps || [])
+        .flatMap(s => s.fields || [])
+        .filter((f, i, arr) => arr.findIndex(x => x.label === f.label) === i)
+        .filter(f => !inStep.has(f.label))
+        .filter(fieldOnPage);
+    const fieldsToFill = [...stepFields, ...menuExtras];
+    const stepName = step?.name || (menuExtras.length ? 'Field Menu' : null);
+    // A matched step with NOTHING to fill is still MATCHED — the Autofill page
+    // is a dropzone and a Continue button, and returning matched:false there
+    // stranded the run between two gates: the recipe advance wants rf.matched,
+    // the generic advance stands down because a step detect matched. Measured:
+    // four iterations staring at a visible "Continue" without clicking it.
+    if (!stepName) return { matched: filled > 0, filled };
+    if (menuExtras.length) {
+        trace('recipe.menu', {
+            step: stepName,
+            extras: menuExtras.map(f => f.label).join(' | '),
+        });
+    }
 
     // Fields are filled in array order (Country BEFORE Province — picking Country
     // re-renders the region field). Custom-selects re-query fresh each pass, so a
@@ -852,7 +1176,7 @@ export async function applyRecipeFields(recipe, profile, cvData, cv) {
     // Sections that must EXIST before their fields can be filled. A repeating
     // block starts empty on some jobs and pre-filled on others (Workday's résumé
     // parse decides), and the recipe cannot fill a row that is not there.
-    for (const sectionName of step.ensureSections || []) {
+    for (const sectionName of step?.ensureSections || []) {
         const r = ensureSectionEntry(sectionName);
         if (r.ok) await sleep(900);   // let the new row render before filling it
     }
@@ -864,8 +1188,26 @@ export async function applyRecipeFields(recipe, profile, cvData, cv) {
     // are ours, not yours" is the difference between a review they can do in a
     // minute and one they have to do field by field.
     const answers = [];
-    for (const f of step.fields || []) {
-        const val = recipeFieldValue(f, profile, cv);
+    // The FULL work history, not just row one — autonomy must not stop at the
+    // schema's single-selector boundary (measured: three CV jobs, a Review
+    // page reading "Work Experience: No Response").
+    if (recipe.ats === 'workday' && (step?.ensureSections || []).includes('Work Experience')) {
+        try { filled += await fillWorkExperienceRows(cv, outcomes); }
+        catch (e) { outcomes.push(['Work Experience (rows)', 'FAIL', (e && e.message) || 'exception']); }
+    }
+    for (const f of fieldsToFill) {
+        let val = recipeFieldValue(f, profile, cv);
+        // Free text nobody stored, that the agent may write itself. Gated on the
+        // box being EMPTY on screen — resolving the value happens before the
+        // per-type handlers get to their own "already filled" check, so without
+        // this a re-run would pay for a message the form is already showing.
+        if ((val == null || String(val).trim() === '') && f.generate === 'message') {
+            const host = f.selector ? document.querySelector(f.selector) : null;
+            const box = host ? deepFindControl(host, f.control) : null;
+            if (box && String(box.value ?? '').trim() === '') {
+                val = await generateMessageViaLLM(f, cv);
+            }
+        }
         const hasLadder = Array.isArray(f.valuePriority) && f.valuePriority.length > 0;
         // A field that may be INFERRED is not skipped for having no value — no
         // value is precisely when the model is worth asking. Everything else with
@@ -880,7 +1222,8 @@ export async function applyRecipeFields(recipe, profile, cvData, cv) {
         try {
             if (f.type === 'search-multi') {
                 const r = await fillSearchMulti(f, val, { profile, cv });
-                if (r.ok) { filled++; outcomes.push([f.label, 'OK', String(val).slice(0, 40)]); }
+                if (r.satisfied && r.changed) { filled++; outcomes.push([f.label, 'OK', `${r.added} added${r.already ? `, ${r.already} already` : ''}`]); }
+                else if (r.satisfied) outcomes.push([f.label, 'done', 'all terms already committed']);
                 else if (r.reason === 'field-absent' || r.reason === 'no search box') outcomes.push([f.label, 'absent', 'not rendered yet']);
                 else if (r.reason === 'no value') outcomes.push([f.label, 'skip', 'no value']);
                 // Every term returning nothing means the employer configured no
@@ -889,7 +1232,7 @@ export async function applyRecipeFields(recipe, profile, cvData, cv) {
                 else if (r.emptyTaxonomy) outcomes.push([f.label, 'skip', 'no results for any term']);
                 else outcomes.push([f.label, 'FAIL', r.reason]);
             } else if (f.type === 'date') {
-                const r = fillDateField(f, val);
+                const r = await fillDateField(f, val);
                 if (r.ok) { filled++; outcomes.push([f.label, 'OK', String(val)]); answers.push({ field: f.label, value: val, source: provenance }); }
                 else if (r.reason === 'already-selected') outcomes.push([f.label, 'done', 'already filled']);
                 else if (r.reason === 'field-absent') outcomes.push([f.label, 'absent', 'not rendered yet']);
@@ -897,6 +1240,17 @@ export async function applyRecipeFields(recipe, profile, cvData, cv) {
                 // there is nothing to fill and nothing failed.
                 else if (r.reason === 'no value') outcomes.push([f.label, 'skip', 'no end date (current role)']);
                 else outcomes.push([f.label, 'FAIL', r.reason]);
+            } else if (f.type === 'checkbox') {
+                const el = f.labelMatch ? findFieldByLabel(f.labelMatch, f.labelDeny) : document.querySelector(f.selector);
+                if (!el || el.offsetParent === null) { outcomes.push([f.label, 'absent', 'not rendered yet']); continue; }
+                if (el.checked) { outcomes.push([f.label, 'done', 'already ticked']); continue; }
+                if (!safeActivate(el, { source: 'recipe', activation: 'widget-option' }, f.selector)) {
+                    outcomes.push([f.label, 'FAIL', 'policy-denied']);
+                    continue;
+                }
+                await sleep(250);
+                if (el.checked) { filled++; outcomes.push([f.label, 'OK', 'ticked']); answers.push({ field: f.label, value: 'Yes', source: provenance }); }
+                else outcomes.push([f.label, 'FAIL', 'tick did not take']);
             } else if (f.type === 'radio') {
                 const r = fillRadio(f, val);
                 if (r.ok) { filled++; outcomes.push([f.label, 'OK', String(val)]); answers.push({ field: f.label, value: val, source: provenance }); }
@@ -904,7 +1258,9 @@ export async function applyRecipeFields(recipe, profile, cvData, cv) {
                 else if (r.reason === 'group-absent') outcomes.push([f.label, 'absent', 'not rendered yet']);
                 else outcomes.push([f.label, 'FAIL', r.reason]);
             } else if (f.type === 'custom-select') {
-                const r = await fillCustomSelect(f, val, { profile, cv });
+                const r = await fillCustomSelect(
+                    f.levelLadder ? { ...f, valuePriority: levelLadder(val) } : f,
+                    val, { profile, cv });
                 if (r.ok) {
                     filled++;
                     outcomes.push([f.label, 'OK', String(r.matched || val)]);
@@ -942,20 +1298,78 @@ export async function applyRecipeFields(recipe, profile, cvData, cv) {
                 if (String(el.value ?? '').trim() !== '') { outcomes.push([f.label, 'done', 'already filled']); continue; }  // idempotent
                 setNativeValue(el, String(val));
                 await sleep(120);
-                if (String(el.value ?? '').trim() !== '') { filled++; outcomes.push([f.label, 'OK', String(val)]); answers.push({ field: f.label, value: val, source: provenance }); }
+                // Truncated in the outcome line only: a written message is ~150
+                // words, and the debug summary is a table meant to be scanned.
+                // `answers` keeps the full value — the review reads that.
+                if (String(el.value ?? '').trim() !== '') { filled++; outcomes.push([f.label, 'OK', String(val).slice(0, 60)]); answers.push({ field: f.label, value: val, source: provenance }); }
                 else outcomes.push([f.label, 'FAIL', 'value did not stick']);
             } else {
-                const el = f.labelMatch ? findFieldByLabel(f.labelMatch) : document.querySelector(f.selector);
+                const el = f.labelMatch ? findFieldByLabel(f.labelMatch, f.labelDeny) : document.querySelector(f.selector);
                 if (!el || el.offsetParent === null) { outcomes.push([f.label, 'absent', 'not rendered yet']); continue; }
                 if (el.type === 'password') { outcomes.push([f.label, 'skip', 'password']); continue; }   // never
-                if (String(el.value ?? '').trim() !== '') { outcomes.push([f.label, 'done', 'already filled']); continue; }  // idempotent
-                setNativeValue(el, String(val));
-                await sleep(120);
-                if (String(el.value ?? '').trim() !== '') { filled++; outcomes.push([f.label, 'OK', String(val)]); answers.push({ field: f.label, value: val, source: provenance }); }
-                else outcomes.push([f.label, 'FAIL', 'value did not stick']);
+                // TEST the widget before trusting the declared type: the same
+                // question is free text on one tenant and a pick-required
+                // prompt on another, and typing into a prompt paints an answer
+                // that commits nothing. The probe decides the strategy; the
+                // label only decided the VALUE.
+                const probed = await probeFieldShape(el);
+                if (isPickerShape(probed.shape)) {
+                    trace('shape.reroute', { field: f.label, declared: f.type || 'text', probed: probed.shape, evidence: probed.evidence });
+                    const r = await fillCustomSelect(f, val, { profile, cv });
+                    if (r.ok) { filled++; outcomes.push([f.label, 'OK', String(r.matched || val)]); answers.push({ field: f.label, value: r.matched || val, source: provenance }); }
+                    else if (r.reason === 'already-selected') outcomes.push([f.label, 'done', 'already selected']);
+                    else outcomes.push([f.label, 'FAIL', r.reason]);
+                    continue;
+                }
+                // Same commit rule as dates and prompts: a value NEXT TO a live
+                // validation error is not an answer. Measured on the salary
+                // textarea — "Negotiable" painted in the box, "must have a
+                // value" right under it (Workday saw the field as EMPTY: the
+                // native setter never reached its state), and this guard then
+                // read the painted text as done on every later pass.
+                const wrapEl = el.closest('[data-automation-id^="formField-"]');
+                const errCount = () => wrapEl
+                    ? wrapEl.querySelectorAll('[data-automation-id="errorMessage"], [data-automation-id="formFieldError"]').length
+                    : 0;
+                const errsBefore = errCount();
+                if (String(el.value ?? '').trim() !== '' && !errsBefore) { outcomes.push([f.label, 'done', 'already filled']); continue; }
+                if (String(el.value ?? '').trim() !== '' && errsBefore) {
+                    setNativeValue(el, '', { quiet: true });
+                    await sleep(120);
+                }
+                // The keyboard path — the one route Workday's widgets reliably
+                // consume — then a real exit so its validation pass runs.
+                await simulateTyping(el, String(val));
+                try { el.dispatchEvent(new FocusEvent('focusout', { bubbles: true })); el.blur?.(); } catch { /* noop */ }
+                await sleep(300);
+                const nowVal = String(el.value ?? '').trim();
+                if (!nowVal) outcomes.push([f.label, 'FAIL', 'value did not stick']);
+                else if (errsBefore > 0 && errCount() > 0) outcomes.push([f.label, 'PARTIAL', 'value shown but error persists']);
+                else { filled++; outcomes.push([f.label, 'OK', String(val)]); answers.push({ field: f.label, value: val, source: provenance }); }
             }
-        } catch (e) { outcomes.push([f.label, 'FAIL', (e && e.message) || 'exception']); }
+        } catch (e) {
+            outcomes.push([f.label, 'FAIL', (e && e.message) || 'exception']);
+            // A field that died mid-widget leaves its popup open and its search box
+            // dirty — state the NEXT field then reads as its own (measured: the
+            // skills crash left a popup that covered Degree's list a pass later).
+            try { await closeStrayPopups(`${f.label}:after-crash`); } catch { /* best effort */ }
+        }
         await sleep(120);
+    }
+
+    // Every work-experience row's end date — the field list above only reaches
+    // the first formField-endDate on the page.
+    // Shape-based, not step-name-based: any page showing language rows gets
+    // the per-row pass, whatever the tenant called the step.
+    if (recipe.ats === 'workday' && document.querySelector('[data-automation-id="formField-language"]')) {
+        try { filled += await fillLanguageRows(cv, outcomes, profile); }
+        catch (e) { outcomes.push(['Languages (rows)', 'FAIL', (e && e.message) || 'exception']); }
+    }
+    // Shape-based, not step-name-based: any page showing endDate rows gets the
+    // per-row pass, whatever the tenant called the step.
+    if (recipe.ats === 'workday' && document.querySelector('[data-automation-id="formField-endDate"]')) {
+        try { filled += await fillExperienceEndDates(cv, outcomes); }
+        catch (e) { outcomes.push(['Work To (rows)', 'FAIL', (e && e.message) || 'exception']); }
     }
 
     // Per-field debug log — only on passes where something was filled or failed
@@ -963,9 +1377,12 @@ export async function applyRecipeFields(recipe, profile, cvData, cv) {
     const failed = outcomes.filter(([, s]) => s === 'FAIL');
     // Always log the per-field verdict while debugging — shows OK/done/absent/skip/
     // FAIL for every recipe field each pass (why filled=0 etc.).
-    console.log(`[Copo Recipe] "${step.name}" fields →`, outcomes.map(([l, s]) => `${l}:${s}`).join('  ·  '));
+    // The ownership registry: what the generic layers consult before touching a
+    // field this recipe covers (see recipeReleased above).
+    for (const [label, status, why] of outcomes) _fieldStatus.set(label, { status, why, at: Date.now() });
+    console.log(`[Copo Recipe] "${stepName}" fields →`, outcomes.map(([l, s]) => `${l}:${s}`).join('  ·  '));
     if (failed.length) {
-        console.warn(`[Copo Recipe] ✗ FAILED (${step.name}):`,
+        console.warn(`[Copo Recipe] ✗ FAILED (${stepName}):`,
             failed.map(([l, , why]) => `${l} — ${why}`).join('  |  '));
     }
     // The same verdicts into the trace. A step that will not advance is always
@@ -978,8 +1395,8 @@ export async function applyRecipeFields(recipe, profile, cvData, cv) {
     // and a step that is already filled has nothing to explain.
     const notable = filled > 0 || failed.length
         || outcomes.some(([, st]) => st === 'absent' || st === 'skip');
-    (notable ? trace : traceOnce.bind(null, `recipe.done:${step.name}`))('recipe.fields', {
-        step: step.name,
+    (notable ? trace : traceOnce.bind(null, `recipe.done:${stepName}`))('recipe.fields', {
+        step: stepName,
         filled,
         ok: outcomes.filter(([, s]) => s === 'OK').map(([l]) => l).join(', ') || null,
         alreadyDone: outcomes.filter(([, s]) => s === 'done').length,
@@ -988,7 +1405,7 @@ export async function applyRecipeFields(recipe, profile, cvData, cv) {
         failed: failed.map(([l, , why]) => `${l}: ${why}`).join(' | ') || null,
     });
 
-    return { matched: true, filled, step: step.name, answers };
+    return { matched: true, filled, step: stepName, answers };
 }
 
 /**
@@ -1005,28 +1422,113 @@ export async function applyRecipeFields(recipe, profile, cvData, cv) {
  * the SECTION HEADING is the only thing that tells them apart — press the wrong
  * one and the application grows an empty education or website row.
  */
-function ensureSectionEntry(sectionName) {
+/**
+ * A section's bounds = everything between ITS heading and the NEXT heading of
+ * the same-or-higher level. The old subtree walk climbed UP "until the block
+ * holds more than its title" — and an EMPTY section is all title, so it
+ * climbed past its own bounds into a container that also held Education's
+ * fields, read them as "this section already has an entry", and silently
+ * never clicked Add. The emptier the section, the more certain the miss.
+ */
+function sectionScope(sectionName) {
     const vis = (e) => !!(e && e.offsetParent !== null);
     const heads = [...document.querySelectorAll('h2, h3, h4')].filter(vis);
     const head = heads.find(h => (h.textContent || '').trim().toLowerCase() === sectionName.toLowerCase());
-    if (!head) return { ok: false, reason: 'section-absent' };
-
-    // The section's own subtree: walk up until the block holds more than its title.
-    let block = head.parentElement;
-    for (let i = 0; i < 4 && block; i++) {
-        if ((block.innerText || '').trim().length > sectionName.length + 10) break;
-        block = block.parentElement;
+    if (!head) return null;
+    const lvl = (h) => Number(h.tagName[1]) || 6;
+    const idx = heads.indexOf(head);
+    let nextHead = null;
+    for (let j = idx + 1; j < heads.length; j++) {
+        if (lvl(heads[j]) <= lvl(head)) { nextHead = heads[j]; break; }
     }
-    if (!block) return { ok: false, reason: 'section-absent' };
+    const FOLLOWING = Node.DOCUMENT_POSITION_FOLLOWING;
+    const inSection = (el) => (head.compareDocumentPosition(el) & FOLLOWING)
+        && (!nextHead || (el.compareDocumentPosition(nextHead) & FOLLOWING));
+    return { head, inSection, vis };
+}
+
+/** The section's own Add / Add Another button, or null. */
+function sectionAddButton(sectionName) {
+    const scope = sectionScope(sectionName);
+    if (!scope) return null;
+    return [...document.querySelectorAll('[data-automation-id="add-button"]')]
+        .filter(scope.vis).filter(scope.inSection)[0] || null;
+}
+
+function ensureSectionEntry(sectionName) {
+    const scope = sectionScope(sectionName);
+    if (!scope) { trace('section.check', { section: sectionName, verdict: 'section-absent' }); return { ok: false, reason: 'section-absent' }; }
 
     // Already has an entry → nothing to do. Adding a second would submit a blank row.
-    if (block.querySelector('[data-automation-id^="formField-"]')) return { ok: false, reason: 'already-present' };
+    const ownFields = [...document.querySelectorAll('[data-automation-id^="formField-"]')].filter(scope.vis).filter(scope.inSection);
+    if (ownFields.length) { trace('section.check', { section: sectionName, verdict: 'already-present', fields: ownFields.length }); return { ok: false, reason: 'already-present' }; }
 
-    const btn = [...block.querySelectorAll('[data-automation-id="add-button"]')].filter(vis)[0];
-    if (!btn) return { ok: false, reason: 'no add button' };
+    const btn = sectionAddButton(sectionName);
+    if (!btn) { trace('section.check', { section: sectionName, verdict: 'no add button in section' }); return { ok: false, reason: 'no add button' }; }
     const ok = safeActivate(btn, { source: 'recipe', activation: 'page-action' }, '[data-automation-id="add-button"]');
     trace('section.add', { section: sectionName, clicked: ok });
     return ok ? { ok: true } : { ok: false, reason: 'policy-denied' };
+}
+
+/**
+ * EVERY work-experience row the CV holds, not just the recipe's row one.
+ *
+ * The recipe schema is born single-row — one field, one selector, first
+ * match — so an autonomous agent stopped exactly at that boundary and rows
+ * 2..n fell off the application silently. This pass GROWS the section to the
+ * CV's row count (append order makes index i ↔ experience[i] ours by
+ * construction) and fills each row's columns, never overwriting text someone
+ * — the ATS parse, a person — already put there. End dates and the
+ * currently-work-here tick stay with fillExperienceEndDates (title-matched,
+ * verified), which runs after this.
+ */
+async function fillWorkExperienceRows(cv, outcomes) {
+    const exp = cv?.experience || [];
+    if (!exp.length) return 0;
+    const vis = (e) => !!(e && e.offsetParent !== null);
+    const rowsNow = () => [...document.querySelectorAll('[data-automation-id="formField-jobTitle"]')].filter(vis);
+
+    const want = Math.min(exp.length, 5);
+    let guard = 0;
+    while (rowsNow().length < want && guard < want + 2) {
+        guard++;
+        const btn = sectionAddButton('Work Experience');
+        if (!btn) break;
+        if (!safeActivate(btn, { source: 'recipe', activation: 'page-action' }, '[data-automation-id="add-button"]')) break;
+        const had = rowsNow().length;
+        const by = Date.now() + 4000;
+        while (rowsNow().length <= had && Date.now() < by) await sleep(200);
+        if (rowsNow().length <= had) break;   // click added nothing — stop, don't spin
+        trace('section.addRow', { section: 'Work Experience', rows: rowsNow().length, want });
+    }
+
+    const colWraps = (aid) => [...document.querySelectorAll(`[data-automation-id="${aid}"]`)].filter(vis);
+    let filled = 0;
+    const titles = rowsNow();
+    for (let i = 0; i < titles.length && i < exp.length; i++) {
+        const e = exp[i];
+        const put = async (wrapEl, val, what) => {
+            if (!wrapEl || val == null || String(val).trim() === '') return;
+            const box = wrapEl.querySelector('input:not([type="hidden"]), textarea');
+            if (!box || String(box.value || '').trim()) return;       // filled → not ours to touch
+            try { box.focus(); } catch { /* noop */ }
+            await simulateTyping(box, String(val));
+            try { box.dispatchEvent(new FocusEvent('focusout', { bubbles: true })); box.blur?.(); } catch { /* noop */ }
+            await sleep(150);
+            if (String(box.value || '').trim()) { filled++; outcomes.push([`${what} (row ${i + 1})`, 'OK', String(val).slice(0, 30)]); }
+            else outcomes.push([`${what} (row ${i + 1})`, 'FAIL', 'value did not stick']);
+        };
+        await put(titles[i], e.title, 'Job Title');
+        await put(colWraps('formField-companyName')[i], e.company, 'Company');
+        await put(colWraps('formField-roleDescription')[i], e.description, 'Role description');
+        const sd = colWraps('formField-startDate')[i];
+        if (sd) {
+            const r = await setDateOnWrap(sd, String(e.start_date || ''));
+            if (r.ok) { filled++; outcomes.push([`Work From (row ${i + 1})`, 'OK', String(e.start_date).slice(0, 12)]); }
+            else if (!['already-selected', 'no value'].includes(r.reason)) outcomes.push([`Work From (row ${i + 1})`, 'FAIL', r.reason]);
+        }
+    }
+    return filled;
 }
 
 /**
@@ -1041,10 +1543,28 @@ function ensureSectionEntry(sectionName) {
  * Accepts what CVs actually write: 03/2024, 2024-03, Mar 2024, 2024. A value
  * that names no year is not a date and is left alone rather than half-entered.
  */
-function fillDateField(f, val) {
+async function fillDateField(f, val) {
     const wrap = f.labelMatch ? findWrapperByLabel(f.labelMatch) : document.querySelector(f.selector);
     if (!wrap) return { ok: false, reason: 'field-absent' };
+    return setDateOnWrap(wrap, val);
+}
 
+/**
+ * The month/year mechanics of a split Workday date, on a GIVEN wrapper — so
+ * the per-row experience pass can reuse them beyond the recipe's row one.
+ *
+ * Two commit rules learned the hard way here:
+ *   · A value NEXT TO a live validation error is not an answer. Measured:
+ *     "03/2024" painted in the box with "The field From is required" right
+ *     under it — the value setter updated the DOM sections but Workday's own
+ *     state never took them, and the old already-selected guard then read
+ *     that DOM text as done forever. Same false-done family as the prompt's
+ *     free text and the ticked-but-ignored checkbox.
+ *   · Entry goes through the KEYBOARD path (simulateTyping), the one route
+ *     Workday's segmented date widget is built to consume, and the exit blur
+ *     is what triggers its validation pass.
+ */
+async function setDateOnWrap(wrap, val) {
     const text = String(val).trim();
     if (/^(hiện tại|present|current|now)$/i.test(text)) return { ok: false, reason: 'no value' };
     const year = (text.match(/\b(19|20)\d{2}\b/) || [])[0];
@@ -1057,16 +1577,464 @@ function fillDateField(f, val) {
     }
 
     const inputs = [...wrap.querySelectorAll('input')].filter(i => i.offsetParent !== null);
+    if (!inputs.length) return { ok: false, reason: 'no inputs in wrapper' };
+    const errorsIn = () => wrap.querySelectorAll('[data-automation-id="errorMessage"], [data-automation-id="formFieldError"]').length;
     const pick = (re) => inputs.find(i => re.test(
         `${i.getAttribute('data-automation-id') || ''} ${i.getAttribute('aria-label') || ''} ${i.name || ''}`));
-    const monthEl = pick(/month/i) || inputs[0];
-    const yearEl = pick(/year/i) || inputs[1];
+    const single = inputs.length === 1 ? inputs[0] : null;
+    const monthEl = single ? null : (pick(/month/i) || inputs[0]);
+    const yearEl = single || pick(/year/i) || inputs[1];
     if (!yearEl) return { ok: false, reason: 'no year input in wrapper' };
-    if (String(yearEl.value || '').trim()) return { ok: false, reason: 'already-selected' };
+    if (single && !month) return { ok: false, reason: 'combined MM/YYYY input but no month in CV value' };
 
-    if (month && monthEl && monthEl !== yearEl) setNativeValue(monthEl, month.padStart(2, '0'));
-    setNativeValue(yearEl, year);
-    return String(yearEl.value || '').trim() ? { ok: true } : { ok: false, reason: 'value did not stick' };
+    const errorsBefore = errorsIn();
+    const readVal = () => String(yearEl.value || '').trim();
+    // Clean value, no live error → genuinely answered. Value + error → the DOM
+    // is painted but Workday never accepted it: fall through and re-enter.
+    if (readVal() && !errorsBefore) return { ok: false, reason: 'already-selected' };
+
+    // Digits as REAL keystrokes, one at a time. Workday's date sections are
+    // spinbuttons that consume keydown/beforeinput and write their own value —
+    // the value setter painted "02/2023" the widget's state never held, the
+    // healing re-entry re-painted it the same dead way, and the error outlived
+    // every pass. When the widget consumes the key (value changes by itself)
+    // its state IS the value; the setter is only the fallback for sections
+    // that turn out to be plain inputs.
+    const typeInto = async (el, digits) => {
+        try { el.focus(); el.select?.(); } catch { /* noop */ }
+        setNativeValue(el, '', { quiet: true });
+        await sleep(60);
+        for (const ch of String(digits)) {
+            const kc = ch.charCodeAt(0);
+            const before = String(el.value || '');
+            const opts = { key: ch, code: `Digit${ch}`, keyCode: kc, which: kc, bubbles: true, cancelable: true, composed: true };
+            el.dispatchEvent(new KeyboardEvent('keydown', opts));
+            el.dispatchEvent(new InputEvent('beforeinput', { data: ch, inputType: 'insertText', bubbles: true, cancelable: true, composed: true }));
+            await sleep(30);
+            if (String(el.value || '') === before) {
+                setNativeValue(el, before + ch, { quiet: true });
+            }
+            el.dispatchEvent(new KeyboardEvent('keyup', opts));
+            await sleep(40);
+        }
+    };
+    if (single) {
+        await typeInto(single, `${month.padStart(2, '0')}${year}`);
+    } else {
+        if (month && monthEl && monthEl !== yearEl) await typeInto(monthEl, month.padStart(2, '0'));
+        await typeInto(yearEl, year);
+    }
+    try {
+        yearEl.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+        yearEl.blur?.();
+    } catch { /* noop */ }
+    await sleep(400);
+
+    if (!readVal()) return { ok: false, reason: 'value did not stick' };
+    // Delta verification: an error that was live before must be gone; a field
+    // that never showed one only needs the value present.
+    if (errorsBefore > 0 && errorsIn() > 0) return { ok: false, reason: 'value shown but error persists' };
+    return { ok: true };
+}
+
+/**
+ * What a CV entry says about how the employment ENDED. Three states, and the
+ * difference is a claim on a real application:
+ *   CURRENT — the CV says so explicitly ("Present", "Hiện tại", is_current).
+ *             Only this state may tick "I currently work here".
+ *   DATED   — a real end date to fill.
+ *   MISSING — the parse simply has nothing. NOT the same as current: ticking
+ *             the box here would assert an employment the CV never claimed.
+ *             This is a user gap — name it and leave it.
+ */
+function classifyEmploymentEnd(exp) {
+    if (exp?.is_current === true || exp?.current === true) return { kind: 'CURRENT' };
+    const raw = String(exp?.end_date || '').trim();
+    if (/^(present|current|now|hiện tại|nay)$/i.test(raw)) return { kind: 'CURRENT' };
+    if (/\b(19|20)\d{2}\b/.test(raw)) return { kind: 'DATED', value: raw };
+    return { kind: 'MISSING' };
+}
+
+/** Proficiency order, highest first — ladders slice DOWNWARD from the
+ *  candidate's own level so a fallback can never claim above it. */
+const LANG_LEVELS = ['Native', 'Fluent', 'Advanced', 'Intermediate', 'Beginner'];
+export function levelLadder(level) {
+    const i = LANG_LEVELS.findIndex(l => l.toLowerCase() === String(level || '').trim().toLowerCase());
+    return i >= 0 ? LANG_LEVELS.slice(i) : LANG_LEVELS.slice(1);   // unknown level → Fluent-down, never Native
+}
+
+/** Language names as VN CVs actually write them — in a Skills line, a summary
+ *  sentence, anywhere. Programming-language homographs (Go, R) stay out. */
+const LANG_KEYWORDS = [
+    ['English', /\benglish\b|tiếng anh/i],
+    ['Chinese', /\bchinese\b|mandarin|tiếng trung|tiếng hoa/i],
+    ['Japanese', /\bjapanese\b|tiếng nhật/i],
+    ['Korean', /\bkorean\b|tiếng hàn/i],
+    ['French', /\bfrench\b|tiếng pháp/i],
+    ['German', /\bgerman\b|tiếng đức/i],
+    ['Spanish', /\bspanish\b|tiếng tây ban nha/i],
+    ['Vietnamese', /\bvietnamese\b|tiếng việt/i],
+];
+
+/** A certificate inside ONE text segment → {language, level, evidence}|null. */
+function certLevel(seg) {
+    let m;
+    if ((m = seg.match(/IELTS[^0-9]{0,10}([4-9](?:\.\d)?)/i))) {
+        const b = parseFloat(m[1]);
+        return { language: 'English', level: b >= 7 ? 'Fluent' : b >= 5.5 ? 'Advanced' : 'Intermediate', evidence: `IELTS ${m[1]}` };
+    }
+    if ((m = seg.match(/TOEFL[^0-9]{0,10}(\d{2,3})/i))) {
+        const s = parseInt(m[1], 10);
+        return { language: 'English', level: s >= 100 ? 'Fluent' : s >= 80 ? 'Advanced' : 'Intermediate', evidence: `TOEFL ${m[1]}` };
+    }
+    if ((m = seg.match(/TOEIC[^0-9]{0,10}(\d{3})/i))) {
+        const s = parseInt(m[1], 10);
+        return { language: 'English', level: s >= 900 ? 'Fluent' : s >= 750 ? 'Advanced' : 'Intermediate', evidence: `TOEIC ${m[1]}` };
+    }
+    if ((m = seg.match(/HSK\s*[- ]?([1-6])/i))) {
+        const n = parseInt(m[1], 10);
+        return { language: 'Chinese', level: n >= 5 ? 'Fluent' : n >= 3 ? 'Intermediate' : 'Beginner', evidence: `HSK ${m[1]}` };
+    }
+    if ((m = seg.match(/JLPT\s*[- ]?N([1-5])/i))
+        || (/japan|nhật/i.test(seg) && (m = seg.match(/\bN([1-5])\b/)))) {
+        const n = parseInt(m[1], 10);
+        return { language: 'Japanese', level: n === 1 ? 'Fluent' : n === 2 ? 'Advanced' : n === 3 ? 'Intermediate' : 'Beginner', evidence: `JLPT N${m[1]}` };
+    }
+    if ((m = seg.match(/TOPIK\s*[- ]?([1-6])/i))) {
+        const n = parseInt(m[1], 10);
+        return { language: 'Korean', level: n >= 5 ? 'Fluent' : n >= 3 ? 'Intermediate' : 'Beginner', evidence: `TOPIK ${m[1]}` };
+    }
+    if ((m = seg.match(/\b(DELF|DALF)\s*[- ]?([ABC][12])\b/i))) {
+        const lvl = m[2].toUpperCase();
+        return { language: 'French', level: /C[12]/.test(lvl) ? 'Fluent' : lvl === 'B2' ? 'Advanced' : 'Intermediate', evidence: `${m[1].toUpperCase()} ${lvl}` };
+    }
+    return null;
+}
+
+/** An explicit level word / CEFR grade inside one segment. */
+function statedLevel(seg) {
+    let m;
+    if ((m = seg.match(/\b([ABC][12])\b/))) {
+        const g = m[1].toUpperCase();
+        return { level: /C[12]/.test(g) ? 'Fluent' : g === 'B2' ? 'Advanced' : g === 'B1' ? 'Intermediate' : 'Beginner', evidence: `CEFR ${g}` };
+    }
+    if (/native|bản ngữ|mother tongue/i.test(seg)) return { level: 'Native', evidence: 'stated' };
+    if (/fluent|thành thạo|lưu loát/i.test(seg)) return { level: 'Fluent', evidence: 'stated' };
+    if (/advanced|nâng cao/i.test(seg)) return { level: 'Advanced', evidence: 'stated' };
+    if (/intermediate|trung cấp/i.test(seg)) return { level: 'Intermediate', evidence: 'stated' };
+    if (/basic|beginner|elementary|cơ bản|sơ cấp/i.test(seg)) return { level: 'Beginner', evidence: 'stated' };
+    return null;
+}
+
+/**
+ * Languages EXTRACTED from wherever the CV actually put them. Most VN CVs
+ * have no Languages section — "English (IELTS 7.5)" sits in the Skills line,
+ * "JLPT N3" under certificates. Per SEGMENT (a skills token, a certificate
+ * name, a summary sentence): certificate mapping beats a stated word, a bare
+ * language mention claims only Intermediate (listed = usable, nothing more),
+ * bare Vietnamese is the mother tongue. Every row carries its evidence.
+ */
+function deriveLanguages(cv, profile) {
+    const skillsText = Array.isArray(cv?.skills) ? cv.skills.join(', ') : String(cv?.skills || '');
+    const segs = [
+        ...splitSkillList(skillsText),
+        ...splitSkillList(String(profile?.skills || '')),
+        ...(cv?.certifications || []).map(c => `${c.name || ''} ${c.issuer || ''}`),
+        ...String(cv?.summary || '').split(/[\n.]+/).slice(0, 8),
+    ];
+    const out = [];
+    for (const s of segs) {
+        const seg = String(s || '');
+        if (!seg.trim()) continue;
+        const cert = certLevel(seg);
+        const kw = LANG_KEYWORDS.find(([, re]) => re.test(seg));
+        const language = (kw && kw[0]) || cert?.language;
+        if (!language || out.some(l => l.language === language)) continue;
+        const stated = statedLevel(seg);
+        const level = cert?.level || stated?.level
+            || (language === 'Vietnamese' ? 'Native' : 'Intermediate');
+        out.push({ language, level, evidence: cert?.evidence || stated?.evidence || 'listed in skills' });
+    }
+    // A CV WRITTEN in English is itself evidence of English: a page of fluent
+    // professional prose is a stronger claim than a keyword would be. Advanced,
+    // not Fluent — the step up needs a score (IELTS/TOEFL), which upgrades it
+    // via the certificate branch above when present.
+    if (!out.some(l => l.language === 'English')) {
+        const sample = [cv?.summary, ...(cv?.experience || []).map(e => e.description)]
+            .filter(Boolean).join(' ').slice(0, 800);
+        const viChars = (sample.match(/[àáảãạăắằẳẵặâấầẩẫậđèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵ]/gi) || []).length;
+        if (sample.length > 250 && viChars < 5) {
+            out.push({ language: 'English', level: 'Advanced', evidence: 'CV written in English' });
+        }
+    }
+    return out;
+}
+
+/**
+ * EVERY language the CV names, each row consistent with itself.
+ *
+ * Two measured defects: the Languages schema was single-row (English with an
+ * IELTS score never appeared), and the per-row "I am fluent in this language."
+ * checkbox was SKIPPED by the non-boolean guard while Overall said "3 -
+ * Fluent" — a review page answering No and Fluent about the same language.
+ * Skipping is not neutral once the form shows two answers that contradict.
+ * The tick is derived from the row's own level: Native/Fluent/Advanced → Yes;
+ * lower levels leave it untouched.
+ */
+async function fillLanguageRows(cv, outcomes, profile) {
+    const langs = [...(cv?.languages || [])];
+    // Skills lines, certificates and the summary are proficiency statements:
+    // append every language they prove that the CV never gave its own section.
+    for (const d of deriveLanguages(cv, profile)) {
+        if (!langs.some(l => String(l.language || '').toLowerCase() === d.language.toLowerCase())) {
+            langs.push(d);
+            trace('lang.derived', { language: d.language, level: d.level, evidence: d.evidence });
+        }
+    }
+    // Mother tongue from nationality when the CV names NO language at all —
+    // the form REQUIRES a row, and a Vietnamese candidate's native Vietnamese
+    // is evidence-backed, not invented (measured: an app resync replaced the
+    // structured CV with one lacking a Languages section, the required row
+    // went unanswered, and the planner ground to NEED_HUMAN on it).
+    if (!langs.length) {
+        // "Nationality" is a field nobody fills — the SIGNALS that this is a
+        // Vietnamese candidate are already on the profile: a +84/0-prefixed
+        // phone, a VN province, or the nationality when someone did type it.
+        // Measured: nationality was empty everywhere, this fallback never
+        // fired, and the required Language row ground a run into the breaker.
+        const vnSignal = /viet/i.test(`${cv?.personal?.nationality || ''} ${profile?.nationality || ''}`)
+            || /^(\+?84|0)\d{8,10}$/.test(String(profile?.phone || cv?.contact?.phone || '').replace(/[\s.\-()]/g, ''))
+            || /hà nội|ha noi|hồ chí minh|ho chi minh|đà nẵng|da nang|việt nam|vietnam/i
+                .test(`${profile?.addressProvince || ''} ${cv?.contact?.address_province || ''}`);
+        if (vnSignal) {
+            langs.push({ language: 'Vietnamese', level: 'Native' });
+            trace('lang.derived', { language: 'Vietnamese', level: 'Native', evidence: 'VN candidate signals (phone/province/nationality)' });
+        }
+    }
+    if (!langs.length) return 0;
+    const vis = (e) => !!(e && e.offsetParent !== null);
+    const langWraps = () => [...document.querySelectorAll('[data-automation-id="formField-language"]')].filter(vis);
+    if (!langWraps().length) return 0;
+
+    const want = Math.min(langs.length, 3);
+    let guard = 0;
+    while (langWraps().length < want && guard < want + 2) {
+        guard++;
+        const btn = sectionAddButton('Languages');
+        if (!btn) break;
+        if (!safeActivate(btn, { source: 'recipe', activation: 'page-action' }, '[data-automation-id="add-button"]')) break;
+        const had = langWraps().length;
+        const by = Date.now() + 4000;
+        while (langWraps().length <= had && Date.now() < by) await sleep(200);
+        if (langWraps().length <= had) break;
+        trace('section.addRow', { section: 'Languages', rows: langWraps().length, want });
+    }
+
+    const scope = sectionScope('Languages');
+    const inScope = scope ? scope.inSection : () => true;
+    const overallWraps = () => [...document.querySelectorAll('[data-automation-id^="formField-"]')].filter(vis).filter(inScope)
+        .filter(w => {
+            const lbl = (w.querySelector('legend, label')?.textContent || '').toLowerCase();
+            return lbl.includes('overall') && !/overall result|gpa/.test(lbl);
+        });
+    const fluentBoxes = () => [...document.querySelectorAll('input[type="checkbox"]')].filter(vis).filter(inScope)
+        .filter(c => /fluent in this language|thành thạo/i.test(
+            `${c.closest('[data-automation-id^="formField-"]')?.querySelector('legend, label')?.textContent || ''} ${c.getAttribute('aria-label') || ''}`));
+
+    let filled = 0;
+    for (let i = 0; i < want; i++) {
+        const L = langs[i];
+        const wrap = langWraps()[i];
+        if (!L?.language || !wrap) break;
+        // Element-precise targeting: tag the row so fillCustomSelect's
+        // selector resolution cannot drift to another row's first match.
+        wrap.setAttribute('data-copo-row', `lang${i}`);
+        const rLang = await fillCustomSelect(
+            { label: `Language (row ${i + 1})`, selector: `[data-copo-row="lang${i}"] button, [data-copo-row="lang${i}"] input`, type: 'custom-select' },
+            L.language, { profile: {}, cv });
+        wrap.removeAttribute('data-copo-row');
+        if (rLang.ok) { filled++; outcomes.push([`Language (row ${i + 1})`, 'OK', L.language]); }
+        else if (rLang.reason !== 'already-selected') outcomes.push([`Language (row ${i + 1})`, 'FAIL', rLang.reason]);
+
+        const ow = overallWraps()[i];
+        if (ow && L.level) {
+            ow.setAttribute('data-copo-row', `oa${i}`);
+            // Ladder slices DOWN from the row's own level — an Advanced speaker
+            // whose tenant offers no "Advanced" row falls to Intermediate,
+            // never up to Native.
+            const rLvl = await fillCustomSelect(
+                { label: `Overall (row ${i + 1})`, selector: `[data-copo-row="oa${i}"] button, [data-copo-row="oa${i}"] input`, valuePriority: levelLadder(L.level), type: 'custom-select' },
+                L.level, { profile: {}, cv });
+            ow.removeAttribute('data-copo-row');
+            if (rLvl.ok) { filled++; outcomes.push([`Overall (row ${i + 1})`, 'OK', String(rLvl.matched || L.level)]); }
+            else if (rLvl.reason !== 'already-selected') outcomes.push([`Overall (row ${i + 1})`, 'FAIL', rLvl.reason]);
+        }
+
+        // The fluency tick, derived from the level — never contradicting the
+        // Overall answer beside it.
+        if (/native|fluent|advanced/i.test(String(L.level || ''))) {
+            const box = fluentBoxes()[i];
+            if (box && !box.checked) {
+                safeActivate(box, { source: 'recipe', activation: 'widget-option' }, 'fluent-language');
+                await sleep(250);
+                if (box.checked) { filled++; outcomes.push([`Fluent (row ${i + 1})`, 'OK', 'ticked']); }
+                else outcomes.push([`Fluent (row ${i + 1})`, 'FAIL', 'tick did not take']);
+            }
+        }
+    }
+    return filled;
+}
+
+/**
+ * End dates for EVERY work-experience row, not just the recipe's row one.
+ *
+ * "Use My Last Application" restores several Work Experience rows with their
+ * end dates blank, and the recipe's Work To only addresses the FIRST
+ * formField-endDate — measured: a run where everything else was filled ended
+ * NEED_HUMAN over three empty "To" fields the CV had answers for. Rows are
+ * matched to CV entries BY JOB TITLE (never by position: restored rows aren't
+ * guaranteed the CV's order, and a misattributed date is a false statement on
+ * a real application). Per row, classifyEmploymentEnd decides: CURRENT → tick
+ * "I currently work here" (then VERIFY the To inputs actually stood down);
+ * DATED → fill month/year; MISSING → a user gap, named in the trace, never
+ * papered over with a current-employment claim.
+ */
+async function fillExperienceEndDates(cv, outcomes) {
+    const exp = cv?.experience || [];
+    if (!exp.length) return 0;
+    const visible = (sel) => [...document.querySelectorAll(sel)].filter(el => el.offsetParent !== null);
+    const endWraps = visible('[data-automation-id="formField-endDate"]');
+    if (!endWraps.length) return 0;
+    const titleInputs = visible('[data-automation-id="formField-jobTitle"] input');
+    const currentBoxes = visible('input[type="checkbox"]').filter(c => {
+        const w = c.closest('[data-automation-id^="formField-"]');
+        const txt = `${w?.querySelector('legend, label')?.textContent || ''} ${c.getAttribute('aria-label') || ''}`;
+        return /currently work here|đang làm việc/i.test(txt);
+    });
+    const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    let filled = 0;
+    for (let i = 0; i < endWraps.length; i++) {
+        const wrap = endWraps[i];
+        const inputs = [...wrap.querySelectorAll('input')].filter(x => x.offsetParent !== null);
+        const yearEl = inputs.find(x => /year/i.test(`${x.getAttribute('data-automation-id') || ''} ${x.getAttribute('aria-label') || ''}`)) || inputs[1];
+        if (!yearEl || String(yearEl.value || '').trim()) continue;   // filled → not ours to touch
+        const rowTitle = norm(titleInputs[i]?.value);
+        const match = rowTitle ? exp.find(e => {
+            const t = norm(e.title);
+            return t && (t === rowTitle || t.includes(rowTitle) || rowTitle.includes(t));
+        }) : null;
+        if (!match) {
+            trace('exp.endDate', { row: i, title: rowTitle.slice(0, 30) || '(no title)', verdict: 'no CV row matched — left for review' });
+            continue;
+        }
+        const endState = classifyEmploymentEnd(match);
+        if (endState.kind === 'MISSING') {
+            // Not ours to guess: no explicit "Present" means ticking the box
+            // would claim an employment the CV never stated.
+            trace('exp.endDate', { row: i, title: rowTitle.slice(0, 30), verdict: 'end date MISSING in CV — user gap, left for review' });
+            outcomes.push([`Work To (row ${i + 1})`, 'skip', 'end date missing in CV — needs user']);
+            continue;
+        }
+        if (endState.kind === 'CURRENT') {
+            // Index pairing is only a candidate — the PROOF is structural below.
+            const box = currentBoxes.length === endWraps.length ? currentBoxes[i] : null;
+            if (!box) {
+                trace('exp.endDate', { row: i, title: rowTitle.slice(0, 30), verdict: `current role but checkbox pairing ambiguous (${currentBoxes.length} boxes / ${endWraps.length} rows)` });
+                outcomes.push([`Work To (row ${i + 1})`, 'FAIL', 'currently-work-here checkbox not found for this row']);
+                continue;
+            }
+            // Same-row proof: the nearest ancestor holding BOTH the checkbox and
+            // this To wrapper must contain exactly ONE endDate field. A page has
+            // many checkboxes (preferred name, consent, other rows) — a claim of
+            // current employment must never land outside its own row.
+            let rowScope = box.parentElement;
+            while (rowScope && rowScope !== document.body && !rowScope.contains(wrap)) rowScope = rowScope.parentElement;
+            const rowLocal = !!rowScope && rowScope !== document.body
+                && rowScope.querySelectorAll('[data-automation-id="formField-endDate"]').length === 1;
+            if (!rowLocal) {
+                trace('exp.endDate', { row: i, title: rowTitle.slice(0, 30), verdict: 'checkbox and To wrapper share no single-row container — refusing to tick' });
+                outcomes.push([`Work To (row ${i + 1})`, 'FAIL', 'row pairing unverified']);
+                continue;
+            }
+            // Postcondition, read as DELTAS. "Checkbox checked" proves the DOM
+            // moved, not that Workday accepted a current employment — measured:
+            // checked=true with the To inputs still live was reported OK. And a
+            // tenant may stand the requirement down ANY of three ways (disable/
+            // hide the inputs, drop required, clear the error), so each signal
+            // is compared to its own BEFORE. Error idiom = the observer's own.
+            const readTo = () => {
+                const ins = [...wrap.querySelectorAll('input')].filter(x => !x.disabled && x.offsetParent !== null);
+                return {
+                    active: ins.length,
+                    required: ins.some(x => x.required || x.getAttribute('aria-required') === 'true'),
+                    errors: rowScope.querySelectorAll('[data-automation-id="errorMessage"], [data-automation-id="formFieldError"]').length,
+                };
+            };
+            const before0 = readTo();
+            const satisfied = () => {
+                const s = readTo();
+                return !s.active
+                    || (before0.required && !s.required)
+                    || (before0.errors > 0 && s.errors === 0);
+            };
+            const wasChecked = box.checked;
+            if (wasChecked && satisfied()) {
+                outcomes.push([`Work To (row ${i + 1})`, 'done', 'current role already committed']);
+                continue;
+            }
+            // Escalation ladder — after EVERY rung the postcondition is re-read;
+            // "the checkbox looks ticked" never ends the ladder by itself.
+            const settle = async (ms) => { await sleep(ms); return box.checked && satisfied(); };
+            let okNow = false;
+            if (!box.checked) {
+                safeActivate(box, { source: 'recipe', activation: 'widget-option' }, 'currently-work-here');
+                okNow = await settle(500);
+            }
+            if (!okNow && box.checked) {
+                // The DOM ticked but Workday didn't react — nudge the framework:
+                // change + blur are what a real interaction would have fired.
+                try { box.dispatchEvent(new Event('change', { bubbles: true })); box.blur?.(); } catch { /* noop */ }
+                okNow = await settle(600);
+            }
+            if (!okNow) {
+                const label = (box.id && rowScope.querySelector(`label[for="${box.id}"]`)) || box.closest('label');
+                if (label) { safeActivate(label, { source: 'recipe', activation: 'widget-option' }, 'currently-work-here'); okNow = await settle(500); }
+            }
+            if (!okNow && box.checked && !satisfied()) {
+                // Last resort, tightly guarded: DOM checked + requirement still
+                // live + row proven → one off→on cycle to resync Workday's state
+                // with the DOM. Never toggled blindly per iteration.
+                safeActivate(box, { source: 'recipe', activation: 'widget-option' }, 'currently-work-here');
+                await sleep(300);
+                if (!box.checked) {
+                    safeActivate(box, { source: 'recipe', activation: 'widget-option' }, 'currently-work-here');
+                    okNow = await settle(600);
+                }
+            }
+            const after0 = readTo();
+            trace('exp.endDate', {
+                row: i, title: rowTitle.slice(0, 30),
+                checkboxAid: box.getAttribute('data-automation-id') || box.id || box.tagName,
+                rowLocal,
+                checked: box.checked,
+                requiredBefore: before0.required, requiredAfter: after0.required,
+                activeBefore: before0.active, activeAfter: after0.active,
+                errorsBefore: before0.errors, errorsAfter: after0.errors,
+                verdict: !box.checked ? 'tick did not take'
+                    : okNow ? 'current-role committed'
+                    : 'PARTIAL — checked but To requirement did not stand down',
+            });
+            if (!box.checked) outcomes.push([`Work To (row ${i + 1})`, 'FAIL', 'tick did not take']);
+            else if (okNow) { filled++; outcomes.push([`Work To (row ${i + 1})`, 'OK', 'currently work here']); }
+            else outcomes.push([`Work To (row ${i + 1})`, 'PARTIAL', 'checked but end-date still required']);
+            continue;
+        }
+        const r = await setDateOnWrap(wrap, endState.value);
+        trace('exp.endDate', { row: i, title: rowTitle.slice(0, 30), value: endState.value.slice(0, 16), verdict: r.ok ? 'filled' : r.reason });
+        if (r.ok) { filled++; outcomes.push([`Work To (row ${i + 1})`, 'OK', endState.value.slice(0, 16)]); }
+        else if (r.reason !== 'already-selected') outcomes.push([`Work To (row ${i + 1})`, 'FAIL', r.reason]);
+    }
+    return filled;
 }
 
 /** The formField WRAPPER whose legend/label contains `want` — findFieldByLabel
@@ -1223,17 +2191,35 @@ function recipeFieldValue(f, profile, cv) {
         const v = shape(String(fromCv));
         if (v != null) return v;
     }
+    // Another profile key as the LAST resort before empty — user decision
+    // 2026-08-03: a CV that only names its city ("Hà Nội") still answers the
+    // street/district boxes with that city rather than stalling the run on a
+    // required field the candidate has no finer answer for.
+    if (f.fallbackProfileKey) {
+        const fb = profile?.[f.fallbackProfileKey];
+        if (fb != null && String(fb).trim() !== '') {
+            const v = shape(fb);
+            if (v != null) return v;
+        }
+    }
     return f.default ?? '';
 }
 
 /** Resolve a dynamic-id field (e.g. Workday Application Questions, whose formField
  *  ids are per-job) by matching its question/label text. Returns the textarea /
  *  input / button inside the first matching formField wrapper. */
-function findFieldByLabel(labelMatch) {
+function findFieldByLabel(labelMatch, labelDeny) {
     const want = String(labelMatch).toLowerCase();
+    // A substring is ambiguous the day a tenant adds a second field carrying
+    // it — measured: labelMatch 'overall' (the language proficiency) landed on
+    // "Overall Result (GPA)", a text box, and the proficiency fill spent its
+    // listbox timeout clicking it. `labelDeny` names what the field is NOT.
+    const deny = labelDeny ? new RegExp(labelDeny, 'i') : null;
     for (const wrap of document.querySelectorAll('[data-automation-id^="formField-"]')) {
         const lbl = (wrap.querySelector('legend, label')?.textContent || '').toLowerCase();
-        if (lbl.includes(want)) return wrap.querySelector('textarea, input:not([type="hidden"]), button');
+        if (!lbl.includes(want)) continue;
+        if (deny && deny.test(lbl)) continue;
+        return wrap.querySelector('textarea, input:not([type="hidden"]), button');
     }
     return null;
 }
@@ -1318,6 +2304,115 @@ async function inferOptionViaLLM(f, options, profile, cv) {
             return { value: null, authExpired: true, why: 'ĐĂNG NHẬP HẾT HẠN — mở Copo và đồng bộ lại' };
         }
         return { value: null, why: `inference failed: ${why.slice(0, 60)}` };
+    }
+}
+
+// One generated message per field per page load. The recipe loop re-runs every
+// iteration and is meant to be idempotent, but an LLM call is neither free nor
+// deterministic — without this, a form that takes eight passes to validate would
+// write (and bill for) eight different notes and fill the last one.
+const _generated = new Map();
+
+/**
+ * The role and employer out of a browser tab title.
+ *
+ * The <title> is the one thing every ATS fills correctly, and it is
+ * conventionally "<role> - <company>", often with a flow word bolted on:
+ * SmartRecruiters serves "Easy apply - [EMC] Embedded Android Developer (01
+ * Year Contact) - Bosch Group" (measured on a live Bosch posting). Dropping the
+ * flow words matters — "Easy apply" as the job title produces a message
+ * applying for a job called Easy apply.
+ *
+ * Exported for the tests: the extension's suite has no DOM, so the parsing is
+ * separated from the reading.
+ */
+export function parseDocumentTitle(raw) {
+    const s = String(raw || '').trim();
+    const parts = s.split(/\s+[-–—|]\s+/).map(p => p.trim()).filter(Boolean);
+    const drop = /^(easy )?apply( now| for this job)?$|^application( form)?$|^careers?$|^jobs?$|^job (details?|description)$|^ứng tuyển$|^tuyển dụng$/i;
+    const kept = parts.filter(p => !drop.test(p));
+    if (!kept.length) return { title: '', company: '' };
+    return {
+        title: kept[0],
+        // Only when there is something left BESIDE the title — a one-part title
+        // is the role, and calling it the company too would put the job's own
+        // name where the employer belongs.
+        company: kept.length > 1 ? kept[kept.length - 1] : '',
+    };
+}
+
+/**
+ * What this page says the job IS — the grounding for a written message.
+ *
+ * Deliberately page-derived rather than passed in. The applies that reach this
+ * code are the ones the web app did NOT dispatch (no queue entry, no parsed JD,
+ * no match score); what the tab is showing is the only job context that exists.
+ * On a job ad that is the whole posting; on a bare apply form it is little more
+ * than the title, which is why the message prompt is built to lean on the CV and
+ * forbidden to invent anything about the employer.
+ */
+function collectJobContext() {
+    const { title, company } = parseDocumentTitle(document.title);
+
+    // Visible prose, minus the form itself — on an ad page this is the JD; on
+    // the form page it collapses to nearly nothing, which the caller checks.
+    let description = '';
+    try {
+        const main = document.querySelector('main, [role="main"], article') || document.body;
+        const clone = main.cloneNode(true);
+        clone.querySelectorAll('input, select, textarea, button, script, style, svg, nav, header, footer').forEach(n => n.remove());
+        description = (clone.innerText || '').replace(/\s*\n\s*/g, '\n').replace(/\n{3,}/g, '\n\n').trim().slice(0, 6000);
+    } catch (e) { /* a page that won't clone still has a title */ }
+
+    return { title, company, description };
+}
+
+/** Vietnamese by diacritic density — mirrors frontend/src/lib/jd-lang.ts. */
+function detectLang(text) {
+    const s = String(text || '');
+    const vi = (s.match(/[ăâđêôơưàáảãạằắẳẵặầấẩẫậèéẻẽẹềếểễệìíỉĩịòóỏõọồốổỗộờớởỡợùúủũụừứửữựỳýỷỹỵ]/gi) || []).length;
+    const letters = (s.match(/[a-zăâđêôơư]/gi) || []).length;
+    return letters > 0 && vi / letters > 0.02 ? 'vi' : 'en';
+}
+
+/**
+ * Write the note for a free-text "message to the hiring team" box.
+ *
+ * Returns null — leaving the box empty — whenever it cannot do this honestly:
+ * no CV to draw claims from, no readable job title to address, or the call
+ * failed. Every one of those is a better outcome than filling an OPTIONAL field
+ * with filler, because the text goes out on a real application under the
+ * candidate's name and cannot be taken back.
+ */
+async function generateMessageViaLLM(f, cv) {
+    const key = `${f.label}@${location.pathname}`;
+    if (_generated.has(key)) return _generated.get(key);
+    _generated.set(key, null);   // claim the slot BEFORE awaiting: two passes can overlap
+
+    if (!cv || !(cv.experience?.length || cv.skills?.length || cv.summary)) {
+        trace('message.generate', { field: f.label, skipped: 'no CV' });
+        return null;
+    }
+    const job = collectJobContext();
+    if (!job.title || job.title.length < 3) {
+        trace('message.generate', { field: f.label, skipped: 'no job title on page' });
+        return null;
+    }
+    try {
+        const lang = detectLang(`${job.title} ${job.description.slice(0, 2000)}`);
+        const res = await callApplyMessage(job, cv, lang);
+        const text = String(res?.coverLetter || '').trim();
+        if (!text) {
+            trace('message.generate', { field: f.label, error: 'empty reply' });
+            return null;
+        }
+        _generated.set(key, text);
+        trace('message.generate', { field: f.label, lang, words: text.split(/\s+/).length, job: job.title.slice(0, 50) });
+        return text;
+    } catch (e) {
+        const why = (e && e.message) || 'failed';
+        trace('message.generate', { field: f.label, error: why.slice(0, 80) });
+        return null;
     }
 }
 
@@ -1459,6 +2554,14 @@ async function fillSearchMulti(f, value, ctx = {}) {
     const wanted = splitSkillList(value).slice(0, f.max || 8);
     if (!wanted.length) return { ok: false, reason: 'no value' };
 
+    // A stale popup from the previous field misreads as this field's results, and
+    // text a crashed pass left in the box corrupts the first query — clear both.
+    await closeStrayPopups(f.label);
+    if (String(input.value || '').trim()) {
+        setNativeValue(input, '', { quiet: true });
+        await sleep(250);
+    }
+
     // Signature of what the results list currently shows, so "has it settled?"
     // is a question about the ROWS rather than about elapsed time.
     const readResultKey = () => {
@@ -1506,7 +2609,21 @@ async function fillSearchMulti(f, value, ctx = {}) {
                 bubbles: true, cancelable: true, composed: true,
             }));
         }
-        await waitForResults(readResultKey, 4000, priorResults);
+        let settled = await waitForResults(readResultKey, 6000, priorResults);
+        // A slow skillsearch answers AFTER the budget: reading then sees an empty
+        // or stale list, and a skill that IS in the taxonomy reports :no-match —
+        // measured live, terms that committed in one run no-matched in the next
+        // purely on server latency. One more Enter re-runs the same search, so
+        // retry once before concluding anything from an unanswered list.
+        if (!settled || !settled.rows || settled.key === priorResults) {
+            for (const type of ['keydown', 'keypress', 'keyup']) {
+                input.dispatchEvent(new KeyboardEvent(type, {
+                    key: 'Enter', code: 'Enter', keyCode: 13, which: 13,
+                    bubbles: true, cancelable: true, composed: true,
+                }));
+            }
+            settled = await waitForResults(readResultKey, 4000, priorResults);
+        }
         const opts = [...document.querySelectorAll(OPTION_SEL)]
             .filter(o => o.offsetParent !== null)
             .filter(o => o.getAttribute('data-automation-id') !== 'selectedItem')
@@ -1529,8 +2646,12 @@ async function fillSearchMulti(f, value, ctx = {}) {
                     const rowHeight = virtualRowHeight(sc);
                     const at = Number.isFinite(chosen.index) ? chosen.index : all.indexOf(chosen);
                     if (rowHeight) {
+                        // Same selectedItem filter as every other candidate list here:
+                        // an already-selected row got through this one and clicking it
+                        // DESELECTS (policy denies it as destructive, wasting the pass).
                         pick = await jumpToIndex(sc, () => [...document.querySelectorAll(OPTION_SEL)]
                             .filter(o => o.offsetParent !== null)
+                            .filter(o => o.getAttribute('data-automation-id') !== 'selectedItem')
                             .filter(o => !o.closest('[data-automation-id="selectedItemList"]')),
                         (list) => pickSearchResult(list, String(chosen.label ?? ''), o => (o.textContent || '').trim()),
                         at, rowHeight, `Skills:${term}`);
@@ -1555,6 +2676,7 @@ async function fillSearchMulti(f, value, ctx = {}) {
         if (!pick) {
             for (const alt of skillFallbacks(term)) {
                 await resetSearchBox();
+                const priorAlt = readResultKey().key;
                 await simulateTyping(input, alt);
                 for (const type of ['keydown', 'keypress', 'keyup']) {
                     input.dispatchEvent(new KeyboardEvent(type, {
@@ -1562,7 +2684,10 @@ async function fillSearchMulti(f, value, ctx = {}) {
                         bubbles: true, cancelable: true, composed: true,
                     }));
                 }
-                await sleep(1200);
+                // Same patience as the main search. This path read the list after a
+                // FIXED 1.2s — the one place still racing the server — so a slow
+                // answer made every fallback look absent from the taxonomy.
+                await waitForResults(readResultKey, 6000, priorAlt);
                 const retryOpts = [...document.querySelectorAll(OPTION_SEL)]
                     .filter(o => o.offsetParent !== null)
                     .filter(o => o.getAttribute('data-automation-id') !== 'selectedItem')
@@ -1572,6 +2697,18 @@ async function fillSearchMulti(f, value, ctx = {}) {
             }
         }
         if (!pick) { notes.push(`${term}:no-match`); await resetSearchBox(); continue; }
+        // A row that is ALREADY committed must not be clicked — that deselects it.
+        // The results list marks committed skills as selectedItem/checked while it
+        // still shows the previous query's rows, so a loose match can land on one
+        // (measured: "Backlog Prioritization", denied by policy as destructive).
+        // Only signals of a COMMITTED pick count here. NOT aria-selected: Workday
+        // puts aria-selected="true" on the row the keyboard cursor is merely
+        // resting on — measured: "LLM Orchestration", unchecked and chip-less,
+        // was skipped as :already because it was the highlighted first result.
+        const pickSelected = pick.getAttribute('data-automation-id') === 'selectedItem'
+            || pick.getAttribute('aria-checked') === 'true'
+            || !!pick.querySelector('input[type="checkbox"]:checked, input[type="radio"]:checked');
+        if (pickSelected) { notes.push(`${term}:already-on-list`); await resetSearchBox(); continue; }
         // Try each plausible target and keep the one that takes.
         //
         // A result row nests a styled checkbox, a leaf node and a label, and which
@@ -1586,6 +2723,12 @@ async function fillSearchMulti(f, value, ctx = {}) {
             pick.querySelector('label'),
             pick,
         ].filter((el, i, arr) => el && arr.indexOf(el) === i);
+        // Clear of the sticky footer first. With several chips committed the
+        // results list sits lower, and a row's click point can land under the
+        // page's "Back / Save and Continue" bar — measured: "AI Workflow Design"
+        // and "Agentic Systems" matched exactly, every click reported an
+        // unrelated overlay at the point, and no chip appeared.
+        try { pick.scrollIntoView({ block: 'center' }); await sleep(150); } catch { /* noop */ }
         const deadline = Date.now() + 2500;
         for (const target of targets) {
             safeActivate(target, { source: 'recipe', activation: 'widget-option' }, f.selector || f.labelMatch);
@@ -1594,7 +2737,51 @@ async function fillSearchMulti(f, value, ctx = {}) {
             if (chips().length > before) break;
         }
         while (Date.now() < deadline && chips().length === before) await sleep(150);
-        if (chips().length > before) { added++; notes.push(`${term}:ok`); } else {
+        // Coordinates failed → drive Workday's own keyboard path: ArrowDown until
+        // the ACTIVE row (aria-activedescendant) is the exact match, then Enter.
+        // No geometry involved, so no overlay can eat it — and Enter fires only
+        // on an exact text match, so it can never commit a neighbouring row.
+        let viaKeyboard = false;
+        if (chips().length === before) {
+            const wantTxt = (pick.textContent || '').trim().toLowerCase();
+            const activeRow = () => {
+                for (const h of [input, ...document.querySelectorAll('[aria-activedescendant]')]) {
+                    const id = h?.getAttribute?.('aria-activedescendant');
+                    const el = id && document.getElementById(id);
+                    if (el && el.offsetParent !== null) return el;
+                }
+                return null;
+            };
+            const press = (key, kc) => {
+                for (const type of ['keydown', 'keyup']) {
+                    input.dispatchEvent(new KeyboardEvent(type, {
+                        key, code: key, keyCode: kc, which: kc,
+                        bubbles: true, cancelable: true, composed: true,
+                    }));
+                }
+            };
+            try { input.focus(); } catch { /* noop */ }
+            const seenActive = new Set();
+            for (let stepN = 0; stepN < 24 && chips().length === before; stepN++) {
+                const row = activeRow();
+                if (row && (row.textContent || '').trim().toLowerCase() === wantTxt) {
+                    press('Enter', 13);
+                    const by = Date.now() + 2000;
+                    while (Date.now() < by && chips().length === before) await sleep(120);
+                    break;
+                }
+                if (!row && stepN > 2) break;               // widget has no active-row idiom
+                if (row) {
+                    if (seenActive.has(row.id)) break;      // cycled the whole list
+                    seenActive.add(row.id);
+                }
+                press('ArrowDown', 40);
+                await sleep(150);
+            }
+            viaKeyboard = chips().length > before;
+            if (viaKeyboard) trace('skills.keyboardCommit', { term });
+        }
+        if (chips().length > before) { added++; notes.push(`${term}:${viaKeyboard ? 'ok-kb' : 'ok'}`); } else {
             notes.push(`${term}:no-effect`);
             // WHICH row was clicked, and what was on offer. "Found it and the click
             // did nothing" is the same sentence whether the row was the right one,
@@ -1605,7 +2792,7 @@ async function fillSearchMulti(f, value, ctx = {}) {
                 triedTargets: targets.map(t => t.getAttribute?.('data-automation-id') || t.tagName).join(' → '),
                 clickedText: (pick.textContent || '').trim().slice(0, 40),
                 clickedAid: pick.getAttribute('data-automation-id') || pick.tagName,
-                hitWasInner: hit !== pick,
+                hitWasInner: targets[0] !== pick,
                 resultsOnScreen: opts.length,
                 offered: [...new Set(opts.map(o => (o.textContent || '').trim()))].slice(0, 6).join(' | '),
             });
@@ -1613,17 +2800,29 @@ async function fillSearchMulti(f, value, ctx = {}) {
         await resetSearchBox();
     }
     trace('skills.fill', { field: f.label, wanted: wanted.length, added, detail: notes.join(', ') });
-    if (!added) {
-        const allNoMatch = notes.length > 0 && notes.every(n => n.endsWith(':no-match'));
-        return { ok: false, emptyTaxonomy: allNoMatch, reason: `nothing committed (${notes.join(', ')})` };
+    // Three separate claims, not one boolean: SATISFIED (the field needs no
+    // further pass), CHANGED (this pass added something). Overloading ok:true
+    // for both would count an untouched-but-complete field as progress every
+    // iteration — filled++ forever — and ok:false counted it as a failure.
+    // Workday keeps skills on the CANDIDATE, so a later application arrives
+    // with every chip already committed (measured: all 8 terms :already on a
+    // fresh job, reported as FAILED). Only an actionable miss — a row that
+    // would not take — leaves the field unsatisfied; not-in-taxonomy terms are
+    // the employer's catalogue, not our failure.
+    const already = notes.filter(n => /:already(-on-list)?$/.test(n)).length;
+    const noMatch = notes.filter(n => n.endsWith(':no-match')).length;
+    if (added > 0) return { satisfied: true, changed: true, added, already };
+    if (notes.length && already + noMatch === notes.length) {
+        if (noMatch === notes.length) return { satisfied: false, changed: false, emptyTaxonomy: true, reason: `nothing committed (${notes.join(', ')})` };
+        return { satisfied: true, changed: false, added: 0, already, reason: 'already-selected' };
     }
-    return { ok: true };
+    return { satisfied: false, changed: false, reason: `unresolved (${notes.join(', ')})` };
 }
 
 async function fillCustomSelect(f, value, ctx = {}) {
     // Some prompts have no stable id at all — Workday gives the language
     // proficiency field a per-tenant GUID — so they are addressed by their label.
-    const trigger = f.labelMatch ? findFieldByLabel(f.labelMatch) : document.querySelector(f.selector);
+    const trigger = f.labelMatch ? findFieldByLabel(f.labelMatch, f.labelDeny) : document.querySelector(f.selector);
     if (!trigger || trigger.offsetParent === null) return { ok: false, reason: 'trigger-absent' };
     const wrap = trigger.closest('[data-automation-id^="formField-"]');
     // Idempotency. Three shapes, all seen in the wild:
@@ -1636,8 +2835,45 @@ async function fillCustomSelect(f, value, ctx = {}) {
     // from being re-answered on every pass.
     const chips = wrap?.querySelector('[data-automation-id="selectedItemList"]');
     if (chips && chips.children.length) return { ok: false, reason: 'already-selected' };
-    if (!f.multi && (trigger.getAttribute('value') || '').trim()) {
+    // The value attribute counts only for BUTTON triggers. On a searchable
+    // prompt's INPUT, chips are the ONLY commit signal: free text someone typed
+    // (the gap-filler treated "How Did You Hear" as a plain text field) reflects
+    // into the attribute via React, made this guard read the field as answered,
+    // and the recipe skipped it forever while Workday kept flagging it invalid —
+    // the loop then burned a 25s LLM plan per iteration on a field it owns.
+    if (!f.multi && trigger.tagName !== 'INPUT' && (trigger.getAttribute('value') || '').trim()) {
         return { ok: false, reason: 'already-selected' };
+    }
+    // A popup another field left open would otherwise be read as OUR option list
+    // below (portal-rendered lists have no formField ancestor to disown them by).
+    await closeStrayPopups(f.label);
+    // Uncommitted text in the search box breaks the fill twice over: Workday
+    // rejects it as an answer, and the ladder below would type INTO it. Clear it
+    // and VERIFY the clear took — a React-controlled input can hand the old text
+    // straight back on re-render, so escalate: quiet setter → loud setter → the
+    // user path (select-all + delete). The trace records which rung it took.
+    if (trigger.tagName === 'INPUT' && String(trigger.value || '').trim()) {
+        const beforeTxt = String(trigger.value || '').slice(0, 30);
+        setNativeValue(trigger, '', { quiet: true });
+        await sleep(120);
+        if (String(trigger.value || '').trim()) {
+            setNativeValue(trigger, '');
+            await sleep(120);
+        }
+        if (String(trigger.value || '').trim()) {
+            try {
+                trigger.focus();
+                trigger.select();
+                document.execCommand('delete');
+            } catch { /* every rung exhausted — the trace below says so */ }
+            await sleep(120);
+        }
+        trace('prompt.clear', {
+            field: f.label,
+            before: beforeTxt,
+            after: String(trigger.value || '').slice(0, 30),
+            verified: !String(trigger.value || '').trim(),
+        });
     }
     // `widget: true` — opening this listbox and picking from it are steps INSIDE
     // one approved field fill, so they are judged as values, not as page actions.
@@ -1667,8 +2903,10 @@ async function fillCustomSelect(f, value, ctx = {}) {
         });
 
     // Wait for OUR listbox, not for any promptOption anywhere on the page.
+    // 6.5s not 4s: the Language prompt was measured taking >4s to open once on
+    // Mondelez, and the shorter budget turned a slow open into listbox-timeout.
     {
-        const deadline = Date.now() + 4000;
+        const deadline = Date.now() + 6500;
         while (!visibleOptions().length && Date.now() < deadline) await sleep(150);
         if (!visibleOptions().length) {
             // Distinguish "the widget never opened" from "it opened and the option
@@ -1699,8 +2937,10 @@ async function fillCustomSelect(f, value, ctx = {}) {
     // hold — and the first option in an unmatched list is an arbitrary claim sent
     // to a real employer ("Employee referral", "Doctorate"). Leaving the field
     // empty is recoverable; a wrong answer on a submitted application is not.
-    const ladder = [want, ...(f.valuePriority || []).map(v => String(v).trim().toLowerCase())]
-        .filter(Boolean);
+    // De-duplicated: the CV value often IS the ladder's top rung ("native" +
+    // ["Native", …]) and trying it twice wasted a full type-and-search cycle.
+    const ladder = [...new Set([want, ...(f.valuePriority || []).map(v => String(v).trim().toLowerCase())]
+        .filter(Boolean))];
 
     /**
      * A match only counts when it is UNAMBIGUOUS.
@@ -1731,18 +2971,32 @@ async function fillCustomSelect(f, value, ctx = {}) {
      * one that actually commits. Nodes with a real box come first as the cheapest
      * useful ordering — a zero-size node is never the one the user would click.
      */
+    // Diacritic/apostrophe fold, used only AFTER the raw comparison found
+    // nothing. VN catalogues meet profiles typed every which way — the option
+    // says "H’Mông (Vietnam)" (curly apostrophe, full diacritics) while the
+    // profile says "H'Mong"; "Mường" meets "Muong". Folding both sides bridges
+    // that; running it as a FALLBACK tier keeps raw-distinct lists (e.g.
+    // "Thái" vs a hypothetical "Thai") resolving exactly as before.
+    const fold = (s) => String(s).normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/\u0111/g, 'd').replace(/[\u2018\u2019\u0060]/g, "'");
     const matchAll = (list, wanted) => {
         const tier = (pred) => list.filter(pred);
+        const wf = fold(wanted);
         let cands = tier(o => txt(o) === wanted);
+        if (!cands.length) cands = tier(o => fold(txt(o)) === wf);
         if (!cands.length) {
-            const prefix = tier(o => txt(o).startsWith(wanted));
             // A prefix/substring tier still has to be UNAMBIGUOUS as a set: many
             // DIFFERENT labels matching means we cannot tell which the user meant,
             // and "Marketing" must never resolve to "Marketing Research".
+            // The prefix tier is also what accepts a country-suffixed catalogue
+            // row: profile "Kinh" → the one option starting "Kinh (Vietnam)".
             const distinct = (l) => new Set(l.map(txt)).size;
+            let prefix = tier(o => txt(o).startsWith(wanted));
+            if (!prefix.length) prefix = tier(o => fold(txt(o)).startsWith(wf));
             if (prefix.length && distinct(prefix) === 1) cands = prefix;
             else {
-                const contains = tier(o => txt(o).includes(wanted));
+                let contains = tier(o => txt(o).includes(wanted));
+                if (!contains.length) contains = tier(o => fold(txt(o)).includes(wf));
                 if (contains.length && distinct(contains) === 1) cands = contains;
             }
         }
@@ -1773,6 +3027,23 @@ async function fillCustomSelect(f, value, ctx = {}) {
             await sleep(200);
             await simulateTyping(filter, wanted);
             await sleep(450);
+            // Enter RUNS the search on a search-shaped filter (Field of Study:
+            // typing alone leaves the 300-row catalogue unfiltered) — but on a
+            // LIVE-filtering box (the source prompt) Enter COMMITS whatever row
+            // is highlighted, and pressing it unconditionally turned a working
+            // field into a wrong answer ("Found via Job Board"). So: press it
+            // ONLY when typing surfaced nothing clickable.
+            if ((filter.getAttribute('enterkeyhint') === 'search'
+                    || filter.getAttribute('data-uxi-widget-type') === 'selectinput')
+                && !uniqueMatch(visibleOptions(), wanted)) {
+                for (const type of ['keydown', 'keypress', 'keyup']) {
+                    filter.dispatchEvent(new KeyboardEvent(type, {
+                        key: 'Enter', code: 'Enter', keyCode: 13, which: 13,
+                        bubbles: true, cancelable: true, composed: true,
+                    }));
+                }
+                await sleep(900);
+            }
             shown = visibleOptions();
             // A filter that narrowed to NOTHING has hidden the answer rather than
             // found it: this prompt's rows are "1 - Beginner / 2 - Intermediate /
@@ -1801,9 +3072,19 @@ async function fillCustomSelect(f, value, ctx = {}) {
         }
     } else {
         for (const wanted of ladder) {
+            // The list can pass the open-guard and then COLLAPSE before the
+            // ladder reads it — measured on Race/Ethnicity: "option-not-found
+            // (0 shown)" from a slow async catalogue. Reopen rather than match
+            // against nothing.
+            if (!visibleOptions().length) {
+                safeActivate(trigger, { source: 'recipe', activation: 'widget-open' }, f.selector);
+                const by = Date.now() + 2500;
+                while (!visibleOptions().length && Date.now() < by) await sleep(150);
+            }
             opt = await findInList(visibleOptions, (list) => uniqueMatch(list, wanted), `${f.label}:${wanted}`, wanted);
             if (opt) { matched = wanted; break; }
         }
+        shown = visibleOptions();   // report what the LAST look saw, not the first
     }
     if (opt) opt = await revealOption(opt, visibleOptions, (list) => uniqueMatch(list, matched), f.label);
     // Nothing matched. If the field is allowed to be INFERRED, ask the model to
@@ -2000,6 +3281,10 @@ async function fillCustomSelect(f, value, ctx = {}) {
             || node.querySelector('[data-automation-id="promptLeafNode"]')
             || node;
         const isLeaf = !!node.querySelector('input[type="radio"], input[type="checkbox"]');
+        // Clear of clipped edges before aiming (ported from the skills fill):
+        // a virtualized row parked at the window's edge hit-tests as whatever
+        // overlaps it, and the direct-dispatch fallback then lands on nothing.
+        try { node.scrollIntoView({ block: 'center' }); await sleep(120); } catch { /* noop */ }
         const beforeRows = renderedRows(visibleOptions).join('|');
         const activated = safeActivate(hit, { source: 'recipe', activation: 'widget-option' }, f.selector);
         if (!activated) { attempts.push(`level${level}:policy-denied`); break; }
@@ -2024,7 +3309,18 @@ async function fillCustomSelect(f, value, ctx = {}) {
         const afterRows = renderedRows(visibleOptions).join('|');
         const drilled = afterRows !== beforeRows && !!visibleOptions().length;
         attempts.push(`level${level}:${drilled ? 'drilled-in' : 'no-effect'}`);
-        trace('list.drill', { field: f.label, level, wasLeaf: isLeaf, drilled, rows: visibleOptions().length });
+        // On no-effect, name what actually sits at the row's click point — "the
+        // right row, covered by a stale popup" and "the right row, dead handler"
+        // read identically without it and need different fixes.
+        const covered = drilled ? null : (() => {
+            try {
+                const r = node.getBoundingClientRect();
+                const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+                if (!top || top === node || node.contains(top)) return null;
+                return top.getAttribute('data-automation-id') || top.tagName;
+            } catch { return null; }
+        })();
+        trace('list.drill', { field: f.label, level, wasLeaf: isLeaf, drilled, rows: visibleOptions().length, covered });
         if (!drilled) {
             // Nothing committed and nothing opened. Reopen once in case the click
             // merely closed the popup, then give up rather than toggling blindly.
@@ -2040,6 +3336,61 @@ async function fillCustomSelect(f, value, ctx = {}) {
         field: f.label, picked: matched, onPage: readCommitted() || '(still empty)',
         levels: attempts.length, attempts: attempts.join(', '), stuck: false,
     });
+    // Every coordinate path failed — drive the widget's own KEYBOARD path
+    // (ported from the skills fill, where covered/virtualized rows made clicks
+    // land on nothing): ArrowDown until the ACTIVE row (aria-activedescendant)
+    // is the match, then Enter. No geometry involved. Bounded small on purpose:
+    // with the filter typed the list is short, and a 300-row unfiltered
+    // catalogue is beyond this rung by design.
+    if (matched) {
+        if (!visibleOptions().length) {
+            safeActivate(trigger, { source: 'recipe', activation: 'widget-open' }, f.selector);
+            const by = Date.now() + 2500;
+            while (!visibleOptions().length && Date.now() < by) await sleep(150);
+        }
+        const kb = (trigger.tagName === 'INPUT' ? trigger : null) || filter || trigger;
+        const activeRow = () => {
+            for (const h of [kb, ...document.querySelectorAll('[aria-activedescendant]')]) {
+                const id = h?.getAttribute?.('aria-activedescendant');
+                const rowEl = id && document.getElementById(id);
+                if (rowEl && rowEl.offsetParent !== null) return rowEl;
+            }
+            return null;
+        };
+        const press = (key, kc) => {
+            for (const type of ['keydown', 'keyup']) {
+                kb.dispatchEvent(new KeyboardEvent(type, { key, code: key, keyCode: kc, which: kc, bubbles: true, cancelable: true, composed: true }));
+            }
+        };
+        try { kb.focus(); } catch { /* noop */ }
+        const seenRows = new Set();
+        for (let stepN = 0; stepN < 24; stepN++) {
+            const row = activeRow();
+            const rowTxt = row ? txt(row) : '';
+            if (row && (rowTxt === matched || fold(rowTxt) === fold(matched))) {
+                press('Enter', 13);
+                const now2 = await waitForCommit(2500);
+                if (now2) {
+                    attempts.push('keyboard:committed');
+                    trace('list.result', { field: f.label, picked: matched, onPage: now2, levels: attempts.length, via: 'keyboard', stuck: true });
+                    return { ok: true, matched };
+                }
+                break;
+            }
+            if (!row && stepN > 2) break;          // widget has no active-row idiom
+            if (row) {
+                if (seenRows.has(row.id)) break;    // cycled the whole list
+                seenRows.add(row.id);
+            }
+            press('ArrowDown', 40);
+            await sleep(120);
+        }
+        attempts.push('keyboard:no-commit');
+    }
+    // Leave the popup CLOSED on the way out — an abandoned list is the next
+    // field's "72 options that answer a different question" (measured: Field
+    // of Study's catalogue read as Language's own list one field later).
+    try { trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); } catch { /* noop */ }
     return { ok: false, reason: `never committed "${matched}" (${attempts.join(', ')})` };
 }
 

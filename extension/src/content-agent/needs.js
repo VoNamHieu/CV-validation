@@ -49,7 +49,11 @@ export const FIELD_PATTERNS = [
     { key: 'lastName', match: /last name|family name|surname|họ/i, profileKey: 'lastName' },
     { key: 'fullName', match: /full name|họ (và |và tên|tên)/i, profileKey: 'fullName' },
     { key: 'email', match: /e-?mail/i, profileKey: 'email' },
-    { key: 'phone', match: /phone|mobile|điện thoại|số đt/i, profileKey: 'phone' },
+    // The phone NUMBER only. /phone/ also matched "Phone Extension" (the whole
+    // mobile number got typed into it), "Phone Device Type" and "Country Phone
+    // Code" (both flagged as mismatches against the number on every run) —
+    // none of them holds a number.
+    { key: 'phone', match: /phone(?!\s*extension)|mobile|điện thoại|số đt/i, deny: /extension|\bext\.?\b|máy lẻ|device\s*type|country\s*phone\s*code|loại (điện thoại|máy)/i, profileKey: 'phone' },
     { key: 'addressStreet', match: /address line ?1|street|địa chỉ/i, profileKey: 'addressStreet' },
     { key: 'addressDistrict', match: /district|town|city\b|quận|huyện|thành phố/i, profileKey: 'addressDistrict' },
     { key: 'addressProvince', match: /province|region|state|tỉnh/i, profileKey: 'addressProvince' },
@@ -66,7 +70,11 @@ export const FIELD_PATTERNS = [
     { key: 'languageLevel', match: /proficiency|fluency|trình độ ngôn ngữ|overall(?!\s*result)/i, path: 'languages[0].level' },
     { key: 'currentTitle', match: /job title|current (job )?title|position|chức danh/i, profileKey: 'currentTitle' },
     { key: 'currentCompany', match: /employer|company name|công ty/i, path: 'experience[0].company' },
-    { key: 'coverLetter', match: /cover letter|message|thư giới thiệu|lời nhắn/i, profileKey: 'coverLetter' },
+    // Two different asks, and conflating them is what put a CV summary in a
+    // hiring-team message box: a "cover letter" field takes the long document,
+    // a "message" box takes the short note. Ordered specific-first.
+    { key: 'coverLetter', match: /cover letter|motivation letter|thư giới thiệu|thư xin việc/i, profileKey: 'coverLetter' },
+    { key: 'applyMessage', match: /\bmessage\b|note to|lời nhắn|tin nhắn/i, profileKey: 'applyMessage' },
 
     // Knowable ONLY to the candidate. Listed so the manifest can name them rather
     // than leaving the caller to discover them by failing.
@@ -91,7 +99,7 @@ export const PROFILE_KEYS = new Set([
     'nationality', 'maritalStatus', 'addressProvince', 'addressDistrict', 'addressStreet',
     'postalCode', 'currentTitle', 'currentLevel', 'yearsOfExperience', 'highestDegree',
     'currentSalary', 'currentIndustry', 'currentFields', 'desiredLocations', 'desiredSalary',
-    'noticePeriod', 'workAuthorized', 'requiresSponsorship', 'coverLetter', 'skills',
+    'noticePeriod', 'workAuthorized', 'requiresSponsorship', 'coverLetter', 'applyMessage', 'skills',
 ]);
 
 /** The concept a field is asking about, or null when nothing recognises it. */
@@ -99,7 +107,9 @@ export function classifyField(field) {
     const text = [field?.label, field?.ariaLabel, field?.placeholder, field?.name, field?.automationId]
         .filter(Boolean).join(' ');
     if (!text.trim()) return null;
-    return FIELD_PATTERNS.find(p => p.match.test(text)) || null;
+    // `deny` names what a pattern is NOT — "Phone Extension" contains "phone"
+    // and got the whole mobile number typed into it.
+    return FIELD_PATTERNS.find(p => p.match.test(text) && !(p.deny && p.deny.test(text))) || null;
 }
 
 /** Read a dotted/indexed path out of the structured CV. */
@@ -189,10 +199,22 @@ export function buildManifest(fields = [], data = {}) {
     }
 
     for (const f of fields) {
+        // A résumé dropzone is not a QUESTION. Its answer comes from cvData via
+        // the recipe's upload path — never inferred from profile text or asked
+        // of the model — and once the file is in it is not a gap either (the
+        // observer reports 'uploaded'). Left in, it produced a text-pipeline
+        // gap literally labelled "Drop files hereor".
+        if (f.componentType === 'file-upload') continue;
         const label = f.label || f.ariaLabel || f.placeholder || f.nearbyText || '';
         const pattern = classifyField(f);
         const canonical = canonicalValue(pattern, data);
-        const filled = String(f.value ?? '').trim() !== '';
+        // A checkbox answers with its CHECKED state, and the observer spells
+        // that 'true'/'false' — so the string 'false' read as "non-empty, hence
+        // answered", and every unchecked box (the terms acknowledgement, most
+        // visibly) sailed past the answer rules into the verify pile.
+        const filled = f.componentType === 'checkbox'
+            ? f.value === 'true'
+            : String(f.value ?? '').trim() !== '';
 
         if (filled) {
             // Already answered — by the ATS parse, or by an earlier pass.
@@ -221,6 +243,15 @@ export function buildManifest(fields = [], data = {}) {
         }
 
         if (canonical) {
+            // A checkbox takes YES or NO — a canonical STRING routed at one is a
+            // classification accident ("I am fluent in this language." matched
+            // the language pattern and got «Vietnamese»), and pushing it made an
+            // un-fillable instruction the loop retried forever. Boolean-ish
+            // values pass; anything else leaves the box to the recipe/rules.
+            if (f.componentType === 'checkbox'
+                && !/^(yes|no|true|false|có|không|1|0)$/i.test(String(canonical.value ?? '').trim())) {
+                continue;
+            }
             fill.push({
                 selector: f.selector, label, key: pattern.key,
                 value: canonical.value, source: canonical.source,
@@ -244,6 +275,9 @@ export function buildManifest(fields = [], data = {}) {
             gaps.push({
                 selector: f.selector, label, key: pattern?.key ?? null,
                 userOnly: !!pattern?.userOnly, options,
+                // The free-answer pass needs the widget shape to know which
+                // gaps it can put to the model (selects only — never free text).
+                componentType: f.componentType,
             });
         }
     }

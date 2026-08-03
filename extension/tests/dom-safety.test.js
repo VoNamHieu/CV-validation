@@ -266,16 +266,21 @@ describe('an unrelated overlay falls back to the judged element', () => {
         assert.equal(backdrop.clicks, 0, 'the unrelated overlay is never clicked');
     });
 
-    test('an unrelated overlay that is itself a submit still blocks everything', () => {
-        // The fallback must not become a way around the policy: the topmost is
-        // judged first, and a refusal there ends it.
+    test('an unrelated overlay is never clicked, whatever its label — the judged element is', () => {
+        // The overlay receives no events either way, so its policy verdict must
+        // not veto the element we were actually asked about. The old rule judged
+        // the unrelated cover FIRST and a refusal there blocked everything —
+        // measured on Mondelez skills: a selected-skill pill ("Remove …" reads
+        // as destructive) overlapped a legit result row and every attempt on the
+        // row was denied. The safety property that matters is asserted below:
+        // the cover itself is never activated.
         const btn = new FakeEl('a'); btn.textContent = 'Autofill with Resume';
         const overlay = new FakeEl('div'); overlay.textContent = 'Submit Application';
         installDom([overlay], { formFields: [] });
 
-        assert.equal(safeActivate(btn, { source: 'gateway', openingApplication: true }), false);
-        assert.equal(btn.clicks, 0);
-        assert.equal(overlay.clicks, 0);
+        assert.equal(safeActivate(btn, { source: 'gateway', openingApplication: true }), true);
+        assert.equal(btn.clicks, 1, 'the element we judged is the one activated');
+        assert.equal(overlay.clicks, 0, 'the submit-looking overlay is never clicked');
     });
 });
 

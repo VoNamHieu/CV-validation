@@ -45,6 +45,25 @@ initFixture();
  * empty every time. Ask the browser for its normal windows instead and take the
  * active tab, preferring one the agent can actually run on.
  */
+/** Incoming profile wins per key; keys only the EXTENSION holds (a console-
+ *  injected gpa, an ethnicity the web app doesn't ship yet) survive every
+ *  sync and every run trigger. These writes used to replace the WHOLE object,
+ *  which silently erased a storage injection the moment a run started from
+ *  the app — a debugging mystery that cost several rounds. */
+async function mergedProfile(incoming) {
+    const { jobfitProfile } = await chrome.storage.local.get('jobfitProfile');
+    const merged = { ...(jobfitProfile || {}) };
+    for (const [k, v] of Object.entries(incoming || {})) {
+        // An EMPTY incoming value must not erase a real one we hold: the app
+        // sends '' for every profile field its user left blank, which would
+        // wipe an injected addressStreet on every run trigger. Empty only
+        // lands when we hold nothing at all.
+        if ((v === '' || v === null || v === undefined) && (k in merged) && merged[k] !== '' && merged[k] != null) continue;
+        merged[k] = v;
+    }
+    return merged;
+}
+
 async function debugTargetTab(tabId) {
     if (tabId) return await chrome.tabs.get(tabId).catch(() => null);
     const wins = await chrome.windows.getAll({ populate: true, windowTypes: ['normal'] }).catch(() => []);
@@ -478,7 +497,12 @@ function endApplySession() {
  */
 function sweepSessionCvs() {
     chrome.storage.local.get(null, (all) => {
-        const dead = Object.keys(all).filter((k) => k.startsWith(SESSION_CV_PREFIX));
+        // NEVER the live session's blob. This swept every applyCv:* including
+        // the one the web app had JUST synced for the tab being opened — the
+        // agent then fell back to the stale global PDF and uploaded the wrong
+        // document to a real application.
+        const live = all.applySession?.sessionId ? `${SESSION_CV_PREFIX}${all.applySession.sessionId}` : null;
+        const dead = Object.keys(all).filter((k) => k.startsWith(SESSION_CV_PREFIX) && k !== live);
         if (dead.length) {
             chrome.storage.local.remove(dead);
             console.log(`[Copo] session CV sweep: removed ${dead.length} blob(s)`);
@@ -582,14 +606,18 @@ function handleAutoApplyStart(message, sendResponse) {
         ? { base64: message.cvFileBase64, fileName: message.cvFileName }
         : null;
     const { sessionId, fragment } = prepareApplySession(jobUrl, jobCv);
-    const storage = {
-        jobfitProfile: profile,
-        pendingAutoApply: true,
-        autoApplyJobUrl: jobUrl,
-        batchMode: false,   // don't inherit a stale batchMode from a prior batch
-        ...fragment,
-    };
     (async () => {
+        const storage = {
+            // MERGE, never clobber: the app's payload wins per key, but keys
+            // only the extension holds (a console-injected gpa, an ethnicity
+            // the web app doesn't ship yet) must survive the trigger — this
+            // write used to erase them the moment a run started from the app.
+            jobfitProfile: await mergedProfile(profile),
+            pendingAutoApply: true,
+            autoApplyJobUrl: jobUrl,
+            batchMode: false,   // don't inherit a stale batchMode from a prior batch
+            ...fragment,
+        };
         const access = await ensureHostAccess(jobUrl);
         if (!access.ok) {
             sendResponse({ success: false, error: 'Cần cấp quyền truy cập trang này. Mở popup Copo để cho phép.' });
@@ -663,19 +691,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     if (message.type === 'SAVE_PROFILE') {
         const syncedAt = Date.now();
-        // Persist the JWT alongside the profile so credit-metered auto-apply /
-        // tailor calls can be charged to this user. Only overwrite when present
-        // (a profile-only sync without a token shouldn't wipe a good token).
-        const toStore = { jobfitProfile: message.profile, jobfitProfileSyncedAt: syncedAt };
-        if (message.token) toStore.jobfitToken = message.token;
-        chrome.storage.local.set(
-            toStore,
-            () => {
-                sendResponse({ success: true, syncedAt });
-                // Push to popup if open so the "Synced …" line refreshes immediately.
-                chrome.runtime.sendMessage({ type: 'PROFILE_UPDATED', syncedAt }).catch(() => { });
-            },
-        );
+        (async () => {
+            // Persist the JWT alongside the profile so credit-metered auto-apply /
+            // tailor calls can be charged to this user. Only overwrite when present
+            // (a profile-only sync without a token shouldn't wipe a good token).
+            // The profile itself MERGES (see mergedProfile) — extension-only keys
+            // survive a web-app sync instead of vanishing with every F5.
+            const toStore = { jobfitProfile: await mergedProfile(message.profile), jobfitProfileSyncedAt: syncedAt };
+            if (message.token) toStore.jobfitToken = message.token;
+            chrome.storage.local.set(
+                toStore,
+                () => {
+                    sendResponse({ success: true, syncedAt });
+                    // Push to popup if open so the "Synced …" line refreshes immediately.
+                    chrome.runtime.sendMessage({ type: 'PROFILE_UPDATED', syncedAt }).catch(() => { });
+                },
+            );
+        })();
         return true;
     }
 
@@ -864,6 +896,45 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 }
                 sendResponse({ success: false, error: lastError?.message || 'All endpoints failed' });
             } catch (e) {
+                sendResponse({ success: false, error: e.message });
+            }
+        })();
+        return true;
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // ── LLM PROXY — Message to the hiring team (free-text box) ──
+    // ══════════════════════════════════════════════════════════════
+    // Reuses the web app's cover-letter route in its 'message' format. Kept as
+    // its own proxy rather than folded into agent-plan because the reply is
+    // prose the agent types verbatim, not a plan it interprets — and because it
+    // bills as its own action, so the cost of writing a note is visible in the
+    // ledger instead of hidden inside the per-job auto_apply fee.
+    if (message.type === 'PROXY_LLM_APPLY_MESSAGE') {
+        const { job, cv, lang } = message;
+        (async () => {
+            try {
+                const data = await chrome.storage.local.get(['jobfitAppUrl', 'jobfitToken']);
+                const appUrl = data.jobfitAppUrl || 'https://copoai.net';
+                const authHeaders = data.jobfitToken
+                    ? { Authorization: `Bearer ${data.jobfitToken}` } : {};
+                const res = await fetch(`${appUrl}/api/ai/cover-letter`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...authHeaders },
+                    body: JSON.stringify({ cv, jd: job, lang, format: 'message' }),
+                    signal: AbortSignal.timeout(120000),
+                });
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    if (res.status === 401) {
+                        throw new Error('Phiên đăng nhập đã hết hạn — mở Copo và đồng bộ lại để tiếp tục.');
+                    }
+                    throw new Error(err.detail || `API error: ${res.status}`);
+                }
+                const result = await res.json();
+                sendResponse({ success: true, data: result });
+            } catch (e) {
+                console.warn('[Copo] Apply-message proxy failed:', e.message);
                 sendResponse({ success: false, error: e.message });
             }
         })();
@@ -1397,7 +1468,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 // ─── Process next job in queue ───
-function processNextJob() {
+async function processNextJob() {
     if (!isProcessing) return;
 
     currentJobIndex++;
@@ -1442,7 +1513,7 @@ function processNextJob() {
         : null;
     const { sessionId, fragment } = prepareApplySession(job.jobUrl, jobCv);
     const storage = {
-        jobfitProfile: job.profile,
+        jobfitProfile: await mergedProfile(job.profile),
         pendingAutoApply: true,
         autoApplyJobUrl: job.jobUrl,
         batchMode: true,

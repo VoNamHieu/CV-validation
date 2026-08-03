@@ -16,6 +16,12 @@ const watch = process.argv.includes('--watch');
 // neither the fixture data nor the call that would use it.
 const fixture = process.argv.includes('--fixture');
 
+// The middle bundle: PRODUCTION data behaviour (no seeding, no fake candidate)
+// but the local-credential path stays on — for exercising login flows with
+// real data before the server-side credential store is configured. Temporary
+// tooling; ship builds remain the plain `node build.mjs`.
+const localCreds = !fixture && process.argv.includes('--local-creds');
+
 // Static assets (source of truth at the extension root) copied as-is into dist.
 const STATIC = ['manifest.json', 'popup.html', 'content.css', 'popup.css', 'icons'];
 
@@ -52,7 +58,7 @@ const options = {
         name: 'strip-fixtures',
         setup(build) {
             build.onResolve({ filter: /fixtures\/dummy\.js$/ }, () => ({
-                path: resolve('src/fixtures/noop.js'),
+                path: resolve(localCreds ? 'src/fixtures/creds-only.js' : 'src/fixtures/noop.js'),
             }));
         },
     }],
@@ -66,5 +72,5 @@ if (watch) {
     console.log('[build] watching src/ → dist/ (re-run `npm run build` after editing manifest/static)');
 } else {
     await esbuild.build(options);
-    console.log(`[build] done → dist/${fixture ? '  ⚠️  FIXTURE BUILD — seeds fake candidate data' : ''}`);
+    console.log(`[build] done → dist/${fixture ? '  ⚠️  FIXTURE BUILD — seeds fake candidate data' : localCreds ? '  ⚠️  LOCAL-CREDS BUILD — reads jobfitApplyCredentials, no seeding' : ''}`);
 }

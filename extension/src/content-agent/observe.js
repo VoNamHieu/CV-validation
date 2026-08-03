@@ -1,6 +1,6 @@
 // AUTO-SPLIT from content-agent.js (Phase 2). Part of the Copo apply agent.
 import { SCROLL_PAUSE_MS, SCROLL_STEP_PX } from './constants.js';
-import { buildUniqueSelector, detectComponentType, findActiveModal, findLabelFor, getNearbyText, sleep } from './dom.js';
+import { buildUniqueSelector, detectComponentType, findActiveModal, findLabelFor, getNearbyText, readFileCommitState, sleep } from './dom.js';
 import { isThirdPartyApply } from './detect.js';
 
 /**
@@ -84,7 +84,13 @@ export function extractFieldsFromRoot(root) {
         'input:not([type="hidden"]):not([type="submit"]):not([type="button"]), ' +
         'input[type="file"], ' +
         'select, textarea, [contenteditable="true"], ' +
-        '[role="combobox"], [role="listbox"], [role="radiogroup"]'
+        '[role="combobox"], [role="listbox"], [role="radiogroup"], ' +
+        // Workday's single-selects are BUTTONS that open a listbox. They were
+        // invisible to this extraction — only the blocker audit saw them — so
+        // on any tenant shape the recipe didn't cover, the generic layers
+        // (answer rules, free-answer inference) never got to fill them: the
+        // page could not complete without the planner.
+        'button[aria-haspopup="listbox"]'
     );
 
     for (const el of elements) {
@@ -173,6 +179,20 @@ export function extractFieldsFromRoot(root) {
                 ?.querySelector('[data-automation-id="selectedItemList"]');
             const chip = sil ? (sil.textContent || '').replace(/\s+/g, ' ').trim() : '';
             if (chip) value = chip.slice(0, 60);
+        }
+        // A file input's `value`/`files` say nothing once the ATS ingests the
+        // file (Workday clears them) — so an attached CV read as an unfilled
+        // REQUIRED field, withheld the deterministic advance, and the run sat
+        // "frozen" in a needless planner call. Same commit definition as the
+        // recipe, via the shared helper.
+        if (componentType === 'file-upload') {
+            value = readFileCommitState(el).committed ? 'uploaded' : '';
+        }
+        // A button-select's answer is its visible text; the placeholder rows
+        // ("Select One") mean empty, whatever the value attribute holds.
+        if (el.tagName === 'BUTTON') {
+            const t = (el.textContent || '').replace(/\s+/g, ' ').trim();
+            value = /^(select one|select|choose one)$/i.test(t) ? '' : t;
         }
 
         // Get options for select elements

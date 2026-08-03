@@ -1,6 +1,12 @@
 // AUTO-SPLIT from content-agent.js (Phase 2). Part of the Copo apply agent.
 // ─── Config ───
-export const AGENT_MAX_ITERATIONS = 25;
+// No iteration cap (user decision 2026-08-02): a fixed count killed legit long
+// runs while real loops are caught by the SEMANTIC guards — the same-state
+// stuck detector, the per-field needs/recovery budgets, and the background
+// watchdog. What remains is a wall-clock ceiling matched to the background's
+// JOB_HARD_CAP_MS: a run may take as long as a careful human form session,
+// never forever (a manual run has no external watchdog to kill it otherwise).
+export const AGENT_MAX_RUNTIME_MS = 15 * 60 * 1000;
 
 export const SCROLL_STEP_PX = 600;
 

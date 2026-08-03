@@ -1,6 +1,7 @@
 // AUTO-SPLIT from content-agent.js (Phase 2). Part of the Copo apply agent.
 import { safeActivate, setFileOnInput, setNativeValue, simulateTyping, sleep } from './dom.js';
 import { checkFill, logDenial } from './policy.js';
+import { isPickerShape, probeFieldShape } from './probe.js';
 
 // Every activation inside a component handler carries the caller's policy context
 // plus a label for what it is doing. These used to be bare `.click()` calls, which
@@ -212,13 +213,22 @@ export async function handleRadioGroup(elOrName, value, ctx) {
  * Handle a checkbox: toggle to match `value` (truthy → checked).
  */
 export async function handleCheckbox(el, value, ctx) {
-    const want = value === true || value === 1 ||
-        ['true', 'yes', '1', 'on', 'checked', 'có', 'đồng ý'].includes(
-            String(value ?? '').toLowerCase().trim()
-        );
+    const raw = String(value ?? '').toLowerCase().trim();
+    const truthy = value === true || value === 1
+        || ['true', 'yes', '1', 'on', 'checked', 'có', 'đồng ý'].includes(raw);
+    const falsy = value === false || value === 0
+        || ['false', 'no', '0', 'off', 'unchecked', 'không'].includes(raw);
+    // A non-boolean answer aimed at a checkbox is a CLASSIFICATION error, not a
+    // fill. Interpreting it as "false" made this a no-op that returned true —
+    // measured: needs re-applied «I am fluent…=Vietnamese» every iteration,
+    // counted it as progress, and starved the recipe for 22 straight passes.
+    if (!truthy && !falsy) return false;
+    const want = truthy;
     if (el.checked !== want) {
         if (!safeActivate(el, wctx(ctx, 'widget-option'))) return false;
         el.dispatchEvent(new Event('change', { bubbles: true }));
+        await sleep(150);
+        return el.checked === want;   // the CLICK is not the outcome; the state is
     }
     return true;
 }
@@ -328,6 +338,15 @@ export async function executeSingleInstruction(inst, cvData, ctx = {}) {
 
         // Fill / Type (text input, textarea)
         if (action === 'fill' || action === 'type') {
+            // TEST before typing: a picker-shaped input takes its value from a
+            // chosen option, and raw text into it paints an answer that commits
+            // nothing (measured: "How Did You Hear" pinned a step for ten
+            // iterations exactly this way). The probe is cached per element.
+            const probedShape = await probeFieldShape(el);
+            if (isPickerShape(probedShape.shape)) {
+                console.log(`[Copo Agent] "${inst.fieldLabel || inst.selector}" probes as ${probedShape.shape} (${probedShape.evidence}) — routing to dropdown handler`);
+                return await handleCustomDropdown(el, value, fillCtx);
+            }
             setNativeValue(el, value);
             await sleep(100);
 
