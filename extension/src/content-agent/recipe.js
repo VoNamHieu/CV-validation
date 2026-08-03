@@ -1830,34 +1830,55 @@ async function fillLanguageRows(cv, outcomes, profile) {
             trace('lang.derived', { language: d.language, level: d.level, evidence: d.evidence });
         }
     }
-    // Mother tongue from nationality when the CV names NO language at all —
-    // the form REQUIRES a row, and a Vietnamese candidate's native Vietnamese
-    // is evidence-backed, not invented (measured: an app resync replaced the
-    // structured CV with one lacking a Languages section, the required row
-    // went unanswered, and the planner ground to NEED_HUMAN on it).
-    if (!langs.length) {
-        // "Nationality" is a field nobody fills — the SIGNALS that this is a
-        // Vietnamese candidate are already on the profile: a +84/0-prefixed
-        // phone, a VN province, or the nationality when someone did type it.
-        // Measured: nationality was empty everywhere, this fallback never
-        // fired, and the required Language row ground a run into the breaker.
-        const vnSignal = /viet/i.test(`${cv?.personal?.nationality || ''} ${profile?.nationality || ''}`)
-            || /^(\+?84|0)\d{8,10}$/.test(String(profile?.phone || cv?.contact?.phone || '').replace(/[\s.\-()]/g, ''))
-            || /hà nội|ha noi|hồ chí minh|ho chi minh|đà nẵng|da nang|việt nam|vietnam/i
-                .test(`${profile?.addressProvince || ''} ${cv?.contact?.address_province || ''}`);
-        if (vnSignal) {
-            langs.push({ language: 'Vietnamese', level: 'Native' });
-            trace('lang.derived', { language: 'Vietnamese', level: 'Native', evidence: 'VN candidate signals (phone/province/nationality)' });
-        }
+    // VN-market hardcode (user decision 2026-08-03): every candidate is a
+    // native Vietnamese speaker — the product serves the Vietnamese market.
+    // The Vietnamese row always exists and never sits below Native, whatever
+    // the CV wrote. This retires the old nationality/phone/province
+    // heuristic, which only fired when the CV named no language at all — so
+    // a CV whose English was derived silently LOST its Vietnamese.
+    const viRow = langs.find(l => /vietnamese|tiếng việt/i.test(String(l.language || '')));
+    if (viRow) viRow.level = 'Native';
+    else {
+        langs.push({ language: 'Vietnamese', level: 'Native' });
+        trace('lang.derived', { language: 'Vietnamese', level: 'Native', evidence: 'VN-market default' });
     }
-    if (!langs.length) return 0;
     const vis = (e) => !!(e && e.offsetParent !== null);
     const langWraps = () => [...document.querySelectorAll('[data-automation-id="formField-language"]')].filter(vis);
     if (!langWraps().length) return 0;
 
-    const want = Math.min(langs.length, 3);
+    // Pair rows to languages by CONTENT, not by index. A row that already
+    // names a language keeps it — and keeps its CV level, so Overall and the
+    // fluency tick stay consistent with what the row actually says. An empty
+    // row takes the next unclaimed language. Index pairing would duplicate
+    // English the moment an earlier pass had committed row one and the
+    // hardcoded Vietnamese shifted every later entry by one.
+    const rowValue = (w) => {
+        const btn = w.querySelector('button[aria-haspopup="listbox"], button');
+        const t = String(btn?.textContent || w.querySelector('input')?.value || '').trim();
+        return /^select one$|^$/i.test(t) ? '' : t;
+    };
+    const buildPlans = () => {
+        const remaining = [...langs];
+        const plans = new Map();   // row wrapper → its language entry
+        for (const w of langWraps()) {
+            const v = rowValue(w).toLowerCase();
+            if (!v) continue;
+            const k = remaining.findIndex(l => {
+                const name = String(l.language || '').toLowerCase();
+                return v.includes(name) || name.includes(v);
+            });
+            // A committed row the CV knows keeps its level. A language the user
+            // picked themselves is not ours to grade: level null skips Overall
+            // and the tick for that row.
+            plans.set(w, k >= 0 ? remaining.splice(k, 1)[0] : { language: rowValue(w), level: null });
+        }
+        return { plans, remaining };
+    };
+
+    // Grow the section until every unclaimed language has a row — cap 3 rows.
+    let { remaining } = buildPlans();
     let guard = 0;
-    while (langWraps().length < want && guard < want + 2) {
+    while (remaining.length && langWraps().length < 3 && guard < 5) {
         guard++;
         const btn = sectionAddButton('Languages');
         if (!btn) break;
@@ -1866,7 +1887,7 @@ async function fillLanguageRows(cv, outcomes, profile) {
         const by = Date.now() + 4000;
         while (langWraps().length <= had && Date.now() < by) await sleep(200);
         if (langWraps().length <= had) break;
-        trace('section.addRow', { section: 'Languages', rows: langWraps().length, want });
+        trace('section.addRow', { section: 'Languages', rows: langWraps().length, want: Math.min(langs.length, 3) });
     }
 
     const scope = sectionScope('Languages');
@@ -1881,19 +1902,30 @@ async function fillLanguageRows(cv, outcomes, profile) {
             `${c.closest('[data-automation-id^="formField-"]')?.querySelector('legend, label')?.textContent || ''} ${c.getAttribute('aria-label') || ''}`));
 
     let filled = 0;
-    for (let i = 0; i < want; i++) {
-        const L = langs[i];
-        const wrap = langWraps()[i];
-        if (!L?.language || !wrap) break;
-        // Element-precise targeting: tag the row so fillCustomSelect's
-        // selector resolution cannot drift to another row's first match.
-        wrap.setAttribute('data-copo-row', `lang${i}`);
-        const rLang = await fillCustomSelect(
-            { label: `Language (row ${i + 1})`, selector: `[data-copo-row="lang${i}"] button, [data-copo-row="lang${i}"] input`, type: 'custom-select' },
-            L.language, { profile: {}, cv });
-        wrap.removeAttribute('data-copo-row');
-        if (rLang.ok) { filled++; outcomes.push([`Language (row ${i + 1})`, 'OK', L.language]); }
-        else if (rLang.reason !== 'already-selected') outcomes.push([`Language (row ${i + 1})`, 'FAIL', rLang.reason]);
+    // Rebuilt AFTER growing: adding a row can re-render the section, and a
+    // plan keyed to a replaced node would silently drop its row.
+    const rebuilt = buildPlans();
+    const plans = rebuilt.plans;
+    remaining = rebuilt.remaining;
+    const rows = langWraps();
+    for (let i = 0; i < rows.length; i++) {
+        const wrap = rows[i];
+        // The row's own claim first; an empty row draws the next unclaimed
+        // language; a leftover empty row (form has more rows than the CV has
+        // languages) is simply left alone.
+        const L = plans.get(wrap) || (rowValue(wrap) ? null : remaining.shift());
+        if (!L?.language) continue;
+        if (!rowValue(wrap)) {
+            // Element-precise targeting: tag the row so fillCustomSelect's
+            // selector resolution cannot drift to another row's first match.
+            wrap.setAttribute('data-copo-row', `lang${i}`);
+            const rLang = await fillCustomSelect(
+                { label: `Language (row ${i + 1})`, selector: `[data-copo-row="lang${i}"] button, [data-copo-row="lang${i}"] input`, type: 'custom-select' },
+                L.language, { profile: {}, cv });
+            wrap.removeAttribute('data-copo-row');
+            if (rLang.ok) { filled++; outcomes.push([`Language (row ${i + 1})`, 'OK', L.language]); }
+            else if (rLang.reason !== 'already-selected') outcomes.push([`Language (row ${i + 1})`, 'FAIL', rLang.reason]);
+        }
 
         const ow = overallWraps()[i];
         if (ow && L.level) {
