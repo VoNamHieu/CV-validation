@@ -305,14 +305,20 @@ async def list_unembedded(*, limit: int = 1000) -> list[dict]:
     return rows_to_dicts(rows)
 
 
-async def list_missing_jd(*, limit: int = 500) -> list[dict]:
-    """Active jobs with an empty/thin stored description (JD backfill queue)."""
+async def list_missing_jd(*, limit: int = 500, max_chars: int = 800) -> list[dict]:
+    """Active jobs whose stored description is empty, thin, or teaser-sized (the
+    JD backfill queue).
+
+    The bar is teaser-sized rather than empty because a Phenom-style list adapter
+    used to store a ~300-char marketing blurb, which looked like a JD to every
+    consumer. ``desc_len`` rides along so the backfill only overwrites when what
+    it resolved is actually longer than what is already there."""
     pool = await get_pool()
     rows = await pool.fetch(
-        "SELECT id, source_url FROM jobs "
-        "WHERE is_active AND length(coalesce(description, '')) < 100 "
+        "SELECT id, source_url, length(coalesce(description, '')) AS desc_len FROM jobs "
+        "WHERE is_active AND length(coalesce(description, '')) < $2 "
         "AND coalesce(source_url, '') <> '' ORDER BY created_at DESC LIMIT $1",
-        limit,
+        limit, max_chars,
     )
     return rows_to_dicts(rows)
 
