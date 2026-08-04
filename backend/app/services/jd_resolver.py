@@ -24,6 +24,10 @@ from app.services.ats_adapters import fetch_ats_jobs
 logger = logging.getLogger(__name__)
 
 _MIN_DESC = 100
+# Below this, a stored description may well be a marketing teaser rather than the
+# JD, so it is still worth asking a by-URL detail adapter (Phenom teasers run
+# ~300 chars; a real JD is thousands). Shared with the JD backfill queue.
+_TEASER_MAX = 800
 _UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 _TIMEOUT = 12
 
@@ -151,19 +155,41 @@ def _smartrecruiters_detail(jd_url: str) -> str | None:
     return f"Job Title: {d.get('name', '')}\n\n{body}".strip()
 
 
-def _workday_detail(jd_url: str) -> str | None:
-    # {tenant}.wdN.myworkdayjobs.com/[locale/]{site}/job/… — like SmartRecruiters,
-    # the Workday search adapter lists postings with description="", and a generic
-    # crawl of the SPA posting page pulls in page chrome ("Welcome to our new
-    # career portal", Apply/Save-job, cookie banner, "© Workday, Inc." footer).
-    # The public CXS API returns the JD as clean HTML.
+def _workday_cxs_ref(jd_url: str) -> tuple[str, str, str, str] | None:
+    """``(origin, tenant, site, ext)`` for a Workday posting URL, else None.
+
+    Workday hands out the same posting under two host shapes, and the CXS API
+    path is identical for both — only where the TENANT lives differs:
+      • ``{tenant}.wdN.myworkdayjobs.com/[locale/]{site}/job/…``  → tenant in host
+      • ``wdN.myworkdaysite.com/[locale/]recruiting/{tenant}/{site}/job/…`` → in path
+    The second shape is what Phenom-fronted tenants publish as their applyUrl
+    (Mondelēz), so keying only on the first left those JDs to a generic crawl of
+    the SPA — i.e. page chrome, not the job.
+    """
     m = re.match(
         r"https?://([^.]+)\.(wd\d+)\.myworkdayjobs\.com/(?:[a-z]{2}-[A-Z]{2}/)?([^/]+)(/job/.+)$",
         jd_url)
-    if not m:
+    if m:
+        tenant, wd, site, ext = m.group(1), m.group(2), m.group(3), m.group(4)
+        return f"https://{tenant}.{wd}.myworkdayjobs.com", tenant, site, ext
+    m = re.match(
+        r"https?://(wd\d+)\.myworkdaysite\.com/(?:[a-z]{2}-[A-Z]{2}/)?recruiting/([^/]+)/([^/]+)(/job/.+)$",
+        jd_url)
+    if m:
+        wd, tenant, site, ext = m.group(1), m.group(2), m.group(3), m.group(4)
+        return f"https://{wd}.myworkdaysite.com", tenant, site, ext
+    return None
+
+
+def _workday_detail(jd_url: str) -> str | None:
+    # Like SmartRecruiters, the Workday search adapter lists postings with
+    # description="", and a generic crawl of the SPA posting page pulls in page
+    # chrome ("Welcome to our new career portal", Apply/Save-job, cookie banner,
+    # "© Workday, Inc." footer). The public CXS API returns the JD as clean HTML.
+    ref = _workday_cxs_ref(jd_url)
+    if not ref:
         return None
-    tenant, wd, site, ext = m.group(1), m.group(2), m.group(3), m.group(4)
-    base = f"https://{tenant}.{wd}.myworkdayjobs.com"
+    base, tenant, site, ext = ref
     try:
         r = requests.get(
             f"{base}/wday/cxs/{tenant}/{site}{ext}",
@@ -484,10 +510,31 @@ async def resolve_full_jd(source_url: str, existing: str = "") -> str:
     import asyncio
 
     existing = (existing or "").strip()
-    if len(existing) >= 200 or not source_url:
+    if not source_url or len(existing) >= _TEASER_MAX:
         return existing
 
     best = existing
+    # A stored description over the old 200-char bar is USUALLY the real JD — but
+    # some list adapters ship a marketing teaser (Phenom's `descriptionTeaser`,
+    # ~300 chars: "Join us and make an impact!") that clears that bar carrying
+    # none of the requirements. So up to _TEASER_MAX we still ask the by-URL
+    # detail adapters; each gates on the URL, so this is an instant no-op (zero
+    # HTTP) for a platform we have no adapter for.
+    try:
+        detail = await asyncio.wait_for(
+            asyncio.to_thread(resolve_jd_detail_only, source_url), timeout=12)
+        if detail and len(detail) > len(best):
+            best = detail
+    except asyncio.TimeoutError:
+        logger.info(f"[resolve_full_jd] detail timed out (12s) {source_url}")
+    except Exception as e:  # never break publish
+        logger.info(f"[resolve_full_jd] detail miss {source_url}: {str(e)[:80]}")
+
+    # Everything below is expensive (whole-board scan, then a browser). Keep the
+    # old bar for entering it: 200 chars of real JD is good enough.
+    if len(best) >= 200:
+        return best
+
     # The ATS list-scan paginates a whole board and often returns nothing for one
     # URL (e.g. thegioididong takes 20s+ → 0 chars). Cap it so a single slow site
     # can't hang the publish request — the crawl below usually gets the JD anyway.

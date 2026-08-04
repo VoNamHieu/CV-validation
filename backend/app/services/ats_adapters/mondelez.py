@@ -55,8 +55,12 @@ def _mondelez(career_url: str) -> list[dict]:
             if url in seen:
                 continue
             seen.add(url)
+            # description="" like every other list adapter: `descriptionTeaser` is
+            # a ~300-char marketing blurb, and storing it made the row look like
+            # it already had a JD — so neither the backfill nor promote ever
+            # fetched the real one from applyUrl's Workday CXS API.
             out.append({"title": title[:200], "url": url, "location": str(loc)[:120],
-                        "description": _strip_html(j.get("descriptionTeaser") or "")[:600]})
+                        "description": ""})
         if start + _PER >= total or len(jobs) < _PER or len(out) >= _MAX_ATS_JOBS:
             break
     logger.info(f"[ats] mondelez → {len(out)} VN jobs")
