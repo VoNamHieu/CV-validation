@@ -75,6 +75,9 @@ export default function IncidentsPanel() {
     const [days, setDays] = useState(7);
     const [typeFilter, setTypeFilter] = useState<'' | IncidentType>('');
     const [onlyUnresolved, setOnlyUnresolved] = useState(true);
+    // Client-side: warnings are things nobody has to act on (a fetch the browser
+    // itself dropped), and they otherwise bury the faults that matter.
+    const [hideWarnings, setHideWarnings] = useState(false);
     const [summary, setSummary] = useState<IncidentSummary | null>(null);
     const [items, setItems] = useState<Incident[]>([]);
     const [total, setTotal] = useState(0);
@@ -121,6 +124,8 @@ export default function IncidentsPanel() {
             setResolving(null);
         }
     }, [onlyUnresolved]);
+
+    const visible = hideWarnings ? items.filter((it) => it.severity !== 'warning') : items;
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -205,6 +210,10 @@ export default function IncidentsPanel() {
                     <input type="checkbox" checked={onlyUnresolved} onChange={(e) => setOnlyUnresolved(e.target.checked)} />
                     Chỉ chưa xử lý
                 </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.78rem', color: 'var(--text-secondary)', cursor: 'pointer' }}>
+                    <input type="checkbox" checked={hideWarnings} onChange={(e) => setHideWarnings(e.target.checked)} />
+                    Ẩn cảnh báo
+                </label>
                 <span style={{ marginLeft: 'auto', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
                     {loading ? 'Đang tải…' : `${nf(total)} lỗi`}
                 </span>
@@ -212,12 +221,12 @@ export default function IncidentsPanel() {
 
             {/* List */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {items.length === 0 && !loading && (
+                {visible.length === 0 && !loading && (
                     <div className="glass-card" style={{ padding: '32px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.86rem' }}>
                         Không có lỗi nào khớp bộ lọc.
                     </div>
                 )}
-                {items.map((it) => {
+                {visible.map((it) => {
                     const meta = typeMeta(it.incident_type);
                     const open = expanded === it.id;
                     return (
@@ -232,6 +241,13 @@ export default function IncidentsPanel() {
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                                         <span style={{ fontSize: '0.72rem', fontWeight: 700, color: meta.color }}>{meta.label}</span>
                                         {it.module && <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>{it.module}</span>}
+                                        {it.severity === 'warning' && (
+                                            <span style={{
+                                                fontSize: '0.66rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em',
+                                                color: 'var(--accent-amber, #d97706)', border: '1px solid currentColor',
+                                                borderRadius: 999, padding: '0 6px',
+                                            }}>cảnh báo</span>
+                                        )}
                                         {it.resolved && (
                                             <span style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--accent-green, #22c55e)', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
                                                 <CheckCircle size={11} weight="fill" /> đã xử lý

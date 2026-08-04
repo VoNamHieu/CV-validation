@@ -1,6 +1,6 @@
 // All API calls use Next.js API routes (relative paths)
 import { getAuthHeaders } from './auth-headers';
-import { reportIncident } from './incidents';
+import { isNetworkNoise, reportIncident } from './incidents';
 import type { CVData } from './types';
 import type { CvImprovement, CvSuggestion } from './cv-improvements';
 
@@ -21,11 +21,15 @@ async function aiPost<T = any>(path: string, body: unknown, fallbackMsg: string)
             body: JSON.stringify(body),
         });
     } catch (netErr) {
-        reportIncident({
-            incident_type: 'api_error', module: 'api',
-            message: netErr instanceof Error ? netErr.message : 'network error',
-            context: { endpoint: path, kind: 'network' },
-        });
+        // No retry here — these are POSTs that spend credits. Still skip the
+        // report when the browser itself was the cause (see isNetworkNoise).
+        if (!isNetworkNoise(netErr)) {
+            reportIncident({
+                incident_type: 'api_error', module: 'api', severity: 'warning',
+                message: netErr instanceof Error ? netErr.message : 'network error',
+                context: { endpoint: path, kind: 'network' },
+            });
+        }
         throw netErr;
     }
     if (!res.ok) {
