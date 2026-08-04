@@ -32,7 +32,7 @@ import { tenantRefFor } from '../ats/tenant.js';
 // you can confirm (in the PAGE / tab console, NOT the service-worker console) that
 // the freshly-built dist is actually loaded. If you don't see this line on the
 // apply tab, the new build isn't injected (reload the extension + refresh the tab).
-const COPO_BUILD = 'prod-final-2026-08-04j';
+const COPO_BUILD = 'prod-final-2026-08-04k';
 try { console.log(`%c[Copo] content-agent build ${COPO_BUILD} loaded → ${location.host}`, 'color:#c43b2e;font-weight:700'); } catch { /* noop */ }
 
 /**
@@ -420,6 +420,12 @@ async function runAgentLoop(profile) {
                 }
                 if (wantReload && reloads < reloadBudget) {
                     try { sessionStorage.setItem('copoApplyReloads', String(reloads + 1)); } catch { /* ignore */ }
+                    // A MANUAL (⚡) run has no pendingAutoApply to resume off, so
+                    // this reload used to end it silently — the page came back
+                    // clean and the agent just stood there, which reads as "the
+                    // form died" (measured on Unilever: error card → reload →
+                    // silence). The flag survives exactly one same-tab reload.
+                    try { sessionStorage.setItem('copoManualResume', '1'); } catch { /* ignore */ }
                     console.warn(`[Copo Apply] recovery: ${errCard ? 'error card' : 'empty page'} → reload ${reloads + 1}/${reloadBudget}`, location.href);
                     showProgress(i + 1, null, 'Trang lỗi/rỗng — tải lại…');
                     await sleep(600);
@@ -1727,6 +1733,23 @@ async function init() {
         chrome.storage.local.get('jobfitProfile', d => r(d.jobfitProfile || null));
     });
     if (!profile) return;
+
+    // Resume a MANUAL run across a recovery reload. The driven flow resumes
+    // off pendingAutoApply; a ⚡-started run had nothing — the reload came
+    // back clean and the agent silently ended (measured on Unilever, where
+    // the second pass then went clean through the very step that crashed).
+    let manualResume = false;
+    try {
+        manualResume = sessionStorage.getItem('copoManualResume') === '1';
+        if (manualResume) sessionStorage.removeItem('copoManualResume');
+    } catch { /* ignore */ }
+    if (manualResume) {
+        trace('recovery.resume', { host: location.hostname, mode: 'manual' });
+        showToast('🔁 Trang đã tải lại sau lỗi — agent tiếp tục…', 4000);
+        await sleep(1500);   // let the fresh SPA hydrate before touching it
+        await runAgentLoop(profile);
+        return;
+    }
 
     const evaluateAndInject = async () => {
         const isJobPage = await waitForJobPageSignal();

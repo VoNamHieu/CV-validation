@@ -163,7 +163,7 @@ export const ANSWER_RULES = [
         match: /how did you hear|how did you find|source|bạn biết đến/i,
         candidates: [
             'company website', 'company careers website', 'employer website',
-            'careers website', 'career site', 'company webpage', 'website', 'webpage', 'online',
+            'careers website', 'career site', 'careers page', 'career page', 'company webpage', 'website', 'webpage',
             // Final rung by user decision (2026-08-03, hit on P&G whose catalogue
             // has no company-website entry): "Other" is a truthful neutral claim.
             // '=' anchors the match — substring would resolve "other" to

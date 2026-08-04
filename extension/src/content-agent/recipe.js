@@ -104,7 +104,7 @@ export const FALLBACK_RECIPES = [
                         selector: '[data-automation-id="formField-source"] input, [data-automation-id="formField-source"] button, [data-automation-id="formField-source"] select',
                         valuePriority: [
                             'Company Website', 'Company Careers Website', 'Employer Website',
-                            'Careers Website', 'Career Site', 'Company Webpage', 'Website', 'Webpage', 'Online',
+                            'Careers Website', 'Career Site', 'Careers Page', 'Career Page', 'Company Webpage', 'Website', 'Webpage',
                             // Final rung by user decision (2026-08-03, hit on P&G where
                             // the catalogue has no company-website entry at all):
                             // "Other" is a truthful neutral claim, better than a
