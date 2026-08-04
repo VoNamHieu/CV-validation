@@ -298,6 +298,15 @@ export const FALLBACK_RECIPES = [
                         label: 'Gender',
                         selector: '[data-automation-id="formField-gender"] button',
                         valuePriority: ['Not Specified', 'Not Declared', 'Undeclared', 'Prefer not to say', 'Decline to answer', 'I do not wish to answer', 'Decline to self-identify', 'Choose not to disclose', 'Not applicable'],
+                        // When every rung misses, the MODEL identifies the decline
+                        // row (the agent-plan prompt's rule 21 orders exactly that,
+                        // never an actual demographic value) — and inferDeny is the
+                        // structural belt: a substantive pick is refused here, so
+                        // the model's worst mistake is an empty field, which is
+                        // what a missing rung produced anyway (measured on Visa:
+                        // "Not Declared" stalled two runs for a phrasing).
+                        infer: true,
+                        inferDeny: /^\s*(male|female|man|woman|nam|nữ|khác|other)\s*$/i,
                         type: 'custom-select', required: true, answerSource: 'AGENT_DEFAULT',
                     },
                     {
@@ -309,6 +318,14 @@ export const FALLBACK_RECIPES = [
                         selector: '[data-automation-id="formField-ethnicity"] button',
                         profileKey: 'ethnicity',
                         valuePriority: ['Not Specified', 'Not Declared', 'Undeclared', 'Prefer not to say', 'Decline to answer', 'I do not wish to answer', 'Decline to self-identify', 'Choose not to disclose', 'Not applicable'],
+                        // Same decline-detection fallback as Gender. The deny
+                        // cannot enumerate every ethnicity, so it blocks the
+                        // shapes a wrong pick would take on THESE catalogues:
+                        // single ethnic names are already prevented by rule 21's
+                        // decline-only instruction, and the profile's own value
+                        // ("Kinh") was tried before the model ever spoke.
+                        infer: true,
+                        inferDeny: /^\s*(asian|white|black|hispanic|latino|kinh|hoa|tày|thái|mường|khmer|nùng|other)\s*$/i,
                         type: 'custom-select',
                     },
                     {
@@ -3629,7 +3646,16 @@ async function fillCustomSelect(f, value, ctx = {}) {
             showToast('🔑 Phiên đăng nhập Copo đã hết hạn — mở web app và đồng bộ lại, '
                 + 'rồi chạy lại. AI không suy luận được trường nào cho tới lúc đó.', 12000);
         }
-        if (r?.value) {
+        // The structural belt on demographic inference: rule 21 tells the
+        // model to pick ONLY the decline row, and this refuses the pick if it
+        // is a substantive value anyway — the model's worst mistake collapses
+        // to an empty field, never a claim about the person.
+        const inferDenied = !!(r?.value && f.inferDeny && f.inferDeny.test(r.value));
+        if (inferDenied) {
+            trace('list.inferDenied', { field: f.label, picked: r.value.slice(0, 30), why: 'substantive value on a decline-only field' });
+            inferNote = `model picked "${r.value.slice(0, 20)}" — refused (decline-only field)`;
+        }
+        if (r?.value && !inferDenied) {
             matched = r.value.toLowerCase();
             // RE-OPEN first. Asking the model takes seconds, and the prompt does
             // not stay open through them — measured: inference returned a valid
