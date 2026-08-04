@@ -97,7 +97,7 @@ export const FALLBACK_RECIPES = [
                         selector: '[data-automation-id="formField-source"] input, [data-automation-id="formField-source"] button, [data-automation-id="formField-source"] select',
                         valuePriority: [
                             'Company Website', 'Company Careers Website', 'Employer Website',
-                            'Careers Website', 'Company Webpage', 'Website', 'Webpage', 'Online',
+                            'Careers Website', 'Career Site', 'Company Webpage', 'Website', 'Webpage', 'Online',
                             // Final rung by user decision (2026-08-03, hit on P&G where
                             // the catalogue has no company-website entry at all):
                             // "Other" is a truthful neutral claim, better than a
@@ -3389,6 +3389,7 @@ async function fillCustomSelect(f, value, ctx = {}) {
     let opt = null;
     let matched = '';
     let shown = visibleOptions();
+    let prevSig = null;   // last round's option-list fingerprint — see list.static below
     if (filter) {
         // A SEARCH box shows nothing until something is typed, so each rung has to
         // be typed before it can be matched. Previously the ladder was only
@@ -3438,12 +3439,38 @@ async function fillCustomSelect(f, value, ctx = {}) {
             // so the typed rung has to be searched for, not just read off.
             opt = await findInList(visibleOptions, (list) => uniqueMatch(list, wanted), `${f.label}:${wanted}`, wanted);
             if (opt) { matched = wanted; break; }
+            // A catalogue that IGNORES typing shows the same rows for every
+            // rung — the answer is on screen now or nowhere. Two identical
+            // rounds prove it: evaluate the WHOLE ladder, best rung first,
+            // against what is visible and stop typing. Measured on P&G:
+            // "Other" was on screen from round one, but its rung sits last,
+            // so it only got its turn after eight wasted typing cycles — and
+            // the field burned a full iteration before a second pass took it.
+            const sig = shown.map(o => (o.textContent || '').trim()).join('¦');
+            if (sig && sig === prevSig) {
+                for (const rung of ladder) {
+                    opt = uniqueMatch(shown, rung);
+                    if (opt) { matched = rung; break; }
+                }
+                trace('list.static', { field: f.label, rows: shown.length, took: matched || '(nothing in ladder)' });
+                break;
+            }
+            prevSig = sig;
         }
         // Every rung typed and nothing matched — try once against the list as it
         // stands with an empty box, in case the filter was the obstacle.
         if (!opt) {
             setNativeValue(filter, '', { quiet: true });
             await sleep(400);
+            // The popup can have CLOSED mid-ladder (an Enter that surfaced
+            // nothing, a stray blur) — the fallback then matched against an
+            // empty page and reported option-not-found for a row that was on
+            // screen a moment earlier. Reopen before concluding anything.
+            if (!visibleOptions().length) {
+                safeActivate(trigger, { source: 'recipe', activation: 'widget-open' }, f.selector);
+                const by = Date.now() + 2500;
+                while (!visibleOptions().length && Date.now() < by) await sleep(150);
+            }
             for (const wanted of ladder) {
                 opt = uniqueMatch(visibleOptions(), wanted);
                 if (opt) { matched = wanted; break; }
