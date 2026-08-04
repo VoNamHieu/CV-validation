@@ -46,7 +46,7 @@ export const ANSWER_RULES = [
         // this rule matching FIRST must never decline less well than the rule
         // it shadows ("I don't wish to answer" needs the contraction rung).
         candidates: [
-            'not specified', 'prefer not to say', 'decline to answer',
+            'not specified', 'not declared', 'prefer not to say', 'decline to answer',
             "don't wish", 'do not wish', 'decline to self-identify',
             'not applicable', 'không muốn trả lời',
         ],
@@ -67,7 +67,8 @@ export const ANSWER_RULES = [
             'prefer not to say', 'prefer not to disclose', 'decline to self identify',
             'decline to self-identify', 'do not wish to disclose', 'not applicable',
             'không muốn trả lời', 'không tiết lộ',
-            'not specified', 'unspecified', 'undisclosed', 'not disclosed',
+            'not specified', 'not declared', 'undeclared', 'unspecified',
+            'undisclosed', 'not disclosed', 'choose not to disclose',
             'no answer', 'không xác định', 'không muốn nêu',
         ],
     },

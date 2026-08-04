@@ -289,13 +289,15 @@ export const FALLBACK_RECIPES = [
                 detect: '[data-automation-id="applyFlowVoluntaryDisclosuresPage"]',
                 fields: [
                     // Demographics: declining is the only answer that states
-                    // nothing about the person. "Not Specified" is this tenant's
-                    // decline row (measured options: Female / Male / Not
-                    // Specified / Other); the longer rungs cover other tenants.
+                    // nothing about the person. Tenants word the decline row
+                    // however they like — measured: "Not Specified" (Mondelez:
+                    // Female/Male/Not Specified/Other), "Not Declared" (Visa:
+                    // Female/Male/Not Declared); the longer rungs cover the
+                    // US-styled phrasings.
                     {
                         label: 'Gender',
                         selector: '[data-automation-id="formField-gender"] button',
-                        valuePriority: ['Not Specified', 'Prefer not to say', 'Decline to answer', 'I do not wish to answer', 'Decline to self-identify', 'Not applicable'],
+                        valuePriority: ['Not Specified', 'Not Declared', 'Undeclared', 'Prefer not to say', 'Decline to answer', 'I do not wish to answer', 'Decline to self-identify', 'Choose not to disclose', 'Not applicable'],
                         type: 'custom-select', required: true, answerSource: 'AGENT_DEFAULT',
                     },
                     {
@@ -306,7 +308,7 @@ export const FALLBACK_RECIPES = [
                         label: 'Race/Ethnicity',
                         selector: '[data-automation-id="formField-ethnicity"] button',
                         profileKey: 'ethnicity',
-                        valuePriority: ['Not Specified', 'Prefer not to say', 'Decline to answer', 'I do not wish to answer', 'Decline to self-identify', 'Not applicable'],
+                        valuePriority: ['Not Specified', 'Not Declared', 'Undeclared', 'Prefer not to say', 'Decline to answer', 'I do not wish to answer', 'Decline to self-identify', 'Choose not to disclose', 'Not applicable'],
                         type: 'custom-select',
                     },
                     {
@@ -1364,7 +1366,29 @@ async function _applyRecipeFields(recipe, profile, cvData, cv) {
                     continue;
                 }
                 await sleep(250);
-                if (el.checked) { filled++; outcomes.push([f.label, 'OK', 'ticked']); answers.push({ field: f.label, value: 'Yes', source: provenance }); }
+                let on = el.checked;
+                // Workday's styled checkbox often wires the CLICK to a panel
+                // div or the label, not the input — measured on Visa, where
+                // the input click flipped nothing ("tick did not take") on the
+                // terms acknowledgement, twice. Same escalation discipline as
+                // the currently-work-here ladder: every rung re-reads the real
+                // input, nothing trusts its own click.
+                if (!on) {
+                    try { el.dispatchEvent(new Event('change', { bubbles: true })); } catch { /* noop */ }
+                    await sleep(250);
+                    on = el.checked;
+                }
+                if (!on) {
+                    const wrapEl = el.closest('[data-automation-id^="formField-"]');
+                    const alt = (el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`))
+                        || el.closest('label')
+                        || wrapEl?.querySelector('[data-automation-id="checkboxPanel"]');
+                    if (alt && safeActivate(alt, { source: 'recipe', activation: 'widget-option' }, f.selector)) {
+                        await sleep(300);
+                        on = el.checked;
+                    }
+                }
+                if (on) { filled++; outcomes.push([f.label, 'OK', 'ticked']); answers.push({ field: f.label, value: 'Yes', source: provenance }); }
                 else outcomes.push([f.label, 'FAIL', 'tick did not take']);
             } else if (f.type === 'radio') {
                 const r = fillRadio(f, val);
