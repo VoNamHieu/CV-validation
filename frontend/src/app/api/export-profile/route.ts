@@ -46,6 +46,7 @@ export async function GET() {
             skills: 'string (comma-separated)',
             middleName: 'string (tên đệm — some tenants require it in both scripts)',
             addressStreet2: 'string (address line 2, usually empty)',
+            driversLicense: 'string (Yes/No — driver license question, Unilever requires it)',
         } satisfies Record<keyof ExtensionProfile, string>,
     });
 }

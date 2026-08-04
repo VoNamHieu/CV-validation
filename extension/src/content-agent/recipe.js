@@ -1537,6 +1537,12 @@ async function _applyRecipeFields(recipe, profile, cvData, cv) {
         try { filled += await fillLanguageRows(cv, outcomes, profile); }
         catch (e) { outcomes.push(['Languages (rows)', 'FAIL', (e && e.message) || 'exception']); }
     }
+    // The checkbox-group twin of the same question (Unilever: "What languages
+    // do you speak?*"). Shape-based like the rows — cheap no-op when absent.
+    if (recipe.ats === 'workday') {
+        try { filled += await fillLanguageCheckboxGroup(cv, outcomes, profile); }
+        catch (e) { outcomes.push(['Languages (checkbox group)', 'FAIL', (e && e.message) || 'exception']); }
+    }
     // Shape-based, not step-name-based: any page showing endDate rows gets the
     // per-row pass, whatever the tenant called the step.
     if (recipe.ats === 'workday' && document.querySelector('[data-automation-id="formField-endDate"]')) {
@@ -2166,7 +2172,11 @@ async function pruneLanguageRows(wantRows, outcomes) {
  * The tick is derived from the row's own level: Native/Fluent/Advanced → Yes;
  * lower levels leave it untouched.
  */
-async function fillLanguageRows(cv, outcomes, profile) {
+/** Every language the candidate can claim, deduped: the CV's own section,
+ *  the certificate/skills derivations, and the VN-market Vietnamese/Native
+ *  rule. One list feeding EVERY language-shaped widget — rows, checkbox
+ *  groups, whatever a tenant renders. */
+function collectLanguages(cv, profile) {
     const langs = [...(cv?.languages || [])];
     // Skills lines, certificates and the summary are proficiency statements:
     // append every language they prove that the CV never gave its own section.
@@ -2188,19 +2198,60 @@ async function fillLanguageRows(cv, outcomes, profile) {
         langs.push({ language: 'Vietnamese', level: 'Native' });
         trace('lang.derived', { language: 'Vietnamese', level: 'Native', evidence: 'VN-market default' });
     }
-
-    // ── ONE ENTRY PER LANGUAGE, BEFORE ANYTHING TOUCHES THE FORM ──
-    {
-        const deduped = dedupeLanguages(langs);
-        if (deduped.length !== langs.length) {
-            trace('lang.dedup', {
-                before: langs.map(l => l.language).join(', '),
-                after: deduped.map(l => l.language).join(', '),
-            });
-        }
-        langs.length = 0;
-        langs.push(...deduped);
+    const deduped = dedupeLanguages(langs);
+    if (deduped.length !== langs.length) {
+        trace('lang.dedup', {
+            before: langs.map(l => l.language).join(', '),
+            after: deduped.map(l => l.language).join(', '),
+        });
     }
+    return deduped;
+}
+
+/**
+ * The checkbox-GROUP shape of the same question (measured on Unilever:
+ * "What languages do you speak?*", ~30 boxes, REQUIRED) — not a select, not
+ * a lone checkbox, so every existing layer politely skipped it: the needs
+ * boolean guard refuses a "Vietnamese" routed at a checkbox (correctly), and
+ * free-answer is select-only. Tick exactly the languages the candidate can
+ * claim; every tick is verified off the real input.
+ */
+async function fillLanguageCheckboxGroup(cv, outcomes, profile) {
+    const legends = [...document.querySelectorAll('fieldset, [data-automation-id^="formField-"]')]
+        .filter(w => w.offsetParent !== null)
+        .filter(w => /what languages|languages (do you|you) speak|ngôn ngữ.*(nói|sử dụng)/i
+            .test((w.querySelector('legend, label')?.textContent || '')));
+    const group = legends.find(w => w.querySelectorAll('input[type="checkbox"]').length >= 3);
+    if (!group) return 0;
+    const langs = collectLanguages(cv, profile).map(l => String(l.language || '').trim().toLowerCase()).filter(Boolean);
+    if (!langs.length) return 0;
+    const boxes = [...group.querySelectorAll('input[type="checkbox"]')].filter(b => b.offsetParent !== null);
+    const labelOf = (b) => ((b.id && group.querySelector(`label[for="${CSS.escape(b.id)}"]`)?.textContent)
+        || b.closest('label')?.textContent || b.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    let filled = 0;
+    for (const b of boxes) {
+        const lbl = labelOf(b);
+        if (!lbl || !langs.includes(lbl)) continue;
+        if (b.checked) { outcomes.push([`Language ✓ ${lbl}`, 'done', 'already ticked']); continue; }
+        if (!safeActivate(b, { source: 'recipe', activation: 'widget-option' }, 'language-checkbox')) continue;
+        await sleep(200);
+        let on = b.checked;
+        if (!on) {
+            const alt = (b.id && group.querySelector(`label[for="${CSS.escape(b.id)}"]`)) || b.closest('label');
+            if (alt && safeActivate(alt, { source: 'recipe', activation: 'widget-option' }, 'language-checkbox')) {
+                await sleep(250);
+                on = b.checked;
+            }
+        }
+        trace('lang.groupTick', { language: lbl, on });
+        if (on) { filled++; outcomes.push([`Language ✓ ${lbl}`, 'OK', 'ticked']); }
+        else outcomes.push([`Language ✓ ${lbl}`, 'FAIL', 'tick did not take']);
+    }
+    return filled;
+}
+
+async function fillLanguageRows(cv, outcomes, profile) {
+    const langs = collectLanguages(cv, profile);
     const vis = (e) => !!(e && e.offsetParent !== null);
     const langWraps = () => [...document.querySelectorAll('[data-automation-id="formField-language"]')].filter(vis);
     if (!langWraps().length) return 0;

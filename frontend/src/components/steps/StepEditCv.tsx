@@ -2672,6 +2672,8 @@ export function PersonalInfoSection({
                         onChange={(v) => patchPersonal({ ethnicity: v })} placeholder="Kinh" />
                     <ProfileInput label="Tên đệm" value={personal.middle_name}
                         onChange={(v) => patchPersonal({ middle_name: v })} placeholder="Nam" />
+                    <ProfileInput label="Bằng lái xe" value={personal.drivers_license}
+                        onChange={(v) => patchPersonal({ drivers_license: v })} placeholder="Có / Không" />
                     <ProfileInput label="Tình trạng hôn nhân" value={personal.marital_status}
                         onChange={(v) => patchPersonal({ marital_status: v })} />
 

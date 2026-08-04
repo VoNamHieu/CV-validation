@@ -208,6 +208,32 @@
     box-shadow: var(--shadow-card);
 }
 
+/* Company-specific apply guide. Only some employers have one (see
+   lib/apply-guides), so this sits under the CTA and is absent on most pages. */
+.guideBtn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    padding: 13px 16px;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-primary);
+    background: var(--bg-card);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-card);
+    cursor: pointer;
+    transition: border-color 0.16s ease, transform 0.16s ease, box-shadow 0.16s ease;
+}
+
+.guideBtn:hover {
+    border-color: var(--border-accent);
+    box-shadow: var(--shadow-card-hover);
+    transform: translateY(-1px);
+}
+
 .factsTitle {
     font-size: 12.5px;
     font-weight: 700;

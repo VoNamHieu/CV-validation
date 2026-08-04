@@ -122,6 +122,9 @@ export const FIELD_PATTERNS = [
     { key: 'noticePeriod', match: /notice period|thời gian báo trước/i, profileKey: 'noticePeriod', userOnly: true },
     { key: 'workAuthorization', match: /legally authoriz|right to work|work permit/i, profileKey: 'workAuthorized', userOnly: true },
     { key: 'sponsorship', match: /sponsor|visa support|bảo lãnh/i, profileKey: 'requiresSponsorship', userOnly: true },
+    // Unilever asks it REQUIRED ("Do you hold a valid driver's license?*") —
+    // knowable only to the candidate, collected once in the web app profile.
+    { key: 'driversLicense', match: /driver'?s? licen[cs]e|giấy phép lái xe|bằng lái/i, profileKey: 'driversLicense', normalize: 'yesno', userOnly: true },
 ];
 
 /**
@@ -139,7 +142,7 @@ export const PROFILE_KEYS = new Set([
     'nationality', 'maritalStatus', 'addressProvince', 'addressDistrict', 'addressStreet', 'addressStreet2',
     'postalCode', 'currentTitle', 'currentLevel', 'yearsOfExperience', 'highestDegree',
     'currentSalary', 'currentIndustry', 'currentFields', 'desiredLocations', 'desiredSalary',
-    'noticePeriod', 'workAuthorized', 'requiresSponsorship', 'coverLetter', 'applyMessage', 'skills',
+    'noticePeriod', 'workAuthorized', 'requiresSponsorship', 'driversLicense', 'coverLetter', 'applyMessage', 'skills',
 ]);
 
 /** The concept a field is asking about, or null when nothing recognises it. */
@@ -169,8 +172,18 @@ export function readPath(cv, path) {
 export function canonicalValue(pattern, data) {
     if (!pattern) return null;
     // Same rule the recipe applies via `normalize: 'name'` — ALL-CAPS names
-    // raise a Workday capitalization advisory on every application.
-    const shape = (v) => (pattern.normalize === 'name' ? normalizeNameCase(String(v)) : String(v));
+    // raise a Workday capitalization advisory on every application. 'yesno'
+    // bridges the profile's Vietnamese ("Có"/"Không") onto the Yes/No options
+    // every ATS actually offers.
+    const shape = (v) => {
+        const s = String(v);
+        if (pattern.normalize === 'name') return normalizeNameCase(s);
+        if (pattern.normalize === 'yesno') {
+            if (/^(yes|y|có|co|true|1)$/i.test(s.trim())) return 'Yes';
+            if (/^(no|không|khong|false|0)$/i.test(s.trim())) return 'No';
+        }
+        return s;
+    };
     const fromProfile = pattern.profileKey ? data?.profile?.[pattern.profileKey] : undefined;
     if (fromProfile != null && String(fromProfile).trim() !== '') {
         return { value: shape(fromProfile), source: SOURCE.PROFILE };

@@ -42,6 +42,7 @@ export const DUMMY_PROFILE = {
     addressDistrict: 'Cầu Giấy',
     addressStreet: '1 Duy Tan Street',
     addressStreet2: '',
+    driversLicense: 'Yes',
     postalCode: '100000',
     currentTitle: 'Product Owner',
     currentLevel: 'Middle',

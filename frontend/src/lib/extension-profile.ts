@@ -24,6 +24,8 @@ export interface ExtensionProfile {
     // Line 2 has no CV source; kept so the schema and the agent's PROFILE_KEYS
     // agree (a key the schema lacks reads as a gap the user can never close).
     addressStreet2: string;
+    // Yes/No — Unilever renders the driver's-license question REQUIRED.
+    driversLicense: string;
     currentTitle: string;
     currentLevel: string;
     yearsOfExperience: number;
@@ -213,6 +215,7 @@ export function cvToExtensionProfile(
         addressDistrict: contact.address_district ?? "",
         addressStreet: contact.address_street ?? "",
         addressStreet2: "",
+        driversLicense: personal.drivers_license ?? "",
         postalCode: contact.address_postal_code ?? "",
         currentTitle,
         currentLevel: employment.current_level ?? "",

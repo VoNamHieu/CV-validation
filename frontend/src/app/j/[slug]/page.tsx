@@ -7,6 +7,7 @@ import { notFound } from 'next/navigation';
 import { MapPin, Buildings, ChartLineUp } from '@phosphor-icons/react/dist/ssr';
 import PromotedJobCta from '@/components/PromotedJobCta';
 import PromotedViewBeacon from '@/components/PromotedViewBeacon';
+import ApplyGuideButton from '@/components/apply-guide/ApplyGuideButton';
 import { renderJd } from '@/lib/renderJd';
 import { SITE_URL } from '@/lib/site';
 import styles from './promoted.module.css';
@@ -251,6 +252,8 @@ export default async function PromotedJobPage(
 
                 <aside className={styles.sidebar}>
                     <PromotedJobCta slug={slug} title={title} />
+                    {/* Renders nothing unless this employer has a guide. */}
+                    <ApplyGuideButton company={company_name} className={styles.guideBtn} source="public-job" />
                     {roleShow.length > 0 && (
                         <div className={styles.factsCard}>
                             <p className={styles.factsTitle}>Vị trí tương tự</p>

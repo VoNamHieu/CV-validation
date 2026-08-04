@@ -72,6 +72,9 @@ export interface PersonalInfo {
     // (or Middle) Name" as a REQUIRED field in both scripts — and it is not
     // derivable when the CV's own name line omits it, so it has to be askable.
     middle_name: string;
+    // "Do you hold a valid driver's license?" — Unilever asks it REQUIRED.
+    // Yes/Có or No/Không; empty = the agent reports a named gap, never guesses.
+    drivers_license: string;
     marital_status: string;
 }
 
@@ -146,7 +149,7 @@ export const EMPTY_CONTACT: ContactInfo = {
 };
 
 export const EMPTY_PERSONAL: PersonalInfo = {
-    date_of_birth: '', gender: '', nationality: '', ethnicity: '', middle_name: '', marital_status: '',
+    date_of_birth: '', gender: '', nationality: '', ethnicity: '', middle_name: '', drivers_license: '', marital_status: '',
 };
 
 export const EMPTY_EMPLOYMENT: EmploymentInfo = {
