@@ -52,6 +52,13 @@ export const FALLBACK_RECIPES = [
                 name: 'My Information',
                 detect: '[data-automation-id="formField-legalName--firstName"]',
                 fields: [
+                    // Honorific, REQUIRED on some tenants (PwC) — derived from
+                    // the profile's own gender via prefixLadder; an empty
+                    // gender leaves it a named gap, never a guess.
+                    {
+                        label: 'Prefix', labelMatch: 'prefix', profileKey: 'gender',
+                        prefixLadder: true, type: 'custom-select', answerSource: 'PROFILE',
+                    },
                     { label: 'First name', selector: '[data-automation-id="formField-legalName--firstName"] input', profileKey: 'firstName', type: 'text', required: true, normalize: 'name' },
                     { label: 'Last name', selector: '[data-automation-id="formField-legalName--lastName"] input', profileKey: 'lastName', type: 'text', required: true, normalize: 'name' },
                     // REQUIRED on Mondelez (measured), and the flat profile carries
@@ -297,6 +304,12 @@ export const FALLBACK_RECIPES = [
                     {
                         label: 'Gender',
                         selector: '[data-automation-id="formField-gender"] button',
+                        // The candidate's own stated gender FIRST (genderLadder
+                        // prepends it — user decision 2026-08-04: tenants ask
+                        // it as an administrative fact and Prefix derives from
+                        // it); the decline rungs remain the whole answer when
+                        // the profile is silent.
+                        profileKey: 'gender', genderLadder: true,
                         valuePriority: ['Not Specified', 'Not Declared', 'Undeclared', 'Prefer not to say', 'Decline to answer', 'I do not wish to answer', 'Decline to self-identify', 'Choose not to disclose', 'Not applicable'],
                         // When every rung misses, the MODEL identifies the decline
                         // row (the agent-plan prompt's rule 21 orders exactly that,
@@ -1415,8 +1428,11 @@ async function _applyRecipeFields(recipe, profile, cvData, cv) {
                 else outcomes.push([f.label, 'FAIL', r.reason]);
             } else if (f.type === 'custom-select') {
                 const r = await fillCustomSelect(
-                    f.levelLadder ? { ...f, valuePriority: levelLadder(val) } : f,
-                    val, { profile, cv });
+                    f.levelLadder ? { ...f, valuePriority: levelLadder(val) }
+                        : f.prefixLadder ? { ...f, valuePriority: prefixLadder(val) }
+                        : f.genderLadder ? { ...f, valuePriority: [...genderLadder(val), ...(f.valuePriority || [])] }
+                        : f,
+                    (f.prefixLadder || f.genderLadder) ? '' : val, { profile, cv });
                 if (r.ok) {
                     filled++;
                     outcomes.push([f.label, 'OK', String(r.matched || val)]);
@@ -1866,6 +1882,29 @@ function classifyEmploymentEnd(exp) {
     if (/^(present|current|now|hiện tại|nay)$/i.test(raw)) return { kind: 'CURRENT' };
     if (/\b(19|20)\d{2}\b/.test(raw)) return { kind: 'DATED', value: raw };
     return { kind: 'MISSING' };
+}
+
+/**
+ * Honorific from the profile's own gender (user decision 2026-08-04, measured
+ * on PwC: "Prefix" is a REQUIRED dropdown in Legal Name). Derived data, not
+ * invented: an empty gender derives nothing and the field stays a named gap —
+ * the one honest answer when the honorific cannot be known.
+ */
+function prefixLadder(gender) {
+    const g = String(gender || '').trim().toLowerCase();
+    if (/^(m|male|nam|anh|ông)$/.test(g)) return ['Mr.', 'Mr', 'Ông', 'Anh'];
+    if (/^(f|female|nữ|nu|chị|bà)$/.test(g)) return ['Ms.', 'Ms', 'Chị', 'Bà', 'Mrs.'];
+    return [];
+}
+
+/** The gender option itself, when the profile states one — tenants ask it as
+ *  an administrative fact (PwC: required in My Information). The candidate's
+ *  own stated value outranks declining; declines remain the fallback rungs. */
+function genderLadder(gender) {
+    const g = String(gender || '').trim().toLowerCase();
+    if (/^(m|male|nam)$/.test(g)) return ['Male', 'Nam', 'Man'];
+    if (/^(f|female|nữ|nu)$/.test(g)) return ['Female', 'Nữ', 'Woman'];
+    return [];
 }
 
 /** Proficiency order, highest first — ladders slice DOWNWARD from the
