@@ -118,8 +118,18 @@ describe('source question', () => {
     });
 
     test('walks down the ladder when the exact rung is absent', () => {
-        const a = resolveAnswer(q('How did you hear about us?'), ['Employee Referral', 'Online'], {});
-        assert.equal(a.value, 'Online');
+        const a = resolveAnswer(q('How did you hear about us?'), ['Employee Referral', 'Careers Page'], {});
+        assert.equal(a.value, 'Careers Page');
+    });
+
+    test('a bare "Online" option is no longer claimed', () => {
+        // The rung was dropped (2026-08-04): on Unilever it would have
+        // resolved to "Online Job Portals (Naukri, IIMJobs etc.)" — a
+        // different statement than any website rung, and anchoring cannot
+        // save it since that option passes the prefix tier too.
+        assert.equal(
+            resolveAnswer(q('How did you hear about us?'), ['Employee Referral', 'Online'], {}),
+            null);
     });
 
     test('answers nothing rather than naming a referrer who does not exist', () => {
