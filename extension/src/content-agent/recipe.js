@@ -204,8 +204,12 @@ export const FALLBACK_RECIPES = [
                     // leaves the step invalid.
                     { label: 'Work From', selector: '[data-automation-id="formField-startDate"]', cvPath: 'experience[0].start_date', type: 'date', required: true },
                     { label: 'Work To', selector: '[data-automation-id="formField-endDate"]', cvPath: 'experience[0].end_date', type: 'date' },
-                    { label: 'School or University', selector: '[data-automation-id="formField-schoolName"] input', cvPath: 'education[0].institution', type: 'text', required: true },
-                    { label: 'Field of Study', selector: '[data-automation-id="formField-fieldOfStudy"] input', cvPath: 'education[0].degree', type: 'text', required: true },
+                    // `labelMatch` beside the selector = per-tenant id drift
+                    // (measured: mdlz names it formField-schoolName, Visa does
+                    // not — the field sat "absent" while the form demanded it).
+                    // The selector is tried first, the label is the fallback.
+                    { label: 'School or University', selector: '[data-automation-id="formField-schoolName"] input', labelMatch: 'school or university', cvPath: 'education[0].institution', type: 'text', required: true },
+                    { label: 'Field of Study', selector: '[data-automation-id="formField-fieldOfStudy"] input', labelMatch: 'field of study', cvPath: 'education[0].degree', type: 'text', required: true },
                     // "Overall Result (GPA)" — REQUIRED on some Mondelez postings.
                     // Only the profile may answer (grade rule: a plausible-looking
                     // number is a fabricated academic record); empty profile →
@@ -1066,8 +1070,7 @@ export function resetFieldStatus() { _fieldStatus.clear(); }
 export function recipeOwnedWrappers(recipe) {
     const owned = new Map();
     for (const f of (recipe?.steps || []).flatMap(s => s.fields || [])) {
-        const el = f.labelMatch ? findFieldByLabel(f.labelMatch, f.labelDeny)
-            : f.selector ? document.querySelector(f.selector) : null;
+        const el = resolveFieldControl(f);
         const wrap = el?.closest?.('[data-automation-id^="formField-"]') || el;
         if (wrap && !owned.has(wrap)) owned.set(wrap, f.label);
     }
@@ -1252,8 +1255,7 @@ async function _applyRecipeFields(recipe, profile, cvData, cv) {
     const stepFields = step?.fields || [];
     const inStep = new Set(stepFields.map(f => f.label));
     const fieldOnPage = (f) => {
-        const el = f.labelMatch ? findFieldByLabel(f.labelMatch, f.labelDeny)
-            : f.selector ? document.querySelector(f.selector) : null;
+        const el = resolveFieldControl(f);
         return !!(el && el.offsetParent !== null);
     };
     const menuExtras = (recipe.steps || [])
@@ -1347,7 +1349,7 @@ async function _applyRecipeFields(recipe, profile, cvData, cv) {
                 else if (r.reason === 'no value') outcomes.push([f.label, 'skip', 'no end date (current role)']);
                 else outcomes.push([f.label, 'FAIL', r.reason]);
             } else if (f.type === 'checkbox') {
-                const el = f.labelMatch ? findFieldByLabel(f.labelMatch, f.labelDeny) : document.querySelector(f.selector);
+                const el = resolveFieldControl(f);
                 if (!el || el.offsetParent === null) { outcomes.push([f.label, 'absent', 'not rendered yet']); continue; }
                 if (el.checked) { outcomes.push([f.label, 'done', 'already ticked']); continue; }
                 if (!safeActivate(el, { source: 'recipe', activation: 'widget-option' }, f.selector)) {
@@ -1382,7 +1384,7 @@ async function _applyRecipeFields(recipe, profile, cvData, cv) {
                     answers.push({ field: f.label, value: r.matched || val, source: fromProfile ? 'PROFILE' : 'AGENT_DEFAULT' });
                 }
                 else if (r.reason === 'already-selected') outcomes.push([f.label, 'done', 'already selected']);
-                else if (r.reason === 'button-absent') outcomes.push([f.label, 'absent', 'not rendered yet']);
+                else if (r.reason === 'button-absent' || r.reason === 'trigger-absent') outcomes.push([f.label, 'absent', 'not rendered yet']);
                 else outcomes.push([f.label, 'FAIL', r.reason]);
             } else if (f.type === 'autocomplete') {
                 // Type-to-search field (SmartRecruiters city) → type then pick a match.
@@ -1410,7 +1412,7 @@ async function _applyRecipeFields(recipe, profile, cvData, cv) {
                 if (String(el.value ?? '').trim() !== '') { filled++; outcomes.push([f.label, 'OK', String(val).slice(0, 60)]); answers.push({ field: f.label, value: val, source: provenance }); }
                 else outcomes.push([f.label, 'FAIL', 'value did not stick']);
             } else {
-                const el = f.labelMatch ? findFieldByLabel(f.labelMatch, f.labelDeny) : document.querySelector(f.selector);
+                const el = resolveFieldControl(f);
                 if (!el || el.offsetParent === null) { outcomes.push([f.label, 'absent', 'not rendered yet']); continue; }
                 if (el.type === 'password') { outcomes.push([f.label, 'skip', 'password']); continue; }   // never
                 // TEST the widget before trusting the declared type: the same
@@ -1640,6 +1642,13 @@ async function fillWorkExperienceRows(cv, outcomes) {
         };
         await put(titles[i], e.title, 'Job Title');
         await put(colWraps('formField-companyName')[i], e.company, 'Company');
+        // Some tenants render per-row Location REQUIRED (measured on Visa —
+        // three empty Location* boxes ended the run NEED_HUMAN) and CVs
+        // almost never state one per job. Country-level truth is the honest
+        // floor for this product's candidates: their work history is in
+        // Vietnam, and "Vietnam" beats a stranded required field (same user
+        // decision as the address city fallback).
+        await put(colWraps('formField-location')[i], e.location || e.city || 'Vietnam', 'Location');
         await put(colWraps('formField-roleDescription')[i], e.description, 'Role description');
         const sd = colWraps('formField-startDate')[i];
         if (sd) {
@@ -1664,7 +1673,8 @@ async function fillWorkExperienceRows(cv, outcomes) {
  * that names no year is not a date and is left alone rather than half-entered.
  */
 async function fillDateField(f, val) {
-    const wrap = f.labelMatch ? findWrapperByLabel(f.labelMatch) : document.querySelector(f.selector);
+    const wrap = (f.selector && document.querySelector(f.selector))
+        || (f.labelMatch ? findWrapperByLabel(f.labelMatch) : null);
     if (!wrap) return { ok: false, reason: 'field-absent' };
     return setDateOnWrap(wrap, val);
 }
@@ -2536,6 +2546,21 @@ function recipeFieldValue(f, profile, cv) {
     return f.default ?? '';
 }
 
+/**
+ * The element a recipe field addresses: measured selector FIRST, label as the
+ * FALLBACK, preferring whichever hit is visible. Tenants drift automation ids
+ * (mdlz names the school box formField-schoolName; Visa does not) — a field
+ * declaring BOTH must not lose its measured id just because a label was added
+ * for resilience, and must not sit "absent" when only the id drifted.
+ */
+function resolveFieldControl(f) {
+    const vis = (el) => !!(el && el.offsetParent !== null);
+    const sel = f.selector ? document.querySelector(f.selector) : null;
+    if (vis(sel)) return sel;
+    const lab = f.labelMatch ? findFieldByLabel(f.labelMatch, f.labelDeny) : null;
+    return vis(lab) ? lab : (sel || lab);
+}
+
 /** Resolve a dynamic-id field (e.g. Workday Application Questions, whose formField
  *  ids are per-job) by matching its question/label text. Returns the textarea /
  *  input / button inside the first matching formField wrapper. */
@@ -2612,8 +2637,25 @@ async function inferOptionViaLLM(f, options, profile, cv) {
             .find(v => v != null && String(v).trim() !== '');
         const chosen = raw == null ? '' : String(raw).trim();
         // Only an option the page offers. A model answering "Bachelor's Degree"
-        // when no such row exists must not become a search for one.
-        const match = offered.find(o => o.toLowerCase() === chosen.toLowerCase());
+        // when no such row exists must not become a search for one. But EXACT
+        // equality was too brittle for long catalogue rows — measured on Visa:
+        // the model answered "Bachelor's or Equivalent First-Degree (I…"
+        // (truncated, straight apostrophe) against "Bachelor's or Equivalent
+        // First-Degree (ISCED …)" (curly apostrophe) and a correct choice was
+        // discarded. Normalise quotes/whitespace, then accept a reply that
+        // UNAMBIGUOUSLY identifies one row: equal, prefix either way, or
+        // contained — a single distinct hit only.
+        const nrm = (s) => String(s).toLowerCase()
+            .replace(/[‘’`]/g, "'").replace(/\s+/g, ' ').trim();
+        const c = nrm(chosen);
+        let match = offered.find(o => nrm(o) === c) || null;
+        if (!match && c.length >= 4) {
+            const hits = offered.filter(o => {
+                const t = nrm(o);
+                return t.startsWith(c) || c.startsWith(t) || t.includes(c);
+            });
+            if (new Set(hits.map(nrm)).size === 1) match = hits[0];
+        }
         trace('list.infer', { field: f.label, asked: offered.length, replied: chosen.slice(0, 40), accepted: !!match });
         return {
             value: match || null,
@@ -2874,8 +2916,8 @@ async function waitForResults(readKey, budgetMs = 4000, priorKey = null) {
  * candidate never made.
  */
 async function fillSearchMulti(f, value, ctx = {}) {
-    const wrap = f.labelMatch ? findWrapperByLabel(f.labelMatch)
-        : document.querySelector(f.selector)?.closest('[data-automation-id^="formField-"]');
+    const wrap = (f.selector && document.querySelector(f.selector)?.closest('[data-automation-id^="formField-"]'))
+        || (f.labelMatch ? findWrapperByLabel(f.labelMatch) : null);
     if (!wrap) return { ok: false, reason: 'field-absent' };
     const input = wrap.querySelector('input[type="text"], input:not([type])');
     if (!input || input.offsetParent === null) return { ok: false, reason: 'no search box' };
@@ -3194,7 +3236,7 @@ function fillNativeSelect(sel, f, value) {
 async function fillCustomSelect(f, value, ctx = {}) {
     // Some prompts have no stable id at all — Workday gives the language
     // proficiency field a per-tenant GUID — so they are addressed by their label.
-    const trigger = f.labelMatch ? findFieldByLabel(f.labelMatch, f.labelDeny) : document.querySelector(f.selector);
+    const trigger = resolveFieldControl(f);
     if (!trigger || trigger.offsetParent === null) return { ok: false, reason: 'trigger-absent' };
     // The one-action shape needs none of the prompt machinery below.
     if (trigger.tagName === 'SELECT') return fillNativeSelect(trigger, f, value);
