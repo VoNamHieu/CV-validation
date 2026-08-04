@@ -348,9 +348,22 @@ export function buildManifest(fields = [], data = {}) {
             //     dropdown means deselecting first, and a half-applied change to a
             //     select is worse than a flagged one.
             const textish = !f.componentType || f.componentType === 'native';
-            if (verdict === VERDICT.MISMATCH && pattern
-                && keyCount.get(`${pattern.key}::${scriptHalf(f)}`) === 1 && textish) {
+            const scopedOnce = pattern && keyCount.get(`${pattern.key}::${scriptHalf(f)}`) === 1;
+            if (verdict === VERDICT.MISMATCH && scopedOnce && textish) {
                 override.push({ ...entry, value: shapeScript(label, canonical.value), source: canonical.source, componentType: f.componentType });
+            } else if (scopedOnce && textish && canonical
+                && NAME_KEYS.includes(pattern.key)
+                && (verdict === VERDICT.MATCH || verdict === VERDICT.NORMALIZED)) {
+                // Same fact, wrong SHAPE (user decision 2026-08-04): "VO" is
+                // the same name as "Vo" but raises Workday's capitalization
+                // advisory on every application, and the western half must
+                // not keep diacritics the fold would remove. Re-case/refold
+                // to the canonical spelling; converges in one pass — once the
+                // box says "Vo", shaped equals it and nothing fires.
+                const shaped = shapeScript(label, canonical.value);
+                if (shaped && String(f.value).trim() !== String(shaped).trim()) {
+                    override.push({ ...entry, value: shaped, source: canonical.source, componentType: f.componentType });
+                }
             }
             continue;
         }

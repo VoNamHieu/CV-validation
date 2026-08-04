@@ -164,6 +164,21 @@ describe('resolving from the candidate\'s own data', () => {
         assert.equal(o?.value, 'Hieu');
     });
 
+    test('a shouting name is re-cased even though it is the same fact', () => {
+        // User decision 2026-08-04: "VO" === "Vo" as a fact, but it raises
+        // Workday's capitalization advisory on every single application.
+        const d = { profile: { lastName: 'Vo' } };
+        const m = buildManifest([field({ label: 'Family Name - Western Script', value: 'VO' })], d);
+        const o = m.override.find(x => x.label === 'Family Name - Western Script');
+        assert.equal(o?.value, 'Vo');
+    });
+
+    test('re-casing converges — a correct box fires nothing', () => {
+        const d = { profile: { lastName: 'Vo' } };
+        const m = buildManifest([field({ label: 'Family Name - Western Script', value: 'Vo' })], d);
+        assert.equal(m.override.length, 0);
+    });
+
     test('a page without a Vietnamese twin passes values through untouched', () => {
         // Every other tenant: one "District or Town", diacritics intact.
         const d = { profile: { addressDistrict: 'Cầu Giấy' } };
