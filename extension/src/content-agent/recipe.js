@@ -923,7 +923,7 @@ export function recipeForUrl(recipes, url) {
  * questions never reach here: the decline-first ANSWER_RULES resolve them
  * upstream of the gap list.
  */
-export async function inferFillDynamicField(gap, profile, cv) {
+export async function inferFillDynamicField(gap, profile, cv, resolvedValue = '') {
     const f = {
         label: String(gap.label || '').slice(0, 70) || '(unlabelled select)',
         selector: gap.selector,
@@ -933,8 +933,15 @@ export async function inferFillDynamicField(gap, profile, cv) {
         answerSource: 'AGENT_DEFAULT',
     };
     // Workday's button prompt reads its options only once opened.
+    // `resolvedValue` is the DETERMINISTIC path through the same machinery:
+    // an answer the rules already hold ("No" to sponsorship) used to go
+    // through the generic dropdown handler, which paints Workday prompts
+    // without committing — measured on Visa's questionnaire, where the four
+    // model-answered selects all committed via THIS route while the one
+    // rule-answered select failed until the fuse blew. The model only enters
+    // when the resolved value matches nothing on the list (infer fallback).
     if (!gap.componentType || gap.componentType === 'custom-dropdown') {
-        return fillCustomSelect(f, '', { profile, cv });
+        return fillCustomSelect(f, resolvedValue, { profile, cv });
     }
     // Native <select> and radio groups already told the observer their options —
     // ask the model to pick from EXACTLY those, then commit and verify.
@@ -1675,7 +1682,11 @@ async function fillWorkExperienceRows(cv, outcomes) {
 async function fillDateField(f, val) {
     const wrap = (f.selector && document.querySelector(f.selector))
         || (f.labelMatch ? findWrapperByLabel(f.labelMatch) : null);
-    if (!wrap) return { ok: false, reason: 'field-absent' };
+    // An invisible wrapper is a field that is NOT on this step — a leftover
+    // hidden node made this report "no inputs in wrapper" as a FAILURE on
+    // every Application Questions pass, burning fail-streak budget on a date
+    // that simply was not there.
+    if (!wrap || wrap.offsetParent === null) return { ok: false, reason: 'field-absent' };
     return setDateOnWrap(wrap, val);
 }
 

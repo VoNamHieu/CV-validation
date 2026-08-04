@@ -32,7 +32,7 @@ import { tenantRefFor } from '../ats/tenant.js';
 // you can confirm (in the PAGE / tab console, NOT the service-worker console) that
 // the freshly-built dist is actually loaded. If you don't see this line on the
 // apply tab, the new build isn't injected (reload the extension + refresh the tab).
-const COPO_BUILD = 'prod-final-2026-08-04b';
+const COPO_BUILD = 'prod-final-2026-08-04c';
 try { console.log(`%c[Copo] content-agent build ${COPO_BUILD} loaded → ${location.host}`, 'color:#c43b2e;font-weight:700'); } catch { /* noop */ }
 
 /**
@@ -730,6 +730,14 @@ async function runAgentLoop(profile) {
                         manifest.override.length
                             ? `Sửa ${manifest.override.length} trường lệch + điền ${manifest.fill.length}…`
                             : `Điền ${manifest.fill.length} trường từ hồ sơ…`);
+                    // Workday prompts commit only through the recipe's widget
+                    // machinery. A RESOLVED answer routed at a custom-dropdown
+                    // used to take the generic handler — measured on Visa's
+                    // questionnaire: the rules held "No" for sponsorship, the
+                    // generic path painted it without committing, the fuse
+                    // blew, and the run ended NEED_HUMAN on a question whose
+                    // answer was in hand all along. Those go the strong way.
+                    const strongSelects = [];
                     const instructions = todo.map(a => ({
                         selector: a.selector,
                         action: a.componentType === 'radio-group' ? 'radio'
@@ -737,7 +745,11 @@ async function runAgentLoop(profile) {
                             : a.componentType === 'native-select' ? 'select'
                             : (a.componentType && a.componentType !== 'native') ? 'custom-select' : 'fill',
                         value: a.value, componentType: a.componentType, fieldLabel: a.label,
-                    }));
+                    })).filter(inst => {
+                        if (inst.action !== 'custom-select') return true;
+                        strongSelects.push(inst);
+                        return false;
+                    });
                     for (const a of manifest.fill) {
                         reviewAnswers.set(`answer::${a.label}`, { field: a.label, value: a.value, source: a.source });
                     }
@@ -747,7 +759,18 @@ async function runAgentLoop(profile) {
                     for (const g of manifest.gaps) {
                         fieldGaps.set(g.key || g.label, { key: g.key, label: g.label, userOnly: g.userOnly });
                     }
-                    const n = await executeFillInstructions(instructions, cvData, policyCtx('recipe'));
+                    let n = await executeFillInstructions(instructions, cvData, policyCtx('recipe'));
+                    for (const inst of strongSelects) {
+                        const r = await inferFillDynamicField(
+                            { label: inst.fieldLabel, selector: inst.selector, componentType: 'custom-dropdown' },
+                            profile, cvStructured, inst.value);
+                        trace('needs.select', {
+                            label: String(inst.fieldLabel || '').slice(0, 50),
+                            value: String(inst.value).slice(0, 30),
+                            ok: !!r.ok, matched: r.matched || null, why: r.reason || null,
+                        });
+                        if (r.ok) n++;
+                    }
                     if (n > 0) {
                         actionsTaken++;
                         history.push({ iteration: i, plan: { action: 'NEEDS', reason: 'deterministic field resolution' }, result: { filled: n } });
