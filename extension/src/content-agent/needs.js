@@ -248,10 +248,21 @@ export function buildManifest(fields = [], data = {}) {
     // canonical data always reads entry [0] — so we cannot tell which row is
     // which, and overriding would move the wrong school onto the wrong line.
     // Correcting is only safe where the mapping is unambiguous.
+    // The concept count is SCRIPT-SCOPED: on a dual-script page the same key
+    // appears twice by design ("Family Name - Vietnamese" beside "Family Name
+    // - Western Script"), and counting them together made every name field
+    // "ambiguous" — which is precisely what let Workday's parser keep a
+    // swapped family/given pair uncorrected. Two School boxes in the SAME
+    // script still count as two (two education rows — genuinely ambiguous).
+    const VI_HALF_RE = /vietnamese|tiếng việt/;
+    const scriptHalf = (f) => (VI_HALF_RE.test(String(f.label || f.ariaLabel || '').toLowerCase()) ? 'vi' : 'west');
     const keyCount = new Map();
     for (const f of fields) {
         const k = classifyField(f)?.key;
-        if (k) keyCount.set(k, (keyCount.get(k) || 0) + 1);
+        if (k) {
+            const kk = `${k}::${scriptHalf(f)}`;
+            keyCount.set(kk, (keyCount.get(kk) || 0) + 1);
+        }
     }
 
     // Script-aware duplicates (measured on P&G): the "- Western Script" half
@@ -290,6 +301,33 @@ export function buildManifest(fields = [], data = {}) {
             ? f.value === 'true'
             : String(f.value ?? '').trim() !== '';
 
+        // ── The local-script half of a NAME, when the CV has no local-script
+        // name to give (user rule 2026-08-04). The profile's "Vo"/"Hieu" is
+        // the ENGLISH spelling; writing it into "… - Vietnamese" claims a
+        // Vietnamese name that does not exist in the data. So: an OPTIONAL
+        // local box stays empty — and parser junk in it (measured on Visa:
+        // family and given SWAPPED, nickname included) is CLEARED, because a
+        // scrambled name is worse than an empty optional box. A REQUIRED one
+        // falls through and takes the English name instead. When the CV name
+        // DOES carry diacritics, none of this fires and both halves fill
+        // normally (Vietnamese keeps its marks, Western folds them).
+        const NAME_KEYS = ['firstName', 'lastName', 'middleName', 'fullName'];
+        if (pattern && NAME_KEYS.includes(pattern.key) && canonical
+            && VI_HALF_RE.test(String(label).toLowerCase())
+            && canonical.value === foldDiacritics(canonical.value)
+            && !f.required) {
+            const cur = String(f.value ?? '').replace(/\s+/g, ' ').trim();
+            const wantN = canonical.value.replace(/\s+/g, ' ').trim().toLowerCase();
+            if (cur && cur.toLowerCase() !== wantN) {
+                override.push({
+                    selector: f.selector, label, key: pattern.key,
+                    expected: '', actual: f.value, verdict: VERDICT.MISMATCH,
+                    value: '', source: SOURCE.AGENT_DEFAULT, componentType: f.componentType,
+                });
+            }
+            continue;
+        }
+
         if (filled) {
             // Already answered — by the ATS parse, or by an earlier pass.
             const verdict = compareValues(canonical?.value, f.value);
@@ -310,7 +348,8 @@ export function buildManifest(fields = [], data = {}) {
             //     dropdown means deselecting first, and a half-applied change to a
             //     select is worse than a flagged one.
             const textish = !f.componentType || f.componentType === 'native';
-            if (verdict === VERDICT.MISMATCH && pattern && keyCount.get(pattern.key) === 1 && textish) {
+            if (verdict === VERDICT.MISMATCH && pattern
+                && keyCount.get(`${pattern.key}::${scriptHalf(f)}`) === 1 && textish) {
                 override.push({ ...entry, value: shapeScript(label, canonical.value), source: canonical.source, componentType: f.componentType });
             }
             continue;

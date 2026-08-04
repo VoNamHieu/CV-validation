@@ -114,6 +114,56 @@ describe('resolving from the candidate\'s own data', () => {
         assert.equal(by('Address Line 1'), 'So 1 Pho Duy Tan');
     });
 
+    test('no Vietnamese name in the CV → the optional local box stays empty', () => {
+        // User rule 2026-08-04: "Vo" is the ENGLISH spelling — writing it into
+        // "… - Vietnamese" claims a Vietnamese name the data does not hold.
+        const d = { profile: { firstName: 'Hieu', lastName: 'Vo' } };
+        const m = buildManifest([
+            field({ label: 'Family Name - Vietnamese', required: false }),
+            field({ label: 'Family Name - Western Script', selector: '#w' }),
+        ], d);
+        assert.ok(!m.fill.some(x => x.label === 'Family Name - Vietnamese'), 'optional local box must not be filled');
+        assert.equal(m.fill.find(x => x.label === 'Family Name - Western Script')?.value, 'Vo');
+    });
+
+    test('…but a REQUIRED local box takes the English name instead', () => {
+        const d = { profile: { lastName: 'Vo' } };
+        const m = buildManifest([field({ label: 'Family Name - Vietnamese', required: true })], d);
+        assert.equal(m.fill[0]?.value, 'Vo');
+    });
+
+    test('parser junk in an optional local box is CLEARED, not respected', () => {
+        // Measured on Visa: the résumé parse put "Hieu (Charles)" in the
+        // Vietnamese FAMILY box and "VO" in the GIVEN box — swapped, nickname
+        // included. A scrambled name is worse than an empty optional box.
+        const d = { profile: { firstName: 'Hieu', lastName: 'Vo' } };
+        const m = buildManifest([
+            field({ label: 'Family Name - Vietnamese', required: false, value: 'Hieu (Charles)' }),
+            field({ label: 'Given Name(s) - Vietnamese', selector: '#g', required: false, value: 'VO' }),
+        ], d);
+        const clears = m.override.filter(o => o.value === '');
+        assert.equal(clears.length, 2, 'both scrambled local boxes are cleared');
+    });
+
+    test('a real Vietnamese name fills the local box WITH its marks', () => {
+        const d = { profile: { lastName: 'Võ' } };
+        const m = buildManifest([field({ label: 'Family Name - Vietnamese', required: false })], d);
+        assert.equal(m.fill[0]?.value, 'Võ');
+    });
+
+    test('the dual-script twin no longer blocks correcting a swapped name', () => {
+        // keyCount is script-scoped: lastName appearing in BOTH halves is by
+        // design, not ambiguity — the Western GIVEN box holding the family
+        // name gets corrected from the profile.
+        const d = { profile: { firstName: 'Hieu', lastName: 'Vo' } };
+        const m = buildManifest([
+            field({ label: 'Given Name(s) - Vietnamese', required: false }),
+            field({ label: 'Given Name(s) - Western Script', selector: '#gw', value: 'Vo' }),
+        ], d);
+        const o = m.override.find(x => x.label === 'Given Name(s) - Western Script');
+        assert.equal(o?.value, 'Hieu');
+    });
+
     test('a page without a Vietnamese twin passes values through untouched', () => {
         // Every other tenant: one "District or Town", diacritics intact.
         const d = { profile: { addressDistrict: 'Cầu Giấy' } };
