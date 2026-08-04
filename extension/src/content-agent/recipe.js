@@ -3332,6 +3332,21 @@ async function fillCustomSelect(f, value, ctx = {}) {
     // The one-action shape needs none of the prompt machinery below.
     if (trigger.tagName === 'SELECT') return fillNativeSelect(trigger, f, value);
     const wrap = trigger.closest('[data-automation-id^="formField-"]');
+    // A selector was measured on ONE tenant, and ids drift MEANINGS across
+    // tenants: on Mondelez formField-countryRegion IS Country/Region, on
+    // Unilever the same id carries "Province or City" — and filling it with
+    // "vietnam" fought the province list with every escalation this executor
+    // owns, which is exactly what preceded the tenant's "Something went
+    // wrong" card. When the field declares a label and the wrapper shows
+    // one, they must share a word; otherwise this is not our field HERE.
+    if (wrap && f.label && !f.labelMatch) {
+        const wl = (wrap.querySelector('legend, label')?.textContent || '').toLowerCase();
+        const toks = String(f.label).toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(t => t.length >= 3);
+        if (wl && toks.length && !toks.some(t => wl.includes(t))) {
+            trace('field.labelMismatch', { field: f.label, wrapperLabel: wl.slice(0, 40), selector: (f.selector || '').slice(0, 60) });
+            return { ok: false, reason: 'trigger-absent' };
+        }
+    }
     // Idempotency. Three shapes, all seen in the wild:
     //   · a button-select stores the chosen option's id in the button's `value`
     //   · a multi-select lists its picks as chips in selectedItemList
@@ -3672,19 +3687,32 @@ async function fillCustomSelect(f, value, ctx = {}) {
             }
         }
     } else {
-        for (const wanted of ladder) {
-            // The list can pass the open-guard and then COLLAPSE before the
-            // ladder reads it — measured on Race/Ethnicity: "option-not-found
-            // (0 shown)" from a slow async catalogue. Reopen rather than match
-            // against nothing.
-            if (!visibleOptions().length) {
-                safeActivate(trigger, { source: 'recipe', activation: 'widget-open' }, f.selector);
-                const by = Date.now() + 2500;
-                while (!visibleOptions().length && Date.now() < by) await sleep(150);
-            }
-            opt = await findInList(visibleOptions, (list) => uniqueMatch(list, wanted), `${f.label}:${wanted}`, wanted);
-            if (opt) { matched = wanted; break; }
+        // A button prompt has no typing to narrow it: what is visible IS the
+        // whole catalogue. So the ladder is evaluated in ONE walk — the old
+        // per-rung loop re-walked and re-opened the list up to 8×12 rounds,
+        // and that storm of synthetic scrolls and toggles is what preceded
+        // Workday's "Something went wrong" card on Unilever's inline
+        // listboxes every time, while a single human-pattern open-and-pick
+        // never reproduced it. (The filter branch got the same economy from
+        // list.static; this is its no-filter twin.)
+        //
+        // The list can also pass the open-guard and then COLLAPSE before the
+        // ladder reads it — measured on Race/Ethnicity — so one reopen, then
+        // one walk.
+        if (!visibleOptions().length) {
+            safeActivate(trigger, { source: 'recipe', activation: 'widget-open' }, f.selector);
+            const by = Date.now() + 2500;
+            while (!visibleOptions().length && Date.now() < by) await sleep(150);
         }
+        const anyRung = (list) => {
+            for (const rung of ladder) {
+                const o = uniqueMatch(list, rung);
+                if (o) { matched = rung; return o; }
+            }
+            return null;
+        };
+        opt = anyRung(visibleOptions())
+            || await findInList(visibleOptions, anyRung, `${f.label}:ladder`, ladder[0] || '');
         shown = visibleOptions();   // report what the LAST look saw, not the first
     }
     if (opt) opt = await revealOption(opt, visibleOptions, (list) => uniqueMatch(list, matched), f.label);
