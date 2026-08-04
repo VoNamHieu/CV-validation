@@ -3302,7 +3302,35 @@ async function fillCustomSelect(f, value, ctx = {}) {
     // Checking chips regardless of `f.multi` is what stops the search-box shape
     // from being re-answered on every pass.
     const chips = wrap?.querySelector('[data-automation-id="selectedItemList"]');
-    if (chips && chips.children.length) return { ok: false, reason: 'already-selected' };
+    if (chips && chips.children.length) {
+        // A chip that CONTRADICTS the candidate's own data is not "already
+        // answered" — it is Workday's résumé parser guessing. Measured twice:
+        // the CV says "University of Illinois at Urbana-Champaign", the parse
+        // committed the CHICAGO campus, and the already-selected guard then
+        // protected the wrong school all the way to Review. Eviction is gated
+        // three ways: the value must come from the user's own data (cvPath /
+        // profileKey — never an agent-default ladder), it must be long enough
+        // to judge (≥2 significant tokens), and the chip must be DECISIVELY
+        // alien (missing tokens of the wanted value). Anything short of all
+        // three keeps the old behaviour.
+        const foldT = (s) => String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+            .replace(/đ/g, 'd').replace(/[‘’`]/g, "'");
+        const want = foldT(String(value || '').trim());
+        const toks = want.split(/[^\p{L}\p{N}]+/u).filter(t => t.length >= 3);
+        const chipT = foldT((chips.textContent || '').replace(/\s+/g, ' ').trim());
+        const alien = (f.cvPath || f.profileKey) && toks.length >= 2 && !toks.every(k => chipT.includes(k));
+        if (!alien) return { ok: false, reason: 'already-selected' };
+        trace('prompt.evict', { field: f.label, chip: chipT.slice(0, 50), want: want.slice(0, 40) });
+        const item = chips.querySelector('[data-automation-id="selectedItem"]') || chips.firstElementChild;
+        if (!item || !safeActivate(item, { source: 'recipe', activation: 'widget-option' }, f.selector)) {
+            return { ok: false, reason: 'wrong chip committed — eviction refused' };
+        }
+        await sleep(600);
+        if (wrap.querySelector('[data-automation-id="selectedItemList"]')?.children.length) {
+            return { ok: false, reason: 'wrong chip committed and would not deselect' };
+        }
+        // Chip gone — fall through and fill the right value.
+    }
     // The value attribute counts only for BUTTON triggers. On a searchable
     // prompt's INPUT, chips are the ONLY commit signal: free text someone typed
     // (the gap-filler treated "How Did You Hear" as a plain text field) reflects
