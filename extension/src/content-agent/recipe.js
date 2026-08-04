@@ -3581,12 +3581,26 @@ async function fillCustomSelect(f, value, ctx = {}) {
     let shown = visibleOptions();
     let prevSig = null;   // last round's option-list fingerprint — see list.static below
     if (filter) {
+        // MATCH-FIRST, TYPE-LAST — the Unilever stack trace made it law. Our
+        // per-character typing fires the widget's onChange, whose handler
+        // fetches a values endpoint (/source, one request PER KEYSTROKE) and
+        // reads its definition atom — and mid-initialisation that atom is
+        // undefined, which is the exact TypeError storm behind "Something
+        // went wrong". A human never types into these prompts: they read the
+        // open list and click, and reproducing that by hand never crashed.
+        // So the whole ladder is tried against what is ALREADY visible before
+        // a single key is sent; typing remains only for the server-backed
+        // searchbox whose list stays empty until fed.
+        for (const rung of ladder) {
+            const o = uniqueMatch(visibleOptions(), rung);
+            if (o) { opt = o; matched = rung; break; }
+        }
         // A SEARCH box shows nothing until something is typed, so each rung has to
         // be typed before it can be matched. Previously the ladder was only
         // compared against whatever happened to be on screen — which for a search
         // prompt is nothing at all, so a required field like "How Did You Hear
         // About Us?" could never be answered on tenants that render it this way.
-        for (const wanted of ladder) {
+        if (!opt) for (const wanted of ladder) {
             // CLEAR between rungs. Without this each rung types on top of the
             // last, and on a prompt that really does filter the box ends up
             // holding "nativenativefluent…" — measured on the language
