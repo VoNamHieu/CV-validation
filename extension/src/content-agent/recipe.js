@@ -3430,6 +3430,20 @@ async function fillCustomSelect(f, value, ctx = {}) {
                 let contains = tier(o => txt(o).includes(wanted));
                 if (!contains.length) contains = tier(o => fold(txt(o)).includes(wf));
                 if (contains.length && distinct(contains) === 1) cands = contains;
+                // Wording drift on proper nouns: the CV says "University of
+                // Illinois at Urbana-Champaign", a catalogue writes it without
+                // the "at" — and no substring bridges that. EVERY significant
+                // token must appear in the row, which is also what REJECTS the
+                // wrong campus: "…at Chicago" has no urbana and no champaign
+                // (measured on Visa, where exactly that school reached the
+                // Review page). Single distinct hit only, like every tier.
+                if (!cands.length) {
+                    const toks = wf.split(/[^\p{L}\p{N}]+/u).filter(t => t.length >= 3);
+                    if (toks.length >= 2) {
+                        const hit = tier(o => { const t = fold(txt(o)); return toks.every(k => t.includes(k)); });
+                        if (hit.length && distinct(hit) === 1) cands = hit;
+                    }
+                }
             }
         }
         return cands.sort((a, b) => {
@@ -3476,6 +3490,26 @@ async function fillCustomSelect(f, value, ctx = {}) {
                     }));
                 }
                 await sleep(900);
+                // Enter on a live-filtering prompt can COMMIT the highlighted
+                // row instead of running the search — measured on Visa:
+                // searching for Urbana-Champaign Enter-committed "University
+                // of Illinois at Chicago" (alphabetically first) and the wrong
+                // school rode all the way to Review. A chip that appears right
+                // after OUR Enter is only accepted when every significant
+                // token of the wanted value is in it; an alien chip is
+                // deselected on the spot and the ladder continues.
+                const chip = wrap?.querySelector('[data-automation-id="selectedItemList"] [data-automation-id="selectedItem"]');
+                if (chip) {
+                    const chipT = fold((chip.textContent || '').trim().toLowerCase());
+                    const wf2 = fold(wanted.replace(/^=/, ''));
+                    const toks = wf2.split(/[^\p{L}\p{N}]+/u).filter(t => t.length >= 3);
+                    const isOurs = chipT === wf2 || chipT.includes(wf2)
+                        || (toks.length >= 2 && toks.every(k => chipT.includes(k)));
+                    trace('prompt.enterCommit', { field: f.label, chip: chipT.slice(0, 50), wanted: wf2.slice(0, 40), accepted: isOurs });
+                    if (isOurs) return { ok: true, matched: wanted.replace(/^=/, '') };
+                    safeActivate(chip, { source: 'recipe', activation: 'widget-option' }, f.selector);
+                    await sleep(500);
+                }
             }
             shown = visibleOptions();
             // A filter that narrowed to NOTHING has hidden the answer rather than

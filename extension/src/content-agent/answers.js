@@ -136,6 +136,17 @@ export const ANSWER_RULES = [
         candidates: ['yes', 'i agree', 'i acknowledge', 'đồng ý', 'có'],
     },
     {
+        // APPLICATION-scoped communication/processing consents — user decision
+        // 2026-08-04, measured on Visa: "may reach out via SMS regarding my
+        // application" and "may use automated tools such as AI to support
+        // review of your application" both Opt-In, for flow smoothness. This
+        // is NOT marketing consent: the match requires the application scope
+        // in the wording, and a newsletter/promo opt-in stays untouched.
+        kind: 'application_consent',
+        match: /(sms|text message|automated tools|use of ai|\bai\b).{0,80}(application|review of your|ứng tuyển|hồ sơ)/i,
+        candidates: ['opt-in', 'opt in', 'yes', 'i agree', 'đồng ý'],
+    },
+    {
         // Knowable only to the candidate. Unlike a degree — which the institution,
         // subject and years together determine — no evidence on the page or in the
         // CV implies a grade, and a plausible-looking number is a fabricated

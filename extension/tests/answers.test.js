@@ -155,6 +155,28 @@ describe('source question', () => {
     });
 });
 
+describe('application-scoped consents opt in', () => {
+    test('SMS-about-my-application and AI-review both take Opt-In', () => {
+        // User decision 2026-08-04 (measured on Visa): flow smoothness.
+        const sms = resolveAnswer(
+            q('I agree that Visa may reach out to me via SMS regarding my application'),
+            ['Opt-In', 'Opt-Out'], {});
+        assert.equal(sms.value, 'Opt-In');
+        const ai = resolveAnswer(
+            q('Visa may use automated tools such as AI to support review of your application'),
+            ['Opt-In', 'Opt-Out'], {});
+        assert.equal(ai.value, 'Opt-In');
+    });
+
+    test('a plain marketing opt-in is NOT covered', () => {
+        // The rule requires the application scope in the wording — a
+        // newsletter consent stays unanswered rather than opted into.
+        assert.equal(
+            resolveAnswer(q('Subscribe to our newsletter for job tips'), ['Opt-In', 'Opt-Out'], {}),
+            null);
+    });
+});
+
 describe('company-relationship questions default to No', () => {
     // User decision 2026-08-02: ties to the HIRING company (a covenant, stock,
     // sponsorship needs) default to "No" when nothing stored says otherwise —
