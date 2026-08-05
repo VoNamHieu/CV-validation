@@ -350,18 +350,25 @@ export async function executeSingleInstruction(inst, cvData, ctx = {}) {
             setNativeValue(el, value);
             await sleep(100);
 
-            // Verify the value stuck
-            if (el.value === value) return true;
-
-            // Fallback: simulate typing
-            console.log('[Copo Agent] Value did not stick, trying keyboard simulation');
-            await simulateTyping(el, value);
-            // Verify again — claiming success here without checking inflates the
-            // `filled` count the planner sees and hides persistently-broken fields.
-            // Input masks may reformat (phone → "(+84) ..."), so accept any
-            // non-empty value as "stuck".
-            if (el.value === value) return true;
-            return String(el.value || '').trim() !== '';
+            let ok = el.value === value;
+            if (!ok) {
+                // Fallback: simulate typing
+                console.log('[Copo Agent] Value did not stick, trying keyboard simulation');
+                await simulateTyping(el, value);
+                // Input masks may reformat (phone → "(+84) ..."), so accept any
+                // non-empty value as "stuck".
+                ok = el.value === value || String(el.value || '').trim() !== '';
+            }
+            // A REAL exit, not just events. Workday's local-script name inputs
+            // wire onInput + onBlur and NO onChange: the value is painted on
+            // input but the widget's atom is written in onBlur — measured on
+            // PwC (#name--legalName--lastNameLocal): without focusout the
+            // verify above read true, the next section re-hydration wiped the
+            // value, the fuse burned two refills, and the run ended NEED_HUMAN
+            // on a field this executor had "filled" twice. The recipe's text
+            // branch has always exited this way; now both layers do.
+            try { el.dispatchEvent(new FocusEvent('focusout', { bubbles: true })); el.blur?.(); } catch { /* noop */ }
+            return ok;
         }
 
         console.warn(`[Copo Agent] Unknown action: ${action}`);
