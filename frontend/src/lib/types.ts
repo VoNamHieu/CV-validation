@@ -103,6 +103,9 @@ export interface JobPreferences {
     work_authorized?: string;
     /** "Will you require visa sponsorship?" — same reasoning. */
     requires_sponsorship?: string;
+    /** "What is your earliest available start date?" (PwC asks it REQUIRED as a
+     *  full date). YYYY-MM-DD. Empty → the agent derives today + notice period. */
+    available_start_date?: string;
 }
 
 // Languages a cover letter can be generated in. Add an entry here and it shows

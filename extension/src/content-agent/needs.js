@@ -40,6 +40,25 @@ function deriveMiddleName(data) {
     return mid.length ? mid.join(' ') : null;
 }
 
+/**
+ * The earliest date the candidate can start, when only the NOTICE PERIOD is
+ * stored. "30 days" is a commitment the candidate already made; today + 30
+ * is its honest date form (measured on PwC: "What is your earliest available
+ * start date?" is a REQUIRED full date and no profile field held one). An
+ * explicit availableStartDate always wins via profileKey; this fires only
+ * beneath it. Returns ISO (YYYY-MM-DD) — setDateOnWrap parses that shape.
+ */
+function deriveStartDate(data) {
+    const p = data?.profile || {};
+    const m = String(p.noticePeriod || '').match(/(\d+)\s*(day|ngày|week|tuần|month|tháng)/i);
+    if (!m) return null;
+    const n = parseInt(m[1], 10);
+    const unit = m[2].toLowerCase();
+    const days = /week|tuần/.test(unit) ? n * 7 : /month|tháng/.test(unit) ? n * 30 : n;
+    const d = new Date(Date.now() + days * 86400000);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 /** Where an answer came from, most trustworthy first. */
 export const SOURCE = {
     PROFILE: 'PROFILE',           // the candidate's own data
@@ -120,6 +139,9 @@ export const FIELD_PATTERNS = [
     // than leaving the caller to discover them by failing.
     { key: 'salaryExpectation', match: /salary|compensation|mức lương/i, profileKey: 'desiredSalary', userOnly: true },
     { key: 'noticePeriod', match: /notice period|thời gian báo trước/i, profileKey: 'noticePeriod', userOnly: true },
+    // "What is your earliest available start date?" (PwC, REQUIRED, a full
+    // date). The stored date wins; else it derives from the notice period.
+    { key: 'availableStartDate', match: /earliest available|available start date|available to start|when (can|could) you start|ngày có thể bắt đầu/i, profileKey: 'availableStartDate', derive: deriveStartDate },
     { key: 'workAuthorization', match: /legally authoriz|right to work|work permit/i, profileKey: 'workAuthorized', userOnly: true },
     { key: 'sponsorship', match: /sponsor|visa support|bảo lãnh/i, profileKey: 'requiresSponsorship', userOnly: true },
     // Unilever asks it REQUIRED ("Do you hold a valid driver's license?*") —
@@ -142,7 +164,7 @@ export const PROFILE_KEYS = new Set([
     'nationality', 'maritalStatus', 'addressProvince', 'addressDistrict', 'addressStreet', 'addressStreet2',
     'postalCode', 'currentTitle', 'currentLevel', 'yearsOfExperience', 'highestDegree',
     'currentSalary', 'currentIndustry', 'currentFields', 'desiredLocations', 'desiredSalary',
-    'noticePeriod', 'workAuthorized', 'requiresSponsorship', 'driversLicense', 'coverLetter', 'applyMessage', 'skills',
+    'noticePeriod', 'availableStartDate', 'workAuthorized', 'requiresSponsorship', 'driversLicense', 'coverLetter', 'applyMessage', 'skills',
 ]);
 
 /** The concept a field is asking about, or null when nothing recognises it. */

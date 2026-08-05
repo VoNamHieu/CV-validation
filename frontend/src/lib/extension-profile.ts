@@ -26,6 +26,8 @@ export interface ExtensionProfile {
     addressStreet2: string;
     // Yes/No — Unilever renders the driver's-license question REQUIRED.
     driversLicense: string;
+    // YYYY-MM-DD; empty → the agent derives it from the notice period.
+    availableStartDate: string;
     currentTitle: string;
     currentLevel: string;
     yearsOfExperience: number;
@@ -216,6 +218,7 @@ export function cvToExtensionProfile(
         addressStreet: contact.address_street ?? "",
         addressStreet2: "",
         driversLicense: personal.drivers_license ?? "",
+        availableStartDate: preferences.available_start_date ?? "",
         postalCode: contact.address_postal_code ?? "",
         currentTitle,
         currentLevel: employment.current_level ?? "",

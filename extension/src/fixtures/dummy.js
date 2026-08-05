@@ -49,6 +49,7 @@ export const DUMMY_PROFILE = {
     yearsOfExperience: 4,
     highestDegree: 'Bachelor',
     noticePeriod: '30 days',
+    availableStartDate: '',   // empty on purpose: derives from the notice period
     workAuthorized: 'Yes',
     requiresSponsorship: 'No',
     currentSalary: '',

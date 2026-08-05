@@ -23,7 +23,7 @@ import { auditRequiredBlockers, observePageState, scrollAndCollect } from './obs
 import { findApplyButton, isApplicationFormPage, summarizeState, waitForJobPageSignal } from './detect.js';
 import { detectLoginWall, handleLoginWall } from './login.js';
 import { trace, traceClear, traceDump, traceOnce } from './trace.js';
-import { applyRecipeFields, atFinalStep, clickRecipeGateway, FIELD_FAIL_BUDGET, inferFillDynamicField, loadRecipes, recipeBlockingFields, recipeForUrl, recipeOwnedWrappers, recipeReleased, resetFieldStatus } from './recipe.js';
+import { applyRecipeFields, atFinalStep, clickRecipeGateway, FIELD_FAIL_BUDGET, fillResolvedDate, inferFillDynamicField, loadRecipes, recipeBlockingFields, recipeForUrl, recipeOwnedWrappers, recipeReleased, resetFieldStatus } from './recipe.js';
 import { checkClick, logDenial } from './policy.js';
 import { buildManifest, summarizeGaps, VERDICT } from './needs.js';
 import { tenantRefFor } from '../ats/tenant.js';
@@ -32,7 +32,7 @@ import { tenantRefFor } from '../ats/tenant.js';
 // you can confirm (in the PAGE / tab console, NOT the service-worker console) that
 // the freshly-built dist is actually loaded. If you don't see this line on the
 // apply tab, the new build isn't injected (reload the extension + refresh the tab).
-const COPO_BUILD = 'prod-final-2026-08-05b';
+const COPO_BUILD = 'prod-final-2026-08-05c';
 try { console.log(`%c[Copo] content-agent build ${COPO_BUILD} loaded → ${location.host}`, 'color:#c43b2e;font-weight:700'); } catch { /* noop */ }
 
 /**
@@ -744,6 +744,13 @@ async function runAgentLoop(profile) {
                     // blew, and the run ended NEED_HUMAN on a question whose
                     // answer was in hand all along. Those go the strong way.
                     const strongSelects = [];
+                    const strongDates = [];
+                    // A Workday date renders as 2–3 spinbutton SECTIONS the
+                    // observer reads as native inputs — the generic text fill
+                    // paints them without committing. Route by SHAPE.
+                    const isDateWrap = (sel) => !!document.querySelector(sel)
+                        ?.closest?.('[data-automation-id^="formField-"]')
+                        ?.querySelector('[data-automation-id^="dateSection"]');
                     const instructions = todo.map(a => ({
                         selector: a.selector,
                         action: a.componentType === 'radio-group' ? 'radio'
@@ -752,9 +759,9 @@ async function runAgentLoop(profile) {
                             : (a.componentType && a.componentType !== 'native') ? 'custom-select' : 'fill',
                         value: a.value, componentType: a.componentType, fieldLabel: a.label,
                     })).filter(inst => {
-                        if (inst.action !== 'custom-select') return true;
-                        strongSelects.push(inst);
-                        return false;
+                        if (inst.action === 'custom-select') { strongSelects.push(inst); return false; }
+                        if (inst.action === 'fill' && isDateWrap(inst.selector)) { strongDates.push(inst); return false; }
+                        return true;
                     });
                     for (const a of manifest.fill) {
                         reviewAnswers.set(`answer::${a.label}`, { field: a.label, value: a.value, source: a.source });
@@ -766,6 +773,15 @@ async function runAgentLoop(profile) {
                         fieldGaps.set(g.key || g.label, { key: g.key, label: g.label, userOnly: g.userOnly });
                     }
                     let n = await executeFillInstructions(instructions, cvData, policyCtx('recipe'));
+                    for (const inst of strongDates) {
+                        const r = await fillResolvedDate(inst.selector, inst.value);
+                        trace('needs.date', {
+                            label: String(inst.fieldLabel || '').slice(0, 50),
+                            value: String(inst.value).slice(0, 16),
+                            ok: !!r.ok, why: r.reason || null,
+                        });
+                        if (r.ok) n++;
+                    }
                     for (const inst of strongSelects) {
                         const r = await inferFillDynamicField(
                             { label: inst.fieldLabel, selector: inst.selector, componentType: 'custom-dropdown' },

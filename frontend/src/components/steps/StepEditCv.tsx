@@ -2700,6 +2700,10 @@ export function PersonalInfoSection({
                         onChange={(v) => patchPreferences({ desired_locations: v })} />
                     <ProfileInput label="Mức lương mong muốn" value={preferences.desired_salary}
                         onChange={(v) => patchPreferences({ desired_salary: v })} />
+                    <ProfileInput label="Thời gian báo trước" value={preferences.notice_period ?? ''}
+                        onChange={(v) => patchPreferences({ notice_period: v })} placeholder="30 ngày" />
+                    <ProfileInput label="Ngày có thể bắt đầu" value={preferences.available_start_date ?? ''}
+                        onChange={(v) => patchPreferences({ available_start_date: v })} placeholder="YYYY-MM-DD (trống = tự tính từ thời gian báo trước)" />
                 </div>
             )}
         </div>

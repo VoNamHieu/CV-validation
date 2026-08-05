@@ -1795,14 +1795,19 @@ async function fillDateField(f, val) {
 async function setDateOnWrap(wrap, val) {
     const text = String(val).trim();
     if (/^(hiện tại|present|current|now)$/i.test(text)) return { ok: false, reason: 'no value' };
-    const year = (text.match(/\b(19|20)\d{2}\b/) || [])[0];
+    // ISO first (YYYY-MM-DD) — the one shape that names a DAY unambiguously.
+    // The derived start date arrives this way; MM/YYYY history dates keep the
+    // loose parsing below.
+    const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    const year = iso ? iso[1] : (text.match(/\b(19|20)\d{2}\b/) || [])[0];
     if (!year) return { ok: false, reason: `no year in "${text}"` };
     const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
-    let month = (text.match(/\b(0?[1-9]|1[0-2])\b(?!\d)/) || [])[0];
-    if (!month) {
+    let month = iso ? iso[2] : (text.match(/\b(0?[1-9]|1[0-2])\b(?!\d)/) || [])[0];
+    if (!month && !iso) {
         const named = MONTHS.findIndex(m => new RegExp(`\\b${m}`, 'i').test(text));
         if (named >= 0) month = String(named + 1);
     }
+    const day = iso ? iso[3] : null;
 
     const inputs = [...wrap.querySelectorAll('input')].filter(i => i.offsetParent !== null);
     if (!inputs.length) return { ok: false, reason: 'no inputs in wrapper' };
@@ -1811,7 +1816,12 @@ async function setDateOnWrap(wrap, val) {
         `${i.getAttribute('data-automation-id') || ''} ${i.getAttribute('aria-label') || ''} ${i.name || ''}`));
     const single = inputs.length === 1 ? inputs[0] : null;
     const monthEl = single ? null : (pick(/month/i) || inputs[0]);
-    const yearEl = single || pick(/year/i) || inputs[1];
+    const yearEl = single || pick(/year/i) || inputs[inputs.length - 1];
+    // A FULL date renders a third spinbutton (measured on PwC's "earliest
+    // available start date"). A day the value does not name defaults to the
+    // month's first — the honest floor for an "earliest" date.
+    const dayEl = single ? null : pick(/day/i);
+    const dayVal = dayEl ? (day || '01') : null;
     if (!yearEl) return { ok: false, reason: 'no year input in wrapper' };
     if (single && !month) return { ok: false, reason: 'combined MM/YYYY input but no month in CV value' };
 
@@ -1865,6 +1875,7 @@ async function setDateOnWrap(wrap, val) {
         await typeInto(single, `${month.padStart(2, '0')}${year}`);
     } else {
         if (month && monthEl && monthEl !== yearEl) await typeInto(monthEl, month.padStart(2, '0'));
+        if (dayVal && dayEl && dayEl !== monthEl && dayEl !== yearEl) await typeInto(dayEl, dayVal.padStart(2, '0'));
         await typeInto(yearEl, year);
     }
     try {
@@ -1881,7 +1892,8 @@ async function setDateOnWrap(wrap, val) {
         const now = el?.getAttribute?.('aria-valuenow');
         return now == null || parseInt(now, 10) === parseInt(want, 10);
     };
-    if (!committed(yearEl) || (!single && month && monthEl && monthEl !== yearEl && !committed(monthEl))) {
+    if (!committed(yearEl) || (!single && month && monthEl && monthEl !== yearEl && !committed(monthEl))
+        || (dayVal && dayEl && !committed(dayEl))) {
         return { ok: false, reason: 'value painted but never committed' };
     }
     // (Split sections only — a combined MM/YYYY input's aria text is the whole
@@ -2568,6 +2580,19 @@ async function fillExperienceEndDates(cv, outcomes) {
         else if (r.reason !== 'already-selected') outcomes.push([`Work To (row ${i + 1})`, 'FAIL', r.reason]);
     }
     return filled;
+}
+
+/**
+ * The needs layer's door into the date machinery: resolve the wrapper from
+ * any selector and commit through setDateOnWrap — a date the generic text
+ * executor would only paint (measured: spinbutton sections take digits from
+ * keydown/input, never from a whole-string setter).
+ */
+export async function fillResolvedDate(selector, value) {
+    const el = document.querySelector(selector);
+    const wrap = el?.closest?.('[data-automation-id^="formField-"]') || el;
+    if (!wrap || wrap.offsetParent === null) return { ok: false, reason: 'field-absent' };
+    return setDateOnWrap(wrap, value);
 }
 
 /** The formField WRAPPER whose legend/label contains `want` — findFieldByLabel

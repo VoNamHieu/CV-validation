@@ -87,7 +87,7 @@ export const ANSWER_RULES = [
     },
     {
         kind: 'conflict_of_interest',
-        match: /conflict of interest|relative|family member (who )?works|xung đột lợi ích/i,
+        match: /conflict of interest|relative|family member (who )?works|relationship (to|with) (a |an )?(pwc |current )?(employee|partner|staff)|người thân|xung đột lợi ích/i,
         candidates: ['no', 'không'],
     },
     {
