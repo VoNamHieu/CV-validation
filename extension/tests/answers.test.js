@@ -253,3 +253,79 @@ describe('grade is never inferred', () => {
         assert.equal(a.source, ANSWER_SOURCE.PROFILE);
     });
 });
+
+// ── Questions measured on PwC (2026-08-05) ───────────────────────────────────
+// Each of these was REQUIRED, had an obvious answer, and ended the run anyway:
+// no rule matched, so they went to the model, which was given no evidence and
+// (correctly) refused to state a fact about the candidate. The fix is a rule,
+// not a better prompt — these are policy, not inference.
+
+describe('travel willingness', () => {
+    test('answers Yes — applying states willingness to do the job as described', () => {
+        const a = resolveAnswer(
+            q('Are you willing and able to travel per the job description requirements?'),
+            ['Yes', 'No'], {});
+        assert.equal(a.value, 'Yes');
+        assert.equal(a.source, ANSWER_SOURCE.AGENT_DEFAULT);
+    });
+});
+
+describe('relation to an employee of the hiring company', () => {
+    for (const label of [
+        'Are you related to a PwC partner, principal, or employee?',
+        'Do you have a relative working at the company?',
+        'Bạn có họ hàng đang làm việc tại công ty không?',
+    ]) {
+        test(`answers No: ${label}`, () => {
+            assert.equal(resolveAnswer(q(label), ['Yes', 'No'], {}).value, 'No');
+        });
+    }
+});
+
+describe('communication consent', () => {
+    test('consents when the consent is tied to this recruitment', () => {
+        const a = resolveAnswer(
+            q('I consent to receive communication, including electronic communication, from PwC in relation to my application.'),
+            ['Yes', 'No'], {});
+        assert.equal(a.value, 'Yes');
+    });
+
+    test('leaves marketing consent alone — nobody is signed up for promo mail to advance a form', () => {
+        assert.equal(
+            resolveAnswer(q('I consent to receive marketing communication and newsletters'), ['Yes', 'No'], {}),
+            null);
+    });
+});
+
+describe('professional certifications', () => {
+    const label = 'Do you hold the professional certifications and/or clearance as outlined in the job description?*';
+    const options = ['Yes', 'No', 'Not Applicable'];
+
+    test('a CV with no certificates answers No — an absent certificate IS the answer', () => {
+        const a = resolveAnswer(q(label), options, {}, { certifications: [] });
+        assert.equal(a.value, 'No');
+        assert.equal(a.source, ANSWER_SOURCE.AGENT_DEFAULT);
+    });
+
+    test('yields to the model when the CV lists certificates — relevance is a judgement', () => {
+        const cv = { certifications: [{ name: 'PMP', issuer: 'PMI', year: '2023' }] };
+        assert.equal(resolveAnswer(q(label), options, {}, cv), null);
+    });
+
+    test('a missing CV is not treated as "no certificates"', () => {
+        // Being told nothing is not evidence of absence — answering "No" there
+        // would state something about the candidate we never read.
+        assert.equal(resolveAnswer(q(label), options, {}, null), null);
+    });
+});
+
+describe('the certification RULE vs the certification SECTION', () => {
+    test('a certificate-name dropdown is left alone', () => {
+        // Workday's My Experience has a Certifications section whose dropdown
+        // lists certificate NAMES. A bare /certification/ match would answer it,
+        // and "No" is a substring of "Notary Public" — a fabricated credential.
+        const options = ['Notary Public', 'PMP', 'CFA Level I'];
+        assert.equal(resolveAnswer(q('Certification'), options, {}, { certifications: [] }), null);
+        assert.equal(resolveAnswer(q('Certifications'), options, {}, { certifications: [] }), null);
+    });
+});

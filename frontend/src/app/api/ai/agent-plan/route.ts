@@ -80,12 +80,14 @@ interface AgentPlanRequest {
     profileData: Record<string, unknown>;
     history: HistoryEntry[];
     hasCV: boolean;
-    /** Education + languages from the structured CV. Present so the planner can
-     *  INFER answers the CV never states outright — chiefly which entry in a
-     *  degree list a qualification corresponds to. */
+    /** Education, languages and certificates from the structured CV. Present so
+     *  the planner can INFER answers the CV never states outright — chiefly which
+     *  entry in a degree list a qualification corresponds to, and whether the
+     *  candidate holds the certification a job names. */
     credentials?: {
         education?: { degree?: string; institution?: string; year?: string }[];
         languages?: { language?: string; level?: string }[];
+        certifications?: { name?: string; issuer?: string; year?: string }[];
     } | null;
 }
 
@@ -182,7 +184,7 @@ ${JSON.stringify(profileData, null, 2)}
 
 ## HAS CV FILE: ${hasCV}
 
-## EDUCATION & LANGUAGES (from the candidate's CV — use these to INFER, see rule 24):
+## EDUCATION, LANGUAGES & CERTIFICATIONS (from the candidate's CV — use these to INFER, see rule 24):
 ${JSON.stringify(credentials ?? {}, null, 2)}
 
 ## ACTION HISTORY (last ${history?.length || 0} actions):
@@ -238,7 +240,13 @@ Decide the single best next action. Return a JSON object.
       pick the decline option — "I don't wish to answer" / "Prefer not to say" /
       "Decline to self-identify". NEVER pick an actual demographic value.
     - "Are you a current employee?" / "Have you worked here before?" /
-      "Do you have a conflict of interest / a relative working here?" → No
+      "Do you have a conflict of interest / a relative working here?" /
+      "Are you related to a partner, principal or employee?" → No
+    - "Are you willing and able to travel per the job description?" → Yes.
+      Applying to a job states willingness to do it as described.
+    - "I consent to receive communication about my application / this
+      recruitment" → Yes. Marketing or newsletter consent is NOT this — leave
+      those alone.
     - Mandatory acknowledgements ("I have read and understand…") → agree/yes.
     - "How did you hear about us?" → Company Website (or the closest of:
       Company Careers Website, Employer Website, Careers Website, Website,
@@ -261,6 +269,10 @@ Decide the single best next action. Return a JSON object.
       bachelor's; "Thạc sĩ" is a master's.
     - Language and proficiency: derive from LANGUAGES above, or from the language
       the CV and the education are in.
+    - "Do you hold the professional certification / licence / clearance this job
+      requires?": read CERTIFICATIONS above. One that plainly covers what the job
+      names → Yes. Nothing relevant listed → No (or the form's "Not applicable").
+      This is reading the CV, not guessing: an absent certificate is an answer.
     If the evidence does not single out one option — several equally plausible,
     or the subject is missing — answer nothing and say so in "reason". A degree
     picked by coin flip is a false credential on a real application.

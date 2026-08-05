@@ -2824,6 +2824,9 @@ async function inferOptionViaLLM(f, options, profile, cv) {
             {
                 education: (cv?.education || []).slice(0, 4),
                 languages: (cv?.languages || []).slice(0, 4),
+                // See index.js: a certification question is answerable only if
+                // the certificates are in the payload.
+                certifications: (cv?.certifications || []).slice(0, 8),
             },
         );
         const raw = (plan?.instructions || [])

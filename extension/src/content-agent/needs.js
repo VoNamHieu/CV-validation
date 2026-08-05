@@ -50,13 +50,41 @@ function deriveMiddleName(data) {
  */
 function deriveStartDate(data) {
     const p = data?.profile || {};
-    const m = String(p.noticePeriod || '').match(/(\d+)\s*(day|ngày|week|tuần|month|tháng)/i);
+    const days = noticeDays(p.noticePeriod);
+    if (days == null) return null;
+    const d = new Date(Date.now() + days * 86400000);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** "30 days" / "2 tuần" / "1 month" → a day count, or null. */
+function noticeDays(text) {
+    const m = String(text || '').match(/(\d+)\s*(day|ngày|week|tuần|month|tháng)/i);
     if (!m) return null;
     const n = parseInt(m[1], 10);
     const unit = m[2].toLowerCase();
-    const days = /week|tuần/.test(unit) ? n * 7 : /month|tháng/.test(unit) ? n * 30 : n;
-    const d = new Date(Date.now() + days * 86400000);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    return /week|tuần/.test(unit) ? n * 7 : /month|tháng/.test(unit) ? n * 30 : n;
+}
+
+/**
+ * The other direction (user rule 2026-08-05): when the candidate stored the DATE
+ * they can start but not a notice period, "How much notice do you need to give?"
+ * is that date minus today. Both facts are the same commitment written two ways,
+ * and a form asking for the one we didn't store used to stall the run.
+ * Days below a week are reported as days; otherwise whole weeks read naturally.
+ */
+function deriveNoticePeriod(data) {
+    const p = data?.profile || {};
+    const iso = String(p.availableStartDate || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
+    const start = new Date(`${iso}T00:00:00`);
+    if (Number.isNaN(start.getTime())) return null;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const days = Math.round((start.getTime() - today.getTime()) / 86400000);
+    if (days <= 0) return 'Immediately';
+    if (days < 7) return `${days} days`;
+    const weeks = Math.round(days / 7);
+    return weeks % 4 === 0 ? `${weeks / 4} months` : `${weeks} weeks`;
 }
 
 /** Where an answer came from, most trustworthy first. */
@@ -127,7 +155,20 @@ export const FIELD_PATTERNS = [
     // field was being read as a fluency level. Excluded explicitly rather than
     // relying on the order of two unrelated entries staying correct.
     { key: 'languageLevel', match: /proficiency|fluency|trình độ ngôn ngữ|overall(?!\s*result)/i, path: 'languages[0].level' },
-    { key: 'currentTitle', match: /job title|current (job )?title|position|chức danh/i, profileKey: 'currentTitle' },
+    // `position` names the title field on most ATSs — but it is also the word
+    // every screening QUESTION uses for the job being applied to ("…authorised
+    // to work in the country in which the position is based?", "…sponsor your
+    // visa for the position you are applying for?"). Measured on PwC: three
+    // required Yes/No questions were routed the profile's job title, which no
+    // Yes/No list offers, and only the model rescued them — three calls, ~20s
+    // each, for answers the policy rules below already hold. So: question-shaped
+    // labels are not title fields.
+    {
+        key: 'currentTitle',
+        match: /job title|current (job )?title|position|chức danh|chức vụ/i,
+        deny: /\?|^(are|do|does|did|have|has|will|would|can|could|is|were) you\b|\bi (agree|consent|acknowledge)\b|bạn có/i,
+        profileKey: 'currentTitle',
+    },
     { key: 'currentCompany', match: /employer|company name|công ty/i, path: 'experience[0].company' },
     // Two different asks, and conflating them is what put a CV summary in a
     // hiring-team message box: a "cover letter" field takes the long document,
@@ -138,7 +179,10 @@ export const FIELD_PATTERNS = [
     // Knowable ONLY to the candidate. Listed so the manifest can name them rather
     // than leaving the caller to discover them by failing.
     { key: 'salaryExpectation', match: /salary|compensation|mức lương/i, profileKey: 'desiredSalary', userOnly: true },
-    { key: 'noticePeriod', match: /notice period|thời gian báo trước/i, profileKey: 'noticePeriod', userOnly: true },
+    // Stored notice wins; else it is the stored start DATE minus today (the same
+    // commitment, written the other way round). userOnly still holds for the case
+    // where neither exists — nobody can guess it from a CV.
+    { key: 'noticePeriod', match: /notice period|how much notice|thời gian báo trước/i, profileKey: 'noticePeriod', derive: deriveNoticePeriod, userOnly: true },
     // "What is your earliest available start date?" (PwC, REQUIRED, a full
     // date). The stored date wins; else it derives from the notice period.
     { key: 'availableStartDate', match: /earliest available|available start date|available to start|when (can|could) you start|ngày có thể bắt đầu/i, profileKey: 'availableStartDate', derive: deriveStartDate },
@@ -423,7 +467,7 @@ export function buildManifest(fields = [], data = {}) {
 
         // Nothing stored answers it. A rule might (Yes/No screening, disclosures).
         const options = (f.options || []).map(o => o.text || o.value).filter(Boolean);
-        const ruled = resolveAnswer({ label, questionText: label }, options, data.profile || {});
+        const ruled = resolveAnswer({ label, questionText: label }, options, data.profile || {}, data.cv || null);
         if (ruled) {
             fill.push({
                 selector: f.selector, label, key: pattern?.key ?? ruled.kind,

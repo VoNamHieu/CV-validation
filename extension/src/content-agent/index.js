@@ -176,6 +176,13 @@ async function runAgentLoop(profile) {
     const credentials = cvStructured ? {
         education: (cvStructured.education || []).slice(0, 4),
         languages: (cvStructured.languages || []).slice(0, 4),
+        // Certificates too (2026-08-05): "Do you hold the professional
+        // certifications and/or clearance outlined in the job description?" is a
+        // REQUIRED question on PwC, and it stalled the run for the plainest
+        // reason — the model was never shown the candidate's certificates, so it
+        // correctly refused to answer. It is the same kind of inference as the
+        // degree list: evidence the CV holds, not a fact invented here.
+        certifications: (cvStructured.certifications || []).slice(0, 8),
     } : null;
 
     // Load the CV FILE for THIS apply session (see loadSessionCv).

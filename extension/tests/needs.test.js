@@ -346,3 +346,58 @@ describe('gaps follow the form, not a schema', () => {
         assert.equal(m.gaps[0].key, null, 'unclassified, but not invisible');
     });
 });
+
+// ── Measured on PwC (2026-08-05) ─────────────────────────────────────────────
+
+describe('a screening question is not a job-title field', () => {
+    // "position" names the title box on most ATSs — and it is also the word every
+    // screening question uses for the job applied to. Three REQUIRED Yes/No
+    // questions were classified as `currentTitle` and routed the profile's job
+    // title, which no Yes/No list offers; only the model rescued them, at ~20s a
+    // call, for answers the policy rules already hold.
+    for (const label of [
+        'Are you legally authorised to work in the country / territory in which the position is based?',
+        'Do you now, or will you in the future, need PwC to sponsor your visa or work permit for the position you are applying for?',
+        'I agree to have my personal data processed by PwC for the purpose of recruitment for this position.',
+    ]) {
+        test(`not a title field: ${label.slice(0, 48)}…`, () => {
+            const p = classifyField({ label });
+            assert.notEqual(p?.key, 'currentTitle');
+        });
+    }
+
+    test('an actual title field still classifies', () => {
+        assert.equal(classifyField({ label: 'Position' }).key, 'currentTitle');
+        assert.equal(classifyField({ label: 'Current Job Title' }).key, 'currentTitle');
+    });
+});
+
+describe('notice period and start date are the same commitment', () => {
+    const inDays = (n) => {
+        const d = new Date(Date.now() + n * 86400000);
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+
+    test('a stored notice period answers the start date', () => {
+        const v = canonicalValue(classifyField({ label: 'Earliest available start date' }),
+            { profile: { noticePeriod: '30 days' } });
+        assert.equal(v.value, inDays(30));
+        assert.equal(v.source, SOURCE.PROFILE);
+    });
+
+    test('a stored start date answers "how much notice"', () => {
+        const v = canonicalValue(classifyField({ label: 'How much notice are you required to give?' }),
+            { profile: { availableStartDate: inDays(28) } });
+        assert.equal(v.value, '1 months');
+    });
+
+    test('a date already past reads as immediate availability', () => {
+        const v = canonicalValue(classifyField({ label: 'Notice period' }),
+            { profile: { availableStartDate: inDays(-3) } });
+        assert.equal(v.value, 'Immediately');
+    });
+
+    test('neither stored stays a gap — nobody can guess it', () => {
+        assert.equal(canonicalValue(classifyField({ label: 'Notice period' }), { profile: {} }), null);
+    });
+});
