@@ -87,6 +87,20 @@ function deriveNoticePeriod(data) {
     return weeks % 4 === 0 ? `${weeks / 4} months` : `${weeks} weeks`;
 }
 
+/**
+ * Country of birth, inferred (user decision 2026-08-05): this product's
+ * candidates are Vietnamese — a Vietnamese nationality or a VN province in
+ * the profile makes "Vietnam" the honest inference, and the AGENT_DEFAULT
+ * source puts it in the review list rather than passing it off as stored
+ * fact. Nothing Vietnamese anywhere → null, never a guess.
+ */
+function deriveCountryOfBirth(data) {
+    const p = data?.profile || {};
+    if (/viet/i.test(String(p.nationality || ''))) return 'Vietnam';
+    if (/hà nội|ha noi|hồ chí minh|ho chi minh|đà nẵng|da nang/i.test(String(p.addressProvince || ''))) return 'Vietnam';
+    return null;
+}
+
 /** Where an answer came from, most trustworthy first. */
 export const SOURCE = {
     PROFILE: 'PROFILE',           // the candidate's own data
@@ -145,6 +159,15 @@ export const FIELD_PATTERNS = [
     { key: 'addressDistrict', match: /district|town|city\b|quận|huyện|thành phố/i, profileKey: 'addressDistrict', fallbackKeys: ['addressProvince'] },
     { key: 'addressProvince', match: /province|region|state|tỉnh/i, profileKey: 'addressProvince' },
     { key: 'postalCode', match: /postal|zip|mã bưu/i, profileKey: 'postalCode' },
+    // ── The personal-facts block PwC renders on Voluntary Disclosures ──
+    // (measured 2026-08-05: four REQUIRED fields, every one either already in
+    // the profile or honestly derivable — and none of them had a pattern, so
+    // all four went to the model, which is FORBIDDEN from stating personal
+    // facts and rightly returned nothing. The data was here; the wire wasn't.)
+    { key: 'dateOfBirth', match: /date of birth|\bdob\b|ngày sinh/i, profileKey: 'dateOfBirth' },
+    { key: 'nationality', match: /nationality|quốc tịch/i, profileKey: 'nationality', normalize: 'country' },
+    { key: 'countryOfBirth', match: /(country|territory)[^?]{0,24}of birth|quốc gia nơi sinh/i, derive: deriveCountryOfBirth, deriveSource: 'AGENT_DEFAULT' },
+    { key: 'maritalStatus', match: /marital status|tình trạng hôn nhân/i, profileKey: 'maritalStatus', userOnly: true },
     { key: 'gpa', match: /\bgpa\b|grade (average|point)|overall result|điểm trung bình/i, path: 'education[0].gpa', userOnly: true },
     { key: 'school', match: /school|university|college|institution|trường/i, path: 'education[0].institution' },
     { key: 'fieldOfStudy', match: /field of study|major|subject|chuyên ngành|ngành học/i, path: 'education[0].degree' },
@@ -276,6 +299,10 @@ export function canonicalValue(pattern, data) {
             if (/^(yes|y|có|co|true|1)$/i.test(s.trim())) return 'Yes';
             if (/^(no|không|khong|false|0)$/i.test(s.trim())) return 'No';
         }
+        // A nationality is stored as a DEMONYM ("Vietnamese") while every
+        // country dropdown lists the COUNTRY ("Vietnam") — no matcher tier
+        // bridges that reversal, so the value itself converts.
+        if (pattern.normalize === 'country' && /^viet/i.test(s.trim())) return 'Vietnam';
         return s;
     };
     const fromProfile = pattern.profileKey ? data?.profile?.[pattern.profileKey] : undefined;
@@ -290,7 +317,9 @@ export function canonicalValue(pattern, data) {
     // still their fact, just not stored under its own key.
     if (pattern.derive) {
         const v = pattern.derive(data);
-        if (v != null && String(v).trim() !== '') return { value: shape(v), source: SOURCE.PROFILE };
+        if (v != null && String(v).trim() !== '') {
+            return { value: shape(v), source: pattern.deriveSource || SOURCE.PROFILE };
+        }
     }
     // Coarser profile keys as the last resort before empty (street → district
     // → city). A vaguer truth beats a stranded required field; AGENT_DEFAULT
@@ -496,6 +525,11 @@ export function buildManifest(fields = [], data = {}) {
         // Nothing stored answers it. A rule might (Yes/No screening, disclosures).
         const options = (f.options || []).map(o => o.text || o.value).filter(Boolean);
         const ruled = resolveAnswer({ label, questionText: label }, options, data.profile || {}, data.cv || null);
+        // An OPTIONAL demographic field stays untouched: the decline ladders
+        // exist to unblock REQUIRED ones, and PwC's optional Disability (whose
+        // catalogue lists only actual disability types, no decline row) burned
+        // two inference rounds per pass to fill a field nobody demanded.
+        if (ruled && ruled.kind === 'demographic' && !f.required) continue;
         if (ruled) {
             fill.push({
                 selector: f.selector, label, key: pattern?.key ?? ruled.kind,

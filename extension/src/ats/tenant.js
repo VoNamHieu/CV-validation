@@ -27,6 +27,13 @@
 const VENDOR_RULES = [
     { test: /\.myworkdayjobs\.com$/i, vendor: 'workday', shape: 'subdomain' },
     { test: /\.myworkdaysite\.com$/i, vendor: 'workday', shape: 'path' },
+    // SAP SuccessFactors career portal (EY measured 2026-08-05). The pod host
+    // (career5.successfactors.eu) is shared by every company on that DC — the
+    // account namespace is the `company` query param (?company=EYHRISPRD1),
+    // present on every portal page from the sign-in wall onwards. The RMK
+    // marketing site in front (careers.ey.com) needs no account and stays
+    // out of these rules on purpose.
+    { test: /(^|\.)career\d*\.successfactors\.(eu|com)$/i, vendor: 'successfactors', shape: 'query-company' },
 ];
 
 const LOCALE_RE = /^[a-z]{2}([-_][A-Za-z]{2})?$/;
@@ -60,6 +67,21 @@ export function tenantRefFor(url) {
     const host = parsed.host.toLowerCase();
     const rule = _ruleFor(host);
     if (!rule) return null;
+
+    if (rule.shape === 'query-company') {
+        // careerN.successfactors.eu/careers?company=<TENANT> — the param IS the
+        // account namespace. A portal URL without it (mid-flow POST targets) is
+        // not a scope we can name; decline rather than invent a shared one.
+        const company = (parsed.searchParams.get('company') || '').trim().toLowerCase();
+        if (!company) return null;
+        return {
+            atsVendor: rule.vendor,
+            tenantKey: `${host}/${company}`,
+            canonicalHost: host,
+            careerSiteKey: null,
+            tenantSlug: company,
+        };
+    }
 
     // Meaningful path segments, in order, with plumbing and locales removed and
     // everything from /job onwards dropped.

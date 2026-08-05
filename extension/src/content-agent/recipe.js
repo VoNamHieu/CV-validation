@@ -506,6 +506,135 @@ export const FALLBACK_RECIPES = [
         submitSelector: '[data-test="footer-submit"]',
         thirdPartySkip: ['indeed', 'linkedin'],
     },
+    // SAP SuccessFactors RCM portal (legacy JUIC UI). UNVERIFIED against a live
+    // fill — built from a full live measurement of EY (tenant EYHRISPRD1 on
+    // career5.successfactors.eu, 2026-08-05).
+    //
+    // Shape of the flow, in order:
+    //  1. The RMK marketing site (careers.ey.com) fronts the portal. Its "Apply
+    //     now" opens an options dialog whose "Apply Now" / "Start applying with
+    //     LinkedIn" anchors are class-identical twins → the scoped text gateway.
+    //     A raw GET of the /talentcommunity/apply/ href redirects to the job
+    //     search page, so the click path is the ONLY way in.
+    //  2. The portal puts its AUTH WALL FIRST (no form before sign-in, unlike
+    //     Workday). Sign-in is #username/#password; create-account is fbclc_*
+    //     fields + a data-privacy DIALOG — both described in `login`/`signup`
+    //     and driven by login.js under the per-tenant attempt budget.
+    //  3. Post-auth lands straight on the job's application (the req id rides
+    //     the careerform hidden fields). ONE page of accordion sections, no
+    //     wizard → `singlePage`; the agent fills and hands off, the user
+    //     presses Apply. Uploading the CV makes SF PARSE it server-side and
+    //     RE-RENDER the whole page with pre-filled Work experience / Education
+    //     rows — and every JUIC element id changes on that re-render (the "NN:"
+    //     prefixes are session-random), which is why nothing here names one:
+    //     text inputs go by their stable `name`, combos by label.
+    //
+    // Known gaps, deliberately left to the LLM planner + probe layer:
+    //  - Parse-created rows need fixing (EY: Google certificates land as
+    //    Education rows missing required Degree/Major; Type of business /
+    //    Country combos come back "No Selection").
+    //  - Row date pickers are <ui5-date-picker-*> web components
+    //    (format dd/MM/yyyy; set .value + a change event).
+    //  - Language skills / Geographic mobility rows ([id$="_addRowBtn"] adds one).
+    {
+        ats: 'successfactors',
+        label: 'SuccessFactors',
+        version: 1,
+        verified: false,
+        singlePage: true,
+        hostPattern: 'career\\d*\\.successfactors\\.(eu|com)|careers\\.ey\\.com',
+        login: {
+            emailSelector: '#username',
+            passwordSelector: '#password',
+            createAccountSubmitSelector: '#fbclc_createAccountButton',
+        },
+        // Create-account extras (login.js runs these on the signup form, after
+        // email + both password boxes). Country code / residence default to VN,
+        // same standing decision as the Workday recipe's Country default.
+        signup: {
+            fields: [
+                { selector: '#fbclc_emailConf', from: 'email' },
+                { selector: '#fbclc_fName', profileKey: 'firstName' },
+                { selector: '#fbclc_lName', profileKey: 'lastName' },
+                { selector: '#fbclc_ituCode', value: 'VN' },
+                { selector: '#fbclc_phoneNumber', profileKey: 'phone' },
+                { selector: '#fbclc_country', value: 'VN' },
+            ],
+            // #dataPrivacyId VALIDATES the whole form, then opens a JUIC dialog
+            // whose buttons carry session-random ids — the accept is text-matched.
+            // Success = the hidden dpcs input holds the statement id.
+            consentDialog: {
+                open: '#dataPrivacyId',
+                acceptText: 'acknowledge\\s*/?\\s*consent',
+                committedInput: '#fbclc_dpcsId',
+            },
+        },
+        // Order matters: once the options dialog is open its scoped gateway wins;
+        // before that, its pool is empty and the opener link gets the click.
+        gateways: [
+            {
+                label: 'Apply Now (options dialog)',
+                scope: 'a.applyOption',
+                text: ['apply now'],
+                textDeny: ['linkedin', 'start applying'],
+            },
+            { label: 'Apply now (job page)', detect: 'a.dialogApplyBtn' },
+        ],
+        steps: [
+            {
+                name: 'Application',
+                // Only the portalcareer application page has these — the RMK job
+                // page and the sign-in wall match nothing here.
+                detect: 'input[name="contactEmail"], [id$="_addRowBtn"]',
+                fields: [
+                    // Profile Information — text inputs by their STABLE name=
+                    // (the account-creation values pre-fill most of them; every
+                    // handler skips a box that already shows its value).
+                    { label: 'Legal first name', selector: 'input[name="firstName"]', profileKey: 'firstName', type: 'text', required: true, normalize: 'name' },
+                    { label: 'Legal last name', selector: 'input[name="lastName"]', profileKey: 'lastName', type: 'text', required: true, normalize: 'name' },
+                    { label: 'Address line 1', selector: 'input[name="address"]', profileKey: 'addressStreet', cvPath: 'contact.address_street', fallbackProfileKey: 'addressProvince', type: 'text' },
+                    { label: 'City', selector: 'input[name="city"]', profileKey: 'addressProvince', type: 'text' },
+                    { label: 'Phone Number', selector: 'input[name="cellPhone"]', profileKey: 'phone', type: 'text', required: true },
+                    { label: 'Email', selector: 'input[name="contactEmail"]', profileKey: 'email', type: 'text', required: true },
+                    // JUIC combos: an _input + _selectButton pair whose ids are
+                    // session-random → resolved by label. Clicking either fires
+                    // the same juic _click and opens a [role=listbox] of
+                    // li[role=option] rows, which fillCustomSelect already speaks.
+                    { label: 'Country/region', labelMatch: 'country/region', value: 'VIET NAM', type: 'custom-select', required: true, answerSource: 'AGENT_DEFAULT' },
+                    { label: 'EY alumni', labelMatch: 'ey alumni', value: 'No', type: 'custom-select', answerSource: 'AGENT_DEFAULT' },
+                    // Job-Specific screening (all REQUIRED on EY). Free-fill
+                    // policy: the model reads the real options and picks
+                    // (select-only, review-flagged) — except gender, which takes
+                    // the explicit decline option, same standing decision as
+                    // Workday's "Not Specified".
+                    { label: 'Cultural background', labelMatch: 'cultural background', type: 'custom-select', required: true, infer: true },
+                    { label: 'First generation higher education', labelMatch: 'first generation', type: 'custom-select', required: true, infer: true },
+                    { label: 'Gender', labelMatch: 'what is your gender', value: 'I do not wish to provide this information', type: 'custom-select', required: true, answerSource: 'AGENT_DEFAULT' },
+                    // The disability-adjustments textarea is optional free text —
+                    // deliberately absent: not volunteered on the user's behalf.
+                ],
+                // No `advance`: single page. The agent stops after filling.
+            },
+        ],
+        // Résumé: the tile menu creates input[name=fileData1] on first open
+        // (openVia clicks the tile), the upload fires on `change` (POST /upload,
+        // attachmentType=RESUME) and the page re-renders — after which only the
+        // tile's filename label proves the commit (committedSelector/-Text).
+        // fileData1 is the Resume slot; the cover-letter (fileData2) and
+        // additional-documents tiles are left alone.
+        fileUploadHosts: [
+            {
+                selector: 'input[type="file"][name="fileData1"]',
+                openVia: '.attachActions',
+                once: true,
+                committedSelector: '.attachmentLabel',
+                committedText: '\\.(pdf|docx?|rtf|txt|png|jpe?g)\\b',
+            },
+        ],
+        // "Apply" / "Save" sit at the page foot with no stable ids; the agent
+        // never presses Apply (singlePage hand-off) so neither is declared.
+        thirdPartySkip: ['linkedin'],
+    },
 ];
 
 /**
@@ -898,7 +1027,7 @@ export function clickRecipeGateway(recipe, hasCV, clickedCounts) {
         // A text-matched CTA (SmartRecruiters "I'm interested" is a styled <a>/<button>
         // with no stable id/class) — match its visible text, skipping third-party
         // shortcuts and a denylist ("Refer a friend" sits right next to it).
-        if (g.text) target = findClickableByText(g.text, g.textDeny);
+        if (g.text) target = findClickableByText(g.text, g.textDeny, g.scope);
         // Fallback / alternative: an exact CSS selector (Workday's autofill modal).
         if (!target && g.detect) {
             let el;
@@ -928,11 +1057,22 @@ function _normText(s) {
 
 /** First visible clickable whose short label contains one of `wants`, excluding
  *  third-party "Apply with …" shortcuts and any label containing a `denies` term
- *  ("refer a friend"). Used for text-only CTAs the CSS-selector gateway can't name. */
-function findClickableByText(wants, denies) {
+ *  ("refer a friend"). Used for text-only CTAs the CSS-selector gateway can't name.
+ *  `scopeSel` narrows the candidate pool to elements matching a selector — for
+ *  twins that share every class and differ only in text (SuccessFactors' apply-
+ *  options dialog renders "Apply Now" and "Start applying with LinkedIn" as
+ *  identical a.applyOption anchors, on a page whose OTHER apply buttons would
+ *  otherwise match "apply now" first in document order). */
+function findClickableByText(wants, denies, scopeSel) {
     const want = (Array.isArray(wants) ? wants : [wants]).map(_normText).filter(Boolean);
     const deny = (denies || []).map(_normText);
-    for (const el of document.querySelectorAll('button, a, [role="button"], input[type="submit"]')) {
+    let pool;
+    try {
+        pool = document.querySelectorAll(scopeSel || 'button, a, [role="button"], input[type="submit"]');
+    } catch {
+        pool = document.querySelectorAll('button, a, [role="button"], input[type="submit"]');
+    }
+    for (const el of pool) {
         if (el.offsetParent === null) continue;
         if (isThirdPartyApply(el)) continue;
         const t = _normText(el.textContent || el.value || '');
@@ -1264,12 +1404,38 @@ async function _applyRecipeFields(recipe, profile, cvData, cv) {
         for (const t of targets) {
             const key = t.host || t.selector;
             if (t.once && _fileUploadedHosts.has(key)) continue;
+            // Recipe-declared commit signal, checked FIRST: an ATS that re-renders
+            // the whole page after ingesting the file (SuccessFactors) destroys
+            // the input we uploaded through, so input state can't testify. The
+            // tile that then shows the FILENAME can — and checking it here also
+            // keeps a re-pass from re-opening the upload menu over a done deal.
+            if (t.committedSelector && t.committedText) {
+                try {
+                    const re = new RegExp(t.committedText, 'i');
+                    if ([...document.querySelectorAll(t.committedSelector)].some(e => re.test(e.textContent || ''))) {
+                        if (t.once) _fileUploadedHosts.add(key);
+                        traceOnce(`upload.committed:${key}`, 'upload', { target: key, committedVia: t.committedSelector });
+                        continue;
+                    }
+                } catch { /* bad pattern — fall through to the generic checks */ }
+            }
             let host = null, fileEl = null;
             if (t.host) {
                 host = document.querySelector(t.host);
                 fileEl = host ? deepQuery('input[type="file"]', host) : null;
             } else if (t.selector) {
                 fileEl = document.querySelector(t.selector) || deepQuery(t.selector);
+                // JUIC attachments (SuccessFactors) create their <input type=file>
+                // only after the tile's "Opens a dialogue" menu is opened — click
+                // the declared opener once, then look again.
+                if (!fileEl && t.openVia) {
+                    const opener = [...document.querySelectorAll(t.openVia)].find(e => e.offsetParent !== null);
+                    if (opener && safeActivate(opener, { source: 'recipe', activation: 'widget-option' }, t.openVia)) {
+                        await sleep(900);
+                        fileEl = document.querySelector(t.selector) || deepQuery(t.selector);
+                    }
+                    trace('upload.openVia', { target: key, openerFound: !!opener, inputAfter: !!fileEl });
+                }
             }
             // ONE commit definition, shared with the observer (readFileCommitState):
             // `input.files` alone is not the truth — Workday ingests the file and

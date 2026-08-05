@@ -318,7 +318,7 @@ describe('every profileKey a pattern reads actually exists', () => {
     });
 
     test('every pattern can be answered from somewhere', () => {
-        const orphans = FIELD_PATTERNS.filter(p => !p.profileKey && !p.path).map(p => p.key);
+        const orphans = FIELD_PATTERNS.filter(p => !p.profileKey && !p.path && !p.derive).map(p => p.key);
         assert.deepEqual(orphans, [], 'a pattern with no source can only ever be a gap');
     });
 });
@@ -399,6 +399,36 @@ describe('notice period and start date are the same commitment', () => {
 
     test('neither stored stays a gap — nobody can guess it', () => {
         assert.equal(canonicalValue(classifyField({ label: 'Notice period' }), { profile: {} }), null);
+    });
+});
+
+// ── The personal-facts block (PwC Voluntary Disclosures, 2026-08-05) ────────
+describe('personal facts the profile already holds are wired, not modelled', () => {
+    test('Primary Nationality resolves from the profile — as the COUNTRY name', () => {
+        // The profile stores the demonym ("Vietnamese"); every country dropdown
+        // lists the country ("Vietnam"). No matcher tier bridges that reversal.
+        const v = canonicalValue(classifyField({ label: 'Primary Nationality*' }),
+            { profile: { nationality: 'Vietnamese' } });
+        assert.deepEqual(v, { value: 'Vietnam', source: SOURCE.PROFILE });
+    });
+
+    test('Country of Birth is inferred for a Vietnamese candidate, and says so', () => {
+        const v = canonicalValue(classifyField({ label: 'Country / Territory of Birth*' }),
+            { profile: { nationality: 'Vietnamese' } });
+        assert.deepEqual(v, { value: 'Vietnam', source: SOURCE.AGENT_DEFAULT });
+    });
+
+    test('…and is NOT invented for a candidate with no Vietnamese signal', () => {
+        assert.equal(canonicalValue(classifyField({ label: 'Country / Territory of Birth*' }),
+            { profile: {} }), null);
+    });
+
+    test('Date of Birth and Marital Status read the profile keys that always existed', () => {
+        assert.equal(classifyField({ label: 'Date of Birth*' })?.key, 'dateOfBirth');
+        assert.equal(classifyField({ label: 'Marital Status*' })?.key, 'maritalStatus');
+        const v = canonicalValue(classifyField({ label: 'Date of Birth*' }),
+            { profile: { dateOfBirth: '1996-01-15' } });
+        assert.equal(v.value, '1996-01-15');
     });
 });
 

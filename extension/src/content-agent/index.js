@@ -32,7 +32,7 @@ import { tenantRefFor } from '../ats/tenant.js';
 // you can confirm (in the PAGE / tab console, NOT the service-worker console) that
 // the freshly-built dist is actually loaded. If you don't see this line on the
 // apply tab, the new build isn't injected (reload the extension + refresh the tab).
-const COPO_BUILD = 'prod-final-2026-08-05d';
+const COPO_BUILD = 'prod-final-2026-08-05e';
 try { console.log(`%c[Copo] content-agent build ${COPO_BUILD} loaded → ${location.host}`, 'color:#c43b2e;font-weight:700'); } catch { /* noop */ }
 
 /**
@@ -604,13 +604,18 @@ async function runAgentLoop(profile) {
                 showProgress(i + 1, null,
                     grant.operation === 'signup' ? 'Tạo tài khoản…' : 'Đăng nhập…');
 
-                let result = await handleLoginWall(grant.credentials, recipe?.login, grant.operation);
+                // signup extras + profile: SuccessFactors' create-account form asks
+                // for name/phone/country too, and its data-privacy consent is a
+                // dialog the recipe describes (recipe.signup) — Workday recipes
+                // carry no signup block and the opts are inert there.
+                const authOpts = { signup: recipe?.signup, profile };
+                let result = await handleLoginWall(grant.credentials, recipe?.login, grant.operation, authOpts);
                 trace('auth.attempt', { pass: 1, outcome: result?.outcome, pending: result?.pending, result: result === null ? 'null' : undefined });
                 // A form switch (sign-in ⇄ create account) isn't an attempt; run the
                 // real one on the form we asked for.
                 if (result?.pending) {
                     await sleep(1200);
-                    result = await handleLoginWall(grant.credentials, recipe?.login, grant.operation);
+                    result = await handleLoginWall(grant.credentials, recipe?.login, grant.operation, authOpts);
                     trace('auth.attempt', { pass: 2, outcome: result?.outcome, result: result === null ? 'null' : undefined });
                 }
 

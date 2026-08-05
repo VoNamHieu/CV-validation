@@ -118,6 +118,69 @@ function _hasUnhandledRequiredConsent() {
         .some(b => !b.checked);
 }
 
+/**
+ * Recipe-driven EXTRA signup fields + consent dialog, for ATSes whose create-
+ * account form asks for more than email/password (SuccessFactors, measured on
+ * EY 2026-08-05: retype email, name, phone country code, phone, country of
+ * residence — and a data-privacy statement that is a DIALOG, not a checkbox).
+ *
+ * The dialog dance is SF's `validateAndOpenDpcsDialog`: the opener VALIDATES the
+ * whole form first (so this runs after every field is filled), then a JUIC
+ * dialog fetches the country-specific statement; its buttons carry session-
+ * random ids (dlgButton_NN:) so the accept is matched by TEXT. Accepting writes
+ * the statement id into a hidden input — that input being non-empty is the only
+ * commit signal, and what `committedInput` checks.
+ *
+ * Declared per-recipe (recipe.signup), all-JSON so it can sync from the web app.
+ */
+async function _runSignupExtras(signup, creds, profile) {
+    let filled = 0;
+    for (const f of signup.fields || []) {
+        const el = _q(f.selector);
+        if (!_vis(el)) { trace('login.signupField', { sel: f.selector, state: 'absent' }); continue; }
+        const value = f.from === 'email' ? (creds.email || '')
+            : f.profileKey ? (profile?.[f.profileKey] || f.default || '')
+            : (f.value ?? f.default ?? '');
+        if (!String(value).trim()) { trace('login.signupField', { sel: f.selector, state: 'no value' }); continue; }
+        if (String(el.value || '').trim()) continue;   // idempotent on a re-pass
+        if (el.tagName === 'SELECT') {
+            el.value = String(value);
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            if (el.value !== String(value)) { trace('login.signupField', { sel: f.selector, state: 'option missing' }); continue; }
+        } else {
+            _typeInto(el, String(value));
+        }
+        filled++;
+    }
+    const dlg = signup.consentDialog;
+    if (!dlg) return { filled, consentOk: null };
+    const committed = () => String(_q(dlg.committedInput)?.value || '').trim() !== '';
+    if (committed()) return { filled, consentOk: true };
+    const opener = _q(dlg.open);
+    if (_vis(opener) && safeActivate(opener, { source: 'login', activation: 'page-action' })) {
+        const acceptRe = new RegExp(dlg.acceptText, 'i');
+        const by = Date.now() + 5000;
+        let btn = null;
+        while (!btn && Date.now() < by) {
+            await sleep(250);
+            btn = [...document.querySelectorAll('button, input[type="button"], [role="button"]')]
+                .find(b => _vis(b) && acceptRe.test((b.textContent || b.value || '')));
+        }
+        if (btn) {
+            // A data-privacy acknowledgement required to create the account —
+            // the same class of consent _tickConsent gives on checkboxes, and
+            // never a marketing opt-in (those are checkboxes, left alone above).
+            safeActivate(btn, { source: 'login', activation: 'widget-option' });
+            const by2 = Date.now() + 3000;
+            while (!committed() && Date.now() < by2) await sleep(250);
+        }
+        trace('login.signupConsentDialog', { openerFound: true, acceptFound: !!btn, committed: committed() });
+    } else {
+        trace('login.signupConsentDialog', { openerFound: _vis(opener), committed: false });
+    }
+    return { filled, consentOk: committed() };
+}
+
 // A form-switch toggle link ("Already have an account? Sign In" on a create form,
 // or vice-versa) matched by text, excluding the header's utility Sign-In button.
 function _findToggle(verbRe) {
@@ -262,9 +325,25 @@ export async function handleLoginWall(creds, login, operation = 'login', opts = 
                 sourceCode: 'unclassified_required_consent', consentAccepted,
             });
         }
+        // Recipe-declared extra fields + consent DIALOG (SuccessFactors). Runs
+        // after email/passwords/checkboxes: the dialog opener validates the
+        // whole form before it opens, so it must go last. A dialog we could not
+        // commit is a consent we did not give — stop and say so, instead of
+        // submitting a form whose required acknowledgement is blank.
+        if (opts.signup) {
+            const extras = await _runSignupExtras(opts.signup, creds, opts.profile || {});
+            trace('login.signupExtras', { filled: extras.filled, consentOk: extras.consentOk });
+            if (extras.consentOk === false) {
+                return authResult('signup', 'consent_required', 'dom', {
+                    sourceCode: 'consent_dialog_not_committed', consentAccepted,
+                });
+            }
+            if (extras.consentOk) consentAccepted = [...(consentAccepted || []), 'Data privacy statement (dialog)'];
+            await sleep(200);
+        }
     }
 
-    const createBtn = _q('[data-automation-id="createAccountSubmitButton"]');
+    const createBtn = _q(login?.createAccountSubmitSelector) || _q('[data-automation-id="createAccountSubmitButton"]');
     let btn;
     if (isCreate) {
         btn = _vis(createBtn) ? createBtn
