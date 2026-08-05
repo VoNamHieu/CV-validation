@@ -32,7 +32,7 @@ import { tenantRefFor } from '../ats/tenant.js';
 // you can confirm (in the PAGE / tab console, NOT the service-worker console) that
 // the freshly-built dist is actually loaded. If you don't see this line on the
 // apply tab, the new build isn't injected (reload the extension + refresh the tab).
-const COPO_BUILD = 'prod-final-2026-08-05c';
+const COPO_BUILD = 'prod-final-2026-08-05d';
 try { console.log(`%c[Copo] content-agent build ${COPO_BUILD} loaded → ${location.host}`, 'color:#c43b2e;font-weight:700'); } catch { /* noop */ }
 
 /**
@@ -1024,6 +1024,31 @@ async function runAgentLoop(profile) {
                         // Only a real open listbox, and never when the modal is the
                         // topmost layer — Escape would dismiss the step instead.
                         if (closeOpenDropdown()) await sleep(250);
+                        // ── PRE-ADVANCE SWEEP: rewrite the text values Workday
+                        // wiped between fill-time and NOW. Every select commit
+                        // re-hydrates its section, and a text value not yet
+                        // synced server-side comes back empty — measured on
+                        // PwC: "City or Ward" was filled at pass start, wiped
+                        // by the source commit 25 seconds later, refilled,
+                        // wiped again, and Save then validated an empty box
+                        // while the needs fuse was already burned. This is the
+                        // one moment nothing will churn the section again, so
+                        // one rewrite here is worth two anywhere else. Text
+                        // inputs only, values the manifest already resolved.
+                        try {
+                            const m2 = buildManifest((await observePageState()).formFields, { profile, cv: cvStructured });
+                            for (const a of m2.fill) {
+                                if (a.componentType && a.componentType !== 'native') continue;
+                                const el2 = document.querySelector(a.selector);
+                                if (!el2 || el2.offsetParent === null) continue;
+                                if (el2.closest('[data-automation-id^="formField-"]')?.querySelector('[data-automation-id^="dateSection"]')) continue;
+                                if (String(el2.value ?? '').trim() !== '') continue;
+                                setNativeValue(el2, String(a.value));
+                                try { el2.dispatchEvent(new FocusEvent('focusout', { bubbles: true })); el2.blur?.(); } catch { /* noop */ }
+                                trace('advance.sweep', { label: String(a.label).slice(0, 40), value: String(a.value).slice(0, 24) });
+                                await sleep(150);
+                            }
+                        } catch { /* the sweep must never block the advance */ }
                         console.log(`[Copo Apply] recipe advance → ${stepNow.advance}`);
                         // The surrounding condition already excludes the review
                         // step; the policy re-checks it anyway, because on Workday
