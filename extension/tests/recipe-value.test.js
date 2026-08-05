@@ -12,7 +12,10 @@ describe('legal-name fields declare name normalisation', () => {
     const wd = FALLBACK_RECIPES.find(r => r.ats === 'workday');
     const mine = wd.steps.find(s => s.name === 'My Information');
 
-    for (const label of ['First name', 'Last name']) {
+    // The local-script pair carries the SAME name on a dual-script tenant, so it
+    // takes the same casing rule — a name is not spelled differently because the
+    // box next to it is labelled "- Vietnamese".
+    for (const label of ['First name', 'Last name', 'First name (local)', 'Last name (local)']) {
         test(`${label} is normalised at fill time`, () => {
             // Without this the agent fills whatever the profile happens to hold,
             // and Workday raises "contains more than 2 capital letters" on every
@@ -25,7 +28,18 @@ describe('legal-name fields declare name normalisation', () => {
     test('no other field is reshaped', () => {
         // Postal code "100000" and the like must reach the form verbatim.
         const shaped = mine.fields.filter(f => f.normalize).map(f => f.label);
-        assert.deepEqual(shaped, ['First name', 'Last name']);
+        assert.deepEqual(shaped, ['First name', 'Last name', 'First name (local)', 'Last name (local)']);
+    });
+
+    test('the local-script pair is owned by the recipe, not left to label reading', () => {
+        // The run that ended NEED_HUMAN did so on "Family Name - Vietnamese*":
+        // the recipe had no selector for it, so it belonged to whichever layer
+        // could read its label — and on the pass that mattered, none could.
+        for (const label of ['First name (local)', 'Last name (local)']) {
+            const f = mine.fields.find(x => x.label === label);
+            assert.ok(/Local/.test(f.selector), `${label} must target the *Local input`);
+            assert.ok(!f.required, `${label} is absent on single-script tenants — it must not block them`);
+        }
     });
 });
 

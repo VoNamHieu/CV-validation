@@ -215,10 +215,33 @@ export const PROFILE_KEYS = new Set([
 export function classifyField(field) {
     const text = [field?.label, field?.ariaLabel, field?.placeholder, field?.name, field?.automationId]
         .filter(Boolean).join(' ');
-    if (!text.trim()) return null;
     // `deny` names what a pattern is NOT — "Phone Extension" contains "phone"
     // and got the whole mobile number typed into it.
-    return FIELD_PATTERNS.find(p => p.match.test(text) && !(p.deny && p.deny.test(text))) || null;
+    const match = (t) => (t.trim()
+        ? FIELD_PATTERNS.find(p => p.match.test(t) && !(p.deny && p.deny.test(t))) || null
+        : null);
+    return match(text) || match(selectorPhrase(field?.selector)) || null;
+}
+
+/**
+ * A field's SELECTOR read as words, so the same patterns can classify a field
+ * whose label we could not read.
+ *
+ * The label is not always there to read: Workday re-renders a section and, for
+ * that pass, the observer reports the field with no label at all (measured on
+ * PwC — `unfilledLabels: "?"` on a REQUIRED name box, which then belonged to
+ * nobody and ended the run). The id is stable while the label flickers:
+ * `#name--legalName--lastNameLocal` → "name legal Name last Name Local" →
+ * the same /last name/ pattern that the visible label would have matched.
+ */
+export function selectorPhrase(selector) {
+    if (!selector) return '';
+    return String(selector)
+        .replace(/[#.[\]"'=^$*~|>+,()]/g, ' ')   // strip CSS punctuation
+        .replace(/[-_/]+/g, ' ')                 // separators → spaces
+        .replace(/([a-z\d])([A-Z])/g, '$1 $2')   // camelCase → two words
+        .replace(/\s+/g, ' ')
+        .trim();
 }
 
 /** Read a dotted/indexed path out of the structured CV. */

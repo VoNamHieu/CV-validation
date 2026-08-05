@@ -18,7 +18,7 @@ import { test, describe, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
     FIELD_FAIL_BUDGET, recipeBlockingFields, recipeFieldStatus,
-    recipeReleased, recordOutcomes, resetFieldStatus,
+    recipeReleased, recordOutcomes, resetFieldStatus, writeStrategy,
 } from '../src/content-agent/recipe.js';
 
 const FAIL = (label, why) => [[label, 'FAIL', why]];
@@ -105,5 +105,35 @@ describe('a new step starts with its own budget', () => {
         // inheriting an exhausted one from a widget that is no longer on screen.
         recordOutcomes(FAIL('Language', 'never committed'));
         assert.equal(recipeBlockingFields().length, 1);
+    });
+});
+
+// ── A value that was written and then thrown away ───────────────────────────
+// The other half of "counted, not rediscovered": a dropdown that never commits
+// is caught by the FAIL verdict above, but a TEXT box that accepts a value and
+// loses it on the next re-render used to be indistinguishable from one that was
+// never filled. So the recipe rewrote it every pass, reported OK every pass, and
+// the run ended NEED_HUMAN on a field it believed it had filled (measured on
+// PwC's local-script name box).
+
+describe('a text box that loses what we wrote', () => {
+    test('the first write is the keyboard route', () => {
+        const s = writeStrategy(undefined);
+        assert.equal(s.method, 'keyboard');
+        assert.equal(s.wipes, 0);
+        assert.equal(s.giveUp, false);
+    });
+
+    test('finding it empty after writing counts as a wipe and changes route', () => {
+        const s = writeStrategy({ value: 'Vo', wipes: 0 });
+        assert.equal(s.wipes, 1);
+        assert.equal(s.method, 'native-event', 'the same route a third time is the loop, not a retry');
+        assert.equal(s.giveUp, false);
+    });
+
+    test('wipes are bounded by the same budget every other failure gets', () => {
+        assert.equal(writeStrategy({ value: 'Vo', wipes: FIELD_FAIL_BUDGET - 1 }).giveUp, false);
+        assert.equal(writeStrategy({ value: 'Vo', wipes: FIELD_FAIL_BUDGET }).giveUp, true,
+            'past the budget the box is reported, not rewritten');
     });
 });

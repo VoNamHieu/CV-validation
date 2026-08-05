@@ -9,7 +9,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-    buildManifest, classifyField, canonicalValue, compareValues, summarizeGaps,
+    buildManifest, classifyField, canonicalValue, compareValues, selectorPhrase, summarizeGaps,
     FIELD_PATTERNS, PROFILE_KEYS, SOURCE, VERDICT,
 } from '../src/content-agent/needs.js';
 
@@ -399,5 +399,32 @@ describe('notice period and start date are the same commitment', () => {
 
     test('neither stored stays a gap — nobody can guess it', () => {
         assert.equal(canonicalValue(classifyField({ label: 'Notice period' }), { profile: {} }), null);
+    });
+});
+
+describe('a field whose label we could not read', () => {
+    // Workday re-renders a section and, for that pass, the observer reports the
+    // field with no label at all — measured on PwC, where a REQUIRED name box
+    // came back as "?" in unfilledLabels, matched no pattern, belonged to no
+    // layer, and ended the run. The id is stable while the label flickers.
+    test('classifies from the selector when the label is missing', () => {
+        const p = classifyField({ label: '', selector: '#name--legalName--lastNameLocal' });
+        assert.equal(p?.key, 'lastName');
+    });
+
+    test('the label still wins when it is there', () => {
+        // A selector that says one thing and a label that says another: the
+        // label is what the human reading the form sees.
+        const p = classifyField({ label: 'Email Address', selector: '#name--legalName--lastNameLocal' });
+        assert.equal(p?.key, 'email');
+    });
+
+    test('an opaque id classifies as nothing rather than as something wrong', () => {
+        assert.equal(classifyField({ label: '', selector: '#gwt-uid-42' }), null);
+    });
+
+    test('reads ids the way a person would', () => {
+        assert.equal(selectorPhrase('[data-automation-id="formField-legalName--firstNameLocal"] input'),
+            'data automation id form Field legal Name first Name Local input');
     });
 });

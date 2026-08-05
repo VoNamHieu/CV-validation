@@ -75,6 +75,20 @@ export const FALLBACK_RECIPES = [
                     },
                     { label: 'First name', selector: '[data-automation-id="formField-legalName--firstName"] input', profileKey: 'firstName', type: 'text', required: true, normalize: 'name' },
                     { label: 'Last name', selector: '[data-automation-id="formField-legalName--lastName"] input', profileKey: 'lastName', type: 'text', required: true, normalize: 'name' },
+                    // Dual-script tenants (PwC VN) render a SECOND legal-name pair
+                    // for the local script — "Family Name - Vietnamese*",
+                    // "Given Name(s) - Vietnamese*", both REQUIRED. The recipe
+                    // owned only the western half, so these two were left to
+                    // whichever layer could READ THEIR LABEL, and the run that
+                    // couldn't ("unfilledLabels: ?") died one field short of the
+                    // step. Ownership here is deterministic; on single-script
+                    // tenants the selector resolves to nothing and the field
+                    // reports 'absent', which costs a lookup and nothing else.
+                    // Value: the same name as the western half — a candidate
+                    // whose CV carries diacritics keeps them, one whose doesn't
+                    // is not given an invented Vietnamese spelling.
+                    { label: 'First name (local)', selector: '[data-automation-id="formField-legalName--firstNameLocal"] input, input[id$="legalName--firstNameLocal"]', profileKey: 'firstName', type: 'text', normalize: 'name' },
+                    { label: 'Last name (local)', selector: '[data-automation-id="formField-legalName--lastNameLocal"] input, input[id$="legalName--lastNameLocal"]', profileKey: 'lastName', type: 'text', normalize: 'name' },
                     // REQUIRED on Mondelez (measured), and the flat profile carries
                     // them only if the user filled them in by hand — a CV states an
                     // address but nothing extracts it into those two keys. When they
@@ -1047,6 +1061,15 @@ export async function inferFillDynamicField(gap, profile, cv, resolvedValue = ''
 // (absent) — so a stale recipe cannot hold a field hostage either.
 const _fieldStatus = new Map();   // field label → { status, why, at, fails, tried[] }
 
+// What this recipe has WRITTEN and read back, per field label. A verify at write
+// time already exists (type → blur → re-read); what was missing is the pass
+// AFTER: Workday re-hydrates a section and the box we filled comes back empty,
+// which used to look identical to "not filled yet", so the recipe rewrote it
+// forever and reported OK every time. Remembering the write turns the second
+// empty read into evidence — a WIPE — with the same budget every other failure
+// gets. Measured on PwC's local-script name pair.
+const _written = new Map();       // field label → { value, wipes }
+
 /**
  * How many passes a field may keep failing before the recipe stops holding the
  * step for it.
@@ -1125,7 +1148,22 @@ export function recordOutcomes(outcomes) {
 }
 
 /** Forget every field verdict — a new step/page starts its own budget. */
-export function resetFieldStatus() { _fieldStatus.clear(); }
+export function resetFieldStatus() { _fieldStatus.clear(); _written.clear(); }
+
+/**
+ * How to write a text box that is EMPTY right now, given what we already put in
+ * it. Pure, so the rule is readable and testable without a DOM.
+ *
+ *   never written  → keyboard (the route Workday consumes)
+ *   written, gone  → a wipe: count it and change route once
+ *   wiped past the budget → stop writing. The step's blocking-field report
+ *   carries it, and the run continues instead of rewriting the same box forever.
+ */
+export function writeStrategy(prior, budget = FIELD_FAIL_BUDGET) {
+    if (!prior) return { wipes: 0, method: 'keyboard', giveUp: false };
+    const wipes = (prior.wipes || 0) + 1;
+    return { wipes, method: 'native-event', giveUp: wipes > budget };
+}
 
 /** formField wrapper element → recipe field label. MENU-wide, matching the
  *  fill scope: any known field whose control resolves on THIS page is the
@@ -1528,17 +1566,47 @@ async function _applyRecipeFields(recipe, profile, cvData, cv) {
                     ? wrapEl.querySelectorAll(FIELD_ERROR_SEL).length
                     : 0;
                 const errsBefore = errCount();
-                if (String(el.value ?? '').trim() !== '' && !errsBefore) { outcomes.push([f.label, 'done', 'already filled']); continue; }
+                if (String(el.value ?? '').trim() !== '' && !errsBefore) {
+                    _written.set(f.label, { value: String(el.value).trim(), wipes: _written.get(f.label)?.wipes || 0 });
+                    outcomes.push([f.label, 'done', 'already filled']);
+                    continue;
+                }
                 if (String(el.value ?? '').trim() !== '' && errsBefore) {
                     setNativeValue(el, '', { quiet: true });
                     await sleep(120);
                 }
-                // The keyboard path — the one route Workday's widgets reliably
-                // consume — then a real exit so its validation pass runs.
-                await simulateTyping(el, String(val));
+                // EMPTY, and we wrote it on an earlier pass → the widget threw the
+                // value away. Rewriting the same way a third time is the loop the
+                // user keeps reporting; count it, change the method once, then
+                // stop and let the step's blocking-field report carry it.
+                const prior = _written.get(f.label);
+                const strat = writeStrategy(prior);
+                if (strat.wipes) {
+                    prior.wipes = strat.wipes;
+                    trace('field.wiped', {
+                        field: f.label, wrote: String(prior.value).slice(0, 24),
+                        wipes: strat.wipes, budget: FIELD_FAIL_BUDGET, next: strat.method,
+                    });
+                }
+                if (strat.giveUp) {
+                    outcomes.push([f.label, 'FAIL', `value wiped ${strat.wipes}× after it was written`]);
+                    continue;
+                }
+                // First attempt: the keyboard path — the one route Workday's
+                // widgets reliably consume. After a wipe, a DIFFERENT route: the
+                // native setter plus an explicit InputEvent, which some widgets
+                // read when they ignore synthesised keystrokes. Same exit either
+                // way (a real focusout, so the widget's validation pass runs).
+                if (strat.method === 'native-event') {
+                    setNativeValue(el, String(val));
+                    el.dispatchEvent(new InputEvent('input', { bubbles: true, data: String(val), inputType: 'insertText' }));
+                } else {
+                    await simulateTyping(el, String(val));
+                }
                 try { el.dispatchEvent(new FocusEvent('focusout', { bubbles: true })); el.blur?.(); } catch { /* noop */ }
                 await sleep(300);
                 const nowVal = String(el.value ?? '').trim();
+                if (nowVal) _written.set(f.label, { value: nowVal, wipes: prior?.wipes || 0 });
                 if (!nowVal) outcomes.push([f.label, 'FAIL', 'value did not stick']);
                 else if (errsBefore > 0 && errCount() > 0) outcomes.push([f.label, 'PARTIAL', 'value shown but error persists']);
                 else { filled++; outcomes.push([f.label, 'OK', String(val)]); answers.push({ field: f.label, value: val, source: provenance }); }
