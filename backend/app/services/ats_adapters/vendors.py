@@ -66,6 +66,7 @@ from app.services.ats_adapters.dhl import *  # noqa: F401,F403
 from app.services.ats_adapters.decathlon import *  # noqa: F401,F403
 from app.services.ats_adapters.vingroup import *  # noqa: F401,F403
 from app.services.ats_adapters.pharmacity import *  # noqa: F401,F403
+from app.services.ats_adapters.lego import *  # noqa: F401,F403
 
 
 _ADAPTERS: list = [
@@ -75,6 +76,9 @@ _ADAPTERS: list = [
     # MiTek's VN-dedicated Workday tenant — must precede the generic `workday`
     # adapter, whose searchText="Vietnam" filter under-counts this all-VN board.
     ("mitek",          lambda u, h: _is_mitek(u),        lambda u, h: _mitek(u)),
+    # LEGO's Workday tenant sends no `locationsText`, so the generic `workday`
+    # adapter's VN filter drops the whole board — must precede it. See lego.py.
+    ("lego",           lambda u, h: _is_lego(u),         lambda u, h: _lego(u)),
     ("workday",        lambda u, h: _resolve_workday_url(u, h) is not None,
                        lambda u, h: _workday(_resolve_workday_url(u, h))),
     ("base.vn",        _is_basevn,                       lambda u, h: _basevn(u, h)),

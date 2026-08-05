@@ -934,6 +934,14 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         homepage="https://3m.com",
         career_url="https://3m.wd1.myworkdayjobs.com/en-US/Search",
     ),
+    FeaturedCompany(
+        name="LEGO",
+        homepage="https://www.lego.com",
+        # Workday tenant with no `locationsText` in its listing → dedicated `lego`
+        # adapter (facet-filtered to Vietnam). The VN board is the LEGO
+        # Manufacturing Vietnam factory in Tân Uyên, Bình Dương.
+        career_url="https://lego.wd103.myworkdayjobs.com/LEGO_External?Location=db69e8c8446c11de98360015c5e6daf6",
+    ),
 
     # ── Tobacco ───────────────────────────────────────────────────────
     FeaturedCompany(
