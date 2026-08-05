@@ -209,6 +209,11 @@ export const PROFILE_KEYS = new Set([
     'postalCode', 'currentTitle', 'currentLevel', 'yearsOfExperience', 'highestDegree',
     'currentSalary', 'currentIndustry', 'currentFields', 'desiredLocations', 'desiredSalary',
     'noticePeriod', 'availableStartDate', 'workAuthorized', 'requiresSponsorship', 'driversLicense', 'coverLetter', 'applyMessage', 'skills',
+    // Both are read by the answer policy (answers.js: the ethnicity rule and the
+    // grade rule) and both are shipped by the web app's ExtensionProfile — this
+    // set had simply drifted behind it, so a profile key the agent genuinely
+    // uses read as "not in the schema".
+    'ethnicity', 'gpa',
 ]);
 
 /** The concept a field is asking about, or null when nothing recognises it. */

@@ -37,3 +37,8 @@ copo-extension-*.zip
 
 # search eval — regenerable embedding cache (~$0.02 via `dump`+`score`)
 backend/eval/emb_cache.json
+
+# Test ATS accounts for the extension's fixture builds. Real passwords: this
+# repo is public, and a credential committed once outlives its deletion.
+# Shape is tracked in extension/src/fixtures/creds.local.example.js.
+extension/src/fixtures/creds.local.js

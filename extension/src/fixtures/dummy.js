@@ -26,6 +26,9 @@
  *      fixture that leaves them blank cannot exercise the steps they block.
  */
 
+import { FIXTURE_CREDENTIALS, FIXTURE_CREDENTIAL_MODE } from './creds.local.js';
+import { pickCredential } from './pick.js';
+
 /** Flat profile — mirrors ExtensionProfile in frontend/src/lib/extension-profile.ts. */
 export const DUMMY_PROFILE = {
     fullName: 'TEST Nguyen Van A',
@@ -35,7 +38,14 @@ export const DUMMY_PROFILE = {
     email: 'copo.agent.test@example.invalid',
     phone: '0900000001',
     dateOfBirth: '1996-01-15',
-    gender: '',                        // left blank on purpose: demographic fields
+    // Gender is NOT a demographic answer here — it is what the Prefix ladder
+    // reads to choose Mr./Ms., and PwC renders "Prefix*" REQUIRED. The EEO
+    // decline path stays exercised by race / veteran / disability, which this
+    // profile deliberately leaves empty.
+    gender: 'Nam',
+    // Administrative fact on VN tenants, and the one demographic a VN candidate
+    // answers rather than declines (see the ethnicity rule in answers.js).
+    ethnicity: 'Kinh',
     nationality: 'Vietnamese',         // must resolve to a decline option, not a value
     maritalStatus: '',
     addressProvince: 'Hà Nội',
@@ -48,6 +58,10 @@ export const DUMMY_PROFILE = {
     currentLevel: 'Middle',
     yearsOfExperience: 4,
     highestDegree: 'Bachelor',
+    // Workday asks "Overall Result (GPA)" REQUIRED on some tenants and answers it
+    // ONLY from this key — no résumé parse supplies it and a plausible number
+    // would be a fabricated academic record.
+    gpa: '4.0',
     noticePeriod: '30 days',
     availableStartDate: '',   // empty on purpose: derives from the notice period
     workAuthorized: 'Yes',
@@ -283,18 +297,12 @@ export const CREDENTIAL_KEY = 'jobfitApplyCredentials';
  * this is for.
  */
 export async function readFixtureCredential() {
-    if (typeof chrome === 'undefined' || !chrome?.storage?.local) return null;
-    const got = await chrome.storage.local.get(CREDENTIAL_KEY);
-    const c = got?.[CREDENTIAL_KEY];
-    if (!c?.email || !c?.password) return null;
-    return {
-        email: String(c.email),
-        password: String(c.password),
-        // Default LOGIN, not signup. Supplying a credential is a statement that
-        // the account already exists, and the coordinator's signup-first probe is
-        // for tenants where that is unknown.
-        operation: c.operation === 'signup' ? 'signup' : 'login',
-    };
+    let stored = null;
+    if (typeof chrome !== 'undefined' && chrome?.storage?.local) {
+        const got = await chrome.storage.local.get(CREDENTIAL_KEY);
+        stored = got?.[CREDENTIAL_KEY] ?? null;
+    }
+    return pickCredential(stored, FIXTURE_CREDENTIALS, FIXTURE_CREDENTIAL_MODE);
 }
 
 /** Replace whatever is in the four slots with the fixture. */

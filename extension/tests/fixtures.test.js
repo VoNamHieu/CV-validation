@@ -12,6 +12,7 @@ import {
 } from '../src/fixtures/dummy.js';
 import * as dummy from '../src/fixtures/dummy.js';
 import * as noop from '../src/fixtures/noop.js';
+import { pickCredential } from '../src/fixtures/pick.js';
 import { PROFILE_KEYS, buildManifest, classifyField, canonicalValue } from '../src/content-agent/needs.js';
 
 describe('the production stub can stand in for the fixture', () => {
@@ -62,16 +63,56 @@ describe('the fixture credential', () => {
 
     test('a half-filled credential is no credential', async () => {
         // Otherwise a typo'd key sends the agent at a login form with a blank
-        // password, which burns an attempt against the tenant's budget.
+        // password, which burns an attempt against the tenant's budget. Asserted
+        // through the pure rule: the module-level accounts live in a gitignored
+        // file, so a test that read them would pass or fail per machine.
         for (const bad of [null, {}, { email: 'a@b.test' }, { password: 'pw' }, { email: '', password: 'pw' }]) {
-            assert.equal(await withStorage(bad, dummy.readFixtureCredential), null, JSON.stringify(bad));
+            assert.equal(pickCredential(bad, { login: null, signup: null }), null, JSON.stringify(bad));
         }
     });
 
-    test('no chrome runtime means no credential', async () => {
+    test('with nothing usable in storage, the build\'s own account is used', () => {
+        // The point of baking accounts in: the console paste is an override for a
+        // one-off, not a step before every run.
+        const builtIn = {
+            login: { email: 'login@test.invalid', password: 'pw1' },
+            signup: { email: 'signup@test.invalid', password: 'pw2' },
+        };
+        assert.deepEqual(pickCredential(null, builtIn, 'login'),
+            { email: 'login@test.invalid', password: 'pw1', operation: 'login' });
+        assert.deepEqual(pickCredential({}, builtIn, 'signup'),
+            { email: 'signup@test.invalid', password: 'pw2', operation: 'signup' });
+    });
+
+    test('storage still outranks the built-in account', () => {
+        const builtIn = { login: { email: 'login@test.invalid', password: 'pw1' } };
+        const c = pickCredential({ email: 'paste@test.invalid', password: 'pw3' }, builtIn, 'login');
+        assert.equal(c.email, 'paste@test.invalid');
+    });
+
+    test('a mode with no account configured yields nothing, not the other account', () => {
+        // Asking for signup and silently getting the login account would register
+        // nothing and quietly test the wrong path.
+        const builtIn = { login: { email: 'login@test.invalid', password: 'pw1' }, signup: null };
+        assert.equal(pickCredential(null, builtIn, 'signup'), null);
+    });
+
+    test('no chrome runtime means no STORAGE credential', async () => {
+        // Outside a browser there is no storage to read, so the only thing left
+        // is whatever accounts the build baked in. Asserted as a shape, never as
+        // a value: those live in a gitignored file, and a test that printed them
+        // on failure would put a password in CI output.
         const prev = globalThis.chrome;
         globalThis.chrome = undefined;
-        try { assert.equal(await dummy.readFixtureCredential(), null); } finally { globalThis.chrome = prev; }
+        try {
+            const c = await dummy.readFixtureCredential();
+            if (c !== null) {
+                assert.ok(c.email && c.password, 'a credential is complete or it is null');
+                assert.match(c.operation, /^(login|signup)$/);
+            }
+        } finally { globalThis.chrome = prev; }
+        assert.equal(pickCredential(null, { login: null, signup: null }), null,
+            'with no accounts configured, a chrome-less runtime has no credential at all');
     });
 });
 
@@ -161,9 +202,25 @@ describe('nothing here can be mistaken for a person', () => {
 
     test('demographic fields are blank, not invented', () => {
         // The fixture must not pre-answer what the policy refuses to answer, or
-        // a test build silently passes a step the real build stops on.
-        assert.equal(DUMMY_PROFILE.gender, '');
-        assert.equal(DUMMY_CV.personal.gender, '');
+        // a test build silently passes a step the real build stops on. `gender`
+        // is NOT one of those: no answer rule reads it (the demographic rule
+        // declines whatever the profile holds) — it feeds the recipe's Prefix
+        // ladder, which PwC renders REQUIRED. What the policy declines is race,
+        // veteran status and disability, and the fixture states none of them.
+        for (const k of ['race', 'veteranStatus', 'disability', 'sexualOrientation']) {
+            assert.ok(!(k in DUMMY_PROFILE), `${k} must not be pre-answered`);
+        }
+        assert.equal(DUMMY_CV.personal.gender, '', 'the CV states nothing about it either');
+    });
+
+    test('the keys a CV never carries are seeded, since each one blocks a required field', () => {
+        // GPA, ethnicity, gender and notice period were pasted into the console
+        // before every measured run. Absent, they leave Workday's "Overall
+        // Result (GPA)", PwC's "Prefix*" and the start-date question unanswered.
+        assert.equal(DUMMY_PROFILE.gpa, '4.0');
+        assert.equal(DUMMY_PROFILE.ethnicity, 'Kinh');
+        assert.equal(DUMMY_PROFILE.gender, 'Nam');
+        assert.equal(DUMMY_PROFILE.noticePeriod, '30 days');
     });
 });
 

@@ -5,7 +5,7 @@
 // The loadable / zippable extension is dist/. Dev: `npm run watch` then load
 // dist/ unpacked. Ship: `npm run zip`.
 import esbuild from 'esbuild';
-import { cpSync, mkdirSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const OUT = 'dist';
@@ -54,14 +54,30 @@ const options = {
     // tree-shakes the module but keeps the `if (false)` block calling into it,
     // leaving a production bundle that referenced a function it no longer
     // contained. Swapping the file makes the absence structural instead.
-    plugins: fixture ? [] : [{
-        name: 'strip-fixtures',
-        setup(build) {
-            build.onResolve({ filter: /fixtures\/dummy\.js$/ }, () => ({
-                path: resolve(localCreds ? 'src/fixtures/creds-only.js' : 'src/fixtures/noop.js'),
-            }));
+    plugins: [
+        // The test accounts live OUTSIDE the repo (public), so the import has to
+        // resolve to something either way: the developer's local file when it
+        // exists, the tracked template — which supplies nulls — when it does not.
+        // Without this a fresh clone fails to build on a missing file.
+        {
+            name: 'local-creds',
+            setup(build) {
+                build.onResolve({ filter: /fixtures\/creds\.local\.js$/ }, () => ({
+                    path: resolve(existsSync('src/fixtures/creds.local.js')
+                        ? 'src/fixtures/creds.local.js'
+                        : 'src/fixtures/creds.local.example.js'),
+                }));
+            },
         },
-    }],
+        ...(fixture ? [] : [{
+            name: 'strip-fixtures',
+            setup(build) {
+                build.onResolve({ filter: /fixtures\/dummy\.js$/ }, () => ({
+                    path: resolve(localCreds ? 'src/fixtures/creds-only.js' : 'src/fixtures/noop.js'),
+                }));
+            },
+        }]),
+    ],
 };
 
 if (watch) {

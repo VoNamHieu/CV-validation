@@ -13,29 +13,40 @@
  * until removed. Ship builds stay `npm run build`, which ignores the key.
  */
 
+import { FIXTURE_CREDENTIALS, FIXTURE_CREDENTIAL_MODE } from './creds.local.js';
+import { pickCredential } from './pick.js';
+import { PROFILE_GAP_SEEDS, seedProfileGaps } from './gaps.js';
+
 export function initFixture() {
-    // No seeding. The banner is the build's identity check — if you don't see
-    // it, you are not on the creds build; if you see it in a ship build, stop.
+    // The candidate is still the REAL one — this build exists to drive a real
+    // profile through a real ATS. What it does seed is the handful of keys no
+    // CV carries (GPA, ethnicity, gender, notice period), and only where the
+    // profile leaves them empty; each one blocks a REQUIRED field, and they
+    // were being pasted into this console before every run.
     try {
-        console.warn('[Copo] ⚠️ LOCAL-CREDS BUILD — reads jobfitApplyCredentials from storage; '
-            + 'no fixture data is seeded. Not for shipping.');
+        console.warn('[Copo] ⚠️ LOCAL-CREDS BUILD — real profile, test ATS accounts. Not for shipping.');
     } catch { /* no console here — nothing to announce to */ }
+    seedProfileGaps(PROFILE_GAP_SEEDS)
+        .then(w => w.length && console.warn(`[Copo] fixture filled empty profile keys: ${w.join(', ')}`))
+        .catch(() => { /* seeding is convenience, never a run blocker */ });
 }
 
 const CREDENTIAL_KEY = 'jobfitApplyCredentials';
 
-/** Same contract as the fixture's reader: `{ email, password }`, optional
- *  `operation: 'signup'`; one credential covers every tenant. */
+/**
+ * The account this run uses: `{ email, password, operation }`.
+ *
+ * Order is storage first, then the built-in test accounts — the console
+ * one-liner stays the way to override for a one-off, and with nothing in
+ * storage the build still has an account to work with instead of stopping.
+ */
 export async function readFixtureCredential() {
-    if (typeof chrome === 'undefined' || !chrome?.storage?.local) return null;
-    const got = await chrome.storage.local.get(CREDENTIAL_KEY);
-    const c = got?.[CREDENTIAL_KEY];
-    if (!c?.email || !c?.password) return null;
-    return {
-        email: String(c.email),
-        password: String(c.password),
-        operation: c.operation === 'signup' ? 'signup' : 'login',
-    };
+    let stored = null;
+    if (typeof chrome !== 'undefined' && chrome?.storage?.local) {
+        const got = await chrome.storage.local.get(CREDENTIAL_KEY);
+        stored = got?.[CREDENTIAL_KEY] ?? null;
+    }
+    return pickCredential(stored, FIXTURE_CREDENTIALS, FIXTURE_CREDENTIAL_MODE);
 }
 
 export const FIXTURE_CREDS_SUPPORTED = true;
