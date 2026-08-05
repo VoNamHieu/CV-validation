@@ -1039,6 +1039,14 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         career_url="https://www.mckinsey.com/careers/search-jobs?countries=Vietnam",
     ),
     FeaturedCompany(
+        name="BCG",
+        homepage="https://www.bcg.com",
+        # Newer-generation Phenom: no /services/jobs/search/, search runs on the
+        # /widgets refineSearch API (`phenom` adapter's fallback). Apply itself
+        # leaves Phenom for studenttalent/experiencedtalent.bcg.com.
+        career_url="https://careers.bcg.com/global/en/search-results",
+    ),
+    FeaturedCompany(
         name="Deloitte",
         homepage="https://www.deloitte.com/vn",
         career_url="https://jobs.sea.deloitte.com/search/?q=&locationsearch=vietnam",
