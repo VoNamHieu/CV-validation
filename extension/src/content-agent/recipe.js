@@ -24,6 +24,20 @@ import { isPickerShape, probeFieldShape } from './probe.js';
 // against real 3M Workday captures (My Information, 2026-07-15 / -22). The
 // custom-select handler is grounded in the captured widget markup (button[value]
 // + promptOption) but PENDING a live-fill verification.
+/**
+ * Guidance + guard for the "How did you hear" MODEL fallback (user decision
+ * 2026-08-05, measured on PwC — a cascading menu of claims with no
+ * website-family leaf). The hint steers the pick to the neutral self-service
+ * family; the deny is the structural belt: no option implying a person or a
+ * referral, none that invites follow-up verification (a specific job board).
+ * "I was referred by a search engine" carries no person, so bare
+ * "referred by" is deliberately NOT denied.
+ */
+const SOURCE_INFER_HINT = 'Pick ONE neutral self-service option (website / online / search engine family). '
+    + 'NEVER pick anything implying a person or a referral (alumni, employee, recruiter, friend, agency, career fair) '
+    + 'and avoid options that require extra follow-up detail (a specific job board).';
+const SOURCE_INFER_DENY = /alumni|former (intern|employee)|\bemployee\b|friend|relative|family|recruiter|agency|headhunt|career fair|campus|job board/i;
+
 export const FALLBACK_RECIPES = [
     {
         ats: 'workday',
@@ -113,6 +127,11 @@ export const FALLBACK_RECIPES = [
                             // board" via the letters inside "another".
                             '=Other', '=Khác',
                         ],
+                        // Ladder exhausted → the MODEL picks from the options
+                        // that are really there (user decision 2026-08-05,
+                        // PwC's cascading claim-menu), guided and guarded —
+                        // see SOURCE_INFER_HINT / SOURCE_INFER_DENY.
+                        infer: true, inferHint: SOURCE_INFER_HINT, inferDeny: SOURCE_INFER_DENY,
                         type: 'custom-select', required: true, answerSource: 'AGENT_DEFAULT',
                     },
                     // Measured options on Mondelez: "Mobile - Personal",
@@ -964,6 +983,11 @@ export async function inferFillDynamicField(gap, profile, cv, resolvedValue = ''
         infer: true,
         answerSource: 'AGENT_DEFAULT',
     };
+    // The source question keeps its guidance whichever layer reaches it.
+    if (/how did you hear|how did you find|bạn biết đến/i.test(f.label)) {
+        f.inferHint = SOURCE_INFER_HINT;
+        f.inferDeny = SOURCE_INFER_DENY;
+    }
     // Workday's button prompt reads its options only once opened.
     // `resolvedValue` is the DETERMINISTIC path through the same machinery:
     // an answer the rules already hold ("No" to sponsorship) used to go
@@ -2762,6 +2786,9 @@ async function inferOptionViaLLM(f, options, profile, cv) {
                     required: true,
                     componentType: 'custom-select',
                     value: '',
+                    // The guidance rides where the prompt already looks for
+                    // context ("use nearbyText to infer what the field asks").
+                    nearbyText: f.inferHint || undefined,
                     options: offered.map(t => ({ value: t, text: t })),
                 }],
                 buttons: [], errors: [], blockers: [], unfilledRequired: [f.label],
@@ -3920,6 +3947,7 @@ async function fillCustomSelect(f, value, ctx = {}) {
      * so the node from the previous level is stale the moment it opens.
      */
     const attempts = [];
+    let inferredAtDrill = false;
     for (let level = 0; level < 4; level++) {
         // A field that has already answered is never clicked again — that is how
         // the retry loop used to deselect its own pick.
@@ -3950,6 +3978,23 @@ async function fillCustomSelect(f, value, ctx = {}) {
             if (found) cands = matchAll(visibleOptions(), matched);
         }
         if (!cands.length && level === 0) cands = [opt];
+        // A DRILLED level is a catalogue the ladder has never seen — PwC's
+        // submenu is six CLAIMS ("I found the job on a job board…") and no
+        // website rung can name one. User decision 2026-08-05: hand exactly
+        // what is on screen to the model, once, same guidance and same deny
+        // belt as the top-level inference.
+        if (!cands.length && f.infer && !inferredAtDrill && level > 0 && visibleOptions().length) {
+            inferredAtDrill = true;
+            const r2 = await inferOptionViaLLM(
+                f, visibleOptions().map(o => (o.textContent || '').trim()), ctx.profile, ctx.cv);
+            if (r2?.value && f.inferDeny && f.inferDeny.test(r2.value)) {
+                trace('list.inferDenied', { field: f.label, picked: r2.value.slice(0, 30), why: 'denied at drill level' });
+            } else if (r2?.value) {
+                matched = r2.value.toLowerCase();
+                trace('list.inferAtDrill', { field: f.label, level, picked: matched.slice(0, 40) });
+                cands = matchAll(visibleOptions(), matched);
+            }
+        }
         if (!cands.length) { attempts.push(`level${level}:no-row`); break; }
 
         // Inside a submenu the wanted label appears TWICE: once on the "‹ Company
