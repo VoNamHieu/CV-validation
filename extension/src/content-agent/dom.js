@@ -35,7 +35,13 @@ export function foldDiacritics(s) {
  * normalizeNameCase in frontend/src/lib/extension-profile.ts.
  */
 export function normalizeNameCase(raw) {
+    // A parenthesised NICKNAME never belongs in a legal-name box — and a
+    // profile synced through a stale web-app build can arrive carrying one
+    // ("Hieu (Charles)", measured 2026-08-06 after a production re-sync
+    // clobbered the repaired split). Stripping here defends every fill layer
+    // at once, whatever upstream did.
     return String(raw ?? '')
+        .replace(/\s*[（(\[][^）)\]]*[）)\]]\s*/g, ' ')
         .split(/(\s+)/)
         .map((word) => {
             const letters = word.replace(/[^\p{L}]/gu, '');

@@ -432,6 +432,19 @@ describe('personal facts the profile already holds are wired, not modelled', () 
     });
 });
 
+describe('a nickname never reaches a legal-name box', () => {
+    test('a profile poisoned by a stale web-app sync still fills clean', () => {
+        // Measured 2026-08-06: a production re-sync (old splitLegalName)
+        // clobbered the profile with 'Hieu (Charles)' — and every fill layer
+        // faithfully wrote the nickname into legal-name fields, where one
+        // tenant's maxLength then chopped it to "Hieu (Char". The shape rule
+        // is the single choke point all name fills share.
+        const v = canonicalValue(classifyField({ label: 'Last Name' }),
+            { profile: { lastName: 'Hieu (Charles)' } });
+        assert.equal(v.value, 'Hieu');
+    });
+});
+
 describe('a field whose label we could not read', () => {
     // Workday re-renders a section and, for that pass, the observer reports the
     // field with no label at all — measured on PwC, where a REQUIRED name box
