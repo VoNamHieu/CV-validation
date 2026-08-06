@@ -163,6 +163,28 @@ describe('other irreversible actions', () => {
     test('…but the controlled login flow may', () => {
         assert.equal(evaluateClick(el('Create Account'), { source: 'login' }).allowed, true);
     });
+
+    test('the recipe may deselect ONE committed chip it is correcting', () => {
+        // Measured on PwC: the résumé parser committed the wrong university
+        // ("…at Chicago" for a CV that says Urbana-Champaign) and the eviction
+        // written to fix exactly that was denied here — a false credential rode
+        // to review twice. The ✕ on a chip says "Remove"; that is the widget's
+        // word for unpicking an option, not a destructive act.
+        const chip = { text: 'Remove University of Illinois at Chicago', automationId: 'selectedItem' };
+        assert.equal(
+            evaluateClick(chip, { source: 'recipe', activation: 'widget-option' }).allowed,
+            true);
+    });
+
+    test('…and nothing wider than that', () => {
+        const chip = { text: 'Remove University of Illinois at Chicago', automationId: 'selectedItem' };
+        // The planner never gets it, whatever it claims about the element.
+        assert.equal(evaluateClick(chip, planner).code, DENY.DESTRUCTIVE);
+        // A section Delete button is not a chip, even from the recipe.
+        assert.equal(
+            evaluateClick(el('Delete'), { source: 'recipe', activation: 'widget-option' }).code,
+            DENY.DESTRUCTIVE);
+    });
 });
 
 // ── fields that must never receive profile data ────────────────────────────

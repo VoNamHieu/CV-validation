@@ -321,7 +321,20 @@ export function evaluateClick(d, ctx = {}) {
     }
 
     // 6. Destroying existing data.
-    if (looksDestructive(d)) return deny(DENY.DESTRUCTIVE);
+    //
+    // EXCEPT deselecting one committed chip in a field the recipe is
+    // correcting: the "Remove" in that ✕ is the widget's own word for
+    // "unpick this option", not a destructive act on the application. Measured
+    // on PwC — the résumé parser committed the WRONG UNIVERSITY (Illinois at
+    // Chicago for a CV that says Urbana-Champaign), the eviction that exists
+    // to fix exactly that was denied here, and a false credential rode to the
+    // review page twice. Narrow on purpose: recipe-sourced, activation
+    // 'widget-option', and a single selected chip — a Delete BUTTON on a
+    // section row (which removes a whole work-experience entry) matches none
+    // of those and stays denied.
+    const chipEviction = source === 'recipe' && ctx.activation === 'widget-option'
+        && (d.automationId === 'selectedItem' || /selectedItem/i.test(d.selector || ''));
+    if (looksDestructive(d) && !chipEviction) return deny(DENY.DESTRUCTIVE);
 
     // 7. Account creation outside the controlled login flow. login.js runs under
     //    the background's per-tenant budget (1 signup + 1 login); a planner that
