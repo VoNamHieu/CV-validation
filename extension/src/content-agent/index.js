@@ -20,6 +20,7 @@ import { removeProgress, showConfirmation, showProgress, showToast } from './ui.
 import { callAgentPlan, callLLMMapping } from './llm.js';
 import { executeFillInstructions } from './fill.js';
 import { auditRequiredBlockers, observePageState, scrollAndCollect } from './observe.js';
+import { isPickerShape, probeFieldShape } from './probe.js';
 import { findApplyButton, isApplicationFormPage, summarizeState, waitForJobPageSignal } from './detect.js';
 import { detectLoginWall, handleLoginWall } from './login.js';
 import { trace, traceClear, traceDump, traceOnce } from './trace.js';
@@ -32,7 +33,7 @@ import { tenantRefFor } from '../ats/tenant.js';
 // you can confirm (in the PAGE / tab console, NOT the service-worker console) that
 // the freshly-built dist is actually loaded. If you don't see this line on the
 // apply tab, the new build isn't injected (reload the extension + refresh the tab).
-const COPO_BUILD = 'prod-final-2026-08-06d';
+const COPO_BUILD = 'prod-final-2026-08-06e';
 try { console.log(`%c[Copo] content-agent build ${COPO_BUILD} loaded → ${location.host}`, 'color:#c43b2e;font-weight:700'); } catch { /* noop */ }
 
 /**
@@ -790,6 +791,24 @@ async function runAgentLoop(rawProfile) {
                         if (inst.action === 'fill' && isDateWrap(inst.selector)) { strongDates.push(inst); return false; }
                         return true;
                     });
+                    // A box the OBSERVER called text can still be a picker: PwC's
+                    // "City or Ward" is a combobox whose suggestions appear as you
+                    // type, and the generic handler typed into it without ever
+                    // committing — the field stayed empty, held the step, and the
+                    // run ended "Stuck" on it three times. The probe already
+                    // knows; now its verdict routes to the same widget machinery
+                    // every other prompt gets.
+                    for (let i = instructions.length - 1; i >= 0; i--) {
+                        const inst = instructions[i];
+                        if (inst.action !== 'fill') continue;
+                        const el = document.querySelector(inst.selector);
+                        if (!el || el.offsetParent === null) continue;
+                        const shape = await probeFieldShape(el);
+                        if (!isPickerShape(shape.shape)) continue;
+                        trace('needs.reshape', { label: String(inst.fieldLabel || '').slice(0, 40), probed: shape.shape, evidence: shape.evidence });
+                        instructions.splice(i, 1);
+                        strongSelects.push(inst);
+                    }
                     for (const a of manifest.fill) {
                         reviewAnswers.set(`answer::${a.label}`, { field: a.label, value: a.value, source: a.source });
                     }

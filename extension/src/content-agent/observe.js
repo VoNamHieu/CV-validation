@@ -505,9 +505,22 @@ export function auditRequiredBlockers() {
         return el.getAttribute?.('aria-required') === 'true' || el.required
             || !!wrap?.querySelector('abbr') || /required/i.test(el.getAttribute?.('aria-label') || '');
     };
+    // A prompt's SEARCH BOX is empty by design once its answer is committed —
+    // the answer lives in a chip, not in the input. Reading that empty box as
+    // an unfilled required field is what pinned three finished PwC fields as
+    // "blockers" ("How Did You Hear About Us? (text)", "City or Ward",
+    // "Country / Territory Phone Code") on a page where every one of them
+    // carried a committed chip: the step could never advance, and the run
+    // ended "Stuck" with a form that was actually complete.
+    const answeredByChip = (el) => {
+        const wrap = el.closest?.('[data-automation-id^="formField-"]');
+        const chips = wrap?.querySelector('[data-automation-id="selectedItemList"]');
+        return !!chips && chips.children.length > 0;
+    };
     // 1) text / tel / email / textarea inputs
     for (const inp of document.querySelectorAll('input[type="text"], input[type="tel"], input[type="email"], input:not([type]), textarea')) {
         if (inp.offsetParent === null) continue;
+        if (answeredByChip(inp)) continue;
         if (isRequired(inp) && !String(inp.value || '').trim()) push(labelOf(inp), 'text');
     }
     // 2) custom-select buttons (Workday: button[aria-haspopup=listbox] showing "Select One")
