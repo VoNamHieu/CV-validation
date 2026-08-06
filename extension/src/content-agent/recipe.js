@@ -1733,11 +1733,33 @@ async function _applyRecipeFields(recipe, profile, cvData, cv) {
                     : 0;
                 const errsBefore = errCount();
                 if (String(el.value ?? '').trim() !== '' && !errsBefore) {
-                    _written.set(f.label, { value: String(el.value).trim(), wipes: _written.get(f.label)?.wipes || 0 });
-                    outcomes.push([f.label, 'done', 'already filled']);
-                    continue;
-                }
-                if (String(el.value ?? '').trim() !== '' && errsBefore) {
+                    // A NAME box holding something other than the candidate's
+                    // name is parser junk, not an answer. Measured on PwC:
+                    // the résumé parse left "Hieu (Char" (truncated) in the
+                    // local FAMILY box, the probe's own test character "a" in
+                    // the GIVEN box, and the family name in BOTH western
+                    // boxes — and recipe ownership had locked all four
+                    // against the needs corrector, so "done, already filled"
+                    // protected the garbage forever. The profile is the
+                    // source of truth for a field that DECLARES a profile
+                    // value; anything else in it gets replaced. Exact-string
+                    // compare on purpose: "VO" vs "Vo" also rewrites, which
+                    // is what stops Workday's capitalization advisory.
+                    const junk = f.normalize === 'name' && val
+                        && String(el.value).replace(/\s+/g, ' ').trim() !== String(val).replace(/\s+/g, ' ').trim();
+                    if (!junk) {
+                        _written.set(f.label, { value: String(el.value).trim(), wipes: _written.get(f.label)?.wipes || 0 });
+                        outcomes.push([f.label, 'done', 'already filled']);
+                        continue;
+                    }
+                    trace('field.correct', {
+                        field: f.label,
+                        from: String(el.value).slice(0, 24),
+                        to: String(val).slice(0, 24),
+                    });
+                    setNativeValue(el, '', { quiet: true });
+                    await sleep(120);
+                } else if (String(el.value ?? '').trim() !== '' && errsBefore) {
                     setNativeValue(el, '', { quiet: true });
                     await sleep(120);
                 }
