@@ -199,7 +199,13 @@ export const FALLBACK_RECIPES = [
                 // Workday (sections unstarred), worthless per common sense.
                 // myExperiencePage is the step container's own automation id,
                 // present in both shapes.
-                detect: '[data-automation-id="formField-degree"], [data-automation-id="myExperiencePage"]',
+                // applyFlowMyExpPage is MEASURED (PwC 715624WD draft, 2026-08-06,
+                // via the live DOM: My Info = applyFlowMyInfoPage, My Experience =
+                // applyFlowMyExpPage, headings are H4, 4 add-buttons). The first
+                // version of this fix guessed "myExperiencePage" from convention,
+                // matched nothing, and shipped a no-op — an id nobody measured is
+                // not a detect.
+                detect: '[data-automation-id="formField-degree"], [data-automation-id="applyFlowMyExpPage"]',
                 // Work Experience starts EMPTY on some jobs — measured: the section
                 // shows an Add button and no fields at all, while the same step on
                 // another job of the same company had them, because Workday's

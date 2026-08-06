@@ -253,7 +253,7 @@ describe('the empty My Experience page is still My Experience', () => {
 
     test('detect covers both the filled and the empty shape', () => {
         assert.ok(step.detect.includes('formField-degree'));
-        assert.ok(step.detect.includes('myExperiencePage'));
+        assert.ok(step.detect.includes('applyFlowMyExpPage'));
     });
 
 });
