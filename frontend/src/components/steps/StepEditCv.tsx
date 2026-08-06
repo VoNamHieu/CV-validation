@@ -2662,7 +2662,7 @@ export function PersonalInfoSection({
                         onChange={(v) => patchContact({ address_street: v })} />
 
                     {/* ── Personal ── */}
-                    <ProfileInput label="Ngày sinh" value={personal.date_of_birth}
+                    <ProfileInput label="Ngày sinh" value={personal.date_of_birth} required
                         onChange={(v) => patchPersonal({ date_of_birth: v })} placeholder="YYYY-MM-DD" />
                     <ProfileInput label="Giới tính" value={personal.gender}
                         onChange={(v) => patchPersonal({ gender: v })} />
@@ -2674,7 +2674,7 @@ export function PersonalInfoSection({
                         onChange={(v) => patchPersonal({ middle_name: v })} placeholder="Nam" />
                     <ProfileInput label="Bằng lái xe" value={personal.drivers_license}
                         onChange={(v) => patchPersonal({ drivers_license: v })} placeholder="Có / Không" />
-                    <ProfileInput label="Tình trạng hôn nhân" value={personal.marital_status}
+                    <ProfileInput label="Tình trạng hôn nhân" value={personal.marital_status} required
                         onChange={(v) => patchPersonal({ marital_status: v })} />
 
                     {/* ── Employment ── */}
@@ -2711,17 +2711,26 @@ export function PersonalInfoSection({
 }
 
 function ProfileInput({
-    label, value, onChange, placeholder,
+    label, value, onChange, placeholder, required,
 }: {
     label: string;
     value: string;
     onChange: (v: string) => void;
     placeholder?: string;
+    /** ATS thường bắt buộc field này (Workday: Date of Birth ở Voluntary
+     *  Disclosures) — thiếu nó agent phải dừng NEED_HUMAN giữa run. Đánh dấu
+     *  để user điền TRƯỚC, thay vì bị chặn giữa chừng. */
+    required?: boolean;
 }) {
     return (
         <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                {label}
+                {label}{required && <span style={{ color: 'var(--accent-red, #dc2626)' }}> *</span>}
+                {required && !String(value || '').trim() && (
+                    <span style={{ color: 'var(--accent-red, #dc2626)', textTransform: 'none', letterSpacing: 0, marginLeft: 6 }}>
+                        — cần cho auto-apply
+                    </span>
+                )}
             </span>
             <input
                 type="text"
