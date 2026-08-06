@@ -90,10 +90,17 @@ export async function probeFieldShape(control) {
     //   - the option's listbox container APPEARED during the probe (a stray's
     //     container, by definition, existed before the first keystroke), or
     //   - the option is inside this field's own formField wrapper (inline lists).
-    const listboxContainers = () =>
-        new Set([...document.querySelectorAll('[data-automation-id="activeListContainer"], [role="listbox"]')]
-            .filter(c => c.offsetParent !== null));
-    const containersBefore = listboxContainers();
+    // Ownership is a LINK, not a coincidence. The first version of this check
+    // also counted any listbox container that APPEARED during the probe's
+    // 400ms window — and other widgets' async churn (a prior field still
+    // committing) opens popups in exactly that window, so a plain address box
+    // kept probing as a combobox on a page where hand-typing shows no
+    // suggestions at all. Two links remain, both explicit: the input names the
+    // container (aria-controls / aria-owns), or the options render inside the
+    // field's own formField wrapper. A genuine picker that advertises neither
+    // is caught by the stuck test below (its typed char does not survive) —
+    // and by the handler-switch escalation, which retries the other strategy
+    // when the chosen one cannot commit.
     const ownedOptions = () => {
         const ownedIds = [control.getAttribute('aria-controls'), control.getAttribute('aria-owns')]
             .filter(Boolean);
@@ -101,9 +108,7 @@ export async function probeFieldShape(control) {
             if (o.offsetParent === null) return false;
             if (wrap && wrap.contains(o)) return true;
             const container = o.closest('[data-automation-id="activeListContainer"], [role="listbox"]');
-            if (!container) return false;
-            if (ownedIds.includes(container.id)) return true;
-            return !containersBefore.has(container);
+            return !!container && ownedIds.includes(container.id);
         }).length;
     };
     try { control.focus(); } catch { /* noop */ }

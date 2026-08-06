@@ -33,7 +33,7 @@ import { tenantRefFor } from '../ats/tenant.js';
 // you can confirm (in the PAGE / tab console, NOT the service-worker console) that
 // the freshly-built dist is actually loaded. If you don't see this line on the
 // apply tab, the new build isn't injected (reload the extension + refresh the tab).
-const COPO_BUILD = 'prod-final-2026-08-06k';
+const COPO_BUILD = 'prod-final-2026-08-06l';
 try { console.log(`%c[Copo] content-agent build ${COPO_BUILD} loaded → ${location.host}`, 'color:#c43b2e;font-weight:700'); } catch { /* noop */ }
 
 /**
@@ -749,6 +749,41 @@ async function runAgentLoop(rawProfile) {
                         });
                         if (deferred.length) {
                             console.log('[Copo Needs] recipe-owned, deferring to the recipe:', deferred.join(' · '));
+                        }
+                    }
+                    // Repeating sections are owned as SECTIONS, not just as the
+                    // first-row fields the recipe schema names. The recipe's row
+                    // machinery pairs languages to rows by content, dedupes and
+                    // grows — the needs layer sees one empty required "Language*"
+                    // box and stuffs it, blind to the section. Watched live
+                    // (Mondelez, 2026-08-06, self-driven run): needs filled the
+                    // free row the recipe was holding for English with a SECOND
+                    // Vietnamese. Every field inside these sections defers,
+                    // whatever selector it carries.
+                    if (recipe.ats === 'workday' && todo.length) {
+                        const REPEATING = ['work experience', 'education', 'languages'];
+                        const heads = [...document.querySelectorAll('h2, h3, h4')].filter(h => h.offsetParent !== null);
+                        const sectionOf = (el) => {
+                            let name = null;
+                            for (const h of heads) {
+                                if (h.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) {
+                                    const t = (h.textContent || '').trim().toLowerCase();
+                                    name = REPEATING.includes(t) ? t : null;
+                                } else break;
+                            }
+                            return name;
+                        };
+                        const deferredRows = [];
+                        todo = todo.filter(a => {
+                            const el = document.querySelector(a.selector);
+                            if (!el) return true;
+                            const sec = sectionOf(el);
+                            if (!sec) return true;
+                            deferredRows.push(`${a.label}→[${sec}]`);
+                            return false;
+                        });
+                        if (deferredRows.length) {
+                            console.log('[Copo Needs] row-section owned by recipe, deferring:', deferredRows.join(' · '));
                         }
                     }
                 }
