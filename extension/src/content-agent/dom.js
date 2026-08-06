@@ -42,6 +42,7 @@ export function normalizeNameCase(raw) {
     // at once, whatever upstream did.
     return String(raw ?? '')
         .replace(/\s*[（(\[][^）)\]]*[）)\]]\s*/g, ' ')
+        .replace(/\s+/g, ' ').trim()
         .split(/(\s+)/)
         .map((word) => {
             const letters = word.replace(/[^\p{L}]/gu, '');
