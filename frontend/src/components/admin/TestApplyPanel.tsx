@@ -27,6 +27,25 @@ export default function TestApplyPanel() {
     const [extReady, setExtReady] = useState(false);
     const [applyState, setApplyState] = useState<Record<string, ApplyStatus>>({});
     const cvData = useAppStore((s) => s.cvData);
+    // A profile the operator OWNS, kept out of the CV pipeline entirely.
+    // cvToExtensionProfile runs whatever split the DEPLOYED build has, so a
+    // test run's identity used to change with the deploy state — measured
+    // 2026-08-06: a production still on the old rule re-poisoned the name pair
+    // on every CV edit. Whatever is in this box wins, verbatim, and it lives in
+    // localStorage so it survives reloads.
+    const [override, setOverride] = useState('');
+    const [overrideMsg, setOverrideMsg] = useState('');
+    useEffect(() => {
+        try { setOverride(localStorage.getItem('copoTestProfile') || ''); } catch { /* private mode */ }
+    }, []);
+    const parsedOverride = useMemo(() => {
+        const raw = override.trim();
+        if (!raw) return null;
+        try {
+            const o = JSON.parse(raw);
+            return o && typeof o === 'object' && !Array.isArray(o) ? o as Record<string, unknown> : null;
+        } catch { return null; }
+    }, [override]);
 
     const load = useCallback(async () => {
         setLoading(true); setError('');
@@ -73,7 +92,9 @@ export default function TestApplyPanel() {
             setStatus(job.job_id, { state: 'error', msg: 'Chưa có CV — upload CV trong app trước để có hồ sơ điền form.' });
             return;
         }
-        const profile = cvToExtensionProfile(cvData);
+        // The override, verbatim — no derivation, no dependency on which build
+        // is deployed. Falls back to the CV-derived profile when unset.
+        const profile = parsedOverride ?? cvToExtensionProfile(cvData);
 
         // Render structured CV → PDF and sync into extension storage so hasCV=true
         // (Workday Autofill needs the file). Non-fatal: on render failure we still
@@ -159,6 +180,63 @@ export default function TestApplyPanel() {
                     <ArrowsClockwise size={14} weight="bold" /> Random lại
                 </button>
             </div>
+
+            {/* The test identity, owned here — see `override` above for why it
+                does not go through cvToExtensionProfile. */}
+            <details style={{
+                marginBottom: 12, borderRadius: 12, border: '1px solid var(--border-subtle)',
+                background: 'var(--bg-card)', padding: '10px 14px', fontSize: '0.8rem',
+            }}>
+                <summary style={{ cursor: 'pointer', fontWeight: 600 }}>
+                    Hồ sơ test {parsedOverride ? '— đang dùng bản tự nhập' : '— đang lấy từ CV trong app'}
+                </summary>
+                <p style={{ color: 'var(--text-muted)', margin: '8px 0' }}>
+                    JSON dán vào đây được gửi <strong>nguyên văn</strong> cho extension, không đi qua
+                    bước dựng hồ sơ từ CV — nên dữ liệu test không đổi theo bản web đang deploy.
+                    Để trống = dùng CV trong app như cũ.
+                </p>
+                <textarea
+                    value={override}
+                    onChange={(e) => { setOverride(e.target.value); setOverrideMsg(''); }}
+                    spellCheck={false}
+                    rows={8}
+                    placeholder={'{\n  "fullName": "Hieu Vo",\n  "firstName": "Hieu",\n  "lastName": "Vo",\n  "email": "...",\n  "phone": "..."\n}'}
+                    style={{
+                        width: '100%', fontFamily: 'ui-monospace, monospace', fontSize: '0.75rem',
+                        padding: 10, borderRadius: 8, border: '1px solid var(--border-subtle)',
+                        background: 'var(--bg-app)', color: 'var(--text-primary)', resize: 'vertical',
+                    }}
+                />
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+                    <button
+                        className="btn-secondary"
+                        style={{ fontSize: '0.78rem', padding: '6px 12px' }}
+                        onClick={() => {
+                            try { localStorage.setItem('copoTestProfile', override); } catch { /* private mode */ }
+                            if (!override.trim()) { setOverrideMsg('Đã xoá — quay lại dùng CV trong app.'); return; }
+                            if (!parsedOverride) { setOverrideMsg('JSON không hợp lệ — chưa lưu được để dùng.'); return; }
+                            // Push it into the extension now, so a run started from
+                            // anywhere (not just this panel) uses the same identity.
+                            window.postMessage({ type: 'JOBFIT_SYNC_PROFILE', profile: parsedOverride }, '*');
+                            setOverrideMsg('Đã lưu và bơm sang extension.');
+                        }}
+                    >
+                        Lưu &amp; bơm sang extension
+                    </button>
+                    <button
+                        className="btn-secondary"
+                        style={{ fontSize: '0.78rem', padding: '6px 12px' }}
+                        onClick={() => {
+                            if (!cvData) { setOverrideMsg('Chưa có CV trong app để lấy mẫu.'); return; }
+                            setOverride(JSON.stringify(cvToExtensionProfile(cvData), null, 2));
+                            setOverrideMsg('Đã nạp mẫu từ CV — sửa rồi bấm lưu.');
+                        }}
+                    >
+                        Nạp mẫu từ CV
+                    </button>
+                    {overrideMsg && <span style={{ color: 'var(--text-muted)' }}>{overrideMsg}</span>}
+                </div>
+            </details>
 
             {/* Readiness banner: extension present? CV present? */}
             <div style={{

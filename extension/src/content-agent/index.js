@@ -15,7 +15,7 @@
  */
 
 import { AGENT_MAX_RUNTIME_MS, APPLY_SESSION_TTL_MS, FILL_RETRY_THRESHOLD, POST_ACTION_WAIT_MS, TENANT_REVIEW_FLAGS } from './constants.js';
-import { closeOpenDropdown, safeActivate, setNativeValue, sleep } from './dom.js';
+import { closeOpenDropdown, repairProfileNames, safeActivate, setNativeValue, sleep } from './dom.js';
 import { removeProgress, showConfirmation, showProgress, showToast } from './ui.js';
 import { callAgentPlan, callLLMMapping } from './llm.js';
 import { executeFillInstructions } from './fill.js';
@@ -32,7 +32,7 @@ import { tenantRefFor } from '../ats/tenant.js';
 // you can confirm (in the PAGE / tab console, NOT the service-worker console) that
 // the freshly-built dist is actually loaded. If you don't see this line on the
 // apply tab, the new build isn't injected (reload the extension + refresh the tab).
-const COPO_BUILD = 'prod-final-2026-08-06b';
+const COPO_BUILD = 'prod-final-2026-08-06c';
 try { console.log(`%c[Copo] content-agent build ${COPO_BUILD} loaded → ${location.host}`, 'color:#c43b2e;font-weight:700'); } catch { /* noop */ }
 
 /**
@@ -105,7 +105,22 @@ const WORKDAY_ERROR_CARD_RE =
 /**
  * Main agentic loop: Observe → Plan → Act → Verify.
  */
-async function runAgentLoop(profile) {
+async function runAgentLoop(rawProfile) {
+    // The name pair is re-derived from the profile's OWN fullName before
+    // anything reads it. A profile is only as correct as the web-app build
+    // that produced it, and a production still running the old split
+    // re-poisons it on every CV edit — three times on 2026-08-06, each sync
+    // putting the family name in the given box. This is the last layer before
+    // a real employer sees the name, so it verifies rather than trusts; a
+    // profile that already agrees with itself comes back untouched.
+    const profile = repairProfileNames(rawProfile);
+    if (profile !== rawProfile) {
+        trace('profile.repair', {
+            fullName: String(rawProfile?.fullName || '').slice(0, 40),
+            was: `${rawProfile?.firstName || ''} / ${rawProfile?.lastName || ''}`,
+            now: `${profile.firstName} / ${profile.lastName}`,
+        });
+    }
     // Deliberately NOT a reset. The agent is re-injected on every navigation, so
     // each page load re-enters here — and the steps worth reading are the ones
     // from before the last navigation. The buffer is cleared when a job's result

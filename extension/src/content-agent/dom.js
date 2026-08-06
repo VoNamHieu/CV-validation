@@ -27,6 +27,76 @@ export function foldDiacritics(s) {
 }
 
 /**
+ * The ~20 Vietnamese family names that cover most of the country, with and
+ * without diacritics. Mirrors VN_FAMILY_NAMES in
+ * frontend/src/lib/extension-profile.ts — deliberately duplicated: the whole
+ * point of the repair below is that it must NOT depend on the web app being
+ * up to date.
+ */
+const VN_FAMILY_NAMES = new Set([
+    'nguyen', 'nguyễn', 'tran', 'trần', 'le', 'lê', 'pham', 'phạm',
+    'hoang', 'hoàng', 'huynh', 'huỳnh', 'phan', 'vu', 'vũ', 'vo', 'võ',
+    'dang', 'đặng', 'bui', 'bùi', 'do', 'đỗ', 'ho', 'hồ', 'ngo', 'ngô',
+    'duong', 'dương', 'truong', 'trương', 'dinh', 'đinh',
+]);
+
+/**
+ * Split a full name into the given/family pair, HERE, from the name itself.
+ *
+ * The web app already does this — but a profile is only ever as correct as the
+ * web app build that produced it, and a production still running the old rule
+ * ("the last token is the given name") re-poisons the profile on every CV
+ * edit: measured three times on 2026-08-06, each sync putting the family name
+ * in the given box and the nickname in the legal name. The agent is the last
+ * layer before a real employer sees this, so it re-derives instead of
+ * trusting, and a deploy stops being a prerequisite for correct applications.
+ *
+ * Returns null when the name cannot settle the question — one token, or an
+ * order neither convention makes obvious — so the stored values stand.
+ */
+export function splitLegalName(raw) {
+    const cleaned = String(raw ?? '')
+        .replace(/[（(\[][^）)\]]*[）)\]]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const parts = cleaned.split(' ').filter(Boolean);
+    if (parts.length < 2) return null;
+    const norm = (x) => x.toLowerCase().replace(/[^\p{L}]/gu, '');
+    const lastIsFamily = VN_FAMILY_NAMES.has(norm(parts[parts.length - 1]));
+    const firstIsFamily = VN_FAMILY_NAMES.has(norm(parts[0]));
+    // Western order only when the END looks like a family name and the START
+    // does not — "Nguyen Van Le" (both ends plausible) keeps the VN reading.
+    if (lastIsFamily && !firstIsFamily) {
+        return {
+            firstName: normalizeNameCase(parts.slice(0, -1).join(' ')),
+            lastName: normalizeNameCase(parts[parts.length - 1]),
+        };
+    }
+    if (!firstIsFamily) return null;   // neither end is a known family name
+    return {
+        firstName: normalizeNameCase(parts[parts.length - 1]),
+        lastName: normalizeNameCase(parts.slice(0, -1).join(' ')),
+    };
+}
+
+/**
+ * A profile whose name fields disagree with its own fullName, repaired.
+ *
+ * Pure and idempotent: same input, same output, and a profile already correct
+ * comes back unchanged (=== the input), so callers can compare by identity to
+ * know whether anything was wrong.
+ */
+export function repairProfileNames(profile) {
+    const full = String(profile?.fullName || '').trim();
+    if (!full) return profile;
+    const split = splitLegalName(full);
+    if (!split) return profile;
+    const same = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+    if (same(profile.firstName, split.firstName) && same(profile.lastName, split.lastName)) return profile;
+    return { ...profile, ...split };
+}
+
+/**
  * ALL-CAPS words → Title Case, everything else untouched. CVs write names in
  * caps ("HIEU VO") and Workday raises a capitalization advisory on every one;
  * but a mixed-case word is already someone's deliberate spelling, and a
