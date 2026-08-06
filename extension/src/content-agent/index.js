@@ -33,7 +33,7 @@ import { tenantRefFor } from '../ats/tenant.js';
 // you can confirm (in the PAGE / tab console, NOT the service-worker console) that
 // the freshly-built dist is actually loaded. If you don't see this line on the
 // apply tab, the new build isn't injected (reload the extension + refresh the tab).
-const COPO_BUILD = 'prod-final-2026-08-06l';
+const COPO_BUILD = 'prod-final-2026-08-06m';
 try { console.log(`%c[Copo] content-agent build ${COPO_BUILD} loaded → ${location.host}`, 'color:#c43b2e;font-weight:700'); } catch { /* noop */ }
 
 /**
@@ -106,7 +106,34 @@ const WORKDAY_ERROR_CARD_RE =
 /**
  * Main agentic loop: Observe → Plan → Act → Verify.
  */
+let _loopLive = false;
+
 async function runAgentLoop(rawProfile) {
+    // SINGLE-FLIGHT. Two concurrent loops in one page fight over observe/fill/
+    // advance and die together in silence — measured 2026-08-06 on a
+    // self-driven Mondelez run (⚡ fired twice: interleaved iter counters,
+    // doubled loop.enter, then 20 minutes of nothing on a clean page). A
+    // second start while one is live is a no-op that says so, not a race.
+    if (_loopLive) {
+        console.warn('[Copo Apply] run already live on this page — second start refused');
+        trace('loop.refused', { why: 'already-live' });
+        return;
+    }
+    _loopLive = true;
+    try {
+        return await _runAgentLoop(rawProfile);
+    } catch (e) {
+        // A loop that dies must SAY SO. The silent stall above was unfindable
+        // precisely because nothing recorded the death.
+        trace('loop.crash', { error: String(e && e.message || e).slice(0, 200) });
+        console.error('[Copo Apply] loop crashed:', e);
+        try { showToast('⚠️ Agent gặp lỗi và đã dừng — bấm ⚡ để chạy lại.', 9000); } catch { /* noop */ }
+    } finally {
+        _loopLive = false;
+    }
+}
+
+async function _runAgentLoop(rawProfile) {
     // The name pair is re-derived from the profile's OWN fullName before
     // anything reads it. A profile is only as correct as the web-app build
     // that produced it, and a production still running the old split
