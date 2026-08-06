@@ -190,13 +190,28 @@ export const FALLBACK_RECIPES = [
                 // Application Questions page too, so its notice-period and salary
                 // fields were never filled on any job.
                 name: 'My Experience',
-                detect: '[data-automation-id="formField-degree"]',
+                // Two shapes of the same step: with rows (résumé parse made
+                // them — formField-degree exists) and EMPTY (PwC /apply without
+                // the autofill path: three bare sections, three Add buttons,
+                // not one formField). The empty shape matched nothing, so the
+                // agent clicked straight past and submitted an application
+                // with no work history, education, or languages — legal per
+                // Workday (sections unstarred), worthless per common sense.
+                // myExperiencePage is the step container's own automation id,
+                // present in both shapes.
+                detect: '[data-automation-id="formField-degree"], [data-automation-id="myExperiencePage"]',
                 // Work Experience starts EMPTY on some jobs — measured: the section
                 // shows an Add button and no fields at all, while the same step on
                 // another job of the same company had them, because Workday's
                 // résumé parse created a row there. Mondelez varies the form per
                 // job, so the recipe cannot assume either shape.
-                ensureSections: ['Work Experience'],
+                // Education and Languages join Work Experience: on the empty
+                // shape ALL THREE need their Add clicked before a single field
+                // exists to fill. Each add is guarded by already-present, so
+                // parse-filled forms are untouched; once the Education row
+                // renders, Degree/School/Field fill as always, and the
+                // language-row pass sees formField-language appear.
+                ensureSections: ['Work Experience', 'Education', 'Languages'],
                 fields: [
                     // Also a claim about the candidate, so also no `pickAny`: the
                     // first option in a degree list is as likely to be "High

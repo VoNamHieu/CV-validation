@@ -175,7 +175,7 @@ describe('repeating sections are created before they are filled', () => {
         // else, because Workday's résumé parse had created a row on the first and
         // not the second. The recipe cannot fill a row that does not exist, and it
         // cannot assume either shape.
-        assert.deepEqual(exp.ensureSections, ['Work Experience']);
+        assert.deepEqual(exp.ensureSections, ['Work Experience', 'Education', 'Languages']);
     });
 
     test('the fields it unlocks are declared', () => {
@@ -241,4 +241,19 @@ describe('the degree LEVEL is derivable without a model', () => {
             }
         }
     });
+});
+
+
+describe('the empty My Experience page is still My Experience', () => {
+    // PwC's /apply flow (no résumé autofill) renders three bare sections and
+    // three Add buttons — not one formField. The step used to detect by
+    // formField-degree alone, matched nothing, and the agent advanced past an
+    // application with no work history at all.
+    const step = FALLBACK_RECIPES.workday.steps.find(s => s.name === 'My Experience');
+
+    test('detect covers both the filled and the empty shape', () => {
+        assert.ok(step.detect.includes('formField-degree'));
+        assert.ok(step.detect.includes('myExperiencePage'));
+    });
+
 });
