@@ -133,6 +133,12 @@ export interface JDEntry {
   // written for THIS job, not the generic summary. coverLetterLang labels it.
   coverLetter?: string;
   coverLetterLang?: string;
+  // Short per-job note for an ATS's free-text "message to the hiring team" box,
+  // generated automatically at apply time (not on a button) for the forms whose
+  // recipe has such a box. Cached on the entry so re-applying the same job — or
+  // a retry after a failed run — does not pay for it twice.
+  applyMessage?: string;
+  applyMessageLang?: string;
   jobTitle?: string;
   company?: string;
   // Job's free-text location (from the listing), used for city matching.

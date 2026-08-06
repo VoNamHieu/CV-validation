@@ -126,6 +126,19 @@ export async function generateCoverLetter(
     return data.coverLetter;
 }
 
+// The short version of the same thing, for an ATS's free-text "message to the
+// hiring team" box. Same route, same anti-fabrication rules, different shape —
+// see LetterFormat in lib/cover-letter.
+export async function generateApplyMessage(
+    cv: unknown, jd: unknown, match: unknown, lang: string,
+): Promise<string> {
+    const data = await aiPost<{ coverLetter: string }>(
+        '/api/ai/cover-letter', { cv, jd, match, lang, format: 'message' },
+        'Tạo lời nhắn cho nhà tuyển dụng thất bại',
+    );
+    return data.coverLetter;
+}
+
 export async function crawlUrl(url: string, keepLinks = false): Promise<{ text: string; textWithLinks?: string; jsonLd?: Record<string, unknown> | null; source_url?: string }> {
     const res = await fetch('/api/crawl-url', {
         method: 'POST',

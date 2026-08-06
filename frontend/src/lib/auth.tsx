@@ -9,6 +9,7 @@ import {
 import type { Session, User } from '@supabase/supabase-js';
 import { getSupabase } from './supabase';
 import { useAppStore } from '@/store/useAppStore';
+import { syncAuthTokenToExtension } from './extension-sync';
 
 interface AuthResult {
     error?: string;
@@ -56,6 +57,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             // Dismiss the soft-gate prompt the moment auth succeeds (covers
             // sign-in in another tab / email-confirm landing while it's open).
             if (s) setPromptOpen(false);
+            // Keep the extension's copy of the token fresh. Supabase fires this
+            // on TOKEN_REFRESHED (~hourly), which is what stops the extension's
+            // just-in-time ATS credential fetch from dying mid-batch on a stale
+            // token. Best-effort: fails silently when the extension isn't there.
+            if (s) void syncAuthTokenToExtension().catch(() => { });
         });
         return () => {
             active = false;

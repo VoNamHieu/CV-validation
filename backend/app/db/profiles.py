@@ -83,8 +83,25 @@ async def delete_account(user_id: str) -> None:
                 "   OR (email IS NOT NULL AND lower(email) = lower($2))",
                 user_id, email or "",
             )
+            # ats_auth_attempts / ats_default_credentials cascade off the tables
+            # below, but list them anyway — this cleanup deliberately does not
+            # rely on every FK being ON DELETE CASCADE, and these rows hold
+            # third-party credentials.
             for table in ("applications", "saved_jobs", "cv_profiles",
-                          "credit_ledger", "credits"):
+                          "credit_ledger", "credits", "ats_auth_attempts",
+                          "ats_tenant_accounts", "ats_default_credentials",
+                          "ats_credentials"):
+                # The ats_* tables arrive with migration 015, which ships
+                # decoupled from this code (the feature is 503-gated until
+                # ATS_CRED_KEY is set). A wipe must not abort account deletion
+                # for every user over a table belonging to a feature none of
+                # them has touched — but a MISSING core table stays a hard
+                # failure, because that is a real bug, not a rollout gap.
+                if table.startswith("ats_"):
+                    exists = await conn.fetchval(
+                        "SELECT to_regclass($1)", f"public.{table}")
+                    if exists is None:
+                        continue
                 await conn.execute(f"DELETE FROM {table} WHERE user_id = $1", user_id)
             await conn.execute("DELETE FROM profiles WHERE id = $1", user_id)
             await conn.execute("DELETE FROM auth.users WHERE id = $1", user_id)

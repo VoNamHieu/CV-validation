@@ -9,7 +9,8 @@
     "tabs",
     "scripting",
     "webNavigation",
-    "cookies"
+    "cookies",
+    "alarms"
   ],
   "host_permissions": [
     "https://*.topcv.vn/*",
@@ -24,6 +25,7 @@
     "https://*.greenhouse.io/*",
     "https://*.ashbyhq.com/*",
     "https://*.myworkdayjobs.com/*",
+    "https://*.myworkdaysite.com/*",
     "https://*.smartrecruiters.com/*",
     "https://*.icims.com/*",
     "https://*.taleo.net/*",
@@ -64,6 +66,7 @@
         "https://*.greenhouse.io/*",
         "https://*.ashbyhq.com/*",
         "https://*.myworkdayjobs.com/*",
+        "https://*.myworkdaysite.com/*",
         "https://*.smartrecruiters.com/*",
         "https://*.icims.com/*",
         "https://*.taleo.net/*",

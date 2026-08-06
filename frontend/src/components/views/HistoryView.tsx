@@ -1,12 +1,14 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     Briefcase, MagnifyingGlass, ArrowSquareOut, Trash, CaretDown, CaretUp,
     Trophy, Crosshair, TrendUp, Warning, Clock, Globe, Sparkle,
     ArrowClockwise, NotePencil, FunnelSimple, ChatCircleDots,
 } from '@phosphor-icons/react';
 import { useAppStore, JobRecord, JobStatus, JOB_STATUS_ORDER } from '@/store/useAppStore';
+import PendingActionsSection from '@/components/ats/PendingActionsSection';
+import { useAtsCredentials } from '@/lib/ats-credentials-context';
 
 // ── Status presentation ──
 const STATUS_META: Record<JobStatus, { label: string; color: string; bg: string; border: string }> = {
@@ -233,6 +235,12 @@ export default function HistoryView() {
     // stale after a save on another tab / device).
     useEffect(() => { void loadJobHistory(); }, [loadJobHistory]);
 
+    // ATS tenants that need the user (email verification, a different password).
+    // Server-held, so this survives a reload and shows up on another device —
+    // which is the point: the user often acts hours after the batch ran.
+    const { accounts: atsAccountsState, refresh: refreshAtsAccounts } = useAtsCredentials();
+    useEffect(() => { void refreshAtsAccounts(); }, [refreshAtsAccounts]);
+
     const [expandedId, setExpandedId] = useState<string | null>(null);
     const [query, setQuery] = useState('');
     const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -303,6 +311,14 @@ export default function HistoryView() {
                     </button>
                 )}
             </div>
+
+            {/* Tenants waiting on the user (verify an email, supply a password).
+                Above the list and outside the empty-state branch: this is the one
+                place a user who verified their mail hours later comes back to. */}
+            <PendingActionsSection
+                accounts={atsAccountsState}
+                onChanged={() => { void refreshAtsAccounts(); }}
+            />
 
             {jobHistory.length === 0 ? (
                 <EmptyState />

@@ -578,6 +578,93 @@ export const account = {
         req<PracticeAttempt[]>(`/api/me/interview/attempts?prep_id=${encodeURIComponent(prepId)}`, { auth: true }),
 };
 
+// ── ATS candidate accounts (Workday login/signup for auto-apply) ──
+// The password is write-only from the browser's side: it goes up here and comes
+// back only to the extension, just-in-time, via /credential/for-apply. Nothing
+// in this group ever returns it.
+
+/** Durable verdict for one tenant. Everything except `unknown`/`ready` means the
+ *  runner will not touch this tenant until the user acts. */
+export type AtsAccountState =
+    | 'unknown' | 'ready' | 'verification_required' | 'credential_required'
+    | 'password_reset_required' | 'consent_required' | 'challenge_required'
+    | 'temporarily_locked' | 'unsupported';
+
+/** Which credential this tenant authenticates with — `legacy_default` is a
+ *  healthy tenant still pinned to a rotated-away default, NOT a problem. */
+export type AtsCredentialMode = 'default' | 'legacy_default' | 'override';
+
+export interface AtsAccount {
+    tenantKey: string;
+    canonicalHost: string;
+    careerSiteKey: string | null;
+    accountState: AtsAccountState;
+    credentialMode: AtsCredentialMode;
+    lastErrorCode: string | null;
+    verificationRequestedAt: string | null;
+    nextRetryAt: string | null;
+    lastAuthSuccessAt: string | null;
+    updatedAt: string | null;
+}
+
+export interface AtsAccountsResponse {
+    atsVendor: string;
+    hasDefaultCredential: boolean;
+    accounts: AtsAccount[];
+}
+
+export interface AtsDefaultCredential {
+    atsVendor: string;
+    hasDefaultCredential: boolean;
+    email: string;              // masked, e.g. "hi***@gmail.com"
+    lifecycleState: string | null;
+    updatedAt: string | null;
+}
+
+export const atsAccounts = {
+    /** Batch-start check: do we have a usable default, and what does each tenant
+     *  already need? Read-only — it does not create tenant rows. */
+    resolve: (tenants: { tenantKey: string; canonicalHost?: string; careerSiteKey?: string }[],
+              atsVendor = 'workday') =>
+        req<AtsAccountsResponse>(`/api/me/ats-accounts/resolve`, {
+            method: 'POST', auth: true, body: JSON.stringify({ atsVendor, tenants }),
+        }),
+
+    list: (atsVendor = 'workday') =>
+        req<AtsAccountsResponse>(`/api/me/ats-accounts?atsVendor=${atsVendor}`, { auth: true }),
+
+    getDefault: (atsVendor = 'workday') =>
+        req<AtsDefaultCredential>(`/api/me/ats-credentials/default?atsVendor=${atsVendor}`, { auth: true }),
+
+    /** Create or rotate the default. Always inserts — tenants pinned to the old
+     *  credential keep working, because that's the password their account has. */
+    setDefault: (email: string, password: string, atsVendor = 'workday') =>
+        req<{ id: string; email: string; createdAt: string }>(`/api/me/ats-credentials/default`, {
+            method: 'POST', auth: true, body: JSON.stringify({ atsVendor, email, password }),
+        }),
+
+    /** Per-tenant credential for an account that predates us. Email is editable
+     *  too: an existing account may sit under a different address entirely. */
+    setTenantCredential: (
+        tenantKey: string, email: string, password: string,
+        opts?: { canonicalHost?: string; careerSiteKey?: string; atsVendor?: string },
+    ) => req<AtsAccount>(`/api/me/ats-accounts/${encodeURIComponent(tenantKey)}/credential`, {
+        method: 'POST', auth: true,
+        body: JSON.stringify({
+            atsVendor: opts?.atsVendor ?? 'workday', email, password,
+            canonicalHost: opts?.canonicalHost, careerSiteKey: opts?.careerSiteKey,
+        }),
+    }),
+
+    /** "I've verified my email / fixed it" — clears the block so the next batch
+     *  probes once more. Does not log in by itself. */
+    retry: (tenantKey: string, atsVendor = 'workday') =>
+        req<AtsAccount>(
+            `/api/me/ats-accounts/${encodeURIComponent(tenantKey)}/retry?atsVendor=${atsVendor}`,
+            { method: 'POST', auth: true },
+        ),
+};
+
 export interface InterviewPrep {
     id: string;
     user_id: string;

@@ -55,7 +55,7 @@ function postAndAwait(
     });
 }
 
-/** Sync the 23-field profile into extension storage. */
+/** Sync the flat profile into extension storage. */
 export async function syncProfileToExtension(
     profile: ExtensionProfile,
     cvData?: CVData,
@@ -88,18 +88,21 @@ export function syncCvFileToExtension(
 }
 
 /**
- * Sync the login credentials the auto-apply agent reuses to sign in / create an
- * account on ATS that gate their apply behind a login (Workday, SuccessFactors…).
- * Collected by LoginCredentialsBanner; the agent fills them ONLY into a genuine
- * login/signup form's own email + password fields.
+ * Push the current auth token to the extension on its own.
+ *
+ * Previously the token only rode along with profile sync, so it refreshed only
+ * when the user edited their CV — a Supabase access token lives ~1h, and the
+ * extension now needs a live one mid-batch to fetch ATS credentials just in
+ * time (and again when the user clicks "Đã xác minh" hours later). This is the
+ * standalone path; a separate message type on purpose, since reusing
+ * JOBFIT_EXPORT_PROFILE would overwrite the stored profile with undefined.
  */
-export function syncApplyCredentialsToExtension(
-    email: string,
-    password: string,
-): Promise<SyncResult> {
+export async function syncAuthTokenToExtension(): Promise<SyncResult> {
+    const token = await getAccessToken();
+    if (!token) return { ok: false, error: "Chưa đăng nhập." };
     return postAndAwait(
-        { type: "JOBFIT_SYNC_CREDENTIALS", email, password },
-        "JOBFIT_SYNC_CREDENTIALS_RESPONSE",
+        { type: "JOBFIT_SYNC_TOKEN", token },
+        "JOBFIT_SYNC_TOKEN_RESPONSE",
     );
 }
 
@@ -107,7 +110,7 @@ export function syncApplyCredentialsToExtension(
 
 /**
  * Sync the rich CV JSON into extension storage. The extension needs this to
- * tailor the CV against a job page's JD (Mode 1) — the flat 23-field profile
+ * tailor the CV against a job page's JD (Mode 1) — the flat profile
  * isn't enough (no experience bullets / skills detail).
  */
 export function syncCvDataToExtension(cv: CVData): Promise<SyncResult> {

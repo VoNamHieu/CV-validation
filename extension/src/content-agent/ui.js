@@ -35,7 +35,9 @@ export function showProgress(step, total, detail) {
     el.textContent = '';
 
     const title = document.createElement('div');
-    title.textContent = `⚡ Auto Apply Agent (${step}/${total})`;
+    // No iteration cap any more — a null total renders as a plain round
+    // counter instead of a fraction of a limit that no longer exists.
+    title.textContent = total ? `⚡ Auto Apply Agent (${step}/${total})` : `⚡ Auto Apply Agent — vòng ${step}`;
     title.style.fontWeight = '700';
     title.style.marginBottom = '4px';
     el.appendChild(title);
@@ -53,9 +55,10 @@ export function showProgress(step, total, detail) {
     });
     const fill = document.createElement('div');
     Object.assign(fill.style, {
-        height: '100%', width: `${(step / total) * 100}%`,
+        height: '100%', width: total ? `${(step / total) * 100}%` : '100%',
         background: 'linear-gradient(90deg, #8b5cf6, #06b6d4)',
         borderRadius: '2px', transition: 'width 0.3s ease',
+        opacity: total ? '1' : '0.5',
     });
     bar.appendChild(fill);
     el.appendChild(bar);

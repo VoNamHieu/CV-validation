@@ -80,6 +80,15 @@ interface AgentPlanRequest {
     profileData: Record<string, unknown>;
     history: HistoryEntry[];
     hasCV: boolean;
+    /** Education, languages and certificates from the structured CV. Present so
+     *  the planner can INFER answers the CV never states outright — chiefly which
+     *  entry in a degree list a qualification corresponds to, and whether the
+     *  candidate holds the certification a job names. */
+    credentials?: {
+        education?: { degree?: string; institution?: string; year?: string }[];
+        languages?: { language?: string; level?: string }[];
+        certifications?: { name?: string; issuer?: string; year?: string }[];
+    } | null;
 }
 
 interface AgentPlan {
@@ -127,7 +136,7 @@ export async function POST(request: Request) {
         const unauth = await requireUser(request);
         if (unauth) return unauth;
 
-        const { pageState, profileData, history, hasCV } = (await request.json()) as AgentPlanRequest;
+        const { pageState, profileData, history, hasCV, credentials } = (await request.json()) as AgentPlanRequest;
 
         if (!pageState || !profileData) {
             return NextResponse.json({ detail: 'pageState and profileData are required' }, { status: 400 });
@@ -175,6 +184,9 @@ ${JSON.stringify(profileData, null, 2)}
 
 ## HAS CV FILE: ${hasCV}
 
+## EDUCATION, LANGUAGES & CERTIFICATIONS (from the candidate's CV — use these to INFER, see rule 24):
+${JSON.stringify(credentials ?? {}, null, 2)}
+
 ## ACTION HISTORY (last ${history?.length || 0} actions):
 ${JSON.stringify(history || [], null, 2)}
 
@@ -188,7 +200,8 @@ Decide the single best next action. Return a JSON object.
 4. If all fields are filled, no errors, and there's a "Submit"/"Apply" button → action "DONE" (let user review and submit manually)
 5. If no fields found → action "SCROLL" to discover more fields
 6. If the page shows success/completion → action "DONE"
-7. If you're stuck or the form requires info not in the profile → action "NEED_HUMAN" with explanation. BLOCKERS (captcha/login) alone are NOT a reason to bail: keep filling every other unfilled field first. Only return NEED_HUMAN for a blocker when there are no more fields you can fill AND the blocker still prevents progress.
+7. If you're stuck → action "NEED_HUMAN" with explanation. BLOCKERS (captcha/login) alone are NOT a reason to bail: keep filling every other unfilled field first. Only return NEED_HUMAN for a blocker when there are no more fields you can fill AND the blocker still prevents progress.
+7b. A question whose answer is not in the profile is NOT automatically NEED_HUMAN. Your job is to complete the application so the user can review the whole thing at the end; stopping halfway leaves them a half-filled form AND no review. Apply these deterministic answers (see ANSWER POLICY below) before considering NEED_HUMAN.
 8. NEVER click Submit/Apply yourself — always return DONE and let the user submit
 9. For fields with componentType 'react-select', 'mui-autocomplete', 'ant-select', 'select2', or 'custom-dropdown': use action 'custom-select'
 10. For fields with componentType 'native-select': use action 'select'
@@ -214,8 +227,58 @@ Decide the single best next action. Return a JSON object.
     - "kỹ năng", "skills" → skills
     - "bằng cấp", "education" → highestDegree
 18. Build CSS selectors: prefer the selector already provided in each field object
-19. NEVER fabricate data not in the profile
+19. NEVER fabricate a FACT about the candidate that is not in the profile — their
+    salary, their dates, their employers, their work authorization. That is
+    different from choosing a form's own neutral option, which rule 21 covers.
 20. For dropdowns, pick the closest matching option from available choices
+
+## ANSWER POLICY (how to answer questions the profile does not cover):
+21. Answer these deterministically, choosing ONLY from the options the form
+    actually offers. These are not facts invented about the candidate — they are
+    either the form's own decline option or the neutral answer:
+    - Demographic / EEO self-identification (race, gender, disability, veteran):
+      pick the decline option — "I don't wish to answer" / "Prefer not to say" /
+      "Decline to self-identify". NEVER pick an actual demographic value.
+    - "Are you a current employee?" / "Have you worked here before?" /
+      "Do you have a conflict of interest / a relative working here?" /
+      "Are you related to a partner, principal or employee?" → No
+    - "Are you willing and able to travel per the job description?" → Yes.
+      Applying to a job states willingness to do it as described.
+    - "I consent to receive communication about my application / this
+      recruitment" → Yes. Marketing or newsletter consent is NOT this — leave
+      those alone.
+    - Mandatory acknowledgements ("I have read and understand…") → agree/yes.
+    - "How did you hear about us?" → Company Website (or the closest of:
+      Company Careers Website, Employer Website, Careers Website, Website,
+      Online). NEVER pick "Employee referral", "Recruiter", "Job fair" or
+      "University" — those name a person or event that does not exist.
+22. Do NOT guess these two — leave them unfilled and say so in "reason" if they
+    block: work authorization and visa sponsorship. A wrong answer there is a
+    material misstatement on a real application, and the user sees the field on
+    the review page.
+23. Everything you answer under rule 21 will be shown to the user at review as an
+    agent default, so prefer the neutral option over the flattering one.
+24. You MAY INFER an answer when it is derivable from evidence you were given,
+    and you must pick ONLY from the options the form actually offers:
+    - Degree / qualification: derive it from EDUCATION above — the institution,
+      the subject and the years together determine which award a school grants.
+      A degree list is usually named per discipline ("B.B.A. - Bachelor of
+      Business Administration", "B.S. - Bachelor of Science", "B.Eng - Bachelor
+      of Engineering"), so match the SUBJECT, not the word "Bachelor" alone.
+      A Vietnamese "Cử nhân" is a bachelor's; "Kỹ sư" is an engineering
+      bachelor's; "Thạc sĩ" is a master's.
+    - Language and proficiency: derive from LANGUAGES above, or from the language
+      the CV and the education are in.
+    - "Do you hold the professional certification / licence / clearance this job
+      requires?": read CERTIFICATIONS above. One that plainly covers what the job
+      names → Yes. Nothing relevant listed → No (or the form's "Not applicable").
+      This is reading the CV, not guessing: an absent certificate is an answer.
+    If the evidence does not single out one option — several equally plausible,
+    or the subject is missing — answer nothing and say so in "reason". A degree
+    picked by coin flip is a false credential on a real application.
+25. NEVER infer these; they are knowable only to the candidate and no evidence
+    implies them: GPA / grade average, salary expectation, notice period, work
+    authorization, visa sponsorship. Leave them and name them in "reason".
 
 ## OUTPUT FORMAT:
 {

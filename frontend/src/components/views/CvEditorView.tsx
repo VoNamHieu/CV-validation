@@ -4,12 +4,14 @@ import { useState, useMemo, useCallback, useEffect } from 'react';
 import {
     Sparkle, Warning, FloppyDisk, CaretLeft, CaretRight,
     UploadSimple, FileText, SpinnerGap, CircleNotch, ClipboardText, MagicWand, UserCircle,
+    LockKey,
 } from '@phosphor-icons/react';
 import { useAppStore } from '@/store/useAppStore';
 import CvDocumentPreview from '@/components/CvDocumentPreview';
 import EditableTemplateFrame from '@/components/EditableTemplateFrame';
 import CvTemplatePicker from '@/components/CvTemplatePicker';
 import { PersonalInfoSection } from '@/components/steps/StepEditCv';
+import AtsAccountsPanel from '@/components/ats/AtsAccountsPanel';
 import { applyCvFieldEdit } from '@/lib/cv-inline-edit';
 import { parsePdfWithAI, renderCvPdf, extractCvStructured } from '@/lib/api';
 import { renderCvHtml, getTemplate, DEFAULT_TEMPLATE_ID } from '@/lib/cv-templates';
@@ -248,7 +250,10 @@ function CvEditorWorkspace({ cv }: { cv: CVData }) {
     const [downloadingPdf, setDownloadingPdf] = useState(false);
     const [pdfError, setPdfError] = useState('');
     // Personal info now lives in its own tab, separate from the CV editor.
-    const [tab, setTab] = useState<'cv' | 'personal'>('cv');
+    // 'accounts' holds the ATS candidate-account credentials the auto-apply
+    // agent uses — account-level settings, so it sits beside personal info
+    // rather than inside the apply flow.
+    const [tab, setTab] = useState<'cv' | 'personal' | 'accounts'>('cv');
 
     const workingCv = editedCv ?? cv;
     // Personal-info edits (contact/personal/employment/preferences) go to cvData
@@ -339,6 +344,7 @@ function CvEditorWorkspace({ cv }: { cv: CVData }) {
                 {([
                     { id: 'cv' as const, label: 'CV', icon: FileText },
                     { id: 'personal' as const, label: 'Thông tin cá nhân', icon: UserCircle },
+                    { id: 'accounts' as const, label: 'Tài khoản ứng tuyển', icon: LockKey },
                 ]).map(({ id, label, icon: Icon }) => {
                     const active = tab === id;
                     return (
@@ -361,6 +367,9 @@ function CvEditorWorkspace({ cv }: { cv: CVData }) {
 
             {/* ══════ Personal Info tab — editable, auto-synced to extension ══════ */}
             {tab === 'personal' && <PersonalInfoSection cv={cv} onChange={setCvData} />}
+
+            {/* ══════ ATS candidate accounts (Workday login/signup) ══════ */}
+            {tab === 'accounts' && <AtsAccountsPanel />}
 
             {tab === 'cv' && (<>
             {/* ══════ AI Disclaimer ══════ */}

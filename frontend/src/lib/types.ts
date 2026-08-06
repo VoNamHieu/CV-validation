@@ -15,6 +15,10 @@ export interface EducationDetail {
     degree: string;
     institution: string;
     year: string;
+    /** Optional: several ATS ask for it as a REQUIRED field (Workday's "Overall
+     *  Result (GPA)"), and no résumé parse can supply it — only the candidate
+     *  knows. Optional so CVs saved before this existed still type-check. */
+    gpa?: string;
 }
 
 export interface ProjectDetail {
@@ -49,6 +53,8 @@ export interface ContactInfo {
     address_province: string;
     address_district: string;
     address_street: string;
+    /** Required by several international ATS and never present on a CV. */
+    address_postal_code?: string;
     linkedin: string;
     github: string;
     portfolio: string;
@@ -58,6 +64,17 @@ export interface PersonalInfo {
     date_of_birth: string;
     gender: string;
     nationality: string;
+    // Ethnic group ("Kinh") — VN forms (and Workday VN tenants' Race/Ethnicity
+    // prompt) ask it as an administrative fact; the decline phrasings the agent
+    // otherwise uses don't exist in that country-specific option list.
+    ethnicity: string;
+    // Tên đệm ("Nam" in Võ Nam Hiếu). Some tenants (P&G) render "Intercalary
+    // (or Middle) Name" as a REQUIRED field in both scripts — and it is not
+    // derivable when the CV's own name line omits it, so it has to be askable.
+    middle_name: string;
+    // "Do you hold a valid driver's license?" — Unilever asks it REQUIRED.
+    // Yes/Có or No/Không; empty = the agent reports a named gap, never guesses.
+    drivers_license: string;
     marital_status: string;
 }
 
@@ -75,6 +92,20 @@ export interface EmploymentInfo {
 export interface JobPreferences {
     desired_locations: string;
     desired_salary: string;
+    /** Answers application forms demand that a CV never states. Collected once,
+     *  reused at every company — the alternative is what happens today: an
+     *  application stalls on "Notice period", the user fixes it by hand, and the
+     *  next company asks exactly the same thing.
+     *  Optional so existing saved CVs still type-check. */
+    notice_period?: string;
+    /** "Are you legally authorized to work in X?" — a material statement, so the
+     *  agent never guesses it. Stored as the candidate's own answer. */
+    work_authorized?: string;
+    /** "Will you require visa sponsorship?" — same reasoning. */
+    requires_sponsorship?: string;
+    /** "What is your earliest available start date?" (PwC asks it REQUIRED as a
+     *  full date). YYYY-MM-DD. Empty → the agent derives today + notice period. */
+    available_start_date?: string;
 }
 
 // Languages a cover letter can be generated in. Add an entry here and it shows
@@ -121,7 +152,7 @@ export const EMPTY_CONTACT: ContactInfo = {
 };
 
 export const EMPTY_PERSONAL: PersonalInfo = {
-    date_of_birth: '', gender: '', nationality: '', marital_status: '',
+    date_of_birth: '', gender: '', nationality: '', ethnicity: '', middle_name: '', drivers_license: '', marital_status: '',
 };
 
 export const EMPTY_EMPLOYMENT: EmploymentInfo = {

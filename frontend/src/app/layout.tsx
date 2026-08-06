@@ -5,6 +5,7 @@ import "./globals.css";
 import { AuthProvider } from "@/lib/auth";
 import { CreditsProvider } from "@/lib/credits-context";
 import { ConsentProvider } from "@/lib/consent-context";
+import { AtsCredentialsProvider } from "@/lib/ats-credentials-context";
 import GlobalAuthModal from "@/components/GlobalAuthModal";
 import FloatingFeedback from "@/components/FloatingFeedback";
 import AnalyticsTracker from "@/components/AnalyticsTracker";
@@ -93,12 +94,14 @@ export default function RootLayout({
         <AuthProvider>
           <CreditsProvider>
             <ConsentProvider>
+              <AtsCredentialsProvider>
               {children}
               <GlobalAuthModal />
               <FloatingFeedback />
               <AnalyticsTracker />
               <InstallExtensionModal />
               <GrantPermissionModal />
+              </AtsCredentialsProvider>
             </ConsentProvider>
           </CreditsProvider>
         </AuthProvider>

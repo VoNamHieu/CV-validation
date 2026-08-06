@@ -72,14 +72,62 @@ export interface RecipeField {
     control?: string;     // selector for the control INSIDE a shadow host (e.g. 'input[type="tel"]');
                           // resolved by piercing shadow roots. Defaults to the first text control.
     profileKey?: string;  // key in the synced ExtensionProfile (omit for a fixed `value`)
+    /** Dotted/indexed path into the STRUCTURED CV (`jobfitCv`) —
+     *  `education[0].institution`, `languages[0].level`, `experience[1].company`.
+     *  The flat profile is one string per concept and cannot express a list;
+     *  Workday asks for school / qualification / subject / grade / language level
+     *  as five separate required fields, and for a second education entry after
+     *  that. Resolution order is value → profileKey → cvPath → default. */
+    cvPath?: string;
     value?: string;       // fixed value (e.g. Postal "100000") — wins over profileKey
     default?: string;     // fallback when the profile key is empty (e.g. Country → "Vietnam")
-    pickAny?: boolean;    // required-but-arbitrary dropdown: any option satisfies it
+    /** Semantic fallbacks for a required dropdown, tried in order after the
+     *  resolved value. Replaces the old `pickAny`, which took the FIRST option
+     *  when nothing matched — on "How did you hear about us?" that is a coin flip
+     *  between "Employee referral", "Recruiter" and "Job fair", i.e. a claim about
+     *  the candidate invented by the agent. No match now means the field is left
+     *  for the user rather than answered wrongly. */
+    valuePriority?: string[];
+    /** Where this answer came from, for the review hand-off. Omit when the value
+     *  is resolved from the profile. */
+    answerSource?: 'AGENT_DEFAULT';
     multi?: boolean;      // input-based multi-select (Country Phone Code): idempotency checks selectedItemList
     labelMatch?: string;  // match a dynamic-id field by its question/label text (Application Questions)
     // shadow-text  = text input inside a web-component shadow root (SmartRecruiters spl-input)
     // autocomplete = type-to-search field that must commit a picked suggestion (SR city)
-    type?: 'text' | 'select' | 'custom-select' | 'shadow-text' | 'autocomplete' | 'date' | 'file' | 'radio' | 'checkbox';
+    // search-multi = a multi-select that refuses free text (Workday Skills):
+    // each value must be typed, then picked from the search results it returns.
+    type?: 'text' | 'select' | 'custom-select' | 'shadow-text' | 'autocomplete' | 'date' | 'file' | 'radio' | 'checkbox' | 'search-multi';
+    /** Cap for a multi-value field, so a long skills list is not typed in full. */
+    max?: number;
+    /** Reshape the resolved value before filling. 'name' = one capital per word
+     *  for ALL-CAPS words only. The web app already normalises names when it
+     *  builds the profile, but that runs at SYNC time — a profile synced before
+     *  that shipped still shouts, and re-syncing is a step nobody should need to
+     *  know about. Applying it at fill time makes the result independent of when
+     *  the profile was last synced. Never applied to a fixed `value`. */
+    normalize?: 'name';
+    /** Values the field can possibly take. A degree dropdown lists
+     *  QUALIFICATIONS, and CVs write the SUBJECT on the same line — so
+     *  `highestDegree` arrives as "Marketing" and the search is doomed before it
+     *  starts, at ten seconds an iteration. A rejected value resolves to empty,
+     *  which leaves a gap the review names instead. */
+    accept?: 'qualification';
+    /** When nothing matches, ask the model to choose from the options actually on
+     *  screen, given the candidate's education. For fields where no string rule
+     *  can work: a Vietnamese qualification ("Cử nhân Marketing") has to be mapped
+     *  onto a list that never names it (B.S. / B.B.A. / L.L.B.). The reply is
+     *  discarded unless it is one of the offered options. */
+    infer?: boolean;
+    /** Free-text the agent WRITES when the profile carries none, instead of
+     *  leaving the box empty. Only 'message' so far: the note an ATS asks for
+     *  the hiring team, which no stored field can answer because it has to be
+     *  about THIS job. The web app normally generates it before dispatch (it
+     *  holds the JD); this is the fallback for an apply that never went through
+     *  the editor, and it is why the field is not simply skipped for having no
+     *  value. Bound by the same anti-fabrication rule as every other generator:
+     *  CV facts only. */
+    generate?: 'message';
     required?: boolean;
 }
 export interface RecipeStep {
@@ -87,6 +135,18 @@ export interface RecipeStep {
     detect?: string;      // selector present when this step is on screen
     fields: RecipeField[];
     advance?: string;     // "Next"/"Continue" button selector
+    // Precondition for LEAVING this step: `advance` is withheld until this
+    // selector matches. The résumé-upload step needs it — clicking Continue
+    // before the file attaches skips the parse the step exists for. Only enforced
+    // when a CV is actually in play, so a text-only apply cannot deadlock waiting
+    // for an upload that was never going to happen.
+    advanceWhen?: string;
+    /** Repeating sections that must have an entry before their fields exist.
+     *  Measured on Mondelez: "Work Experience" renders an Add button and nothing
+     *  else until it is pressed — and the same step on another job of the same
+     *  company came pre-filled, because the résumé parse created a row there. The
+     *  section heading identifies the button; all of them share one automation id. */
+    ensureSections?: string[];
 }
 // A non-form gateway the agent must click to reach the form (e.g. Workday's
 // "Start Your Application" modal, rendered as <a role="button"> the generic scan
@@ -130,7 +190,7 @@ export interface ApplyRecipe {
 const WORKDAY: ApplyRecipe = {
     ats: 'workday',
     label: 'Workday',
-    version: 5,
+    version: 13,
     verified: true,
     hostPattern: '\\.myworkdayjobs\\.com|\\.myworkdaysite\\.com',
     login: {
@@ -154,10 +214,16 @@ const WORKDAY: ApplyRecipe = {
                 // Western-script name — the required, always-present pair (a tenant
                 // that also enables local-script names adds *--firstNameLocal, which
                 // we leave to the LLM since we have no romanization-split for it).
-                { label: 'First name', selector: '[data-automation-id="formField-legalName--firstName"] input', profileKey: 'firstName', type: 'text', required: true },
-                { label: 'Last name', selector: '[data-automation-id="formField-legalName--lastName"] input', profileKey: 'lastName', type: 'text', required: true },
-                { label: 'Address line 1', selector: '[data-automation-id="formField-addressLine1"] input', profileKey: 'addressStreet', type: 'text' },
-                { label: 'District or Town', selector: '[data-automation-id="formField-city"] input', profileKey: 'addressDistrict', type: 'text' },
+                { label: 'First name', selector: '[data-automation-id="formField-legalName--firstName"] input', profileKey: 'firstName', type: 'text', required: true, normalize: 'name' },
+                { label: 'Last name', selector: '[data-automation-id="formField-legalName--lastName"] input', profileKey: 'lastName', type: 'text', required: true, normalize: 'name' },
+                // REQUIRED on Mondelez (measured), and the flat profile carries them
+                // only if the user typed them in — a CV states an address but nothing
+                // extracts it into those two keys. Profile-only, the planner hit two
+                // empty required fields and returned NEED_HUMAN, ending the run on
+                // data the CV was holding all along. Order is value → profileKey →
+                // cvPath, so a filled profile still wins.
+                { label: 'Address line 1', selector: '[data-automation-id="formField-addressLine1"] input', profileKey: 'addressStreet', cvPath: 'contact.address_street', type: 'text', required: true },
+                { label: 'District or Town', selector: '[data-automation-id="formField-city"] input', profileKey: 'addressDistrict', cvPath: 'contact.address_district', type: 'text', required: true },
                 // Required text input a résumé never carries → autofill leaves it blank
                 // and Next validation blocks. Default to the VN generic postal code.
                 { label: 'Postal Code', selector: '[data-automation-id="formField-postalCode"] input', value: '100000', type: 'text', required: true },
@@ -170,11 +236,101 @@ const WORKDAY: ApplyRecipe = {
                 // LLM landing them — the cause of the flaky My-Information step.
                 { label: 'Country', selector: '[data-automation-id="formField-country"] button', profileKey: 'nationality', default: 'Vietnam', type: 'custom-select', required: true },
                 { label: 'Province or City', selector: '[data-automation-id="formField-countryRegion"] button', profileKey: 'addressProvince', type: 'custom-select' },
-                { label: 'How did you hear', selector: '[data-automation-id="formField-source"] button', value: 'Website', pickAny: true, type: 'custom-select', required: true },
-                { label: 'Phone type', selector: '[data-automation-id="formField-phoneType"] button', value: 'Mobile', type: 'custom-select' },
+                {
+                    // 3M renders this as a button→listbox, Mondelez as a
+                    // searchable text input. Measured on both; only one exists
+                    // per tenant, so the comma list resolves whichever is there.
+                    label: 'How did you hear',
+                    selector: '[data-automation-id="formField-source"] input, [data-automation-id="formField-source"] button',
+                    valuePriority: [
+                        'Company Website', 'Company Careers Website', 'Employer Website',
+                        'Careers Website', 'Company Webpage', 'Website', 'Webpage', 'Online',
+                    ],
+                    type: 'custom-select', required: true, answerSource: 'AGENT_DEFAULT',
+                },
+                {
+                    // Measured options: "Mobile - Personal", "Mobile - Work",
+                    // "Telephone - Office", "Telephone - Personal".
+                    label: 'Phone type', selector: '[data-automation-id="formField-phoneType"] button',
+                    valuePriority: ['Mobile - Personal', 'Mobile', 'Cell'],
+                    type: 'custom-select', answerSource: 'AGENT_DEFAULT',
+                },
                 // Required multi-select (input-based, not a button): the LLM types but never
                 // commits an item, leaving it empty ("0 items selected") and blocking Next.
                 { label: 'Country Phone Code', selector: '[data-automation-id="formField-countryPhoneCode"] input', value: 'Vietnam', type: 'custom-select', multi: true, required: true },
+            // REQUIRED on Mondelez and matched by nothing here — the recipe filled
+            // the other eleven required fields and left this one, so the step never
+            // validated and never advanced. "No" is not a guess: it is the
+            // deterministic Answer Policy rule for previous_employment, and a
+            // candidate who HAD worked there would be applying from an internal site.
+            { label: 'Previously worked here', selector: '[data-automation-id="formField-candidateIsPreviousWorker"]', value: 'No', type: 'radio', required: true, answerSource: 'AGENT_DEFAULT' },
+            ],
+            advance: '[data-automation-id="pageFooterNextButton"]',
+        },
+        {
+            // My Experience: "Autofill with Resume" fills Job Title / Company / School
+            // (text) but leaves the REQUIRED education Degree dropdown at "Select One" —
+            // that empty required field silently blocks Next (the agent looped until
+            // stuck). Pick the candidate's degree level (or any option) so it validates.
+            name: 'My Experience',
+            // ONLY the degree field: `jobTitleHeading` is the job-title <h2>
+            // Workday renders on EVERY page of the apply flow, so using it as a
+            // step marker made My Experience match the Application Questions page
+            // first — and those fields were never filled on any job.
+            detect: '[data-automation-id="formField-degree"]',
+            ensureSections: ['Work Experience'],
+            fields: [
+                {
+                    label: 'Degree', selector: '[data-automation-id="formField-degree"] button',
+                    profileKey: 'highestDegree',
+                    // NO ladder. Measured on Mondelez: 19 named qualifications
+                    // (B.Arch, B.B.A., B.S., L.L.B. …) and no generic "Bachelor's
+                    // Degree", so a fallback rung would pick a DISCIPLINE the
+                    // candidate never claimed. Only their own stated degree may
+                    // match; absent that the field goes to them at review.
+                    //
+                    // `accept` is what stops the OTHER failure: a CV writes the
+                    // SUBJECT on the degree line, so highestDegree arrives as
+                    // "Marketing" and the search of a qualification list is doomed
+                    // before it starts — ten seconds an iteration, every iteration.
+                    type: 'custom-select', required: true, accept: 'qualification', infer: true,
+                },
+                // Measured as REQUIRED on Mondelez and left blank by Workday's own
+                // résumé parse, so the step could not advance without them.
+                // The Work Experience block — REQUIRED on Mondelez and matched by
+                // nothing here, so five required fields sat empty and the planner
+                // reported the dates as "not in the user profile" when the CV held
+                // all of them. Matched by LABEL rather than automation id: the
+                // labels are what a real run measured verbatim.
+                { label: 'Job Title', selector: '[data-automation-id="formField-jobTitle"] input', cvPath: 'experience[0].title', type: 'text', required: true },
+                { label: 'Company', selector: '[data-automation-id="formField-companyName"] input', cvPath: 'experience[0].company', type: 'text', required: true },
+                { label: 'Role description', selector: '[data-automation-id="formField-roleDescription"] textarea', cvPath: 'experience[0].description', type: 'text' },
+                // startDate/endDate hold TWO inputs (dateSectionMonth-input,
+                // dateSectionYear-input), so the WRAPPER is the selector.
+                { label: 'Work From', selector: '[data-automation-id="formField-startDate"]', cvPath: 'experience[0].start_date', type: 'date', required: true },
+                { label: 'Work To', selector: '[data-automation-id="formField-endDate"]', cvPath: 'experience[0].end_date', type: 'date' },
+                { label: 'School or University', selector: '[data-automation-id="formField-schoolName"] input', cvPath: 'education[0].institution', type: 'text', required: true },
+                { label: 'Field of Study', selector: '[data-automation-id="formField-fieldOfStudy"] input', cvPath: 'education[0].degree', type: 'text', required: true },
+                // The Languages block. Measured on Mondelez: Language and "Overall"
+                // (proficiency) are both REQUIRED, and "Overall" carries a
+                // per-tenant GUID for an automation id — hence labelMatch.
+                { label: 'Language', selector: '[data-automation-id="formField-language"] button', cvPath: 'languages[0].language', type: 'custom-select', required: true },
+                {
+                    // Measured: the list is "1 - Beginner / 2 - Intermediate /
+                    // 3 - Fluent" — no "Native" row, so a CV stating a first
+                    // language matched nothing and blocked a required field. The
+                    // ladder steps DOWN only: a native speaker is fluent, so this
+                    // claims nothing extra, and nothing higher exists to claim.
+                    label: 'Language level', labelMatch: 'overall', cvPath: 'languages[0].level',
+                    valuePriority: ['Native', 'Fluent', 'Advanced', 'Intermediate', 'Beginner'],
+                    type: 'custom-select', required: true,
+                },
+                // Skills refuses free text: typing leaves the box empty and the
+                // value only exists once a SEARCH RESULT is clicked.
+                // Measured id. The search runs on ENTER, not on typing — without it
+                // the list reads "No Items." for every term, which is easy to mistake
+                // for an empty taxonomy.
+                { label: 'Skills', selector: '[data-automation-id="formField-skills"] input', profileKey: 'skills', type: 'search-multi', max: 8 },
             ],
             advance: '[data-automation-id="pageFooterNextButton"]',
         },
@@ -190,9 +346,33 @@ const WORKDAY: ApplyRecipe = {
             ],
             advance: '[data-automation-id="pageFooterNextButton"]',
         },
+        {
+            // Step 1 of the wizard, and it had no entry here at all — which is why
+            // a run that logged in and uploaded the CV then sat on this page until
+            // the stuck-detector killed it. The page carries NO form fields (a
+            // dropzone and "Continue", nothing else), so the agent took the "host
+            // matches but the form has not rendered yet" branch and waited for a
+            // form that was never coming: no step matched, so there was no
+            // `advance` selector to click, and the LLM is deliberately not handed a
+            // fieldless page.
+            //
+            // LAST in the array on purpose. steps.find() takes the first match, and
+            // Workday keeps the /apply/autofillWithResume URL for the whole wizard
+            // — so if this page's container id outlives the step it belongs to, the
+            // specific steps above must still win.
+            name: 'Autofill with Resume',
+            detect: '[data-automation-id="applyFlowAutoFillPage"]',
+            fields: [],
+            // Do not leave until the resume is actually attached. Advancing early
+            // skips the parse this step exists for, and that parse is what fills My
+            // Information — measured: the file input is absent on the first pass and
+            // appears on the second, so an unguarded advance sails past the upload.
+            advanceWhen: '[data-automation-id="file-upload-item"], [data-automation-id="file-upload-successful"]',
+            advance: '[data-automation-id="pageFooterNextButton"]',
+        },
     ],
-    // Resume upload lives on the earlier "Autofill with Resume" step (not captured
-    // here) — this is Workday's stable upload input; unverified against a live DOM.
+    // Uploaded on the "Autofill with Resume" step above — Workday's stable upload
+    // input, measured on Mondelez (present from the second pass, not the first).
     fileUploadSelector: '[data-automation-id="file-upload-input-ref"]',
     submitSelector: '[data-automation-id="pageFooterSubmitButton"]',
     // Final Review step (its "Submit" reuses pageFooterNextButton) → agent stops here.
@@ -212,7 +392,11 @@ const WORKDAY: ApplyRecipe = {
 const SMARTRECRUITERS: ApplyRecipe = {
     ats: 'smartrecruiters',
     label: 'SmartRecruiters',
-    version: 1,
+    // v2: the Message box reads `applyMessage` and can be written by the agent.
+    // Must match the bundled recipe's version in the extension — the merge takes
+    // the remote whenever remoteV >= bundledV, so a stale deploy here silently
+    // downgrades the field the extension just shipped.
+    version: 2,
     verified: false,
     singlePage: true,
     hostPattern: 'smartrecruiters\\.com',
@@ -242,8 +426,13 @@ const SMARTRECRUITERS: ApplyRecipe = {
                 { label: 'Phone', selector: '[data-test="personal-info-phone"]', control: 'input[type="tel"]', profileKey: 'phone', type: 'shadow-text', required: true },
                 // City autocomplete (≥3 chars → async place lookup → pick a match).
                 { label: 'Location', selector: '[data-test="location-autocomplete"]', profileKey: 'addressProvince', default: 'Ho Chi Minh City', type: 'autocomplete', required: true },
-                // Optional free-text note to the hiring manager → use the tailored letter.
-                { label: 'Message', selector: '[data-test="hiring-manager-message-text"], [data-test="hiring-manager-message-container"]', profileKey: 'coverLetter', type: 'shadow-text' },
+                // Optional free-text note to the hiring team. Verified live on a
+                // Bosch posting (2026-08-01): <oc-textarea data-test=…> wraps an
+                // <spl-textarea> whose SHADOW root holds the real 10-row
+                // <textarea>; aria-required=false, no maxlength. Filled from the
+                // short per-job message the web app generates, or written by the
+                // agent when it dispatched without one.
+                { label: 'Message', selector: '[data-test="hiring-manager-message-text"], [data-test="hiring-manager-message-container"]', profileKey: 'applyMessage', type: 'shadow-text', generate: 'message' },
             ],
             // No `advance`: single-page form. The agent stops after filling.
         },
@@ -270,4 +459,21 @@ export function recipeForUrl(url?: string | null): ApplyRecipe | null {
     let host = '';
     try { host = new URL(url).host.toLowerCase(); } catch { host = String(url).toLowerCase(); }
     return APPLY_RECIPES.find(r => new RegExp(r.hostPattern, 'i').test(host)) || null;
+}
+
+/**
+ * Does this URL's form have a free-text box worth writing a message for?
+ *
+ * The web app generates that message before dispatch, and generation costs a
+ * credit — so it must not run for the many forms that have no such box. The
+ * recipe already knows, field by field, so asking it is both free and exactly
+ * as correct as the recipe is. An unrecognised host answers false: no recipe
+ * means the generic agent path, where the extension decides at fill time
+ * (it can see the form; we cannot).
+ */
+export function recipeWantsApplyMessage(url?: string | null): boolean {
+    const recipe = recipeForUrl(url);
+    if (!recipe) return false;
+    return (recipe.steps || []).some(step =>
+        (step.fields || []).some(f => f.profileKey === 'applyMessage' || f.generate === 'message'));
 }

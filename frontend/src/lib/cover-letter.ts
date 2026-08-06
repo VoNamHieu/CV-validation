@@ -4,6 +4,14 @@
 // anti-fabrication rule: only facts already in the CV — no invented
 // achievements, employers, or numbers.
 //
+// TWO formats out of the same inputs, because they land in different places:
+//   'letter'  — the 300–400 word document the user downloads as a PDF.
+//   'message' — the 110–160 word note that goes in an ATS's free-text box
+//               (SmartRecruiters' "Message to the Hiring Team" is 10 rows).
+// A full letter pasted into that box reads as a wall of text with a signature
+// block under a form that already collected the name, so it is not just the
+// letter truncated — it is addressed and closed differently.
+//
 // We ask for a single-field JSON {letter} (not free prose): JSON string fields
 // carry real newlines through JSON.parse and can't come back wrapped in stray
 // [ ] brackets or quotes.
@@ -50,7 +58,23 @@ const SCHEMA = {
     required: ['letter'],
 };
 
-function systemPrompt(languageLabel: string): string {
+/** Which shape of text to produce. See the file header. */
+export type LetterFormat = 'letter' | 'message';
+
+function systemPrompt(languageLabel: string, format: LetterFormat): string {
+    if (format === 'message') {
+        return `Bạn là chuyên gia viết lời nhắn ngắn gửi nhà tuyển dụng trong form ứng tuyển.
+
+Viết một LỜI NHẮN NGẮN, tự nhiên, chân thực gửi đội tuyển dụng cho vị trí trong Job Description. Viết TOÀN BỘ bằng ${languageLabel}.
+
+Quy tắc BẮT BUỘC:
+- CHỈ dùng thông tin CÓ THẬT trong CV (kinh nghiệm, kỹ năng, thành tích, con số). TUYỆT ĐỐI KHÔNG bịa công ty, chức danh, dự án, hay số liệu không có trong CV.
+- 110–160 từ, 2–3 đoạn ngắn: (1) ứng tuyển vị trí nào + vì sao quan tâm; (2) 2 bằng chứng CỤ THỂ từ CV khớp đúng yêu cầu chính của JD; (3) một câu kết mong được trao đổi.
+- Đây là ô nhập trong form, KHÔNG phải lá thư: KHÔNG có "Kính gửi ..." trang trọng kiểu văn bản, KHÔNG ký tên, KHÔNG ghi ngày tháng, KHÔNG địa chỉ — form đã có tên và liên hệ rồi.
+- Văn phong tự nhiên của người bản ngữ ${languageLabel}, KHÔNG dịch máy word-by-word. Tự tin nhưng không khoa trương.
+- Ngăn cách các đoạn bằng một dòng trống thật (ký tự xuống dòng), KHÔNG viết placeholder "[...]", KHÔNG markdown, KHÔNG bọc trong dấu ngoặc [ ] hay dấu nháy.
+- Trả về DUY NHẤT JSON đúng schema {"letter": "..."}, không thêm gì khác.`;
+    }
     return `Bạn là chuyên gia viết thư giới thiệu (cover letter) xin việc.
 
 Viết một lá thư giới thiệu CHUYÊN NGHIỆP, đầy đủ, chân thực cho vị trí trong Job Description. Viết TOÀN BỘ lá thư bằng ${languageLabel}.
@@ -88,21 +112,25 @@ function normalizeLetter(raw: string): string {
 
 export async function generateCoverLetter(
     cv: unknown, jd: unknown, match: unknown, targetLang: string,
+    format: LetterFormat = 'letter',
 ): Promise<string> {
     if (!cv || !jd) throw new Error('cv and jd are required');
     const label = COVER_LETTER_LANGUAGES[targetLang] || targetLang || 'Tiếng Việt';
     const matchLine = match
         ? `\nĐỘ KHỚP ĐÃ CHẤM (tham khảo để chọn điểm mạnh nào nên nêu): ${JSON.stringify(match)}`
         : '';
-    const userPrompt = `Viết thư giới thiệu bằng ${label} cho ứng viên ứng tuyển vị trí trong JD dưới đây, chỉ dựa trên CV thật.
+    const isMsg = format === 'message';
+    const userPrompt = `${isMsg
+        ? `Viết lời nhắn ngắn gửi đội tuyển dụng bằng ${label}`
+        : `Viết thư giới thiệu bằng ${label}`} cho ứng viên ứng tuyển vị trí trong JD dưới đây, chỉ dựa trên CV thật.
 
 CV: ${JSON.stringify(compactCv(cv))}
 
 JOB DESCRIPTION: ${JSON.stringify(compactJd(jd))}${matchLine}
 
-Trả về JSON {"letter"}, 300–400 từ, các đoạn cách nhau bằng dòng trống thật.`;
+Trả về JSON {"letter"}, ${isMsg ? '110–160' : '300–400'} từ, các đoạn cách nhau bằng dòng trống thật.`;
 
-    const raw = await callAIJudge(systemPrompt(label), userPrompt, SCHEMA);
+    const raw = await callAIJudge(systemPrompt(label, format), userPrompt, SCHEMA);
     const parsed = safeJsonParse<{ letter?: string }>(raw);
     const letter = normalizeLetter(parsed?.letter ?? '');
     if (!letter) throw new Error('AI trả về thư rỗng. Vui lòng thử lại.');
