@@ -630,7 +630,7 @@ function handleAutoApplyStart(message, sendResponse) {
             return;
         }
         if (charge.auth) {
-            sendResponse({ success: false, error: 'Phiên đăng nhập đã hết hạn — mở Copo và đồng bộ lại để tiếp tục.' });
+            sendResponse({ success: false, error: 'Phiên đăng nhập đã hết hạn — mở copoai.net (đang đăng nhập) là token tự làm mới; KHÔNG cần đồng bộ CV.' });
             return;
         }
         chrome.storage.local.set(storage, () => {
@@ -833,7 +833,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                             // The AI routes now require the synced login; a
                             // stale/expired token 401s → tell the user to re-sync.
                             if (res.status === 401) {
-                                throw new Error('Phiên đăng nhập đã hết hạn — mở Copo và đồng bộ lại để tiếp tục.');
+                                throw new Error('Phiên đăng nhập đã hết hạn — mở copoai.net (đang đăng nhập) là token tự làm mới; KHÔNG cần đồng bộ CV.');
                             }
                             throw new Error(err.detail || `API error: ${res.status}`);
                         }
@@ -882,7 +882,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                             // The AI routes now require the synced login; a
                             // stale/expired token 401s → tell the user to re-sync.
                             if (res.status === 401) {
-                                throw new Error('Phiên đăng nhập đã hết hạn — mở Copo và đồng bộ lại để tiếp tục.');
+                                throw new Error('Phiên đăng nhập đã hết hạn — mở copoai.net (đang đăng nhập) là token tự làm mới; KHÔNG cần đồng bộ CV.');
                             }
                             throw new Error(err.detail || `API error: ${res.status}`);
                         }
@@ -927,7 +927,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 if (!res.ok) {
                     const err = await res.json().catch(() => ({}));
                     if (res.status === 401) {
-                        throw new Error('Phiên đăng nhập đã hết hạn — mở Copo và đồng bộ lại để tiếp tục.');
+                        throw new Error('Phiên đăng nhập đã hết hạn — mở copoai.net (đang đăng nhập) là token tự làm mới; KHÔNG cần đồng bộ CV.');
                     }
                     throw new Error(err.detail || `API error: ${res.status}`);
                 }
@@ -1026,7 +1026,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     return;
                 }
                 if (charge.auth) {
-                    sendResponse({ success: false, error: 'Phiên đăng nhập hết hạn — mở Copo và đồng bộ lại.' });
+                    sendResponse({ success: false, error: 'Phiên đăng nhập hết hạn — mở copoai.net (đang đăng nhập) để token tự làm mới.' });
                     return;
                 }
 
@@ -1048,7 +1048,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                             // The AI routes now require the synced login; a
                             // stale/expired token 401s → tell the user to re-sync.
                             if (res.status === 401) {
-                                throw new Error('Phiên đăng nhập đã hết hạn — mở Copo và đồng bộ lại để tiếp tục.');
+                                throw new Error('Phiên đăng nhập đã hết hạn — mở copoai.net (đang đăng nhập) là token tự làm mới; KHÔNG cần đồng bộ CV.');
                             }
                             throw new Error(err.detail || `API error: ${res.status}`);
                         }
@@ -1319,7 +1319,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 }
                 // Distinguish "your session expired" from "this tenant is blocked":
                 // the first is fixable by re-opening the web app, the second isn't.
-                const detail = cred.auth ? 'Phiên đăng nhập hết hạn — mở Copo và đồng bộ lại.'
+                const detail = cred.auth ? 'Phiên đăng nhập hết hạn — mở copoai.net (đang đăng nhập) để token tự làm mới.'
                     : cred.missing ? 'Chưa có thông tin đăng nhập cho trang tuyển dụng.'
                         : cred.revoked ? 'Thông tin đăng nhập đã bị thu hồi — cần nhập lại.'
                             : cred.disabled ? 'Tính năng tài khoản ATS chưa được bật.'
@@ -1600,7 +1600,7 @@ async function processNextJob() {
                 success: false,
                 detail: charge.insufficient
                     ? 'Không đủ credit để ứng tuyển job này.'
-                    : 'Phiên đăng nhập hết hạn — mở Copo và đồng bộ lại.',
+                    : 'Phiên đăng nhập hết hạn — mở copoai.net (đang đăng nhập) để token tự làm mới.',
             };
             // Out of credits applies to every remaining job → stop the batch
             // instead of churning failures; expired auth is the same. Routed

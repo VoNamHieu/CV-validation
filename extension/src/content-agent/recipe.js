@@ -3127,7 +3127,7 @@ async function inferOptionViaLLM(f, options, profile, cv) {
         // "Degree not found" sends the next hour into the wrong file. Say what it
         // is and what fixes it.
         if (/hết hạn|expired|401|unauthor/i.test(why)) {
-            return { value: null, authExpired: true, why: 'ĐĂNG NHẬP HẾT HẠN — mở Copo và đồng bộ lại' };
+            return { value: null, authExpired: true, why: 'ĐĂNG NHẬP HẾT HẠN — mở copoai.net (đang đăng nhập), token tự làm mới' };
         }
         return { value: null, why: `inference failed: ${why.slice(0, 60)}` };
     }
@@ -4114,8 +4114,9 @@ async function fillCustomSelect(f, value, ctx = {}) {
             f, visibleOptions().map(o => (o.textContent || '').trim()), ctx.profile, ctx.cv);
         inferNote = r?.why || 'not attempted';
         if (r?.authExpired) {
-            showToast('🔑 Phiên đăng nhập Copo đã hết hạn — mở web app và đồng bộ lại, '
-                + 'rồi chạy lại. AI không suy luận được trường nào cho tới lúc đó.', 12000);
+            showToast('🔑 Phiên đăng nhập Copo đã hết hạn — mở copoai.net trong tab khác '
+                + '(đang đăng nhập) là token tự làm mới, KHÔNG cần đồng bộ CV. '
+                + 'AI không suy luận được trường nào cho tới lúc đó.', 12000);
         }
         // The structural belt on demographic inference: rule 21 tells the
         // model to pick ONLY the decline row, and this refuses the pick if it
