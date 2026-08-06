@@ -79,12 +79,37 @@ export async function probeFieldShape(control) {
     // Never disturb an answered field; its shape can wait for a pass where it
     // is empty (and an answered field is not being filled anyway).
     if (String(control.value || '').trim()) return done('text-free', 'holds a value — not probed');
-    const visibleOptions = () => [...document.querySelectorAll(OPTION_SEL)].filter(o => o.offsetParent !== null).length;
-    const optionsBefore = visibleOptions();
+
+    // An option only counts if it belongs to THIS input. The page-global count
+    // this used to be turned every stray popup into evidence: on Mondelez the
+    // source prompt's 64-row list was still open, its virtualiser re-rendered
+    // two rows during the probe's 400ms window, and the First-name TEXT INPUT
+    // was ruled a combobox — then died in the dropdown machinery, three times,
+    // on a field a keyboard fills. Ownership is established two ways:
+    //   - the option sits in a container this input aria-controls/aria-owns, or
+    //   - the option's listbox container APPEARED during the probe (a stray's
+    //     container, by definition, existed before the first keystroke), or
+    //   - the option is inside this field's own formField wrapper (inline lists).
+    const listboxContainers = () =>
+        new Set([...document.querySelectorAll('[data-automation-id="activeListContainer"], [role="listbox"]')]
+            .filter(c => c.offsetParent !== null));
+    const containersBefore = listboxContainers();
+    const ownedOptions = () => {
+        const ownedIds = [control.getAttribute('aria-controls'), control.getAttribute('aria-owns')]
+            .filter(Boolean);
+        return [...document.querySelectorAll(OPTION_SEL)].filter(o => {
+            if (o.offsetParent === null) return false;
+            if (wrap && wrap.contains(o)) return true;
+            const container = o.closest('[data-automation-id="activeListContainer"], [role="listbox"]');
+            if (!container) return false;
+            if (ownedIds.includes(container.id)) return true;
+            return !containersBefore.has(container);
+        }).length;
+    };
     try { control.focus(); } catch { /* noop */ }
     await simulateTyping(control, 'a');
     await sleep(400);
-    const optionsAfter = visibleOptions();
+    const opened = ownedOptions();
     const stuck = String(control.value || '') === 'a';
     // Undo before reporting: clear the char, close anything the char opened.
     setNativeValue(control, '', { quiet: true });
@@ -93,8 +118,8 @@ export async function probeFieldShape(control) {
     } catch { /* noop */ }
     await sleep(150);
 
-    if (optionsAfter > optionsBefore) {
-        return done(stuck ? 'text-combobox' : 'prompt-select', `typing opened ${optionsAfter - optionsBefore} option rows`);
+    if (opened > 0) {
+        return done(stuck ? 'text-combobox' : 'prompt-select', `typing opened ${opened} OWNED option rows`);
     }
     if (stuck) return done('text-free', 'typing sticks, no list opened');
     return done('prompt-select', 'typing did not stick — the value lives in a picker');

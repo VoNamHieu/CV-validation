@@ -13,7 +13,7 @@
 // pass; the recipe re-runs every iteration and is idempotent, so partial progress
 // accumulates and already-filled fields are skipped.
 
-import { FIELD_ERROR_SEL, deepFindControl, deepQuery, deepQueryAll, dropFileOnZone, normalizeNameCase, readFileCommitState, safeActivate, setFileOnInput, setNativeValue, simulateTyping, sleep, waitForElement } from './dom.js';
+import { FIELD_ERROR_SEL, deepFindControl, deepQuery, deepQueryAll, dropFileOnZone, normalizeNameCase, readFileCommitState, safeActivate, setFileOnInput, setNativeValue, simulateTyping, sleep, waitForElement , isLegalNameLabel } from './dom.js';
 import { isThirdPartyApply } from './detect.js';
 import { showToast } from './ui.js';
 import { trace, traceOnce } from './trace.js';
@@ -1732,7 +1732,7 @@ async function _applyRecipeFields(recipe, profile, cvData, cv) {
                 // that commits nothing. The probe decides the strategy; the
                 // label only decided the VALUE.
                 const probed = await probeFieldShape(el);
-                if (isPickerShape(probed.shape)) {
+                if (isPickerShape(probed.shape) && !isLegalNameLabel(f.label)) {
                     trace('shape.reroute', { field: f.label, declared: f.type || 'text', probed: probed.shape, evidence: probed.evidence });
                     const r = await fillCustomSelect(f, val, { profile, cv });
                     if (r.ok) { filled++; outcomes.push([f.label, 'OK', String(r.matched || val)]); answers.push({ field: f.label, value: r.matched || val, source: provenance }); }

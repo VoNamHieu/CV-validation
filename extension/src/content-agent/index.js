@@ -15,7 +15,7 @@
  */
 
 import { AGENT_MAX_RUNTIME_MS, APPLY_SESSION_TTL_MS, FILL_RETRY_THRESHOLD, POST_ACTION_WAIT_MS, TENANT_REVIEW_FLAGS } from './constants.js';
-import { closeOpenDropdown, repairProfileNames, safeActivate, setNativeValue, sleep } from './dom.js';
+import { closeOpenDropdown, isLegalNameLabel, repairProfileNames, safeActivate, setNativeValue, sleep } from './dom.js';
 import { removeProgress, showConfirmation, showProgress, showToast } from './ui.js';
 import { callAgentPlan, callLLMMapping } from './llm.js';
 import { executeFillInstructions } from './fill.js';
@@ -33,7 +33,7 @@ import { tenantRefFor } from '../ats/tenant.js';
 // you can confirm (in the PAGE / tab console, NOT the service-worker console) that
 // the freshly-built dist is actually loaded. If you don't see this line on the
 // apply tab, the new build isn't injected (reload the extension + refresh the tab).
-const COPO_BUILD = 'prod-final-2026-08-06h';
+const COPO_BUILD = 'prod-final-2026-08-06i';
 try { console.log(`%c[Copo] content-agent build ${COPO_BUILD} loaded → ${location.host}`, 'color:#c43b2e;font-weight:700'); } catch { /* noop */ }
 
 /**
@@ -803,6 +803,7 @@ async function runAgentLoop(rawProfile) {
                         if (inst.action !== 'fill') continue;
                         const el = document.querySelector(inst.selector);
                         if (!el || el.offsetParent === null) continue;
+                        if (isLegalNameLabel(inst.fieldLabel || inst.label)) continue;
                         const shape = await probeFieldShape(el);
                         if (!isPickerShape(shape.shape)) continue;
                         trace('needs.reshape', { label: String(inst.fieldLabel || '').slice(0, 40), probed: shape.shape, evidence: shape.evidence });

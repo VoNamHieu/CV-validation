@@ -10,7 +10,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { splitLegalName, repairProfileNames } from '../src/content-agent/dom.js';
+import { isLegalNameLabel, splitLegalName, repairProfileNames } from '../src/content-agent/dom.js';
 
 describe('splitting a name the agent can settle', () => {
     test('Vietnamese order — family name first', () => {
@@ -66,5 +66,25 @@ describe('repairing a poisoned profile', () => {
         const poisoned = { fullName: 'HIEU (CHARLES) VO', firstName: 'Vo', lastName: 'Hieu' };
         const once = repairProfileNames(poisoned);
         assert.equal(repairProfileNames(once), once);
+    });
+});
+
+
+describe('a legal-name box is never rerouted to a picker', () => {
+    // Mondelez, 2026-08-06: a stray popup's rows counted as probe evidence and
+    // the plain First-name input was ruled a combobox — three listbox-timeouts
+    // on a field a keyboard fills, run dead. The probe evidence is now scoped
+    // to owned options; this predicate is the belt on top of that fix.
+    test('every spelling of a name field is recognised', () => {
+        for (const l of ['First name', 'Last name', 'Given Name(s) - Western Script*',
+            'Family Name - Vietnamese*', 'Middle Name', 'Legal Name', 'Họ', 'Tên', 'Tên đệm']) {
+            assert.ok(isLegalNameLabel(l), l);
+        }
+    });
+
+    test('fields that merely contain "name" are not swept in', () => {
+        for (const l of ['Username', 'Company Name', 'School Name', 'How did you hear', 'City or Ward']) {
+            assert.ok(!isLegalNameLabel(l), l);
+        }
     });
 });

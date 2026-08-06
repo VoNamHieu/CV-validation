@@ -27,6 +27,18 @@ export function foldDiacritics(s) {
 }
 
 /**
+ * A legal-name box is never a picker — no tenant renders "Given Name(s)" as a
+ * dropdown, and the one time the probe said otherwise it had been fooled by a
+ * stray popup (Mondelez, 2026-08-06: three listbox-timeouts on a plain text
+ * input, run dead). Both reroute sites consult this BEFORE trusting a picker
+ * verdict on a field whose label says it is a name.
+ */
+export function isLegalNameLabel(label) {
+    return /given name|family name|first name|last name|middle name|legal name|(^|[^a-zà-ỹ])(họ|tên đệm|tên)([^a-zà-ỹ]|$)/i
+        .test(String(label || ''));
+}
+
+/**
  * The ~20 Vietnamese family names that cover most of the country, with and
  * without diacritics. Mirrors VN_FAMILY_NAMES in
  * frontend/src/lib/extension-profile.ts — deliberately duplicated: the whole
