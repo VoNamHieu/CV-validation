@@ -224,7 +224,10 @@ export const FALLBACK_RECIPES = [
                         // offers B.S. / B.B.A. / L.L.B. No string rule bridges
                         // that, so when nothing matches the model is asked to pick
                         // from the options actually on screen, given the education.
-                        type: 'custom-select', required: true, accept: 'qualification', infer: true,
+                        // The LEVEL ladder (see degreeLadder): the value the
+                        // candidate's own CV states, tried deterministically
+                        // before the model is consulted at all.
+                        type: 'custom-select', required: true, accept: 'qualification', infer: true, degreeLadder: true,
                     },
                     // Measured as REQUIRED on Mondelez, and left blank by Workday's
                     // own résumé parse — so the step could not advance without them
@@ -1659,6 +1662,7 @@ async function _applyRecipeFields(recipe, profile, cvData, cv) {
                     f.levelLadder ? { ...f, valuePriority: levelLadder(val) }
                         : f.prefixLadder ? { ...f, valuePriority: prefixLadder(val) }
                         : f.genderLadder ? { ...f, valuePriority: [...genderLadder(val), ...(f.valuePriority || [])] }
+                        : f.degreeLadder ? { ...f, valuePriority: degreeLadder(val || cv?.education?.[0]?.degree) }
                         : f,
                     (f.prefixLadder || f.genderLadder) ? '' : val, { profile, cv });
                 if (r.ok) {
@@ -2202,6 +2206,43 @@ function genderLadder(gender) {
     const g = String(gender || '').trim().toLowerCase();
     if (/^(m|male|nam)$/.test(g)) return ['Male', 'Nam', 'Man'];
     if (/^(f|female|nữ|nu)$/.test(g)) return ['Female', 'Nữ', 'Woman'];
+    return [];
+}
+
+/**
+ * Generic phrasings of the candidate's own degree LEVEL, derived from the
+ * CV's free-text degree ("Bachelor of Science in Marketing", "Cử nhân CNTT").
+ *
+ * This exists because the Degree field lived on inference alone — correct on
+ * days the model answers ("asked: 42 → Bachelor Degree", PwC 07:20), red on
+ * days it returns nothing (same tenant, same field, six hours later). A level
+ * the CV itself states is derivable without any model.
+ *
+ * LEVEL phrasings only, never disciplines: on catalogues like Mondelez's
+ * (19 named qualifications — B.Arch, B.B.A., L.L.B. — and no generic entry)
+ * every rung below misses and the field falls through to infer exactly as
+ * before; picking "B.S." for a "Cử nhân Marketing" would claim a science
+ * credential the CV never stated. The bare level ("Bachelor") rides last and
+ * only lands where it is unambiguous — fillCustomSelect already refuses a
+ * rung with more than one hit.
+ */
+export function degreeLadder(cvDegreeText) {
+    const t = String(cvDegreeText || '').toLowerCase();
+    if (/doctor|ph\.?d|tiến sĩ|tien si/.test(t)) {
+        return ['Doctorate Degree', "Doctor's Degree", 'Doctorate', 'PhD'];
+    }
+    if (/master|thạc sĩ|thac si|mba|m\.?sc\b|m\.?a\b/.test(t)) {
+        return ["Master's Degree", 'Master Degree', 'Masters Degree', 'Master'];
+    }
+    if (/bachelor|cử nhân|cu nhan|kỹ sư|ky su|đại học|dai hoc|b\.?sc?\b|b\.?a\b|b\.?b\.?a\b/.test(t)) {
+        return ["Bachelor's Degree", 'Bachelor Degree', 'Bachelors Degree', 'Bachelor'];
+    }
+    if (/associate|cao đẳng|cao dang/.test(t)) {
+        return ["Associate's Degree", 'Associate Degree', 'Associate'];
+    }
+    if (/diploma|trung cấp|trung cap/.test(t)) {
+        return ['Diploma'];
+    }
     return [];
 }
 

@@ -6,7 +6,7 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { FALLBACK_RECIPES, levelLadder } from '../src/content-agent/recipe.js';
+import { FALLBACK_RECIPES, degreeLadder, levelLadder } from '../src/content-agent/recipe.js';
 
 describe('legal-name fields declare name normalisation', () => {
     const wd = FALLBACK_RECIPES.find(r => r.ats === 'workday');
@@ -213,5 +213,32 @@ describe('language proficiency maps onto the offered rungs', () => {
         assert.deepEqual(levelLadder('nonsense'),
             ['Fluent', 'Advanced', 'Intermediate', 'Beginner'],
             'unknown level starts at Fluent, never claims Native');
+    });
+});
+
+describe('the degree LEVEL is derivable without a model', () => {
+    // The Degree field lived on inference alone: correct when the model
+    // answered ("asked: 42 → Bachelor Degree"), red when it returned nothing —
+    // same tenant, same field, six hours apart. The level the CV itself states
+    // now tries deterministically first; the model stays as the last net.
+    test('free-text CV degrees resolve to generic level phrasings', () => {
+        assert.deepEqual(degreeLadder('Bachelor of Science in Marketing')[0], "Bachelor's Degree");
+        assert.deepEqual(degreeLadder('Cử nhân Công nghệ thông tin')[0], "Bachelor's Degree");
+        assert.deepEqual(degreeLadder('MBA')[0], "Master's Degree");
+        assert.deepEqual(degreeLadder('Tiến sĩ Kinh tế')[0], 'Doctorate Degree');
+    });
+
+    test('no level stated → no rungs, the field falls through to infer', () => {
+        assert.deepEqual(degreeLadder('Marketing'), []);
+        assert.deepEqual(degreeLadder(''), []);
+    });
+
+    test('rungs are LEVELS only — no rung ever claims a discipline', () => {
+        for (const level of ['Bachelor of Arts', 'Thạc sĩ Luật', 'PhD in Physics']) {
+            for (const rung of degreeLadder(level)) {
+                assert.ok(!/\b(science|arts|law|business|engineering)\b/i.test(rung),
+                    `rung "${rung}" claims a discipline`);
+            }
+        }
     });
 });
