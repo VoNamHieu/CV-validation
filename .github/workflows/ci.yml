@@ -20,7 +20,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          # 22, because 20's `node --test` does not expand a glob argument and
+          # the newest Node does not accept a bare directory — the test script
+          # now hands it shell-expanded file paths, which every version takes,
+          # and pinning the LTS the developers run keeps the two honest.
+          node-version: '22'
       # No lockfile-dependent install: the only devDependency is esbuild.
       - run: npm install --no-audit --no-fund
       # The safety suite. A failure here means the agent can take an action the
