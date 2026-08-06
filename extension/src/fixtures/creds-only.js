@@ -13,9 +13,28 @@
  * until removed. Ship builds stay `npm run build`, which ignores the key.
  */
 
-import { FIXTURE_CREDENTIALS, FIXTURE_CREDENTIAL_MODE } from './creds.local.js';
 import { pickCredential } from './pick.js';
 import { PROFILE_GAP_SEEDS, seedProfileGaps } from './gaps.js';
+
+/**
+ * The local accounts, loaded so that their ABSENCE is not a crash.
+ *
+ * creds.local.js is gitignored (real passwords, public repo). build.mjs
+ * resolves the import to the tracked template when it is missing — but
+ * `node --test` has no such plugin, so a STATIC import made every test file
+ * that reaches this module fail to load on a fresh clone. Measured on CI,
+ * where the extension suite reported one failure and 27 fewer tests than
+ * local: the whole fixture file never ran. A dynamic import can be caught;
+ * a static one cannot.
+ */
+async function loadLocalCreds() {
+    try {
+        return await import('./creds.local.js');
+    } catch {
+        return { FIXTURE_CREDENTIALS: { login: null, signup: null }, FIXTURE_CREDENTIAL_MODE: 'login' };
+    }
+}
+
 
 export function initFixture() {
     // The candidate is still the REAL one — this build exists to drive a real
@@ -46,6 +65,7 @@ export async function readFixtureCredential() {
         const got = await chrome.storage.local.get(CREDENTIAL_KEY);
         stored = got?.[CREDENTIAL_KEY] ?? null;
     }
+    const { FIXTURE_CREDENTIALS, FIXTURE_CREDENTIAL_MODE } = await loadLocalCreds();
     return pickCredential(stored, FIXTURE_CREDENTIALS, FIXTURE_CREDENTIAL_MODE);
 }
 

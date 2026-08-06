@@ -26,8 +26,27 @@
  *      fixture that leaves them blank cannot exercise the steps they block.
  */
 
-import { FIXTURE_CREDENTIALS, FIXTURE_CREDENTIAL_MODE } from './creds.local.js';
 import { pickCredential } from './pick.js';
+
+/**
+ * The local accounts, loaded so that their ABSENCE is not a crash.
+ *
+ * creds.local.js is gitignored (real passwords, public repo). build.mjs
+ * resolves the import to the tracked template when it is missing — but
+ * `node --test` has no such plugin, so a STATIC import made every test file
+ * that reaches this module fail to load on a fresh clone. Measured on CI,
+ * where the extension suite reported one failure and 27 fewer tests than
+ * local: the whole fixture file never ran. A dynamic import can be caught;
+ * a static one cannot.
+ */
+async function loadLocalCreds() {
+    try {
+        return await import('./creds.local.js');
+    } catch {
+        return { FIXTURE_CREDENTIALS: { login: null, signup: null }, FIXTURE_CREDENTIAL_MODE: 'login' };
+    }
+}
+
 
 /** Flat profile — mirrors ExtensionProfile in frontend/src/lib/extension-profile.ts. */
 export const DUMMY_PROFILE = {
@@ -302,6 +321,7 @@ export async function readFixtureCredential() {
         const got = await chrome.storage.local.get(CREDENTIAL_KEY);
         stored = got?.[CREDENTIAL_KEY] ?? null;
     }
+    const { FIXTURE_CREDENTIALS, FIXTURE_CREDENTIAL_MODE } = await loadLocalCreds();
     return pickCredential(stored, FIXTURE_CREDENTIALS, FIXTURE_CREDENTIAL_MODE);
 }
 
