@@ -423,6 +423,14 @@ describe('personal facts the profile already holds are wired, not modelled', () 
             { profile: {} }), null);
     });
 
+    test('a profile synced by an OLD build (no nationality key) still resolves', () => {
+        // The stored profile predates the key entirely — the VN-market
+        // derivation answers, flagged as the agent's inference.
+        const v = canonicalValue(classifyField({ label: 'Primary Nationality*' }),
+            { profile: { addressProvince: 'Hà Nội' } });
+        assert.deepEqual(v, { value: 'Vietnam', source: SOURCE.AGENT_DEFAULT });
+    });
+
     test('Date of Birth and Marital Status read the profile keys that always existed', () => {
         assert.equal(classifyField({ label: 'Date of Birth*' })?.key, 'dateOfBirth');
         assert.equal(classifyField({ label: 'Marital Status*' })?.key, 'maritalStatus');

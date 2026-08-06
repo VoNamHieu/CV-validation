@@ -165,7 +165,11 @@ export const FIELD_PATTERNS = [
     // all four went to the model, which is FORBIDDEN from stating personal
     // facts and rightly returned nothing. The data was here; the wire wasn't.)
     { key: 'dateOfBirth', match: /date of birth|\bdob\b|ngày sinh/i, profileKey: 'dateOfBirth' },
-    { key: 'nationality', match: /nationality|quốc tịch/i, profileKey: 'nationality', normalize: 'country' },
+    // profileKey when the profile has it — but a profile synced by an OLD
+    // web-app build has no nationality key at all (measured 2026-08-06: the
+    // field fell through to gap-inference and died on the old server prompt).
+    // Same honest VN-market derivation as countryOfBirth, same review flag.
+    { key: 'nationality', match: /nationality|quốc tịch/i, profileKey: 'nationality', normalize: 'country', derive: deriveCountryOfBirth, deriveSource: 'AGENT_DEFAULT' },
     { key: 'countryOfBirth', match: /(country|territory)[^?]{0,24}of birth|quốc gia nơi sinh/i, derive: deriveCountryOfBirth, deriveSource: 'AGENT_DEFAULT' },
     { key: 'maritalStatus', match: /marital status|tình trạng hôn nhân/i, profileKey: 'maritalStatus', userOnly: true },
     { key: 'gpa', match: /\bgpa\b|grade (average|point)|overall result|điểm trung bình/i, path: 'education[0].gpa', userOnly: true },
