@@ -2655,24 +2655,34 @@ async function fillLanguageRows(cv, outcomes, profile) {
     // home, versus how many rows are free to take one. Recomputed every
     // iteration so the row just added is counted.
     const freeRowCount = () => langWraps().filter(w => !rowValue(w)).length;
+    // Every exit is NAMED. The English-less Mondelez submission (review:
+    // "Languages 1: Vietnamese", nothing else) came through here — some branch
+    // below broke out silently, the fill loop had nothing to place, and the
+    // section read as complete. A hand-check minutes later showed the Add
+    // button present and working, so whichever branch it was, the trace said
+    // nothing and the step advanced minus a language the CV states.
+    let growStop = '';
     const growGuard = 5;
     for (let g = 0; g < growGuard; g++) {
         const { remaining: unplaced } = buildPlans();
         const need = unplaced.length - freeRowCount();
         if (need <= 0) break;                       // a blank row is already waiting
-        if (langWraps().length >= 3) break;         // cap
+        if (langWraps().length >= 3) { growStop = 'row cap (3)'; break; }
         const btn = sectionAddButton('Languages');
-        if (!btn) break;
-        if (!safeActivate(btn, { source: 'recipe', activation: 'page-action' }, '[data-automation-id="add-button"]')) break;
+        if (!btn) { growStop = 'no add button in Languages scope'; break; }
+        if (!safeActivate(btn, { source: 'recipe', activation: 'page-action' }, '[data-automation-id="add-button"]')) {
+            growStop = 'add click denied/failed'; break;
+        }
         const had = langWraps().length;
         const by = Date.now() + 4000;
         while (langWraps().length <= had && Date.now() < by) await sleep(200);
-        if (langWraps().length <= had) break;       // click added nothing — don't spin
+        if (langWraps().length <= had) { growStop = 'add clicked, no row appeared in 4s'; break; }
         trace('section.addRow', {
             section: 'Languages', rows: langWraps().length,
             unplaced: unplaced.length, free: freeRowCount(), want: Math.min(langs.length, 3),
         });
     }
+    if (growStop) trace('lang.growStop', { why: growStop, rows: langWraps().length });
 
     // Whatever the cause — an earlier build's over-growing, two passes racing, a
     // half-finished manual edit — a section that already carries duplicate or
@@ -2738,12 +2748,36 @@ async function fillLanguageRows(cv, outcomes, profile) {
         if (/native|fluent|advanced/i.test(String(L.level || ''))) {
             const box = fluentBoxes()[i];
             if (box && !box.checked) {
+                // Same escalation every other Workday checkbox needed: the
+                // bare click routinely paints nothing (measured on this very
+                // box — review said "I am fluent: No" beside "Overall:
+                // Fluent"), so climb: click → change event → label/panel.
                 safeActivate(box, { source: 'recipe', activation: 'widget-option' }, 'fluent-language');
                 await sleep(250);
+                if (!box.checked) {
+                    try { box.dispatchEvent(new Event('change', { bubbles: true })); } catch { /* noop */ }
+                    await sleep(250);
+                }
+                if (!box.checked) {
+                    const bw = box.closest('[data-automation-id^="formField-"]');
+                    const alt = (box.id && document.querySelector(`label[for="${CSS.escape(box.id)}"]`))
+                        || box.closest('label')
+                        || bw?.querySelector('[data-automation-id="checkboxPanel"]');
+                    if (alt) { safeActivate(alt, { source: 'recipe', activation: 'widget-option' }, 'fluent-language'); await sleep(300); }
+                }
                 if (box.checked) { filled++; outcomes.push([`Fluent (row ${i + 1})`, 'OK', 'ticked']); }
                 else outcomes.push([`Fluent (row ${i + 1})`, 'FAIL', 'tick did not take']);
             }
         }
+    }
+    // A language with no row is a MISSING ANSWER, not a quiet shrug: report it
+    // as a failure so the field-failure budget holds the step and the trace
+    // names what is absent — instead of submitting an application that omits
+    // a language the CV states (measured: the English-less Mondelez review).
+    const leftover = buildPlans().remaining;
+    if (leftover.length) {
+        outcomes.push(['Languages', 'FAIL',
+            `no row for: ${leftover.map(l => l.language).join(', ')}${growStop ? ` (grow stopped: ${growStop})` : ''}`]);
     }
     return filled;
 }
