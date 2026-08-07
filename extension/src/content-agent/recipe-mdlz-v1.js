@@ -2215,7 +2215,13 @@ async function fillWorkExperienceRows(cv, outcomes) {
             outcomes.push([`Work From (row ${i + 1})`, 'NEED_DATA', sdAnswerable.why]);
         } else if (sd) {
             const r = await setDateOnWrap(sd, String(e.start_date || ''));
-            if (r.ok) { filled++; outcomes.push([`Work From (row ${i + 1})`, 'OK', String(e.start_date).slice(0, 12)]); }
+            // A value that was ALREADY right is not progress. Returning ok for
+            // a lingering-error date made every pass report filled=3, the loop
+            // read that as movement, and it span 170 iterations on a page it
+            // had not changed (R-173518). 'done' ends the streak without
+            // pretending anything moved, so the error breaker can fire.
+            if (r.ok && r.lingeringError) { outcomes.push([`Work From (row ${i + 1})`, 'done', 'value already correct; form error is stale']); }
+            else if (r.ok) { filled++; outcomes.push([`Work From (row ${i + 1})`, 'OK', String(e.start_date).slice(0, 12)]); }
             else if (!['already-selected', 'no value'].includes(r.reason)) outcomes.push([`Work From (row ${i + 1})`, 'FAIL', r.reason]);
         }
     }
