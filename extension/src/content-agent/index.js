@@ -42,7 +42,7 @@ import { tenantRefFor } from '../ats/tenant.js';
 // you can confirm (in the PAGE / tab console, NOT the service-worker console) that
 // the freshly-built dist is actually loaded. If you don't see this line on the
 // apply tab, the new build isn't injected (reload the extension + refresh the tab).
-const COPO_BUILD = 'phase0-isolation-2026-08-07e';
+const COPO_BUILD = 'phase0-isolation-2026-08-07f';
 try { console.log(`%c[Copo] content-agent build ${COPO_BUILD} loaded → ${location.host}`, 'color:#c43b2e;font-weight:700'); } catch { /* noop */ }
 
 /**
@@ -182,6 +182,7 @@ async function _runAgentLoop(rawProfile) {
     const history = [];
     let prevStateHash = '';
     let prevStepCurrent = null;
+    let prevRecipeStep = null;
     let prevUrl = window.location.href;
     const fillAttempts = new Map(); // selector → { count, lastValue }
     const persistentlyUnfilled = new Set();
@@ -1251,8 +1252,21 @@ async function _runAgentLoop(rawProfile) {
 
             // Step changed (multi-step wizard advanced) or URL changed → reset
             // stuck-detection state so a fresh page doesn't trip false positives.
+            //
+            // The RECIPE's matched step is a third change signal, and on Workday
+            // it is the only honest one: the tenant's own indicator read "1/5"
+            // for the entire Demand Planning Intern run (the progress nav lists
+            // every step and the parser sees the first), the URL never changes —
+            // so My Experience's "Languages(1/3)" verdict survived into
+            // Application Questions and held a CLEAN page's advance for seven
+            // passes until the run died "Stuck". A verdict about a page that no
+            // longer exists must not hold the page that replaced it.
             const curStep = state.stepIndicator?.current ?? null;
-            if (curStep !== prevStepCurrent || state.url !== prevUrl) {
+            const curRecipeStep = recipe
+                ? ((recipe.steps || []).find(s => s.detect && document.querySelector(s.detect))?.name ?? null)
+                : null;
+            if (curStep !== prevStepCurrent || state.url !== prevUrl
+                || curRecipeStep !== prevRecipeStep) {
                 prevStateHash = '';
                 fillAttempts.clear();
                 persistentlyUnfilled.clear();
@@ -1265,6 +1279,7 @@ async function _runAgentLoop(rawProfile) {
                 // also mean the new step's first real failure had no retries left.
                 resetFieldStatus();
                 prevStepCurrent = curStep;
+                prevRecipeStep = curRecipeStep;
                 prevUrl = state.url;
                 // A new page gets its own grace to render. Without this the budget
                 // is spent by whichever step happened to be slow first, and every

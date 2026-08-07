@@ -2797,10 +2797,19 @@ async function fillLanguageRows(cv, outcomes, profile) {
     // as a failure so the field-failure budget holds the step and the trace
     // names what is absent — instead of submitting an application that omits
     // a language the CV states (measured: the English-less Mondelez review).
+    //
+    // And the mirror image, measured 2026-08-07 on Demand Planning Intern: a
+    // pass that ends with NOTHING left over must SAY SO under the same label.
+    // The failure lives under 'Languages' while the fix lands under
+    // 'Language (row 2)' — without this OK, a once-failed section stayed FAIL
+    // at 1/3 forever (a fixed field never fails again, so the budget never
+    // releases it) and held the advance on every later step of the run.
     const leftover = buildPlans().remaining;
     if (leftover.length) {
         outcomes.push(['Languages', 'FAIL',
             `no row for: ${leftover.map(l => l.language).join(', ')}${growStop ? ` (grow stopped: ${growStop})` : ''}`]);
+    } else {
+        outcomes.push(['Languages', 'OK', 'every CV language has a row']);
     }
     return filled;
 }
