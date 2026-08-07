@@ -326,7 +326,7 @@ export const FALLBACK_RECIPES = [
                 detect: '[data-automation-id="applyFlowPrimaryQuestionsPage"]',
                 fields: [
                     { label: 'Notice period', labelMatch: 'notice period', value: '30 days', type: 'text' },
-                    { label: 'Salary expectations', labelMatch: 'salary', profileKey: 'desiredSalary', default: 'Negotiable', type: 'text' },
+                    { label: 'Salary expectations', labelMatch: 'salary', profileKey: 'desiredSalary', default: 'Negotiable', type: 'text', normalize: 'money' },
                     // The three screening dropdowns Mondelez asks on every job
                     // (measured on R-173278; labelMatch phrasings verbatim from the
                     // page). All three are AGENT_DEFAULT answers ABOUT the candidate,
@@ -1758,6 +1758,24 @@ async function _applyRecipeFields(recipe, profile, cvData, cv) {
                 // native setter never reached its state), and this guard then
                 // read the painted text as done on every later pass.
                 const wrapEl = el.closest('[data-automation-id^="formField-"]');
+                // Money fields answer to the BOX, not the recipe default: a
+                // numeric/VND box gets digits (converted if the profile talks
+                // USD), and with no digits to give, the field steps aside as a
+                // named gap instead of looping a doomed "Negotiable" write.
+                if (f.normalize === 'money' && val) {
+                    const numericBox = el.type === 'number' || el.inputMode === 'numeric'
+                        || /numeric/i.test(el.getAttribute('data-automation-id') || '');
+                    const vndLabel = /\bvnd\b|₫/i.test(wrapEl?.textContent || f.label || '');
+                    const reshaped = reshapeMoneyValue(val, { numericBox, vndLabel });
+                    if (reshaped !== String(val)) {
+                        trace('field.money', {
+                            field: f.label, from: String(val).slice(0, 20),
+                            to: reshaped.slice(0, 20) || '(gap — no digits)', numericBox, vndLabel,
+                        });
+                    }
+                    if (!reshaped) { outcomes.push([f.label, 'skip', 'no numeric salary to write — left as a named gap']); continue; }
+                    val = reshaped;
+                }
                 const errCount = () => wrapEl
                     ? wrapEl.querySelectorAll(FIELD_ERROR_SEL).length
                     : 0;
@@ -3058,6 +3076,33 @@ function readCvPath(cv, path) {
 const ACCEPTS = {
     qualification: /bachelor|master|doctor|phd|associate|diploma|certificate|high school|\bb\.?[sae]\b|\bm\.?[sa]\b|mba|llb|cử nhân|thạc sĩ|tiến sĩ|kỹ sư|cao đẳng|trung cấp/i,
 };
+
+/**
+ * A salary value, reshaped for the box that has to hold it.
+ *
+ * Measured on PwC Corporate Tax: the recipe wrote "Negotiable" into "What are
+ * your salary expectations (gross) in VND?*" — a numeric box — and Workday's
+ * validation error then stood through sixteen passes while recovery cleared
+ * and rewrote the same impossible value. A money field's ANSWER depends on
+ * what the box accepts: a text box takes the profile value verbatim; a numeric
+ * box takes digits or nothing (an empty gap is named at review, a doomed write
+ * loops forever). USD converts to VND only when the label ASKS in VND —
+ * coarse fixed rate, and the review page shows the number it produced.
+ *
+ * Exported for tests.
+ */
+export function reshapeMoneyValue(raw, { numericBox = false, vndLabel = false } = {}) {
+    const s = String(raw || '').trim();
+    if (!s) return '';
+    if (!numericBox && !vndLabel) return s;          // free-text box: verbatim
+    const digits = s.replace(/[^\d]/g, '');
+    if (!digits) return '';                          // "Negotiable" → named gap
+    let n = parseInt(digits, 10);
+    if (!Number.isFinite(n) || n <= 0) return '';
+    if (vndLabel && /\$|usd/i.test(s)) n = n * 26000;            // USD → VND
+    else if (/\d\s*tr\b|triệu/i.test(s)) n = n * 1000000;        // "52tr" → VND
+    return String(n);
+}
 
 function recipeFieldValue(f, profile, cv) {
     // A fixed `value` is the recipe author's literal choice — never rewritten.
