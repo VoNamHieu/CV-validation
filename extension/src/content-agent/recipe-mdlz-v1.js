@@ -2219,6 +2219,103 @@ function dateAnswerable(text) {
     return month ? { ok: true } : { ok: false, why: `year but no month in "${t.slice(0, 16)}"` };
 }
 
+/**
+ * Write a Workday month/year date THROUGH ITS CALENDAR PICKER.
+ *
+ * MEASURED on the live mdlz form, 2026-08-07, three ways into one field:
+ *   · synthetic KeyboardEvent (all a content script can send) → nothing.
+ *     value stays "", aria-valuenow stays null. This is the path the agent
+ *     has been using, which means it has NEVER written a date: every
+ *     "Work From: filled" in the traces was Workday's own résumé parse.
+ *     When the agent had to write one itself — a row it added, a segment
+ *     the recovery cleared — the field stayed empty and the step died on
+ *     "The field From is required".
+ *   · CDP insertText → nothing either.
+ *   · CDP real keydown (a human at the keyboard) → writes.
+ *   · THE PICKER, driven by ordinary synthetic clicks → WRITES AND COMMITS
+ *     (month=5, year=2024 read back from aria-valuenow).
+ *
+ * Clicks are what a content script CAN send, and this widget accepts them.
+ * So dates are picked, never typed.
+ *
+ * Structure, as measured: [data-automation-id="dateIcon"] opens a panel; a
+ * UL holds twelve div[role="button"] month cells labelled "May 2026" (the
+ * current one prefixed "Selected "); the panel above it carries
+ * button[aria-label="Previous Year"|"Next Year"] and a text node with the
+ * year on display. aria-valuenow on the two dateSection inputs is the
+ * commit signal — .value is not (it reads empty even when committed).
+ */
+async function pickDateOnWrap(wrap, month, year) {
+    const vis = (e) => !!(e && e.offsetParent !== null);
+    const monthEl = wrap.querySelector('[data-automation-id="dateSectionMonth-input"]');
+    const yearEl = wrap.querySelector('[data-automation-id="dateSectionYear-input"]');
+    const now = (el) => String(el?.getAttribute('aria-valuenow') ?? '').trim();
+    const holds = () => now(monthEl) !== '' && Number(now(monthEl)) === Number(month)
+        && now(yearEl) !== '' && Number(now(yearEl)) === Number(year);
+    if (holds()) return { ok: true, reason: 'already-selected' };
+
+    const icon = wrap.querySelector('[data-automation-id="dateIcon"]') || wrap.querySelector('button');
+    if (!icon) return { ok: false, reason: 'no calendar icon on this date field' };
+    if (!safeActivate(icon, { source: 'recipe', activation: 'widget-open' }, '[data-automation-id="dateIcon"]')) {
+        return { ok: false, reason: 'policy denied the calendar' };
+    }
+    const monthCells = () => [...document.querySelectorAll('[role="button"]')].filter(vis)
+        .filter(e => /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)$/i.test((e.textContent || '').trim()));
+    const by = Date.now() + 4000 * hiddenMult();
+    while (!monthCells().length && Date.now() < by) await sleep(150);
+    const cells0 = monthCells();
+    if (!cells0.length) return { ok: false, reason: 'calendar did not open' };
+
+    // The panel that owns these cells — year arrows live above the UL.
+    const ul = cells0[0].closest('ul') || cells0[0].parentElement;
+    const panel = ul?.parentElement || document;
+    const shownYear = () => {
+        const el = [...panel.querySelectorAll('*')].filter(vis)
+            .find(e => /^(19|20)\d{2}$/.test((e.textContent || '').trim()));
+        return el ? Number((el.textContent || '').trim()) : null;
+    };
+    const arrow = (dir) => [...panel.querySelectorAll('button, [role="button"]')].filter(vis)
+        .find(e => new RegExp(`${dir} year`, 'i').test(e.getAttribute('aria-label') || ''));
+
+    // Walk to the wanted year. Bounded: a date decades away is a data problem,
+    // not a navigation problem, and clicking forty times to discover that is
+    // the kind of spending this agent has done enough of.
+    let hops = 0;
+    const MAX_HOPS = 40;
+    let cur = shownYear();
+    while (cur != null && cur !== Number(year) && hops < MAX_HOPS) {
+        const a = arrow(cur > Number(year) ? 'previous' : 'next');
+        if (!a) break;
+        safeActivate(a, { source: 'recipe', activation: 'widget-option' }, '[aria-label*="Year"]');
+        hops++;
+        const settleBy = Date.now() + 1200 * hiddenMult();
+        const was = cur;
+        while (Date.now() < settleBy) { await sleep(120); if (shownYear() !== was) break; }
+        cur = shownYear();
+    }
+    if (cur !== Number(year)) {
+        trace('date.pickYearFailed', { wanted: String(year), reached: String(cur), hops });
+        try { document.body.click(); } catch { /* close the panel */ }
+        return { ok: false, reason: `calendar could not reach ${year} (stopped at ${cur} after ${hops})` };
+    }
+
+    const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+    const wantCell = MONTHS[Number(month) - 1];
+    const cell = monthCells().find(e => (e.textContent || '').trim().toLowerCase() === wantCell);
+    if (!cell) return { ok: false, reason: `month ${month} not in the calendar` };
+    safeActivate(cell, { source: 'recipe', activation: 'widget-option' }, '[role="button"]');
+
+    const commitBy = Date.now() + 2500 * hiddenMult();
+    while (!holds() && Date.now() < commitBy) await sleep(150);
+    trace('date.picked', {
+        wanted: `${month}/${year}`, hops,
+        committed: holds() ? `${now(monthEl)}/${now(yearEl)}` : '(not committed)',
+    });
+    return holds()
+        ? { ok: true, via: 'calendar' }
+        : { ok: false, reason: `calendar click did not commit ${month}/${year}` };
+}
+
 async function setDateOnWrap(wrap, val) {
     const text = String(val).trim();
     if (/^(hiện tại|present|current|now)$/i.test(text)) return { ok: false, reason: 'no value' };
@@ -2271,6 +2368,20 @@ async function setDateOnWrap(wrap, val) {
     // painted text, or a value beside an error — falls through and re-enters.
     if (committed(yearEl) && (single || !month || committed(monthEl)) && !errorsBefore) {
         return { ok: false, reason: 'already-selected' };
+    }
+
+    // ── SECTIONED DATES ARE PICKED, NOT TYPED ──
+    // Measured 2026-08-07: a content script's synthetic keystrokes write
+    // NOTHING into these spinbuttons (value stays empty, aria-valuenow stays
+    // null), while the calendar accepts an ordinary synthetic click and
+    // commits. Every "date filled" in the old traces was Workday's résumé
+    // parse; the agent's own writes never landed, which is why a row it added
+    // could never satisfy From/To. The typing path below stays for plain
+    // single-input dates, which are a different widget.
+    if (!single && month && wrap.querySelector('[data-automation-id="dateIcon"]')) {
+        const picked = await pickDateOnWrap(wrap, Number(month), Number(year));
+        if (picked.ok) return picked;
+        trace('date.pickFallback', { wanted: `${month}/${year}`, why: String(picked.reason).slice(0, 60) });
     }
 
     // Digits as REAL keystrokes, one at a time. Workday's date sections are
