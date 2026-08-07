@@ -2930,7 +2930,26 @@ async function fillExperienceEndDates(cv, outcomes) {
         const wrap = endWraps[i];
         const inputs = [...wrap.querySelectorAll('input')].filter(x => x.offsetParent !== null);
         const yearEl = inputs.find(x => /year/i.test(`${x.getAttribute('data-automation-id') || ''} ${x.getAttribute('aria-label') || ''}`)) || inputs[1];
-        if (!yearEl || String(yearEl.value || '').trim()) continue;   // filled → not ours to touch
+        const monthEl = inputs.find(x => /month/i.test(`${x.getAttribute('data-automation-id') || ''} ${x.getAttribute('aria-label') || ''}`)) || inputs[0];
+        if (!yearEl) continue;
+        const yearVal = String(yearEl.value || '').trim();
+        const monthVal = monthEl && monthEl !== yearEl ? String(monthEl.value || '').trim() : yearVal;
+        if (yearVal && monthVal) continue;   // truly filled → not ours to touch
+        if (yearVal || monthVal) {
+            // MDLZ-REPRODUCED FIX (R-174262, 2026-08-07, error.stubborn ×4):
+            // HALF a date is not "filled" — a resumed draft carried "2" in one
+            // segment, the year-only check read the row as filled and skipped
+            // it forever while Workday demanded To. Clear both segments and
+            // fill the whole date below. Identical fix lives in generic.
+            trace('exp.endDate', {
+                row: i, title: norm(titleInputs[i]?.value).slice(0, 30) || '(no title)',
+                verdict: `half-filled (${monthVal || '∅'}/${yearVal || '∅'}) — cleared to refill`,
+            });
+            for (const el of [monthEl, yearEl]) {
+                if (el) { try { setNativeValue(el, '', { quiet: true }); } catch { /* readonly */ } }
+            }
+            await sleep(150);
+        }
         const rowTitle = norm(titleInputs[i]?.value);
         const match = rowTitle ? exp.find(e => {
             const t = norm(e.title);

@@ -2909,7 +2909,26 @@ async function fillExperienceEndDates(cv, outcomes) {
         const wrap = endWraps[i];
         const inputs = [...wrap.querySelectorAll('input')].filter(x => x.offsetParent !== null);
         const yearEl = inputs.find(x => /year/i.test(`${x.getAttribute('data-automation-id') || ''} ${x.getAttribute('aria-label') || ''}`)) || inputs[1];
-        if (!yearEl || String(yearEl.value || '').trim()) continue;   // filled → not ours to touch
+        const monthEl = inputs.find(x => /month/i.test(`${x.getAttribute('data-automation-id') || ''} ${x.getAttribute('aria-label') || ''}`)) || inputs[0];
+        if (!yearEl) continue;
+        const yearVal = String(yearEl.value || '').trim();
+        const monthVal = monthEl && monthEl !== yearEl ? String(monthEl.value || '').trim() : yearVal;
+        if (yearVal && monthVal) continue;   // truly filled → not ours to touch
+        if (yearVal || monthVal) {
+            // HALF a date is not "filled". A resumed draft carried "2" in one
+            // segment (measured R-174262: recovery cleared it, but the
+            // year-only check here read the row as filled and skipped it on
+            // every later pass while Workday demanded To — error.stubborn ×4,
+            // run blocked). Clear both segments and fill the whole date below.
+            trace('exp.endDate', {
+                row: i, title: norm(titleInputs[i]?.value).slice(0, 30) || '(no title)',
+                verdict: `half-filled (${monthVal || '∅'}/${yearVal || '∅'}) — cleared to refill`,
+            });
+            for (const el of [monthEl, yearEl]) {
+                if (el) { try { setNativeValue(el, '', { quiet: true }); } catch { /* readonly */ } }
+            }
+            await sleep(150);
+        }
         const rowTitle = norm(titleInputs[i]?.value);
         const match = rowTitle ? exp.find(e => {
             const t = norm(e.title);
@@ -4414,7 +4433,19 @@ async function fillCustomSelect(f, value, ctx = {}) {
             const chips = [...wrap.querySelectorAll('[data-automation-id="selectedItem"]')];
             if (chips.length) return chips.map(c => (c.textContent || '').trim()).join(' | ');
             const t = (wrap.querySelector('button')?.textContent || '').trim();
-            return t && !/select one/i.test(t) ? t : '';
+            if (t && !/select one/i.test(t)) return t;
+            // A searchable single-select commits INTO ITS INPUT and closes the
+            // popup — no chip, no button. Measured on Province or City
+            // (R-174262): search-pick committed for real (the next pass read
+            // the field as done and Workday never objected), but this reader
+            // saw nothing and a working click was recorded as no-commit. The
+            // popup-closed condition is what separates a commit from the text
+            // we typed ourselves while it was open.
+            if (trigger.tagName === 'INPUT') {
+                const v = String(trigger.value || '').trim();
+                if (v && !visibleOptions().length) return v;
+            }
+            return '';
         } catch { return ''; }
     };
     // Without a wrapper there is no field state to read. "Cannot tell" must not
