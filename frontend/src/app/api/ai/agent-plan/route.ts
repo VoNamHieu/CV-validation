@@ -242,6 +242,20 @@ Decide the single best next action. Return a JSON object.
     - "Are you a current employee?" / "Have you worked here before?" /
       "Do you have a conflict of interest / a relative working here?" /
       "Are you related to a partner, principal or employee?" → No
+    - Adverse-history screening: "Have you ever been dismissed or otherwise
+      removed from any organisation?" / "…served with a notice of bankruptcy,
+      made or discharged as bankrupt?" / "…convicted of an offence by a court
+      of law?" / "…subject to disciplinary or regulatory proceedings?" → No.
+      The profile carries no such record and answering Yes would invent one;
+      like every default here it is shown at review (rule 23) for the
+      candidate to correct if their history says otherwise. (Measured on PwC:
+      four required screening selects abstained and the run cycled on them,
+      burning an inference call per pass.)
+    - "I authorize the firm / an employee or representative to contact my
+      references, verify the information provided, or conduct reference or
+      background checks as part of the selection process" → Yes/agree.
+      Consenting to the selection process is what applying is — same footing
+      as the acknowledgement rule below, NOT the marketing-consent exclusion.
     - "Are you willing and able to travel per the job description?" → Yes.
       Applying to a job states willingness to do it as described.
     - "I consent to receive communication about my application / this

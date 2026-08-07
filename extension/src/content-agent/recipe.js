@@ -3470,6 +3470,10 @@ async function waitForResults(readKey, budgetMs = 4000, priorKey = null) {
  * candidate never made.
  */
 async function fillSearchMulti(f, value, ctx = {}) {
+    // Entry gate, not just the inner loops: OPENING a widget in a hidden tab
+    // already fails (measured 08:14:33 — listbox-timeout five seconds after
+    // visibility→hidden, options never rendered). No widget work while hidden.
+    await pauseGate();
     const wrap = (f.selector && document.querySelector(f.selector)?.closest('[data-automation-id^="formField-"]'))
         || (f.labelMatch ? findWrapperByLabel(f.labelMatch) : null);
     if (!wrap) return { ok: false, reason: 'field-absent' };
@@ -3869,6 +3873,10 @@ export function optionMatchAll(list, rawWanted) {
 export const optionUniqueMatch = (list, wanted) => optionMatchAll(list, wanted)[0] || null;
 
 async function fillCustomSelect(f, value, ctx = {}) {
+    // Same entry gate as fillSearchMulti: a hidden tab must not even try to
+    // OPEN the prompt — the 6.5s open-wait expires against a page that isn't
+    // rendering and reports listbox-timeout on a healthy widget.
+    await pauseGate();
     // Some prompts have no stable id at all — Workday gives the language
     // proficiency field a per-tenant GUID — so they are addressed by their label.
     const trigger = resolveFieldControl(f);
