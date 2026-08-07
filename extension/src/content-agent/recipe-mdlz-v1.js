@@ -4973,8 +4973,23 @@ async function _fillCustomSelectTimed(f, value, ctx = {}) {
         // value is refused whatever asked for it.
         const demographicQ = /gender|sex\b|race|ethnic|dân tộc|giới tính|disability|khuyết tật|veteran|cựu chiến binh/i
             .test(String(f.label || ''));
-        const decliney = /prefer not|wish not|don'?t wish|decline|not disclose|không muốn|từ chối/i;
-        if (r?.value && demographicQ && !decliney.test(String(r.value))) {
+        // A DECLINE is what this belt exists to allow — including the wording
+        // tenants actually ship. Measured on R-173784 (07w): the belt refused
+        // "Not Specified", which IS the decline option, and refused "Kinh
+        // (Vietnam)", which is the candidate's OWN stored ethnicity — 58
+        // seconds spent turning two correct answers into empty fields. So:
+        // decline wording passes, and so does a value the profile itself
+        // states. Only an INVENTED demographic claim is refused.
+        const decliney = /prefer not|wish not|don'?t wish|do not wish|decline|not disclose|not specified|unspecified|choose not|no answer|không muốn|từ chối|không tiết lộ/i;
+        const fromProfile = (() => {
+            const v = String(r?.value || '').toLowerCase();
+            for (const k of ['ethnicity', 'raceEthnicity', 'race', 'gender', 'sex']) {
+                const own = String(ctx?.profile?.[k] || '').trim().toLowerCase();
+                if (own && (v.includes(own) || own.includes(v.split('(')[0].trim()))) return true;
+            }
+            return false;
+        })();
+        if (r?.value && demographicQ && !decliney.test(String(r.value)) && !fromProfile) {
             trace('list.inferDenied', {
                 field: f.label, picked: String(r.value).slice(0, 30),
                 why: 'demographic question — an inferred value would be a claim about the person',
