@@ -1580,7 +1580,31 @@ async function _applyRecipeFields(recipe, profile, cvData, cv) {
         .filter((f, i, arr) => arr.findIndex(x => x.label === f.label) === i)
         .filter(f => !inStep.has(f.label))
         .filter(fieldOnPage);
-    const fieldsToFill = [...stepFields, ...menuExtras];
+    let fieldsToFill = [...stepFields, ...menuExtras];
+    // ── ONE FIELD, ONE OWNER ──
+    // The row helpers below own every Work Experience date and every language
+    // row. Leaving the single-field twins in this loop meant two layers wrote
+    // the same widgets in one pass, each verifying against state the other had
+    // just changed — the "loạn" in a run that finishes but re-reads itself for
+    // minutes. Whoever owns the SECTION owns its fields; the generic entries
+    // step aside (named, so the summary still accounts for them).
+    if (recipe.ats === 'workday') {
+        const ownedByRows = [];
+        const rowsOwnWork = (step?.ensureSections || []).includes('Work Experience')
+            || !!document.querySelector('[data-automation-id="formField-startDate"]');
+        const rowsOwnLang = !!document.querySelector('[data-automation-id="formField-language"]');
+        fieldsToFill = fieldsToFill.filter((f) => {
+            const owned = (rowsOwnWork && /^Work (From|To)$/i.test(f.label || ''))
+                || (rowsOwnLang && /^Language( level)?$/i.test(f.label || ''));
+            if (owned) ownedByRows.push(f.label);
+            return !owned;
+        });
+        if (ownedByRows.length) {
+            traceOnce(`owner.rows:${stepName}:${ownedByRows.join(',')}`, 'owner.delegated', {
+                step: stepName, to: 'row-helpers', fields: ownedByRows.join(' | '),
+            });
+        }
+    }
     const stepName = step?.name || (menuExtras.length ? 'Field Menu' : null);
     // A matched step with NOTHING to fill is still MATCHED — the Autofill page
     // is a dropzone and a Continue button, and returning matched:false there
@@ -2109,7 +2133,13 @@ async function fillWorkExperienceRows(cv, outcomes) {
         await put(colWraps('formField-location')[i], e.location || e.city || 'Vietnam', 'Location');
         await put(colWraps('formField-roleDescription')[i], e.description, 'Role description');
         const sd = colWraps('formField-startDate')[i];
-        if (sd) {
+        const sdAnswerable = dateAnswerable(e.start_date);
+        if (sd && !sdAnswerable.ok) {
+            // NEED_DATA: named now, before a single keystroke, so the run does
+            // not spend a minute filling Skills to discover this at the end.
+            trace('exp.needData', { row: i + 1, field: 'Work From', why: sdAnswerable.why });
+            outcomes.push([`Work From (row ${i + 1})`, 'NEED_DATA', sdAnswerable.why]);
+        } else if (sd) {
             const r = await setDateOnWrap(sd, String(e.start_date || ''));
             if (r.ok) { filled++; outcomes.push([`Work From (row ${i + 1})`, 'OK', String(e.start_date).slice(0, 12)]); }
             else if (!['already-selected', 'no value'].includes(r.reason)) outcomes.push([`Work From (row ${i + 1})`, 'FAIL', r.reason]);
@@ -2156,6 +2186,27 @@ async function fillDateField(f, val) {
  *     Workday's segmented date widget is built to consume, and the exit blur
  *     is what triggers its validation pass.
  */
+
+/**
+ * Can this CV value answer a Workday month+year date at all?
+ *
+ * Workday's date sections are BOTH required — a year with no month writes half
+ * a date, which the form rejects as empty and which the recovery then makes
+ * worse. Deciding it here, before anything is typed, turns a minute of fill
+ * work plus a NEED_HUMAN at the end into a named gap the review can carry.
+ */
+function dateAnswerable(text) {
+    const t = String(text || '').trim();
+    if (!t) return { ok: false, why: 'no date in CV' };
+    if (/^(hiện tại|present|current|now)$/i.test(t)) return { ok: true, current: true };
+    const year = /\b(19|20)\d{2}\b/.test(t);
+    if (!year) return { ok: false, why: `no year in "${t.slice(0, 16)}"` };
+    const month = /^\d{4}-\d{2}-\d{2}$/.test(t)
+        || /\b(0?[1-9]|1[0-2])\b(?!\d)/.test(t.replace(/\b(19|20)\d{2}\b/, ''))
+        || /jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|tháng/i.test(t);
+    return month ? { ok: true } : { ok: false, why: `year but no month in "${t.slice(0, 16)}"` };
+}
+
 async function setDateOnWrap(wrap, val) {
     const text = String(val).trim();
     if (/^(hiện tại|present|current|now)$/i.test(text)) return { ok: false, reason: 'no value' };
@@ -3156,6 +3207,12 @@ async function fillExperienceEndDates(cv, outcomes) {
             else outcomes.push([`Work To (row ${i + 1})`, 'PARTIAL', 'checked but end-date still required']);
             continue;
         }
+        const edAnswerable = dateAnswerable(endState.value);
+        if (!edAnswerable.ok) {
+            trace('exp.needData', { row: i + 1, field: 'Work To', why: edAnswerable.why });
+            outcomes.push([`Work To (row ${i + 1})`, 'NEED_DATA', edAnswerable.why]);
+            continue;
+        }
         const r = await setDateOnWrap(wrap, endState.value);
         trace('exp.endDate', { row: i, title: rowTitle.slice(0, 30), value: endState.value.slice(0, 16), verdict: r.ok ? 'filled' : r.reason });
         if (r.ok) { filled++; outcomes.push([`Work To (row ${i + 1})`, 'OK', endState.value.slice(0, 16)]); }
@@ -3736,6 +3793,23 @@ async function fillSearchMulti(f, value, ctx = {}) {
         .map(c => (c.textContent || '').replace(/\s*×\s*/g, '').trim()).filter(Boolean);
     const wanted = splitSkillList(value).slice(0, f.max || 8);
     if (!wanted.length) return { ok: false, reason: 'no value' };
+
+    // ── ALREADY SATISFIED → TOUCH NOTHING ──
+    // Every pass re-typed all eight terms into the search box to conclude
+    // "already" eight times: ~5 seconds per iteration, five iterations, on a
+    // field that was complete before the first of them. A committed chip is
+    // the answer; asking the server again is not verification, it is cost.
+    {
+        const norm0 = (x) => String(x || '').replace(/\s+/g, ' ').trim().toLowerCase();
+        const have = chips().map(norm0);
+        const missing = wanted.filter(t => {
+            const n = norm0(t);
+            return !have.some(h => h === n || h.includes(n) || n.includes(h));
+        });
+        if (!missing.length) {
+            return { satisfied: true, changed: false, added: 0, already: wanted.length, reason: 'already-selected' };
+        }
+    }
 
     // A stale popup from the previous field misreads as this field's results, and
     // text a crashed pass left in the box corrupts the first query — clear both.

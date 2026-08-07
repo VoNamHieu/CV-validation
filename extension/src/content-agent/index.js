@@ -42,7 +42,7 @@ import { tenantRefFor } from '../ats/tenant.js';
 // you can confirm (in the PAGE / tab console, NOT the service-worker console) that
 // the freshly-built dist is actually loaded. If you don't see this line on the
 // apply tab, the new build isn't injected (reload the extension + refresh the tab).
-const COPO_BUILD = 'phase0-trace-2026-08-07n';
+const COPO_BUILD = 'phase0-exec-2026-08-07o';
 try { console.log(`%c[Copo] content-agent build ${COPO_BUILD} loaded → ${location.host}`, 'color:#c43b2e;font-weight:700'); } catch { /* noop */ }
 
 /**
@@ -112,6 +112,39 @@ async function loadSessionCv() {
 // Timing spans are for the tenant being tuned: on for a locked snapshot,
 // silent everywhere else, so no other tenant's trace changes shape.
 setSpanTracking(!!LOCKED_TENANT);
+
+// ── ADVANCE LOCK ──
+// A step is advanced ONCE. Measured on R-172088: three Save-and-Continue
+// clicks 1.5s apart on the same page, because the loop came round before
+// Workday had transitioned and read the still-complete step as ready to
+// advance again. Extra clicks on a transitioning wizard are how a page ends
+// up half-saved. The lock holds until the step's fingerprint actually
+// changes (or the wait expires, so a page that silently refuses can still be
+// retried).
+const ADVANCE_LOCK_MS = 6000;
+let _advLock = null;
+function _stepFingerprint(state, recipe) {
+    try {
+        const step = recipe ? ((recipe.steps || []).find(s => s.detect && document.querySelector(s.detect))?.name || '') : '';
+        const btn = (document.querySelector('[data-automation-id="pageFooterNextButton"]')?.textContent || '').trim().slice(0, 24);
+        const req = (state?.formFields || []).filter(f => f.required).length;
+        const ind = state?.stepIndicator ? `${state.stepIndicator.current}/${state.stepIndicator.total}` : '';
+        return `${location.pathname}|${step}|${ind}|${req}|${btn}`;
+    } catch { return `fp-${Date.now()}`; }
+}
+/** True when this step has already been advanced and has not moved yet. */
+function _advanceHeld(state, recipe) {
+    if (!LOCKED_TENANT) return false;
+    const fp = _stepFingerprint(state, recipe);
+    if (!_advLock) return false;
+    if (_advLock.fp !== fp) { _advLock = null; return false; }   // it moved → free
+    if (Date.now() - _advLock.at > ADVANCE_LOCK_MS) { _advLock = null; return false; }
+    trace('advance.held', { waitedMs: Date.now() - _advLock.at, fp: fp.slice(-40) });
+    return true;
+}
+function _advanceTaken(state, recipe) {
+    if (LOCKED_TENANT) _advLock = { fp: _stepFingerprint(state, recipe), at: Date.now() };
+}
 
 // The iteration currently being timed. Module scope so reportResult can close
 // it — a run that ends mid-iteration would otherwise lose its slowest one.
@@ -1222,9 +1255,10 @@ async function _runAgentLoop(rawProfile) {
                         // `actionsTaken` anyway told the completion check that we
                         // had acted, and let the loop continue as if the step had
                         // moved on.
+                        if (_advanceHeld(state, recipe)) { await sleep(800); continue; }
                         const advanced = safeActivate(adv, policyCtx('recipe'), stepNow.advance);
                         trace('advance.click', { selector: stepNow.advance, activated: advanced });
-                        if (advanced) _progress();
+                        if (advanced) { _progress(); _advanceTaken(state, recipe); }
                         if (!advanced) {
                             removeProgress();
                             showToast(withTenantFlags('✅ Đã điền xong — kiểm tra rồi tự bấm nộp để hoàn tất.'), 8000);
@@ -1449,6 +1483,16 @@ async function _runAgentLoop(rawProfile) {
                             // already had. Every segment goes, or none does.
                             // (mdlz-first per the snapshot rule; the generic
                             // keeps the old path until this is promoted.)
+                            // A field with an OWNER is never cleared by this
+                            // layer: the owner knows what the value should be
+                            // and how this widget commits, and a blind clear
+                            // is how a good date became half a date. Reset its
+                            // budget instead — the owner re-enters next pass.
+                            if (LOCKED_TENANT && recipeFieldStatus(m.label)) {
+                                trace('recover.delegated', { field: m.label, to: 'recipe owner', error: String(m.message || '').slice(0, 60) });
+                                fieldRecovery.set(m.label, 0);
+                                continue;
+                            }
                             const dateSegs = LOCKED_TENANT
                                 ? [...(m.wrap?.querySelectorAll?.('[data-automation-id^="dateSection"] input, [data-automation-id^="dateSection"]') || [])]
                                     .filter(el => el.tagName === 'INPUT' && el.offsetParent !== null)
