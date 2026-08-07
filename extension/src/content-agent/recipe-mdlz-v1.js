@@ -3138,11 +3138,19 @@ async function fillLanguageRows(cv, outcomes, profile) {
         if (langWraps().length >= 3) { growStop = 'row cap (3)'; break; }
         const btn = sectionAddButton('Languages');
         if (!btn) { growStop = 'no add button in Languages scope'; break; }
+        // MEASURED (rc4, HSE_R-173159): the section ended with ONE row and the
+        // English row was never created — "add clicked, no row appeared in 4s".
+        // The calendar failed the same way and for the same reason: a click
+        // aimed at a control below the fold hit-tests as whatever covers that
+        // point. Scroll it under the cursor, then click, and give the render
+        // longer than four seconds before calling it a refusal.
+        try { btn.scrollIntoView({ block: 'center' }); } catch { /* noop */ }
+        await sleep(250);
+        const had = langWraps().length;
         if (!safeActivate(btn, { source: 'recipe', activation: 'page-action' }, '[data-automation-id="add-button"]')) {
             growStop = 'add click denied/failed'; break;
         }
-        const had = langWraps().length;
-        const by = Date.now() + 4000;
+        const by = Date.now() + 8000 * hiddenMult();
         while (langWraps().length <= had && Date.now() < by) await sleep(200);
         if (langWraps().length <= had) { growStop = 'add clicked, no row appeared in 4s'; break; }
         trace('section.addRow', {
@@ -3308,7 +3316,15 @@ async function fillLanguageRows(cv, outcomes, profile) {
             // the element), climb click -> label/panel, verify after settle.
             const wantsTick = /native|fluent|advanced/i.test(String(L.level || ''));
             if (wantsTick) {
-                const liveBox = () => fluentBoxes()[i] || null;
+                // The tick belongs to THIS row. Reading fluentBoxes()[i] paired
+                // an index across a page-wide list — the same flaw that lost
+                // English — so the box is found inside the row's own container,
+                // re-read every attempt because re-hydration replaces it.
+                const liveBox = () => {
+                    const rowNow = languageRows().find(r => r.language
+                        && String(L.language || '').toLowerCase().includes(r.language.toLowerCase()));
+                    return rowNow?.tick || fluentBoxes()[i] || null;
+                };
                 for (let attempt = 0; attempt < 2 && !(liveBox()?.checked); attempt++) {
                     const box2 = liveBox();
                     if (!box2) break;
