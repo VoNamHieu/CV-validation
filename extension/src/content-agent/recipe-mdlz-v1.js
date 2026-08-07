@@ -3318,7 +3318,69 @@ async function fillLanguageRows(cv, outcomes, profile) {
  * DATED → fill month/year; MISSING → a user gap, named in the trace, never
  * papered over with a current-employment claim.
  */
+/**
+ * The Work Experience section as ROWS, not as parallel column arrays.
+ *
+ * Index pairing across page-wide arrays is what let a current role — whose To
+ * field is HIDDEN — shift every later row by one (measured: "3 boxes / 2
+ * rows"), and it is why an error on one row was read as an error on all three.
+ * A row is its CONTAINER: the nearest ancestor holding exactly one Job Title,
+ * and with it whatever else that row owns. Identity is title+company, so a row
+ * survives Workday re-rendering it.
+ *
+ * Pure observation — nothing here writes. It exists so the next measurement
+ * can say WHICH row owns the From/To error that has been ending these runs.
+ */
+function workExperienceRows() {
+    const vis = (e) => !!(e && e.offsetParent !== null);
+    const titles = [...document.querySelectorAll('[data-automation-id="formField-jobTitle"]')].filter(vis);
+    const rows = [];
+    for (const t of titles) {
+        let box = t.parentElement;
+        while (box && box !== document.body
+            && box.querySelectorAll('[data-automation-id="formField-jobTitle"]').length === 1
+            && !box.querySelector('[data-automation-id="formField-startDate"]')) box = box.parentElement;
+        if (!box || box === document.body) box = t.parentElement;
+        const val = (sel) => {
+            const w = box.querySelector(sel);
+            const i = w?.querySelector('input');
+            return String(i?.value || '').trim();
+        };
+        const seg = (sel, which) => {
+            const w = box.querySelector(sel);
+            const el = w?.querySelector(`[data-automation-id="dateSection${which}-input"]`);
+            return el ? String(el.getAttribute('aria-valuenow') ?? '').trim() : null;
+        };
+        rows.push({
+            container: box,
+            identity: `${val('[data-automation-id="formField-jobTitle"]')}@${val('[data-automation-id="formField-companyName"]')}`.toLowerCase(),
+            title: val('[data-automation-id="formField-jobTitle"]'),
+            company: val('[data-automation-id="formField-companyName"]'),
+            from: `${seg('[data-automation-id="formField-startDate"]', 'Month') || '∅'}/${seg('[data-automation-id="formField-startDate"]', 'Year') || '∅'}`,
+            to: box.querySelector('[data-automation-id="formField-endDate"]')
+                ? `${seg('[data-automation-id="formField-endDate"]', 'Month') || '∅'}/${seg('[data-automation-id="formField-endDate"]', 'Year') || '∅'}`
+                : '(hidden)',
+            current: !![...box.querySelectorAll('input[type="checkbox"]')].find(c => c.checked
+                && /currently work here|đang làm việc/i.test(`${c.closest('[data-automation-id^="formField-"]')?.querySelector('legend, label')?.textContent || ''} ${c.getAttribute('aria-label') || ''}`)),
+            errors: box.querySelectorAll(FIELD_ERROR_SEL).length,
+        });
+    }
+    return rows;
+}
+
 async function fillExperienceEndDates(cv, outcomes) {
+    // Row-scoped truth, once per pass: which row holds which dates, whether it
+    // claims to be current, and — the question three runs could not answer —
+    // which row the live error actually belongs to.
+    try {
+        const model = workExperienceRows();
+        if (model.length) {
+            traceOnce(`rows:${model.map(r => `${r.identity}|${r.from}|${r.to}|${r.errors}`).join(';')}`, 'rows.model', {
+                rows: model.map((r, i) => `#${i + 1} ${r.title.slice(0, 18)}@${r.company.slice(0, 14)} from=${r.from} to=${r.to}${r.current ? ' CURRENT' : ''} errs=${r.errors}`).join(' | '),
+            });
+        }
+    } catch { /* measurement must never break the fill */ }
+
     const exp = cv?.experience || [];
     if (!exp.length) return 0;
     const visible = (sel) => [...document.querySelectorAll(sel)].filter(el => el.offsetParent !== null);
