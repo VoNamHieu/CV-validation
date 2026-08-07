@@ -2874,6 +2874,41 @@ async function fillLanguageRows(cv, outcomes, profile) {
                 outcomes.push([`Overall (row ${i + 1})`, 'FAIL',
                     `still "${onPage().slice(0, 24) || '(empty)'}" after reselect ×2 (${String(last?.reason || 'no commit')})`]);
             }
+
+            // MDLZ-REPRODUCED (R-174262 review page): "I am fluent in this
+            // language: No" printed beside "Overall: 3 - Fluent". The tick
+            // lives under the same re-hydration contradiction the Overall did
+            // — Workday drops it and the earlier pass, which saw it go on,
+            // never looks again. The CV's level decides this box, so converge
+            // it: re-read the LIVE node each attempt (re-hydration replaces
+            // the element), climb click -> label/panel, verify after settle.
+            const wantsTick = /native|fluent|advanced/i.test(String(L.level || ''));
+            if (wantsTick) {
+                const liveBox = () => fluentBoxes()[i] || null;
+                for (let attempt = 0; attempt < 2 && !(liveBox()?.checked); attempt++) {
+                    const box2 = liveBox();
+                    if (!box2) break;
+                    trace('lang.convergeTick', {
+                        row: i + 1, language: String(L.language).slice(0, 20),
+                        onPage: 'unticked', attempt: attempt + 1,
+                    });
+                    safeActivate(box2, { source: 'recipe', activation: 'widget-option' }, 'fluent-language');
+                    await sleep(300);
+                    const box3 = liveBox();
+                    if (box3 && !box3.checked) {
+                        const alt = (box3.id && document.querySelector(`label[for="${CSS.escape(box3.id)}"]`))
+                            || box3.closest('label')
+                            || box3.closest('[data-automation-id^="formField-"]')?.querySelector('[data-automation-id="checkboxPanel"]');
+                        if (alt) { safeActivate(alt, { source: 'recipe', activation: 'widget-option' }, 'fluent-language'); await sleep(300); }
+                    }
+                    await sleep(500);   // let the section's re-hydration land
+                }
+                const finalBox = liveBox();
+                if (finalBox) {
+                    outcomes.push([`Fluent (row ${i + 1})`, finalBox.checked ? 'OK' : 'FAIL',
+                        finalBox.checked ? 'verified after settle' : 'tick did not stay after 2 attempts']);
+                }
+            }
         }
     }
 
@@ -3807,18 +3842,45 @@ async function fillSearchMulti(f, value, ctx = {}) {
         // stayed empty and no chip appeared, while two other skills committed on
         // the same code path. Clicking the input directly is a guess, and it was
         // the wrong one often enough to lose skills silently.
+        // Clear of the sticky footer first. With several chips committed the
+        // results list sits lower, and a row's click point can land under the
+        // page's "Back / Save and Continue" bar — measured: "AI Workflow Design"
+        // and "Agentic Systems" matched exactly, every click reported an
+        // unrelated overlay at the point, and no chip appeared.
+        //
+        // MDLZ-REPRODUCED (R-174262): the review page carried "Agentic AI", a
+        // skill the CV never states, beside the "Agentic Systems" that was
+        // wanted. The virtualiser RECYCLES row nodes while scrolling, so the
+        // node matched a moment ago can be displaying a different skill by the
+        // time it is clicked — and the targets were computed off that stale
+        // node. So: remember the LABEL, scroll, then re-resolve the row by
+        // that label and rebuild the targets from what is on screen NOW. No
+        // row carrying it any more means the list moved under us: abandon the
+        // term rather than click whatever took its place.
+        const wantLabel = (pick.textContent || '').trim();
+        try { pick.scrollIntoView({ block: 'center' }); await sleep(150); } catch { /* noop */ }
+        {
+            const norm2 = (x) => String(x || '').replace(/\s+/g, ' ').trim().toLowerCase();
+            const fresh = [...document.querySelectorAll(OPTION_SEL)]
+                .filter(o => o.offsetParent !== null)
+                .filter(o => o.getAttribute('data-automation-id') !== 'selectedItem')
+                .filter(o => !o.closest('[data-automation-id="selectedItemList"]'))
+                .find(o => norm2(o.textContent) === norm2(wantLabel));
+            if (!fresh) {
+                trace('skills.rowRecycled', { term, wanted: wantLabel.slice(0, 40), note: 'row no longer on screen after scroll — not clicking its replacement' });
+                notes.push(`${term}:row-recycled`);
+                await resetSearchBox();
+                continue;
+            }
+            pick = fresh;
+        }
         const targets = [
             pick.querySelector('[data-automation-id="promptLeafNode"]'),
             pick.querySelector('input[type="checkbox"], input[type="radio"]'),
             pick.querySelector('label'),
             pick,
         ].filter((el, i, arr) => el && arr.indexOf(el) === i);
-        // Clear of the sticky footer first. With several chips committed the
-        // results list sits lower, and a row's click point can land under the
-        // page's "Back / Save and Continue" bar — measured: "AI Workflow Design"
-        // and "Agentic Systems" matched exactly, every click reported an
-        // unrelated overlay at the point, and no chip appeared.
-        try { pick.scrollIntoView({ block: 'center' }); await sleep(150); } catch { /* noop */ }
+        const beforeChipTexts = chips().map(c => String(c.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase());
         const deadline = Date.now() + 2500 * hiddenMult();
         for (const target of targets) {
             safeActivate(target, { source: 'recipe', activation: 'widget-option' }, f.selector || f.labelMatch);
@@ -3870,6 +3932,43 @@ async function fillSearchMulti(f, value, ctx = {}) {
             }
             viaKeyboard = chips().length > before;
             if (viaKeyboard) trace('skills.keyboardCommit', { term });
+        }
+        // THE CHIP THAT APPEARED MUST BE THE ONE WE ASKED FOR.
+        // Any chip counted as success before, so a neighbour committed by a
+        // recycled row was recorded as the wanted skill and reached the review
+        // page as a claim the candidate never made (R-174262: "Agentic AI").
+        // An alien chip is removed here, at the one moment we KNOW we put it
+        // there — chips already on the candidate before this pass are never
+        // touched, because those may be the user's own from another
+        // application.
+        if (chips().length > before) {
+            const norm3 = (x) => String(x || '').replace(/\s+/g, ' ').trim().toLowerCase();
+            const wanted3 = norm3(wantLabel);
+            const addedChips = chips().filter(c => !beforeChipTexts.includes(norm3(c.textContent)));
+            const alienChips = addedChips.filter(c => {
+                const t = norm3(c.textContent);
+                return !(t === wanted3 || t.includes(wanted3) || wanted3.includes(t));
+            });
+            for (const bad of alienChips) {
+                const label = String(bad.textContent || '').replace(/\s+/g, ' ').trim();
+                const del = bad.querySelector('button, [role="button"], [aria-label*="elete" i], [aria-label*="emove" i]') || bad;
+                const removed = safeActivate(del, { source: 'recipe', activation: 'widget-option' }, f.selector || f.labelMatch);
+                await sleep(400);
+                const stillThere = chips().some(c => norm3(c.textContent) === norm3(label));
+                trace('skills.wrongChip', {
+                    term, wanted: wantLabel.slice(0, 40), committed: label.slice(0, 40),
+                    removeAttempted: removed, stillOnForm: stillThere,
+                });
+                notes.push(`${term}:wrong-chip "${label.slice(0, 24)}"${stillThere ? ' (STILL ON FORM)' : ' (removed)'}`);
+            }
+            if (alienChips.length && !chips().some(c => {
+                const t = norm3(c.textContent);
+                return t === wanted3 || t.includes(wanted3) || wanted3.includes(t);
+            })) {
+                // The wanted skill never landed; only the wrong one did.
+                await resetSearchBox();
+                continue;
+            }
         }
         if (chips().length > before) { added++; notes.push(`${term}:${viaKeyboard ? 'ok-kb' : 'ok'}`); } else {
             notes.push(`${term}:no-effect`);
