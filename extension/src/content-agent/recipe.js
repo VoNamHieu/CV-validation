@@ -4112,19 +4112,30 @@ async function fillCustomSelect(f, value, ctx = {}) {
     // one field could silently erase another's. It also made the
     // waitForElement() guard below pass instantly on a page where no listbox had
     // opened at all.
-    const visibleOptions = () => [...document.querySelectorAll(OPTION_SEL)]
-        .filter(o => o.offsetParent !== null)
-        // A committed chip is also role=option / promptOption. Clicking one
-        // DESELECTS it, so leaving them in the candidate pool meant filling one
-        // field could silently erase another field's answer.
-        .filter(o => o.getAttribute('data-automation-id') !== 'selectedItem')
-        .filter(o => !o.closest('[data-automation-id="selectedItemList"]'))
-        // The placeholder row is a real option element; picking it answers nothing.
-        .filter(o => o.id !== 'select-one' && (o.textContent || '').trim().toLowerCase() !== 'select one')
-        .filter(o => {
-            const owner = o.closest('[data-automation-id^="formField-"]');
-            return !owner || owner === wrap;   // never another field's committed answer
-        });
+    const visibleOptions = () => {
+        // OUR popup first, when the widget names it: Workday stamps the open
+        // trigger with aria-controls/aria-owns pointing at its listbox. A
+        // portal popup has no formField ancestor, so without this a stray
+        // list another field left open reads as OURS — measured on HSE
+        // Specialist R-173159: four orphan rows sat over Province or City and
+        // ate four drill levels, the search-pick AND the keyboard rung, while
+        // the field's real popup was never even open.
+        const ownId = trigger.getAttribute('aria-controls') || trigger.getAttribute('aria-owns');
+        const own = ownId ? document.getElementById(ownId) : null;
+        return [...(own || document).querySelectorAll(OPTION_SEL)]
+            .filter(o => o.offsetParent !== null)
+            // A committed chip is also role=option / promptOption. Clicking one
+            // DESELECTS it, so leaving them in the candidate pool meant filling one
+            // field could silently erase another field's answer.
+            .filter(o => o.getAttribute('data-automation-id') !== 'selectedItem')
+            .filter(o => !o.closest('[data-automation-id="selectedItemList"]'))
+            // The placeholder row is a real option element; picking it answers nothing.
+            .filter(o => o.id !== 'select-one' && (o.textContent || '').trim().toLowerCase() !== 'select one')
+            .filter(o => {
+                const owner = o.closest('[data-automation-id^="formField-"]');
+                return !owner || owner === wrap;   // never another field's committed answer
+            });
+    };
 
     // Wait for OUR listbox, not for any promptOption anywhere on the page.
     // 6.5s not 4s: the Language prompt was measured taking >4s to open once on
@@ -4546,23 +4557,42 @@ async function fillCustomSelect(f, value, ctx = {}) {
             if (forward.length) cands = forward;
         }
 
-        const node = cands[0];
-        // Innermost meaningful control first. A row nests
-        // menuItem[role=option] › promptLeafNode › promptOption; the radio only
-        // exists once we are deep enough to be looking at a real choice.
-        const hit = node.querySelector('input[type="radio"], input[type="checkbox"]')
-            || node.querySelector('[data-automation-id="promptLeafNode"]')
-            || node;
-        const isLeaf = !!node.querySelector('input[type="radio"], input[type="checkbox"]');
-        // Clear of clipped edges before aiming (ported from the skills fill):
-        // a virtualized row parked at the window's edge hit-tests as whatever
-        // overlaps it, and the direct-dispatch fallback then lands on nothing.
-        try { node.scrollIntoView({ block: 'center' }); await sleep(120); } catch { /* noop */ }
-        const beforeRows = renderedRows(visibleOptions).join('|');
-        const activated = safeActivate(hit, { source: 'recipe', activation: 'widget-option' }, f.selector);
-        if (!activated) { attempts.push(`level${level}:policy-denied`); break; }
-
-        const now = await waitForCommit(isLeaf ? 2500 : 1200);
+        // TRY each node carrying the label, in order — the plural return was
+        // always the matcher's promise, and clicking only cands[0] broke it:
+        // box-sort can put a dead twin first, and four drill levels then die
+        // on the same corpse (measured: Province or City no-effect ×4 while
+        // the value committed by hand first try). A click that neither
+        // commits nor drills costs one short wait; the next twin is often
+        // the live row.
+        let now = '';
+        let drilled = false;
+        let denied = false;
+        let node = cands[0];
+        let isLeaf = false;
+        let beforeRows = renderedRows(visibleOptions).join('|');
+        for (const cand of cands.slice(0, 3)) {
+            node = cand;
+            // Innermost meaningful control first. A row nests
+            // menuItem[role=option] › promptLeafNode › promptOption; the radio
+            // only exists once we are looking at a real choice.
+            const hit = node.querySelector('input[type="radio"], input[type="checkbox"]')
+                || node.querySelector('[data-automation-id="promptLeafNode"]')
+                || node;
+            isLeaf = !!node.querySelector('input[type="radio"], input[type="checkbox"]');
+            // Clear of clipped edges before aiming: a virtualized row parked at
+            // the window's edge hit-tests as whatever overlaps it.
+            try { node.scrollIntoView({ block: 'center' }); await sleep(120); } catch { /* noop */ }
+            beforeRows = renderedRows(visibleOptions).join('|');
+            const activated = safeActivate(hit, { source: 'recipe', activation: 'widget-option' }, f.selector);
+            if (!activated) { denied = true; attempts.push(`level${level}:policy-denied`); break; }
+            now = await waitForCommit(isLeaf ? 2500 : 1200);
+            if (now) break;
+            await sleep(350 * hiddenMult());
+            const afterRows = renderedRows(visibleOptions).join('|');
+            drilled = afterRows !== beforeRows && !!visibleOptions().length;
+            if (drilled) break;
+        }
+        if (denied) break;
         if (now) {
             attempts.push(`level${level}:stuck`);
             if (f.multi) {
@@ -4576,14 +4606,6 @@ async function fillCustomSelect(f, value, ctx = {}) {
             trace('list.result', { field: f.label, picked: matched, onPage: now, levels: level + 1, stuck: true });
             return { ok: true, matched: matched.replace(/^=/, '') };
         }
-        // No commit. Did the click DRILL IN instead? A changed row set means a
-        // submenu opened and the next pass should match inside it. ×hiddenMult:
-        // the submenu render lands late in a hidden tab, and reading early here
-        // is what turned a working drill into "level0:no-effect" four runs in
-        // five on PwC's source cascade.
-        await sleep(350 * hiddenMult());
-        const afterRows = renderedRows(visibleOptions).join('|');
-        const drilled = afterRows !== beforeRows && !!visibleOptions().length;
         attempts.push(`level${level}:${drilled ? 'drilled-in' : 'no-effect'}`);
         // On no-effect, name what actually sits at the row's click point — "the
         // right row, covered by a stale popup" and "the right row, dead handler"
