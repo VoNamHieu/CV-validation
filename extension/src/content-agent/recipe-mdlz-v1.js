@@ -2256,13 +2256,21 @@ async function pickDateOnWrap(wrap, month, year) {
 
     const icon = wrap.querySelector('[data-automation-id="dateIcon"]') || wrap.querySelector('button');
     if (!icon) return { ok: false, reason: 'no calendar icon on this date field' };
-    if (!safeActivate(icon, { source: 'recipe', activation: 'widget-open' }, '[data-automation-id="dateIcon"]')) {
-        return { ok: false, reason: 'policy denied the calendar' };
-    }
     const monthCells = () => [...document.querySelectorAll('[role="button"]')].filter(vis)
         .filter(e => /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)$/i.test((e.textContent || '').trim()));
-    const by = Date.now() + 4000 * hiddenMult();
-    while (!monthCells().length && Date.now() < by) await sleep(150);
+    // Measured 2026-08-07 (R-173784): "calendar did not open" five times in a
+    // run where the same click worked by hand — a click aimed at an icon that
+    // is off-screen hit-tests as whatever covers that point. Scroll it under
+    // the cursor first, and give it a second attempt before giving up.
+    for (let attempt = 0; attempt < 2 && !monthCells().length; attempt++) {
+        try { wrap.scrollIntoView({ block: 'center' }); } catch { /* noop */ }
+        await sleep(200);
+        if (!safeActivate(icon, { source: 'recipe', activation: 'widget-open' }, '[data-automation-id="dateIcon"]')) {
+            return { ok: false, reason: 'policy denied the calendar' };
+        }
+        const by = Date.now() + 3000 * hiddenMult();
+        while (!monthCells().length && Date.now() < by) await sleep(150);
+    }
     const cells0 = monthCells();
     if (!cells0.length) return { ok: false, reason: 'calendar did not open' };
 
@@ -4891,6 +4899,25 @@ async function _fillCustomSelectTimed(f, value, ctx = {}) {
         if (inferDenied) {
             trace('list.inferDenied', { field: f.label, picked: r.value.slice(0, 30), why: 'substantive value on a decline-only field' });
             inferNote = `model picked "${r.value.slice(0, 20)}" — refused (decline-only field)`;
+        }
+        // ── DEMOGRAPHIC BELT, INDEPENDENT OF THE FIELD DEFINITION ──
+        // Measured on R-173784: the profile asked for "I don't wish to answer",
+        // this tenant's Gender list offers only Female/Male/Other, the ladder
+        // exhausted, and the model was asked to choose — it answered "Male",
+        // which was written to a real application as a statement about the
+        // candidate. The deny belt only ran when the FIELD carried inferDeny,
+        // and this call came in without one. The question decides now, not the
+        // field's definition: on a demographic prompt, an inferred substantive
+        // value is refused whatever asked for it.
+        const demographicQ = /gender|sex\b|race|ethnic|dân tộc|giới tính|disability|khuyết tật|veteran|cựu chiến binh/i
+            .test(String(f.label || ''));
+        const decliney = /prefer not|wish not|don'?t wish|decline|not disclose|không muốn|từ chối/i;
+        if (r?.value && demographicQ && !decliney.test(String(r.value))) {
+            trace('list.inferDenied', {
+                field: f.label, picked: String(r.value).slice(0, 30),
+                why: 'demographic question — an inferred value would be a claim about the person',
+            });
+            return { ok: false, reason: `demographic answer refused ("${String(r.value).slice(0, 20)}") — left for the candidate` };
         }
         if (r?.value && !inferDenied) {
             matched = r.value.toLowerCase();
