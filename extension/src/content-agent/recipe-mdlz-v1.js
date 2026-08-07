@@ -4745,6 +4745,27 @@ async function _fillCustomSelectTimed(f, value, ctx = {}) {
         }
     }
     await sleep(150);
+    // ── A DEMOGRAPHIC FIELD ANSWERS FROM DEMOGRAPHIC DATA, OR NOT AT ALL ──
+    // Measured on R-173784: the gap-filler handed Race/Ethnicity the value
+    // "Hà Nội" — the candidate's CITY — because its own mapping fell through
+    // to the nearest populated profile key. A wrong ethnicity is not a slow
+    // field, it is a false statement about a person on a real application, and
+    // it fails silently. So on these questions the value must come from the
+    // demographic keys or be a decline; anything else is dropped here, and the
+    // ladder's decline rungs answer instead.
+    if (/gender|sex\b|race|ethnic|dân tộc|giới tính/i.test(String(f.label || ''))) {
+        const own = String(ctx?.profile?.ethnicity || ctx?.profile?.gender || '').trim();
+        const v = String(value || '').trim();
+        const looksDecline = /prefer not|wish|decline|not specified|unspecified|choose not|no answer|không|từ chối/i.test(v);
+        const isOwn = own && (v.toLowerCase().includes(own.toLowerCase()) || own.toLowerCase().includes(v.toLowerCase()));
+        if (v && !looksDecline && !isOwn) {
+            trace('demographic.valueDropped', {
+                field: f.label, given: v.slice(0, 24), profileHas: own.slice(0, 20) || '(none)',
+                note: 'value did not come from a demographic key — falling back to the ladder',
+            });
+            value = own || '';
+        }
+    }
     const want = String(value || '').trim().toLowerCase();
     // Type-to-filter: the trigger itself when it's an input (Mondelez renders the
     // source and phone-code prompts as a search box, placeholder "Search"), else a
