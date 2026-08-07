@@ -1581,6 +1581,7 @@ async function _applyRecipeFields(recipe, profile, cvData, cv) {
         .filter(f => !inStep.has(f.label))
         .filter(fieldOnPage);
     let fieldsToFill = [...stepFields, ...menuExtras];
+    const stepName = step?.name || (menuExtras.length ? 'Field Menu' : null);
     // ── ONE FIELD, ONE OWNER ──
     // The row helpers below own every Work Experience date and every language
     // row. Leaving the single-field twins in this loop meant two layers wrote
@@ -1605,7 +1606,6 @@ async function _applyRecipeFields(recipe, profile, cvData, cv) {
             });
         }
     }
-    const stepName = step?.name || (menuExtras.length ? 'Field Menu' : null);
     // A matched step with NOTHING to fill is still MATCHED — the Autofill page
     // is a dropzone and a Continue button, and returning matched:false there
     // stranded the run between two gates: the recipe advance wants rf.matched,
