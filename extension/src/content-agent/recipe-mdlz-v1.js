@@ -2331,7 +2331,44 @@ async function setDateOnWrap(wrap, val) {
     // Delta verification: an error that was live before must be gone; a field
     // that never showed one only needs the value present. (Measured on mdlz:
     // a real commit clears the inputAlert immediately, no Continue needed.)
-    if (errorsBefore > 0 && errorsIn() > 0) return { ok: false, reason: 'value shown but error persists' };
+    if (errorsBefore > 0 && errorsIn() > 0) {
+        // The VALUE decides, not the error node. Workday re-validates a date on
+        // Save, not on write, so a correct value can sit beside an error left
+        // over from the failed Save that preceded this pass — measured on
+        // R-174262, where all three rows reported "value shown but error
+        // persists" while every one of them displayed the right date, the
+        // recipe then held the advance, and the run stalled arguing with a
+        // stale banner. So: if the segments now hold exactly what the CV asked
+        // for, this field is answered. Blur first to give Workday the one
+        // event that clears its own error; if the error genuinely belongs to
+        // this field, the next Save says so again and the streak still ends
+        // the step.
+        try {
+            for (const el of [monthEl, yearEl, dayEl]) {
+                if (el) { el.dispatchEvent(new FocusEvent('focusout', { bubbles: true })); el.blur?.(); }
+            }
+        } catch { /* noop */ }
+        await sleep(250);
+        const holds = (el, want) => {
+            if (!el || want == null) return true;
+            const now = el.getAttribute('role') === 'spinbutton'
+                ? String(el.getAttribute('aria-valuenow') ?? '').trim()
+                : String(el.value ?? '').trim();
+            return now !== '' && Number(now) === Number(want);
+        };
+        const valueIsRight = single
+            ? String(yearEl.value || '').includes(String(year))
+            : (holds(yearEl, year) && (!month || holds(monthEl, month)));
+        if (valueIsRight) {
+            trace('date.errorLingers', {
+                wanted: `${month || '?'}/${year}`,
+                errorsInField: errorsIn(),
+                verdict: 'value matches the CV — treating the error as stale or another row\'s',
+            });
+            return { ok: true, lingeringError: true };
+        }
+        return { ok: false, reason: 'value shown but error persists' };
+    }
     return { ok: true };
 }
 
@@ -3214,6 +3251,15 @@ async function fillExperienceEndDates(cv, outcomes) {
             };
             const wasChecked = box.checked;
             if (wasChecked && satisfied()) {
+                // Traced, not silent: a pass where this row skipped left NO
+                // line in the trace at all, so "the tick survived" and "the
+                // helper never looked" read identically while Workday kept
+                // demanding To (R-174262).
+                trace('exp.endDate', {
+                    row: i, title: rowTitle.slice(0, 30),
+                    verdict: 'current role already committed — no action',
+                    rowErrors: rowScope.querySelectorAll(FIELD_ERROR_SEL).length,
+                });
                 outcomes.push([`Work To (row ${i + 1})`, 'done', 'current role already committed']);
                 continue;
             }
