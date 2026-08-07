@@ -3043,7 +3043,28 @@ async function fillExperienceEndDates(cv, outcomes) {
         }
         if (endState.kind === 'CURRENT') {
             // Index pairing is only a candidate — the PROOF is structural below.
-            const box = currentBoxes.length === endWraps.length ? currentBoxes[i] : null;
+            let box = currentBoxes.length === endWraps.length ? currentBoxes[i] : null;
+            if (!box) {
+                // Counts differ the moment a current role HIDES its To field:
+                // three rows, three checkboxes, two endDate wrappers — and index
+                // pairing is meaningless then anyway. Measured on R-172088
+                // ("3 boxes / 2 rows"), where the row that needed the tick was
+                // refused it and the step died on a To it never had to answer.
+                // So pair by CONTAINMENT: the nearest ancestor of THIS To
+                // wrapper that holds exactly one endDate field and exactly one
+                // of these checkboxes is that row.
+                let scope = wrap.parentElement;
+                while (scope && scope !== document.body) {
+                    const boxesIn = currentBoxes.filter(c => scope.contains(c));
+                    if (boxesIn.length === 1
+                        && scope.querySelectorAll('[data-automation-id="formField-endDate"]').length === 1) {
+                        box = boxesIn[0];
+                        trace('exp.endDate', { row: i, title: rowTitle.slice(0, 30), verdict: 'checkbox paired structurally (counts differ)' });
+                        break;
+                    }
+                    scope = scope.parentElement;
+                }
+            }
             if (!box) {
                 trace('exp.endDate', { row: i, title: rowTitle.slice(0, 30), verdict: `current role but checkbox pairing ambiguous (${currentBoxes.length} boxes / ${endWraps.length} rows)` });
                 outcomes.push([`Work To (row ${i + 1})`, 'FAIL', 'currently-work-here checkbox not found for this row']);

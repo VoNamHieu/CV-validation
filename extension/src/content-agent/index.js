@@ -42,7 +42,7 @@ import { tenantRefFor } from '../ats/tenant.js';
 // you can confirm (in the PAGE / tab console, NOT the service-worker console) that
 // the freshly-built dist is actually loaded. If you don't see this line on the
 // apply tab, the new build isn't injected (reload the extension + refresh the tab).
-const COPO_BUILD = 'phase0-trace-2026-08-07m';
+const COPO_BUILD = 'phase0-trace-2026-08-07n';
 try { console.log(`%c[Copo] content-agent build ${COPO_BUILD} loaded → ${location.host}`, 'color:#c43b2e;font-weight:700'); } catch { /* noop */ }
 
 /**
@@ -1440,8 +1440,28 @@ async function _runAgentLoop(rawProfile) {
                     // done. Clear it; the next recipe pass re-enters fresh.
                     for (const m of retryable) {
                         if ((fieldRecovery.get(m.label) || 0) >= 2) {
+                            // A COMPOSITE DATE is not one input. Clearing the
+                            // first one empties the MONTH and leaves the year —
+                            // measured on R-172088: "Work From was: 2" turned a
+                            // valid 02/2026 into a half date, Workday raised
+                            // "The field From is required", the error count went
+                            // 2 → 4 and the run died asking a human for months it
+                            // already had. Every segment goes, or none does.
+                            // (mdlz-first per the snapshot rule; the generic
+                            // keeps the old path until this is promoted.)
+                            const dateSegs = LOCKED_TENANT
+                                ? [...(m.wrap?.querySelectorAll?.('[data-automation-id^="dateSection"] input, [data-automation-id^="dateSection"]') || [])]
+                                    .filter(el => el.tagName === 'INPUT' && el.offsetParent !== null)
+                                : [];
                             const inp = m.wrap?.querySelector?.('input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]), textarea');
                             const was = inp ? String(inp.value || '').trim() : '';
+                            if (dateSegs.length > 1) {
+                                const had = dateSegs.map(el => String(el.value || '').trim()).join('/');
+                                for (const el of dateSegs) setNativeValue(el, '', { quiet: true });
+                                trace('recover.clearedDate', { field: m.label, was: had.slice(0, 20), segments: dateSegs.length });
+                                fieldRecovery.set(m.label, 0);
+                                continue;
+                            }
                             if (inp && was) {
                                 setNativeValue(inp, '', { quiet: true });
                                 trace('recover.cleared', { field: m.label, was: was.slice(0, 20) });
