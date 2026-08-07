@@ -2793,6 +2793,69 @@ async function fillLanguageRows(cv, outcomes, profile) {
             }
         }
     }
+    // ── CONVERGE — the destination is KNOWN, so a mismatch is OURS to close ──
+    //
+    // Measured on Demand Planning Intern (2026-08-07): the agent committed
+    // "3 - Fluent" and VERIFIED it on-page, Workday re-hydrated the section
+    // from server state, the box came back "1 - Beginner" beside a ticked
+    // "I am fluent" — and the already-selected guard then protected the
+    // contradiction forever. User rule, same day: with the target clear and
+    // no external factor, FAILING IS THE BUG. This pass runs after every
+    // commit and tick in the section (after the re-hydration storm), rereads
+    // each row, and re-drives any Overall whose value sits outside the
+    // planned level's own ladder — reselect bypasses the guard on purpose.
+    // FAIL survives only for the genuinely external case: the tenant's list
+    // holds no acceptable rung at all.
+    {
+        const pairing = buildPlans();
+        const rows3 = langWraps();
+        const overalls = overallWraps();
+        for (let i = 0; i < rows3.length; i++) {
+            const L = pairing.plans.get(rows3[i]);
+            const ow = overalls[i];
+            if (!L?.level || !ow) continue;
+            const ladder = levelLadder(L.level).map(r => String(r).toLowerCase());
+            // The fill ladder keeps its bottom rung as a last resort; the
+            // VERIFY must not — accepting Beginner beside a ticked "I am
+            // fluent" is exactly the contradiction this pass exists to close.
+            const acceptable = ladder.length > 1 ? ladder.slice(0, -1) : ladder;
+            const onPage = () => rowValue(ow).toLowerCase();
+            const fits = () => {
+                const t = onPage();
+                return !!t && acceptable.some(r => t.includes(r) || r.includes(t));
+            };
+            let last = null;
+            for (let attempt = 0; attempt < 2 && !fits(); attempt++) {
+                trace('lang.converge', {
+                    row: i + 1, language: String(L.language).slice(0, 20),
+                    onPage: onPage().slice(0, 24) || '(empty)', want: acceptable[0], attempt: attempt + 1,
+                });
+                ow.setAttribute('data-copo-row', `oafix${i}`);
+                last = await fillCustomSelect(
+                    {
+                        label: `Overall (row ${i + 1})`, reselect: true,
+                        selector: `[data-copo-row="oafix${i}"] button, [data-copo-row="oafix${i}"] input`,
+                        valuePriority: levelLadder(L.level), type: 'custom-select',
+                    },
+                    L.level, { profile: {}, cv });
+                ow.removeAttribute('data-copo-row');
+                await sleep(600);   // let the section's re-hydration land before rereading
+            }
+            if (fits()) {
+                outcomes.push([`Overall (row ${i + 1})`, 'OK', `verified after settle: ${onPage().slice(0, 24)}`]);
+            } else if (last?.ok && /beginner/i.test(String(last.matched || ''))) {
+                // The ladder walked down HONESTLY: better rungs were tried
+                // first and this tenant's list holds none of them. External —
+                // the one case a below-class value is an answer, and the
+                // review names it rather than the run failing over it.
+                outcomes.push([`Overall (row ${i + 1})`, 'OK', 'tenant offers nothing above Beginner (ladder exhausted)']);
+            } else {
+                outcomes.push([`Overall (row ${i + 1})`, 'FAIL',
+                    `still "${onPage().slice(0, 24) || '(empty)'}" after reselect ×2 (${String(last?.reason || 'no commit')})`]);
+            }
+        }
+    }
+
     // A language with no row is a MISSING ANSWER, not a quiet shrug: report it
     // as a failure so the field-failure budget holds the step and the trace
     // names what is absent — instead of submitting an application that omits
@@ -3997,7 +4060,12 @@ async function fillCustomSelect(f, value, ctx = {}) {
     // into the attribute via React, made this guard read the field as answered,
     // and the recipe skipped it forever while Workday kept flagging it invalid —
     // the loop then burned a 25s LLM plan per iteration on a field it owns.
-    if (!f.multi && trigger.tagName !== 'INPUT' && (trigger.getAttribute('value') || '').trim()) {
+    // `reselect` is the caller saying "I KNOW the right value and the box holds
+    // a wrong one" — the guard steps aside and the prompt is re-opened and
+    // re-picked. Same rule the name boxes earned: a value that contradicts the
+    // plan is corrected, not respected. Without it, one bad hydration ("1 -
+    // Beginner" beside a ticked I-am-fluent) was protected forever.
+    if (!f.multi && !f.reselect && trigger.tagName !== 'INPUT' && (trigger.getAttribute('value') || '').trim()) {
         return { ok: false, reason: 'already-selected' };
     }
     // A popup another field left open would otherwise be read as OUR option list
