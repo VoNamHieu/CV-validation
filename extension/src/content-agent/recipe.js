@@ -4535,6 +4535,58 @@ async function fillCustomSelect(f, value, ctx = {}) {
         field: f.label, picked: matched, onPage: readCommitted() || '(still empty)',
         levels: attempts.length, attempts: attempts.join(', '), stuck: false,
     });
+    // SEARCH-AND-PICK rung: type the DECIDED phrase into the widget's own
+    // filter and click the row the server returns. The drill path dies on this
+    // widget's LIFETIME: PwC's source popup re-renders off a CXS fetch and
+    // closes across the seconds an inference takes — measured 2026-08-07,
+    // "level1:no-row" with the decided leaf on screen moments earlier. The
+    // filter has no such window: Workday itself narrows the catalogue to the
+    // leaf, whatever cascade level it lives at. This is the universal rung a
+    // filter-carrying shape is owed regardless of what the field is called
+    // (user rule 2026-08-07: capability pool gates on shape, never on field).
+    if (matched && filter) {
+        await pauseGate();
+        try {
+            if (!visibleOptions().length) {
+                safeActivate(trigger, { source: 'recipe', activation: 'widget-open' }, f.selector);
+                await sleep(300);
+            }
+            filter.focus();
+            try { setNativeValue(filter, '', { quiet: true }); } catch { /* readonly box */ }
+            await simulateTyping(filter, matched);
+            const by = Date.now() + 5000 * hiddenMult();
+            let row = null;
+            while (Date.now() < by && !row) {
+                row = uniqueMatch(visibleOptions(), matched);
+                if (!row) await sleep(200);
+            }
+            trace('list.searchPick', {
+                field: f.label, typed: matched.slice(0, 40),
+                found: !!row, rows: visibleOptions().length,
+            });
+            if (row) {
+                const hit = row.querySelector('input[type="radio"], input[type="checkbox"]')
+                    || row.querySelector('[data-automation-id="promptLeafNode"]')
+                    || row;
+                safeActivate(hit, { source: 'recipe', activation: 'widget-option' }, f.selector);
+                const committed = await waitForCommit(2500);
+                if (committed) {
+                    attempts.push('searchPick:committed');
+                    if (f.multi) {
+                        trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+                        try { trigger.blur?.(); } catch { /* noop */ }
+                    }
+                    trace('list.result', { field: f.label, picked: matched, onPage: committed, via: 'search-pick', stuck: true });
+                    return { ok: true, matched: matched.replace(/^=/, '') };
+                }
+                attempts.push('searchPick:no-commit');
+            } else {
+                attempts.push('searchPick:no-row');
+            }
+        } catch {
+            attempts.push('searchPick:error');
+        }
+    }
     // Every coordinate path failed — drive the widget's own KEYBOARD path
     // (ported from the skills fill, where covered/virtualized rows made clicks
     // land on nothing): ArrowDown until the ACTIVE row (aria-activedescendant)
