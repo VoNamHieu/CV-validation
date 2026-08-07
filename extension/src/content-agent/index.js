@@ -33,7 +33,7 @@ import { requestStop, setRunMode, stopRequested } from './run-state.js';
 // exempt from tab throttling), the driven page opens in its own small window
 // so it is rarely occluded at all, and verify budgets still stretch under
 // document.hidden for the rendering that genuinely lags.
-import { applyRecipeFields, atFinalStep, clickRecipeGateway, FIELD_FAIL_BUDGET, fillResolvedDate, inferFillDynamicField, loadRecipes, recipeBlockingFields, recipeForUrl, recipeOwnedWrappers, recipeReleased, resetFieldStatus } from './recipe.js';
+import { applyRecipeFields, atFinalStep, clickRecipeGateway, FIELD_FAIL_BUDGET, fillResolvedDate, inferFillDynamicField, loadRecipes, recipeBlockingFields, recipeForUrl, recipeOwnedWrappers, recipeReleased, resetFieldStatus } from './recipe-router.js';
 import { checkClick, logDenial } from './policy.js';
 import { buildManifest, summarizeGaps, VERDICT } from './needs.js';
 import { tenantRefFor } from '../ats/tenant.js';
@@ -42,7 +42,7 @@ import { tenantRefFor } from '../ats/tenant.js';
 // you can confirm (in the PAGE / tab console, NOT the service-worker console) that
 // the freshly-built dist is actually loaded. If you don't see this line on the
 // apply tab, the new build isn't injected (reload the extension + refresh the tab).
-const COPO_BUILD = 'phase0-isolation-2026-08-07h';
+const COPO_BUILD = 'phase0-isolation-2026-08-07i';
 try { console.log(`%c[Copo] content-agent build ${COPO_BUILD} loaded → ${location.host}`, 'color:#c43b2e;font-weight:700'); } catch { /* noop */ }
 
 /**
