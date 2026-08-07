@@ -19,7 +19,7 @@ import { showToast } from './ui.js';
 import { trace, traceOnce } from './trace.js';
 import { callAgentPlan, callApplyMessage } from './llm.js';
 import { isPickerShape, probeFieldShape } from './probe.js';
-import { hiddenMult, stopRequested } from './run-state.js';
+import { hiddenMult, pauseGate, stopRequested } from './run-state.js';
 
 // Keep in sync with frontend/src/lib/applyRecipes.ts (WORKDAY). Fields verified
 // against real 3M Workday captures (My Information, 2026-07-15 / -22). The
@@ -913,6 +913,7 @@ async function findInList(getShown, match, label = '', wanted = '') {
     let rounds = 0;
     for (let pos = 0; pos <= sc.scrollHeight; pos += step) {
         if (stopRequested()) return null;   // background abandoned this run
+        await pauseGate();                  // a hidden tab waits, never walks
         const before = renderedRows(getShown).join('|');
         sc.scrollTop = pos;
         nudgeScroll(sc);
@@ -3521,6 +3522,7 @@ async function fillSearchMulti(f, value, ctx = {}) {
     const notes = [];
     for (const term of wanted) {
         if (stopRequested()) break;   // background abandoned this run
+        await pauseGate();            // a hidden tab waits, never searches
         if (chips().some(c => c.toLowerCase() === term.toLowerCase())) { notes.push(`${term}:already`); continue; }
         const before = chips().length;
         const priorResults = readResultKey().key;
@@ -4341,6 +4343,7 @@ async function fillCustomSelect(f, value, ctx = {}) {
     let inferredAtDrill = false;
     for (let level = 0; level < 4; level++) {
         if (stopRequested()) break;   // background abandoned this run
+        await pauseGate();            // a hidden tab waits, never drills
         // A field that has already answered is never clicked again — that is how
         // the retry loop used to deselect its own pick.
         const settled = readCommitted();

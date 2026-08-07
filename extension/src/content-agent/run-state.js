@@ -38,3 +38,26 @@ export function hiddenMult() {
         return 1;   // non-browser (policy unit tests) → no stretching
     }
 }
+
+// ── Pause-when-hidden ──
+// Stretched budgets were not enough: run smsik0vk4pw1h46 (PwC, 2026-08-07)
+// spent 62 MINUTES in a hidden tab — one list walk took 25 of them under
+// intensive throttling — and still learned nothing, because a hidden tab's
+// evidence cannot be trusted at any budget. A hidden tab now WAITS instead
+// of working: the gate below is awaited at the loop top and inside every
+// long widget loop, so the run resumes the moment the tab is looked at.
+
+let _mode = 'manual';   // 'batch' | 'single' | 'manual' — set at trigger time
+export function setRunMode(m) { _mode = m; }
+export function runMode() { return _mode; }
+
+let _pausedMs = 0;      // total time spent paused — excluded from the run cap
+export function pausedMs() { return _pausedMs; }
+export function addPausedMs(ms) { _pausedMs += ms; }
+
+let _gate = null;       // index.js installs the actual wait (UI + refocus ask)
+export function setPauseGate(fn) { _gate = fn; }
+/** Await this at the top of any long loop. No-op when visible or unset. */
+export async function pauseGate() {
+    if (_gate) await _gate();
+}

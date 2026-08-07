@@ -1542,6 +1542,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return true;  // async response
     }
 
+    // ── Batch agent paused >60s in a hidden tab: bring its window forward ──
+    // Only the DRIVEN tab is obeyed, and only because a batch is the user
+    // having handed the browser over — a single apply waits instead.
+    if (message.type === 'FOCUS_RUN_TAB') {
+        const tid = sender.tab && sender.tab.id;
+        const driven = tid != null && (tid === applyTabId || tid === currentTabId);
+        if (driven) {
+            try { chrome.tabs.update(tid, { active: true }, () => void chrome.runtime.lastError); } catch { /* gone */ }
+            if (sender.tab.windowId != null) {
+                try { chrome.windows.update(sender.tab.windowId, { focused: true }, () => void chrome.runtime.lastError); } catch { /* gone */ }
+            }
+        }
+        sendResponse({ ok: driven });
+        return true;
+    }
+
     // ── Agent heartbeat: the driven page is alive, extend the watchdog ──
     if (message.type === 'AUTO_APPLY_HEARTBEAT') {
         if (isProcessing && sender.tab && sender.tab.id === currentTabId
