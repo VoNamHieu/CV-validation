@@ -3787,6 +3787,85 @@ function fillNativeSelect(sel, f, value) {
     return { ok: false, reason: `option-not-found (native select, ${options.length} options, tried ${ladder.length}: ${ladder.join('/')})` };
 }
 
+// ── Option matching, at module scope so the fixture corpus can freeze it ──
+// Lifted VERBATIM out of fillCustomSelect (Phase 1 of the refactor): same
+// tiers, same unambiguity rule, same ordering. Any change here must first
+// pass tests/option-match.fixtures.test.js against the MEASURED tenant lists.
+export const optionText = (o) => (o.textContent || '').trim().toLowerCase();
+
+// Diacritic/apostrophe fold, used only AFTER the raw comparison found
+// nothing. VN catalogues meet profiles typed every which way — the option
+// says "H’Mông (Vietnam)" (curly apostrophe, full diacritics) while the
+// profile says "H'Mong"; "Mường" meets "Muong". Folding both sides bridges
+// that; running it as a FALLBACK tier keeps raw-distinct lists (e.g.
+// "Thái" vs a hypothetical "Thai") resolving exactly as before.
+export const foldOptionText = (s) => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/đ/g, 'd').replace(/[‘’`]/g, "'");
+
+/**
+ * EVERY node that could be the wanted option, best first.
+ *
+ * A match only counts when it is UNAMBIGUOUS. Measured on Mondelez's Degree
+ * list: a plain substring match on "Bachelor" hits ELEVEN disciplines and
+ * takes the first — Architecture — a false credential claim for someone who
+ * studied Marketing. So: exact wins; a prefix or substring match is accepted
+ * only when exactly one DISTINCT label matches; anything else answers nothing.
+ *
+ * Returning one node was the earlier bug. Workday keeps several elements
+ * carrying the same option text in the document at once — measured on "How
+ * Did You Hear About Us?", where "Company Website" existed both inside the
+ * open popup and again elsewhere — and `exact[0]` takes whichever comes first
+ * in DOM order. Which duplicate is live cannot be decided by looking at it,
+ * so the caller tries them in order and keeps the one that actually commits.
+ * Nodes with a real box come first as the cheapest useful ordering.
+ */
+export function optionMatchAll(list, rawWanted) {
+    // A rung written '=Other' is ANCHORED: exact or prefix only, never the
+    // contains tier — "other" lives inside "another", and a substring hit
+    // on "Another job board" is a wrong claim, not a fallback.
+    const anchored = rawWanted.startsWith('=');
+    const wanted = anchored ? rawWanted.slice(1) : rawWanted;
+    const tier = (pred) => list.filter(pred);
+    const wf = foldOptionText(wanted);
+    let cands = tier(o => optionText(o) === wanted);
+    if (!cands.length) cands = tier(o => foldOptionText(optionText(o)) === wf);
+    if (!cands.length) {
+        // A prefix/substring tier still has to be UNAMBIGUOUS as a set: many
+        // DIFFERENT labels matching means we cannot tell which the user meant,
+        // and "Marketing" must never resolve to "Marketing Research".
+        // The prefix tier is also what accepts a country-suffixed catalogue
+        // row: profile "Kinh" → the one option starting "Kinh (Vietnam)".
+        const distinct = (l) => new Set(l.map(optionText)).size;
+        let prefix = tier(o => optionText(o).startsWith(wanted));
+        if (!prefix.length) prefix = tier(o => foldOptionText(optionText(o)).startsWith(wf));
+        if (prefix.length && distinct(prefix) === 1) cands = prefix;
+        else if (!anchored) {
+            let contains = tier(o => optionText(o).includes(wanted));
+            if (!contains.length) contains = tier(o => foldOptionText(optionText(o)).includes(wf));
+            if (contains.length && distinct(contains) === 1) cands = contains;
+            // Wording drift on proper nouns: the CV says "University of
+            // Illinois at Urbana-Champaign", a catalogue writes it without
+            // the "at" — and no substring bridges that. EVERY significant
+            // token must appear in the row, which is also what REJECTS the
+            // wrong campus: "…at Chicago" has no urbana and no champaign
+            // (measured on Visa, where exactly that school reached the
+            // Review page). Single distinct hit only, like every tier.
+            if (!cands.length) {
+                const toks = wf.split(/[^\p{L}\p{N}]+/u).filter(t => t.length >= 3);
+                if (toks.length >= 2) {
+                    const hit = tier(o => { const t = foldOptionText(optionText(o)); return toks.every(k => t.includes(k)); });
+                    if (hit.length && distinct(hit) === 1) cands = hit;
+                }
+            }
+        }
+    }
+    return cands.sort((a, b) => {
+        const box = (o) => { const r = o.getBoundingClientRect(); return r.width > 0 && r.height > 0 ? 0 : 1; };
+        return box(a) - box(b);
+    });
+}
+export const optionUniqueMatch = (list, wanted) => optionMatchAll(list, wanted)[0] || null;
+
 async function fillCustomSelect(f, value, ctx = {}) {
     // Some prompts have no stable id at all — Workday gives the language
     // proficiency field a per-tenant GUID — so they are addressed by their label.
@@ -3939,7 +4018,7 @@ async function fillCustomSelect(f, value, ctx = {}) {
     // source and phone-code prompts as a search box, placeholder "Search"), else a
     // search input beside the button (long lists like Country on 3M).
     const filter = (trigger.tagName === 'INPUT' ? trigger : null) || wrap?.querySelector('input[type="text"]');
-    const txt = (o) => (o.textContent || '').trim().toLowerCase();
+    const txt = optionText;
 
     // The candidates, best first: the resolved value, then each rung of the
     // field's semantic ladder. Exact match beats a substring match at every rung,
@@ -3955,89 +4034,12 @@ async function fillCustomSelect(f, value, ctx = {}) {
     const ladder = [...new Set([want, ...(f.valuePriority || []).map(v => String(v).trim().toLowerCase())]
         .filter(Boolean))];
 
-    /**
-     * A match only counts when it is UNAMBIGUOUS.
-     *
-     * Measured on Mondelez's Degree list: every option names a discipline
-     * ("B.Arch - Bachelor of Architecture or equivalent", "B.B.A. - Bachelor of
-     * Business Administration…") and there is no generic "Bachelor's Degree" at
-     * all. A plain substring match on "Bachelor" hits ELEVEN of them and takes
-     * the first — Architecture — which is a false credential claim on a real
-     * application for someone who studied Marketing.
-     *
-     * So: exact wins; a prefix or substring match is accepted only when exactly
-     * one option matches it. Anything else is ambiguous and answers nothing,
-     * which the review then names.
-     */
-    /**
-     * EVERY node that could be the wanted option, best first.
-     *
-     * Returning one node was the bug. Workday keeps several elements carrying the
-     * same option text in the document at once — measured on "How Did You Hear
-     * About Us?", where "Company Website" existed both inside the open popup and
-     * again elsewhere — and `exact[0]` takes whichever comes first in DOM order.
-     * Click the wrong one and nothing happens at all: no error, no change, and the
-     * old code reported success. That is this field failing on every single run.
-     *
-     * Which duplicate is live cannot be decided by looking at it (they are all
-     * "visible" by offsetParent), so the caller tries them in order and keeps the
-     * one that actually commits. Nodes with a real box come first as the cheapest
-     * useful ordering — a zero-size node is never the one the user would click.
-     */
-    // Diacritic/apostrophe fold, used only AFTER the raw comparison found
-    // nothing. VN catalogues meet profiles typed every which way — the option
-    // says "H’Mông (Vietnam)" (curly apostrophe, full diacritics) while the
-    // profile says "H'Mong"; "Mường" meets "Muong". Folding both sides bridges
-    // that; running it as a FALLBACK tier keeps raw-distinct lists (e.g.
-    // "Thái" vs a hypothetical "Thai") resolving exactly as before.
-    const fold = (s) => String(s).normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-        .replace(/\u0111/g, 'd').replace(/[\u2018\u2019\u0060]/g, "'");
-    const matchAll = (list, rawWanted) => {
-        // A rung written '=Other' is ANCHORED: exact or prefix only, never the
-        // contains tier — "other" lives inside "another", and a substring hit
-        // on "Another job board" is a wrong claim, not a fallback.
-        const anchored = rawWanted.startsWith('=');
-        const wanted = anchored ? rawWanted.slice(1) : rawWanted;
-        const tier = (pred) => list.filter(pred);
-        const wf = fold(wanted);
-        let cands = tier(o => txt(o) === wanted);
-        if (!cands.length) cands = tier(o => fold(txt(o)) === wf);
-        if (!cands.length) {
-            // A prefix/substring tier still has to be UNAMBIGUOUS as a set: many
-            // DIFFERENT labels matching means we cannot tell which the user meant,
-            // and "Marketing" must never resolve to "Marketing Research".
-            // The prefix tier is also what accepts a country-suffixed catalogue
-            // row: profile "Kinh" → the one option starting "Kinh (Vietnam)".
-            const distinct = (l) => new Set(l.map(txt)).size;
-            let prefix = tier(o => txt(o).startsWith(wanted));
-            if (!prefix.length) prefix = tier(o => fold(txt(o)).startsWith(wf));
-            if (prefix.length && distinct(prefix) === 1) cands = prefix;
-            else if (!anchored) {
-                let contains = tier(o => txt(o).includes(wanted));
-                if (!contains.length) contains = tier(o => fold(txt(o)).includes(wf));
-                if (contains.length && distinct(contains) === 1) cands = contains;
-                // Wording drift on proper nouns: the CV says "University of
-                // Illinois at Urbana-Champaign", a catalogue writes it without
-                // the "at" — and no substring bridges that. EVERY significant
-                // token must appear in the row, which is also what REJECTS the
-                // wrong campus: "…at Chicago" has no urbana and no champaign
-                // (measured on Visa, where exactly that school reached the
-                // Review page). Single distinct hit only, like every tier.
-                if (!cands.length) {
-                    const toks = wf.split(/[^\p{L}\p{N}]+/u).filter(t => t.length >= 3);
-                    if (toks.length >= 2) {
-                        const hit = tier(o => { const t = fold(txt(o)); return toks.every(k => t.includes(k)); });
-                        if (hit.length && distinct(hit) === 1) cands = hit;
-                    }
-                }
-            }
-        }
-        return cands.sort((a, b) => {
-            const box = (o) => { const r = o.getBoundingClientRect(); return r.width > 0 && r.height > 0 ? 0 : 1; };
-            return box(a) - box(b);
-        });
-    };
-    const uniqueMatch = (list, wanted) => matchAll(list, wanted)[0] || null;
+    // The tiered matcher lives at module scope (optionMatchAll) so the fixture
+    // corpus can freeze it — see the doc comment there for the unambiguity
+    // rule and the duplicate-node ordering, both of which were measured bugs.
+    const fold = foldOptionText;
+    const matchAll = optionMatchAll;
+    const uniqueMatch = optionUniqueMatch;
 
     let opt = null;
     let matched = '';

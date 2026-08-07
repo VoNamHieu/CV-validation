@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<!--
+  Hostile-widget harness — the HOW/VERIFY test bed static fixtures cannot be.
+
+  Reproduces, under toggles, the exact pathologies measured on live Workday
+  runs 2026-08-06/07:
+    · delayed commit   — a click "lands" but the chip/value appears ~550ms+
+                         later (the window that turned working clicks into
+                         "no-effect" in hidden tabs)
+    · row recycling    — the virtualiser re-uses row nodes on scroll, so a
+                         held element reference silently becomes a different
+                         option (the Skills stale-node class)
+    · synthetic-scroll — programmatic scrollTop does NOT re-render the row
+      ignored             window; only a trusted wheel does (VIRTUALISER
+                         IGNORED SYNTHETIC SCROLL, measured on Field of Study)
+    · collapsed clip   — the list container measures ~1px tall while rows
+                         render outside it (PwC source popup, clip 542..543)
+    · cascade          — categories without radios drill into leaf claims
+                         with radios; a breadcrumb row walks back OUT
+
+  Serve:   python3 -m http.server 8977 --directory extension/tests/harness
+  Drive:   open http://localhost:8977/hostile-widget.html, grant the host in
+           the Copo popup, then run the agent (⚡ / AGENT_TEST_STEP).
+  Toggles: checkboxes below, or URL params ?delay=550&recycle=1&noscroll=1&clip=1
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Copo hostile-widget harness</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 24px; max-width: 720px; }
+  fieldset { margin: 16px 0; padding: 12px; }
+  .wd-field { margin: 18px 0; }
+  .wd-field label { display: block; font-weight: 600; margin-bottom: 4px; }
+  [data-automation-id="activeListContainer"] {
+    position: absolute; background: #fff; border: 1px solid #999;
+    width: 320px; overflow-y: auto; max-height: 200px; z-index: 10;
+  }
+  .clip-collapsed[data-automation-id="activeListContainer"] {
+    max-height: 2px; height: 2px; overflow: visible;
+  }
+  [data-automation-id="menuItem"] { padding: 6px 10px; cursor: pointer; background: #fff; }
+  [data-automation-id="menuItem"]:hover { background: #eef; }
+  [data-automation-id="selectedItem"] {
+    display: inline-block; background: #dde8ff; border-radius: 10px;
+    padding: 2px 10px; margin: 2px;
+  }
+  #log { font: 12px/1.5 monospace; background: #f5f5f5; padding: 8px; height: 140px; overflow-y: auto; }
+  button[data-automation-id="pageFooterNextButton"] {
+    position: sticky; bottom: 0; padding: 10px 28px; font-size: 15px;
+  }
+</style>
+</head>
+<body>
+<h1>Hostile-widget harness</h1>
+
+<fieldset id="toggles">
+  <legend>Pathologies</legend>
+  <label><input type="checkbox" id="t-delay" checked> delayed commit <input id="t-delay-ms" type="number" value="550" style="width:70px"> ms</label><br>
+  <label><input type="checkbox" id="t-recycle" checked> virtualiser recycles row nodes</label><br>
+  <label><input type="checkbox" id="t-noscroll"> ignore synthetic scroll (trusted wheel only)</label><br>
+  <label><input type="checkbox" id="t-clip"> collapse list clip rect to 2px</label><br>
+</fieldset>
+
+<!-- ── Searchable multi-select: the mdlz Skills family ── -->
+<div class="wd-field" data-automation-id="formField-skills">
+  <label for="skills-input">Skills</label>
+  <div data-automation-id="selectedItemList" id="skills-chips"></div>
+  <input id="skills-input" type="text" placeholder="Search" autocomplete="off">
+</div>
+
+<!-- ── Hierarchical single-select: the PwC/mdlz source family ── -->
+<div class="wd-field" data-automation-id="formField-source">
+  <label>How Did You Hear About Us?</label>
+  <div data-automation-id="selectedItemList" id="source-chips"></div>
+  <button id="source-trigger" aria-haspopup="listbox" type="button">Select One</button>
+</div>
+
+<!-- ── Plain single-select control group: should always pass ── -->
+<div class="wd-field" data-automation-id="formField-phoneType">
+  <label>Phone Type</label>
+  <button id="phone-trigger" aria-haspopup="listbox" type="button">Select One</button>
+</div>
+
+<button data-automation-id="pageFooterNextButton" type="button">Save and Continue</button>
+<h3>Event log</h3>
+<div id="log"></div>
+
+<script>
+'use strict';
+// ── config ─────────────────────────────────────────────────────────────
+const qp = new URLSearchParams(location.search);
+const $ = (id) => document.getElementById(id);
+if (qp.has('delay')) { $('t-delay-ms').value = qp.get('delay'); }
+if (qp.get('recycle') === '0') $('t-recycle').checked = false;
+if (qp.get('noscroll') === '1') $('t-noscroll').checked = true;
+if (qp.get('clip') === '1') $('t-clip').checked = true;
+const cfg = () => ({
+  delayMs: $('t-delay').checked ? Number($('t-delay-ms').value) || 0 : 0,
+  recycle: $('t-recycle').checked,
+  noSyntheticScroll: $('t-noscroll').checked,
+  clip: $('t-clip').checked,
+});
+const log = (m) => {
+  const row = document.createElement('div');
+  row.textContent = `${new Date().toISOString().slice(11, 23)} ${m}`;
+  $('log').prepend(row);
+};
+
+// ── catalogues ─────────────────────────────────────────────────────────
+// Skills: real-looking taxonomy. Deliberately holds NO entry for the four
+// measured out-of-taxonomy terms, and fuzzy search offers neighbours.
+const SKILLS = [
+  'Agile Scrum Development', 'Agile Software Development', 'Agile Methodologies',
+  'Backlog Prioritization', 'Business Economics', 'Financial Economics',
+  'Industrial Economics', 'It Economics', 'LLM Orchestration', 'Plant Economics',
+  'Product Roadmapping', 'Quantitative Economics', 'Retention Strategies',
+  'Septic Systems', 'Agentic Platforms', 'Talent Optimization', 'AI Workflow Design',
+  ...Array.from({ length: 300 }, (_, i) => `Filler Skill ${String(i).padStart(3, '0')}`),
+].sort();
+// Source cascade: PwC-shaped. Categories carry no radio; leaves are claims.
+const SOURCE = {
+  'Alumni': ['I am an alumnus of this company'],
+  'Employee Referral': ['I was referred by an employee'],
+  'Former Intern': ['I interned at this company'],
+  'Job Board': Array.from({ length: 40 }, (_, i) => `I found the job on job board #${i + 1}`),
+  'University / Campus': ['I met the company on campus'],
+  'Website': ['I found the job on a job board', 'I was referred by a search engine',
+    'I came directly to the company website'],
+};
+const PHONE = ['Home', 'Mobile', 'Mobile - Personal', 'Work'];
+
+// ── shared popup machinery (one popup at a time, portal-appended) ─────
+let popup = null;
+function closePopup() { if (popup) { popup.remove(); popup = null; } }
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePopup(); });
+
+/**
+ * A virtualised listbox faithful to the measured pathologies. Renders a POOL
+ * of row nodes over `items`; scrolling shifts which item each pool node shows
+ * (recycle mode) instead of creating fresh nodes — exactly how a held
+ * reference goes stale. In noSyntheticScroll mode the window only re-renders
+ * after a trusted wheel event, whatever scrollTop claims.
+ */
+function openList(anchor, items, onPick, { leafRadios = false } = {}) {
+  closePopup();
+  const c = cfg();
+  popup = document.createElement('div');
+  popup.setAttribute('data-automation-id', 'activeListContainer');
+  if (c.clip) popup.className = 'clip-collapsed';
+  const r = anchor.getBoundingClientRect();
+  popup.style.left = `${r.left}px`;
+  popup.style.top = `${r.bottom + window.scrollY + 2}px`;
+  const ROW_H = 30;
+  const POOL = 12;
+  const spacer = document.createElement('div');
+  spacer.style.height = `${items.length * ROW_H}px`;
+  spacer.style.position = 'relative';
+  popup.appendChild(spacer);
+  const pool = [];
+  for (let i = 0; i < Math.min(POOL, items.length); i++) {
+    const row = document.createElement('div');
+    row.setAttribute('data-automation-id', 'menuItem');
+    row.setAttribute('role', 'option');
+    row.style.position = 'absolute';
+    row.style.height = `${ROW_H}px`;
+    row.style.width = '100%';
+    spacer.appendChild(row);
+    pool.push(row);
+  }
+  let first = 0;
+  let wheelSeen = 0;
+  const render = () => {
+    for (let i = 0; i < pool.length; i++) {
+      const idx = first + i;
+      const row = pool[i];
+      if (idx >= items.length) { row.style.display = 'none'; continue; }
+      row.style.display = '';
+      row.style.top = `${idx * ROW_H}px`;
+      const it = items[idx];
+      const label = typeof it === 'string' ? it : it.label;
+      const leaf = typeof it === 'string' ? leafRadios : !!it.leaf;
+      row.innerHTML = '';
+      const inner = document.createElement('div');
+      inner.setAttribute('data-automation-id', 'promptLeafNode');
+      if (leaf) {
+        const radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = 'hostile-leaf';
+        inner.appendChild(radio);
+      }
+      inner.appendChild(document.createTextNode(label));
+      row.appendChild(inner);
+      row.onclick = () => { log(`row click: "${label}"`); onPick(items[idx], row); };
+    }
+  };
+  popup.addEventListener('wheel', (e) => { if (e.isTrusted) wheelSeen = Date.now(); }, { passive: true });
+  popup.addEventListener('scroll', () => {
+    const c2 = cfg();
+    if (c2.noSyntheticScroll && Date.now() - wheelSeen > 150) {
+      log('scroll IGNORED (synthetic, noscroll mode)');
+      return;                       // rendered rows never change
+    }
+    const next = Math.floor(popup.scrollTop / ROW_H);
+    if (next === first) return;
+    first = next;
+    if (c2.recycle) render();       // same nodes, new meanings
+    else {                          // non-recycle: rebuild fresh nodes
+      pool.forEach(p => p.remove());
+      pool.length = 0;
+      for (let i = 0; i < Math.min(POOL, items.length); i++) {
+        const row = document.createElement('div');
+        row.setAttribute('data-automation-id', 'menuItem');
+        row.setAttribute('role', 'option');
+        row.style.position = 'absolute';
+        row.style.height = `${ROW_H}px`;
+        row.style.width = '100%';
+        spacer.appendChild(row);
+        pool.push(row);
+      }
+      render();
+    }
+  });
+  document.body.appendChild(popup);
+  render();
+  return { close: closePopup };
+}
+
+/** Commit after the configured latency — the verify-window pathology. */
+function lateCommit(fn, what) {
+  const ms = cfg().delayMs;
+  log(`commit scheduled: ${what} (+${ms}ms)`);
+  setTimeout(() => { fn(); log(`commit LANDED: ${what}`); }, ms);
+}
+
+// ── Skills: search box → fuzzy results → chips ────────────────────────
+const chips = () => [...$('skills-chips').children].map(c => c.firstChild.textContent);
+function addChip(label) {
+  if (chips().includes(label)) return;
+  const chip = document.createElement('span');
+  chip.setAttribute('data-automation-id', 'selectedItem');
+  chip.append(Object.assign(document.createElement('span'), { textContent: label }));
+  const x = Object.assign(document.createElement('button'), { textContent: '×' });
+  x.onclick = () => chip.remove();
+  chip.appendChild(x);
+  $('skills-chips').appendChild(chip);
+}
+const tokens = (s) => s.toLowerCase().split(/[^a-z0-9]+/).filter(t => t.length >= 2);
+function skillSearch(q) {
+  const qt = tokens(q);
+  if (!qt.length) return [];
+  const exact = SKILLS.filter(s => s.toLowerCase() === q.trim().toLowerCase());
+  const fuzzy = SKILLS.filter(s => { const st = tokens(s); return qt.some(t => st.includes(t)); });
+  return [...new Set([...exact, ...fuzzy])].slice(0, 33);
+}
+$('skills-input').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  const q = $('skills-input').value;
+  const results = skillSearch(q);
+  log(`search "${q}" → ${results.length} results`);
+  openList($('skills-input'), results, (item) => {
+    lateCommit(() => addChip(item), item);
+  }, { leafRadios: false });
+});
+
+// ── Source: hierarchical cascade ──────────────────────────────────────
+function openSourceLevel0() {
+  const cats = Object.keys(SOURCE).map(k => ({ label: k, leaf: false }));
+  openList($('source-trigger'), cats, (item) => {
+    // A category click commits NOTHING — it drills. Late, like the real one.
+    lateCommit(() => openSourceLevel1(item.label), `drill → ${item.label}`);
+  });
+}
+function openSourceLevel1(cat) {
+  const rows = [{ label: `‹ ${cat}`, leaf: false, back: true },
+    ...SOURCE[cat].map(l => ({ label: l, leaf: true }))];
+  openList($('source-trigger'), rows, (item) => {
+    if (item.back) { lateCommit(() => openSourceLevel0(), 'back out'); return; }
+    lateCommit(() => {
+      closePopup();
+      $('source-chips').innerHTML = '';
+      const chip = document.createElement('span');
+      chip.setAttribute('data-automation-id', 'selectedItem');
+      chip.textContent = item.label;
+      $('source-chips').appendChild(chip);
+      $('source-trigger').textContent = item.label;
+    }, item.label);
+  });
+}
+$('source-trigger').onclick = openSourceLevel0;
+
+// ── Phone type: plain select, the control group ───────────────────────
+$('phone-trigger').onclick = () => {
+  openList($('phone-trigger'), PHONE, (label) => {
+    lateCommit(() => { closePopup(); $('phone-trigger').textContent = label; }, label);
+  }, { leafRadios: true });
+};
+
+$('log') && log(`harness ready — delay=${cfg().delayMs}ms recycle=${cfg().recycle} noscroll=${cfg().noSyntheticScroll} clip=${cfg().clip}`);
+</script>
+</body>
+</html>
