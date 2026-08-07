@@ -332,6 +332,13 @@ export function evaluateClick(d, ctx = {}) {
     // 'widget-option', and a single selected chip — a Delete BUTTON on a
     // section row (which removes a whole work-experience entry) matches none
     // of those and stays denied.
+    // Removing an EMPTY repeating row destroys nothing: the caller has proved
+    // every field in it is blank (see pruneEmptyExperienceRows), and Workday
+    // marks such a row required, so leaving it is what blocks the step. A row
+    // that holds ANY data still matches the destructive rule below and stays
+    // denied — the exemption is the emptiness, not the button.
+    const emptyRowCleanup = source === 'recipe' && ctx.activation === 'empty-row-cleanup';
+    if (looksDestructive(d) && emptyRowCleanup) return { allowed: true };
     const chipEviction = source === 'recipe' && ctx.activation === 'widget-option'
         && (d.automationId === 'selectedItem' || /selectedItem/i.test(d.selector || ''));
     if (looksDestructive(d) && !chipEviction) return deny(DENY.DESTRUCTIVE);

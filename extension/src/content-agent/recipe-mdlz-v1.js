@@ -2152,7 +2152,55 @@ function ensureSectionEntry(sectionName) {
  * currently-work-here tick stay with fillExperienceEndDates (title-matched,
  * verified), which runs after this.
  */
+/**
+ * Remove Work Experience rows that hold NOTHING.
+ *
+ * A draft carried over from an earlier attempt can leave a blank row behind
+ * (measured on HSE_R-173159: four rows, the fourth entirely empty), and
+ * Workday marks its Job Title / Company / From required — so the step cannot
+ * validate and the run ends on fields no CV can answer. The agent added rows
+ * but never removed them; this is the other half.
+ *
+ * Strictly emptiness-gated: every input in the row must be blank and both date
+ * segments unset. A row with any data is never touched — the policy exemption
+ * is granted to the emptiness, not to the button.
+ */
+async function pruneEmptyExperienceRows(outcomes) {
+    const vis = (e) => !!(e && e.offsetParent !== null);
+    let removed = 0;
+    for (let guard = 0; guard < 3; guard++) {
+        const rows = workExperienceRows();
+        if (rows.length <= 1) break;
+        const blank = rows.find(r => !r.title && !r.company
+            && r.from === '∅/∅' && (r.to === '(hidden)' || r.to === '∅/∅')
+            && ![...r.container.querySelectorAll('input')].filter(vis)
+                .some(i => i.type !== 'checkbox' && String(i.value || '').trim()));
+        if (!blank) break;
+        const del = [...blank.container.querySelectorAll('button, [role="button"]')].filter(vis)
+            .find(b => /^delete$/i.test((b.textContent || '').trim())
+                || /delete|remove/i.test(b.getAttribute('aria-label') || ''));
+        if (!del) { trace('rows.pruneNoButton', { note: 'empty row has no Delete control' }); break; }
+        try { del.scrollIntoView({ block: 'center' }); } catch { /* noop */ }
+        await sleep(250);
+        const had = workExperienceRows().length;
+        if (!safeActivate(del, { source: 'recipe', activation: 'empty-row-cleanup' }, 'work-experience-row')) {
+            trace('rows.pruneDenied', { note: 'policy refused the empty-row delete' });
+            break;
+        }
+        const by = Date.now() + 4000 * hiddenMult();
+        while (workExperienceRows().length >= had && Date.now() < by) await sleep(200);
+        const now = workExperienceRows().length;
+        trace('rows.pruned', { was: had, now, verdict: now < had ? 'removed' : 'no change' });
+        if (now >= had) break;
+        removed++;
+    }
+    if (removed) outcomes.push([`Work Experience (empty rows)`, 'OK', `removed ${removed}`]);
+    return removed;
+}
+
 async function fillWorkExperienceRows(cv, outcomes) {
+    try { await pruneEmptyExperienceRows(outcomes); } catch { /* cleanup must never block the fill */ }
+
     const exp = cv?.experience || [];
     if (!exp.length) return 0;
     const vis = (e) => !!(e && e.offsetParent !== null);
