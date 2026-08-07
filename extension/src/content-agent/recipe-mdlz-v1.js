@@ -1933,7 +1933,15 @@ async function _applyRecipeFields(recipe, profile, cvData, cv) {
     // the first formField-endDate on the page.
     // Shape-based, not step-name-based: any page showing language rows gets
     // the per-row pass, whatever the tenant called the step.
-    if (recipe.ats === 'workday' && document.querySelector('[data-automation-id="formField-language"]')) {
+    const langShape = (() => {
+        if (document.querySelector('[data-automation-id="formField-language"]')) return 'ROWS';
+        const box = [...document.querySelectorAll('input[type="checkbox"]')].find(c => {
+            const w = c.closest('[data-automation-id^="formField-"]');
+            return /language|ngôn ngữ/i.test(`${w?.querySelector('legend, label')?.textContent || ''} ${c.getAttribute('aria-label') || ''}`);
+        });
+        return box ? 'CHECKBOX_GROUP' : 'ABSENT';
+    })();
+    if (recipe.ats === 'workday' && langShape === 'ROWS') {
         try {
             const _t = Date.now();
             filled += await fillLanguageRows(cv, outcomes, profile);
@@ -1942,8 +1950,12 @@ async function _applyRecipeFields(recipe, profile, cvData, cv) {
         catch (e) { outcomes.push(['Languages (rows)', 'FAIL', (e && e.message) || 'exception']); }
     }
     // The checkbox-group twin of the same question (Unilever: "What languages
-    // do you speak?*"). Shape-based like the rows — cheap no-op when absent.
-    if (recipe.ats === 'workday') {
+    // do you speak?*"). SHAPE decides which module runs — the rows form and
+    // the checkbox form are different widgets answering one question, and
+    // running both on every Workday iteration (which is what the traces show)
+    // is work that cannot help: whichever shape is absent costs a full scan to
+    // discover it is absent.
+    if (recipe.ats === 'workday' && langShape === 'CHECKBOX_GROUP') {
         try {
             const _t = Date.now();
             filled += await fillLanguageCheckboxGroup(cv, outcomes, profile);
@@ -2743,6 +2755,51 @@ async function fillLanguageRows(cv, outcomes, profile) {
     const vis = (e) => !!(e && e.offsetParent !== null);
     const langWraps = () => [...document.querySelectorAll('[data-automation-id="formField-language"]')].filter(vis);
     if (!langWraps().length) return 0;
+
+    // ── VERIFY BEFORE EXECUTE ──
+    // A cheap read answers "is this section already right?" — every CV
+    // language has a row, each row's Overall sits inside its level's ladder,
+    // and every fluent tick that should be on is on. When it is, nothing is
+    // touched: no growing, no pruning, no popup, no re-tick. This is the
+    // difference between re-checking (which must keep happening, because
+    // Workday drops values) and re-doing (which costs seconds and can undo a
+    // good value). Anything short of "all three true" falls through to the
+    // full pass below, so a value Workday wiped is still repaired.
+    {
+        const rowText = (w) => {
+            const b = w.querySelector('button[aria-haspopup="listbox"], button');
+            return String(b?.textContent || w.querySelector('input')?.value || '').trim().toLowerCase();
+        };
+        const scope0 = sectionScope('Languages');
+        const inScope0 = scope0 ? scope0.inSection : () => true;
+        const overalls0 = [...document.querySelectorAll('[data-automation-id^="formField-"]')].filter(vis).filter(inScope0)
+            .filter(w => { const l = (w.querySelector('legend, label')?.textContent || '').toLowerCase(); return l.includes('overall') && !/overall result|gpa/.test(l); });
+        const ticks0 = [...document.querySelectorAll('input[type="checkbox"]')].filter(vis).filter(inScope0)
+            .filter(c => /fluent in this language|thành thạo/i.test(
+                `${c.closest('[data-automation-id^="formField-"]')?.querySelector('legend, label')?.textContent || ''} ${c.getAttribute('aria-label') || ''}`));
+        const rows0 = langWraps();
+        const settled = langs.length > 0 && langs.every((L) => {
+            const idx = rows0.findIndex(w => {
+                const v = rowText(w); const n = String(L.language || '').toLowerCase();
+                return v && (v.includes(n) || n.includes(v));
+            });
+            if (idx < 0) return false;
+            if (!L.level) return true;
+            const ladder = levelLadder(L.level).map(r => String(r).toLowerCase());
+            const acceptable = ladder.length > 1 ? ladder.slice(0, -1) : ladder;
+            const ov = overalls0[idx] ? rowText(overalls0[idx]) : '';
+            if (!ov || !acceptable.some(r => ov.includes(r) || r.includes(ov))) return false;
+            if (/native|fluent|advanced/i.test(String(L.level)) && ticks0[idx] && !ticks0[idx].checked) return false;
+            return true;
+        });
+        if (settled) {
+            traceOnce(`lang.settled:${langs.map(l => l.language).join(',')}`, 'lang.settled', {
+                languages: langs.map(l => `${l.language}:${l.level || '?'}`).join(' | '), rows: rows0.length,
+            });
+            outcomes.push(['Languages', 'OK', 'verified settled — nothing to do']);
+            return 0;
+        }
+    }
 
     // Pair rows to languages by CONTENT, not by index. A row that already
     // names a language keeps it — and keeps its CV level, so Overall and the

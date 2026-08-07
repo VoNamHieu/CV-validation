@@ -42,7 +42,7 @@ import { tenantRefFor } from '../ats/tenant.js';
 // you can confirm (in the PAGE / tab console, NOT the service-worker console) that
 // the freshly-built dist is actually loaded. If you don't see this line on the
 // apply tab, the new build isn't injected (reload the extension + refresh the tab).
-const COPO_BUILD = 'phase0-exec-2026-08-07p';
+const COPO_BUILD = 'phase0-exec-2026-08-07q';
 try { console.log(`%c[Copo] content-agent build ${COPO_BUILD} loaded → ${location.host}`, 'color:#c43b2e;font-weight:700'); } catch { /* noop */ }
 
 /**
@@ -112,6 +112,27 @@ async function loadSessionCv() {
 // Timing spans are for the tenant being tuned: on for a locked snapshot,
 // silent everywhere else, so no other tenant's trace changes shape.
 setSpanTracking(!!LOCKED_TENANT);
+
+// ── PLANNER DEDUP ──
+// The planner is the most expensive thing in the loop (11s on the measured
+// runs) and the loop re-enters it every iteration. Asking the same model the
+// same question about a page that has not changed cannot produce a different
+// answer — but a page that HAS changed (a new error, a value Workday wiped, a
+// row added, different options) must reach it immediately. So the gate is the
+// STATE, not a call budget: identical state waits, changed state asks. Bounded
+// so a genuinely stuck page still gets a fresh opinion eventually.
+let _lastPlanState = null;
+let _planSkips = 0;
+const PLAN_SKIP_MAX = 4;
+function _plannerStateHash(state, recipe) {
+    try {
+        const errs = (state?.errors || []).map(e => `${e.field || ''}:${String(e.message || '').slice(0, 40)}`).sort().join('|');
+        const unresolved = (state?.unfilledRequired || []).map(f => f.label || f.selector || '?').sort().join(',');
+        const committed = (state?.formFields || []).map(f => `${f.label || f.selector}=${String(f.value || '').slice(0, 12)}`).sort().join(';');
+        const actions = (state?.buttons || []).map(b => String(b.text || '').slice(0, 18)).sort().join(',');
+        return `${_stepFingerprint(state, recipe)}#${errs}#${unresolved}#${committed}#${actions}`;
+    } catch { return `hash-${Date.now()}`; }
+}
 
 // ── ADVANCE LOCK ──
 // A step is advanced ONCE. Measured on R-172088: three Save-and-Continue
@@ -1044,6 +1065,11 @@ async function _runAgentLoop(rawProfile) {
             // step is done; when it fills something new we re-observe so the LLM
             // sees the pre-filled state and only handles the rest (dropdowns, Next).
             if (recipe) {
+                // Mid-transition, the OLD step's recipe must not run: the page
+                // being replaced still answers selectors, so a pass here fills
+                // widgets that are about to be discarded and reads their state
+                // as this step's truth. Wait for the page to become itself.
+                if (_advanceHeld(state, recipe)) { await sleep(700); continue; }
                 const rf = await _phase('recipe', () => applyRecipeFields(recipe, profile, cvData, cvStructured));
                 if (rf?.filled) _progress();
                 if (_openIter && rf?.step) _openIter.step = rf.step;
@@ -1558,6 +1584,18 @@ async function _runAgentLoop(rawProfile) {
             const _planT0 = Date.now();
             console.log(`[Copo Apply] → LLM plan request (fields=${state.formFields.length}, unfilledRequired=${state.unfilledRequired.length})…`);
             try {
+                if (LOCKED_TENANT) {
+                    const h = _plannerStateHash(state, recipe);
+                    if (h === _lastPlanState && _planSkips < PLAN_SKIP_MAX) {
+                        _planSkips++;
+                        trace('plan.deduped', { skips: _planSkips, budget: PLAN_SKIP_MAX });
+                        showProgress(i + 1, null, 'Trang chưa đổi — chờ thay vì hỏi lại AI…');
+                        await sleep(1200);
+                        continue;
+                    }
+                    _lastPlanState = h;
+                    _planSkips = 0;
+                }
                 plan = await _phase('planner', () => callAgentPlan(state, profile, history.slice(-8), hasCV, credentials));
             } catch (err) {
                 console.warn(`[Copo Apply] ✖ LLM plan FAILED in ${Date.now() - _planT0}ms: ${err.message}`);
