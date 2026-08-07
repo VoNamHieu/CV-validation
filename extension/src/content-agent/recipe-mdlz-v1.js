@@ -37,7 +37,7 @@
 import { FIELD_ERROR_SEL, deepFindControl, deepQuery, deepQueryAll, dropFileOnZone, normalizeNameCase, readFileCommitState, safeActivate, setFileOnInput, setNativeValue, simulateTyping, sleep, waitForElement , isLegalNameLabel } from './dom.js';
 import { isThirdPartyApply } from './detect.js';
 import { showToast } from './ui.js';
-import { trace, traceOnce } from './trace.js';
+import { spanDropdown, spanField, trace, traceOnce } from './trace.js';
 import { callAgentPlan, callApplyMessage } from './llm.js';
 import { isPickerShape, probeFieldShape } from './probe.js';
 import { hiddenMult, pauseGate, stopRequested } from './run-state.js';
@@ -1607,6 +1607,26 @@ async function _applyRecipeFields(recipe, profile, cvData, cv) {
     }
 
     const outcomes = [];   // [label, status, note] per field → debug summary below
+    // ── PER-FIELD TIMING ──
+    // A field can be walked by the recipe, a row helper, the validation
+    // recovery and the planner inside ONE iteration, each re-checking widgets
+    // that are already done — and the only symptom is a run that finishes but
+    // takes minutes and reads out of order. The span closes at the START of
+    // the next field (every `continue` in this loop exits that way) and picks
+    // up the outcome the body recorded, so owner/attempt/duration/result land
+    // in one row per touch.
+    let _fLabel = null, _fT0 = 0, _fHandler = null;
+    const _closeField = () => {
+        if (!_fLabel) return;
+        const o = [...outcomes].reverse().find(x => x[0] === _fLabel);
+        spanField(_fLabel, {
+            step: stepName, owner: 'recipe', handler: _fHandler,
+            ms: Date.now() - _fT0,
+            result: o ? String(o[1]) : 'no-outcome',
+            path: o && o[2] ? String(o[2]).slice(0, 80) : undefined,
+        });
+        _fLabel = null;
+    };
     // Provenance for the review hand-off: which answers came from the user's own
     // data, and which are values the agent chose to get the step to validate. The
     // user is going to check the application on the review page, and "these four
@@ -1617,10 +1637,16 @@ async function _applyRecipeFields(recipe, profile, cvData, cv) {
     // schema's single-selector boundary (measured: three CV jobs, a Review
     // page reading "Work Experience: No Response").
     if (recipe.ats === 'workday' && (step?.ensureSections || []).includes('Work Experience')) {
-        try { filled += await fillWorkExperienceRows(cv, outcomes); }
+        try {
+            const _t = Date.now();
+            filled += await fillWorkExperienceRows(cv, outcomes);
+            spanField('§ Work Experience (rows)', { step: stepName, owner: 'rows', ms: Date.now() - _t, result: 'done' });
+        }
         catch (e) { outcomes.push(['Work Experience (rows)', 'FAIL', (e && e.message) || 'exception']); }
     }
     for (const f of fieldsToFill) {
+        _closeField();
+        _fLabel = f.label; _fT0 = Date.now(); _fHandler = f.type || 'text';
         let val = recipeFieldValue(f, profile, cv);
         // Free text nobody stored, that the agent may write itself. Gated on the
         // box being EMPTY on screen — resolving the value happens before the
@@ -1877,25 +1903,38 @@ async function _applyRecipeFields(recipe, profile, cvData, cv) {
         }
         await sleep(120);
     }
+    _closeField();   // the last field of the pass has no successor to close it
 
     // Every work-experience row's end date — the field list above only reaches
     // the first formField-endDate on the page.
     // Shape-based, not step-name-based: any page showing language rows gets
     // the per-row pass, whatever the tenant called the step.
     if (recipe.ats === 'workday' && document.querySelector('[data-automation-id="formField-language"]')) {
-        try { filled += await fillLanguageRows(cv, outcomes, profile); }
+        try {
+            const _t = Date.now();
+            filled += await fillLanguageRows(cv, outcomes, profile);
+            spanField('§ Languages (rows)', { step: stepName, owner: 'rows', ms: Date.now() - _t, result: 'done' });
+        }
         catch (e) { outcomes.push(['Languages (rows)', 'FAIL', (e && e.message) || 'exception']); }
     }
     // The checkbox-group twin of the same question (Unilever: "What languages
     // do you speak?*"). Shape-based like the rows — cheap no-op when absent.
     if (recipe.ats === 'workday') {
-        try { filled += await fillLanguageCheckboxGroup(cv, outcomes, profile); }
+        try {
+            const _t = Date.now();
+            filled += await fillLanguageCheckboxGroup(cv, outcomes, profile);
+            spanField('§ Languages (checkbox group)', { step: stepName, owner: 'rows', ms: Date.now() - _t, result: 'done' });
+        }
         catch (e) { outcomes.push(['Languages (checkbox group)', 'FAIL', (e && e.message) || 'exception']); }
     }
     // Shape-based, not step-name-based: any page showing endDate rows gets the
     // per-row pass, whatever the tenant called the step.
     if (recipe.ats === 'workday' && document.querySelector('[data-automation-id="formField-endDate"]')) {
-        try { filled += await fillExperienceEndDates(cv, outcomes); }
+        try {
+            const _t = Date.now();
+            filled += await fillExperienceEndDates(cv, outcomes);
+            spanField('§ Work end dates (rows)', { step: stepName, owner: 'rows', ms: Date.now() - _t, result: 'done' });
+        }
         catch (e) { outcomes.push(['Work To (rows)', 'FAIL', (e && e.message) || 'exception']); }
     }
 
@@ -4139,6 +4178,28 @@ export function optionMatchAll(list, rawWanted) {
 export const optionUniqueMatch = (list, wanted) => optionMatchAll(list, wanted)[0] || null;
 
 async function fillCustomSelect(f, value, ctx = {}) {
+    // One open→commit cycle, timed. The fallback ladder this widget walked is
+    // the interesting part when a run is slow: `reason` already spells it out
+    // on failure, and the success returns carry `path`. Only slow or
+    // unsuccessful cycles are kept — a dropdown that answers on the first
+    // click has nothing to explain.
+    const _t0 = Date.now();
+    let _r = null;
+    try {
+        _r = await _fillCustomSelectTimed(f, value, ctx);
+        return _r;
+    } finally {
+        try {
+            spanDropdown(f.label, {
+                ms: Date.now() - _t0,
+                result: _r?.ok ? 'ok' : (_r?.reason ? String(_r.reason).split(' (')[0] : 'threw'),
+                path: _r?.path || (_r?.reason ? String(_r.reason) : ''),
+            });
+        } catch { /* measurement must never break a fill */ }
+    }
+}
+
+async function _fillCustomSelectTimed(f, value, ctx = {}) {
     // Same entry gate as fillSearchMulti: a hidden tab must not even try to
     // OPEN the prompt — the 6.5s open-wait expires against a page that isn't
     // rendering and reports listbox-timeout on a healthy widget.
@@ -4753,7 +4814,7 @@ async function fillCustomSelect(f, value, ctx = {}) {
                 await sleep(150);
             }
             trace('list.result', { field: f.label, picked: matched, onPage: now, levels: level + 1, stuck: true });
-            return { ok: true, matched: matched.replace(/^=/, '') };
+            return { ok: true, matched: matched.replace(/^=/, ''), path: attempts.join('→') || 'first-click' };
         }
         attempts.push(`level${level}:${drilled ? 'drilled-in' : 'no-effect'}`);
         // On no-effect, name what actually sits at the row's click point — "the
@@ -4825,7 +4886,7 @@ async function fillCustomSelect(f, value, ctx = {}) {
                         try { trigger.blur?.(); } catch { /* noop */ }
                     }
                     trace('list.result', { field: f.label, picked: matched, onPage: committed, via: 'search-pick', stuck: true });
-                    return { ok: true, matched: matched.replace(/^=/, '') };
+                    return { ok: true, matched: matched.replace(/^=/, ''), path: attempts.join('→') };
                 }
                 attempts.push('searchPick:no-commit');
             } else {
@@ -4872,7 +4933,7 @@ async function fillCustomSelect(f, value, ctx = {}) {
                 if (now2) {
                     attempts.push('keyboard:committed');
                     trace('list.result', { field: f.label, picked: matched, onPage: now2, levels: attempts.length, via: 'keyboard', stuck: true });
-                    return { ok: true, matched: matched.replace(/^=/, '') };
+                    return { ok: true, matched: matched.replace(/^=/, ''), path: attempts.join('→') };
                 }
                 break;
             }

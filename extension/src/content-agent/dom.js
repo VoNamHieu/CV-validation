@@ -1,5 +1,6 @@
 // AUTO-SPLIT from content-agent.js (Phase 2). Part of the Copo apply agent.
 import { checkClick, logDenial } from './policy.js';
+import { spanBucket } from './trace.js';
 
 // ─── Helpers ───
 /**
@@ -15,6 +16,9 @@ import { checkClick, logDenial } from './policy.js';
  * worker is recycling mid-sleep — late is recoverable, hung is not.
  */
 export function sleep(ms) {
+    // Waiting is the single biggest line item in a slow run, so it is
+    // measured rather than guessed (no-op unless span tracking is on).
+    try { spanBucket('sleepMs', ms); } catch { /* never break a sleep */ }
     try {
         if (typeof document !== 'undefined' && document.hidden && ms >= 50
             && typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {

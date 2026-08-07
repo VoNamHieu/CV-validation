@@ -33,8 +33,12 @@ function pick() {
     return generic;
 }
 const impl = pick();
+/** Which locked snapshot is driving this page, if any. Span tracking keys on
+ *  it: the timing instrumentation is for the tenant being tuned, and other
+ *  tenants' traces stay exactly as they were. */
+export const LOCKED_TENANT = LOCKED.find(t => t.impl === impl)?.key || null;
 try {
-    if (impl !== generic) console.log('%c[Copo] tenant-locked recipe active: mdlz-v1', 'color:#7c3aed;font-weight:700');
+    if (impl !== generic) console.log(`%c[Copo] tenant-locked recipe active: ${LOCKED_TENANT}`, 'color:#7c3aed;font-weight:700');
 } catch { /* noop */ }
 
 export const applyRecipeFields = impl.applyRecipeFields;

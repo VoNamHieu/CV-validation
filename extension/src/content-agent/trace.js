@@ -162,3 +162,143 @@ export function traceClear() {
     if (!hasStore()) return;
     try { sessionStorage.removeItem(KEY); } catch { /* ignore */ }
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+//  SPANS — where the time actually goes
+// ═══════════════════════════════════════════════════════════════════════
+//
+// The event log above says what the agent DID; it cannot say what a run
+// COST. A field can be touched by the recipe, a row helper, the validation
+// recovery and the planner in one iteration, each pass re-walking widgets
+// that are already done, and the only visible symptom is "it works but it
+// is slow and the order looks random".
+//
+// So spans record, per field and per iteration: who touched it, how many
+// times, for how long, through which fallback path, and whether the
+// iteration produced any progress at all. Aggregates (small, bounded) live
+// beside the rolling event buffer and survive navigation, so a report can
+// be printed at the end of a run that crossed four page loads.
+//
+// Detail is kept only when it earns its place — slow, failed, or a path
+// nobody has seen before — because the buffer is meant to be PASTED.
+
+const SPAN_KEY = 'copoAgentSpans';
+const SLOW_MS = 2000;          // a field/dropdown slower than this keeps its detail
+const MAX_ITERS = 200;
+const MAX_DROPS = 40;
+
+let spansOn = false;
+/** Only the locked-tenant path turns this on (see recipe-router). */
+export function setSpanTracking(on) { spansOn = !!on; }
+export function spanTrackingOn() { return spansOn; }
+
+const emptySpans = () => ({ fields: {}, iters: [], buckets: { sleepMs: 0, llmMs: 0 }, drops: [], startedAt: Date.now() });
+
+function loadSpans() {
+    if (!hasStore()) return emptySpans();
+    try { return JSON.parse(sessionStorage.getItem(SPAN_KEY) || 'null') || emptySpans(); } catch { return emptySpans(); }
+}
+function saveSpans(s) {
+    if (!hasStore()) return;
+    try { sessionStorage.setItem(SPAN_KEY, JSON.stringify(s)); } catch { /* full */ }
+}
+
+/** Time spent waiting vs thinking — the two buckets that explain a slow run. */
+export function spanBucket(name, ms) {
+    if (!spansOn || !(ms > 0)) return;
+    const s = loadSpans();
+    s.buckets[name] = (s.buckets[name] || 0) + Math.round(ms);
+    saveSpans(s);
+}
+
+/**
+ * One field, handled once, by one owner. `owner` is the LAYER (recipe, rows,
+ * needs, planner, recovery) — the same field showing several owners in one
+ * run is exactly the duplicated work this exists to surface.
+ */
+export function spanField(label, { step, owner, handler, iteration, ms, result, path } = {}) {
+    if (!spansOn || !label) return;
+    const s = loadSpans();
+    const k = String(label).slice(0, 48);
+    const f = s.fields[k] || (s.fields[k] = { attempts: 0, totalMs: 0, maxMs: 0, owners: {}, results: {}, paths: [], steps: [] });
+    f.attempts++;
+    f.totalMs += Math.round(ms || 0);
+    f.maxMs = Math.max(f.maxMs, Math.round(ms || 0));
+    if (owner) f.owners[owner] = (f.owners[owner] || 0) + 1;
+    if (result) f.results[result] = (f.results[result] || 0) + 1;
+    if (handler) f.handler = handler;
+    if (step && !f.steps.includes(step)) f.steps.push(step);
+    if (iteration != null) f.lastIteration = iteration;
+    // A path is kept once — repeats of the same ladder say nothing new.
+    if (path && !f.paths.includes(path) && f.paths.length < 4) f.paths.push(path);
+    saveSpans(s);
+}
+
+/** One dropdown open→commit cycle. Kept only when slow or unsuccessful. */
+export function spanDropdown(field, { ms, result, path, rows } = {}) {
+    if (!spansOn) return;
+    const notable = (ms || 0) >= SLOW_MS || (result && result !== 'ok');
+    if (!notable) return;
+    const s = loadSpans();
+    s.drops.push({ field: String(field || '?').slice(0, 40), ms: Math.round(ms || 0), result, path: String(path || '').slice(0, 90), rows });
+    if (s.drops.length > MAX_DROPS) s.drops = s.drops.slice(-MAX_DROPS);
+    saveSpans(s);
+}
+
+/** One loop iteration: its phases, and whether anything actually moved. */
+export function spanIteration({ n, step, ms, progress, phases } = {}) {
+    if (!spansOn) return;
+    const s = loadSpans();
+    s.iters.push({ n, step: String(step || '?').slice(0, 28), ms: Math.round(ms || 0), progress: !!progress, phases });
+    if (s.iters.length > MAX_ITERS) s.iters = s.iters.slice(-MAX_ITERS);
+    saveSpans(s);
+}
+
+/**
+ * The six questions a slow run has to answer, printed as one block.
+ * Returns the aggregate so a caller can ship it with the result.
+ */
+export function traceReport() {
+    if (!spansOn) return null;
+    const s = loadSpans();
+    const fields = Object.entries(s.fields);
+    if (!fields.length && !s.iters.length) return null;
+    const byTime = [...fields].sort((a, b) => b[1].totalMs - a[1].totalMs).slice(0, 5)
+        .map(([k, v]) => `${k} ${(v.totalMs / 1000).toFixed(1)}s ×${v.attempts}${v.paths.length ? ` [${v.paths[v.paths.length - 1]}]` : ''}`);
+    const byTouch = [...fields].filter(([, v]) => v.attempts > 1).sort((a, b) => b[1].attempts - a[1].attempts).slice(0, 5)
+        .map(([k, v]) => `${k} ×${v.attempts} (${Object.entries(v.owners).map(([o, n]) => `${o}:${n}`).join(' ')})`);
+    const multiOwner = fields.filter(([, v]) => Object.keys(v.owners).length > 1)
+        .map(([k, v]) => `${k} ← ${Object.keys(v.owners).join(' + ')}`);
+    const idle = s.iters.filter(i => !i.progress);
+    const totalMs = Date.now() - (s.startedAt || Date.now());
+    const phaseTotals = {};
+    for (const it of s.iters) for (const [p, ms] of Object.entries(it.phases || {})) phaseTotals[p] = (phaseTotals[p] || 0) + ms;
+    const secs = (ms) => `${((ms || 0) / 1000).toFixed(1)}s`;
+    const report = {
+        runMs: totalMs,
+        slowestFields: byTime,
+        mostTouched: byTouch,
+        multiOwner,
+        iterations: { total: s.iters.length, noProgress: idle.length, idleAt: idle.map(i => i.n).slice(0, 20) },
+        time: { total: secs(totalMs), waiting: secs(s.buckets.sleepMs), llm: secs(s.buckets.llmMs), phases: Object.fromEntries(Object.entries(phaseTotals).map(([k, v]) => [k, secs(v)])) },
+        dropdownFallbacks: s.drops.map(d => `${d.field} ${secs(d.ms)} ${d.result}${d.path ? ` [${d.path}]` : ''}`),
+    };
+    try {
+        console.warn('%c[Copo Report] where the time went', 'color:#7c3aed;font-weight:700');
+        console.warn(`  total ${report.time.total} · waiting ${report.time.waiting} · LLM ${report.time.llm}`);
+        console.warn(`  phases: ${Object.entries(report.time.phases).map(([k, v]) => `${k} ${v}`).join(' · ') || '(none)'}`);
+        console.warn(`  iterations: ${report.iterations.total}, no progress in ${report.iterations.noProgress}${report.iterations.idleAt.length ? ` (#${report.iterations.idleAt.join(',')})` : ''}`);
+        console.warn('  slowest fields:', report.slowestFields.length ? report.slowestFields : '(none)');
+        console.warn('  handled more than once:', report.mostTouched.length ? report.mostTouched : '(none)');
+        console.warn('  touched by several layers:', report.multiOwner.length ? report.multiOwner : '(none)');
+        if (report.dropdownFallbacks.length) console.warn('  dropdown fallbacks:', report.dropdownFallbacks);
+        console.warn('[Copo Report] copy the line below:\n' + JSON.stringify(report));
+    } catch { /* noop */ }
+    return report;
+}
+
+/** A finished job starts the next one from an empty ledger. */
+export function traceSpansClear() {
+    if (!hasStore()) return;
+    try { sessionStorage.removeItem(SPAN_KEY); } catch { /* noop */ }
+}

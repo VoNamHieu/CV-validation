@@ -23,7 +23,7 @@ import { auditRequiredBlockers, observePageState, scrollAndCollect } from './obs
 import { isPickerShape, probeFieldShape } from './probe.js';
 import { findApplyButton, isApplicationFormPage, summarizeState, waitForJobPageSignal } from './detect.js';
 import { detectLoginWall, handleLoginWall } from './login.js';
-import { setTraceRun, trace, traceClear, traceDump, traceOnce } from './trace.js';
+import { setSpanTracking, setTraceRun, spanIteration, trace, traceClear, traceDump, traceOnce, traceReport, traceSpansClear } from './trace.js';
 import { requestStop, setRunMode, stopRequested } from './run-state.js';
 
 // NO pause-on-hidden. That behavior shipped 2026-08-07 without the user's
@@ -33,7 +33,7 @@ import { requestStop, setRunMode, stopRequested } from './run-state.js';
 // exempt from tab throttling), the driven page opens in its own small window
 // so it is rarely occluded at all, and verify budgets still stretch under
 // document.hidden for the rendering that genuinely lags.
-import { applyRecipeFields, atFinalStep, clickRecipeGateway, FIELD_FAIL_BUDGET, fillResolvedDate, inferFillDynamicField, loadRecipes, recipeBlockingFields, recipeForUrl, recipeOwnedWrappers, recipeReleased, resetFieldStatus } from './recipe-router.js';
+import { applyRecipeFields, atFinalStep, clickRecipeGateway, FIELD_FAIL_BUDGET, fillResolvedDate, inferFillDynamicField, loadRecipes, recipeBlockingFields, recipeForUrl, recipeOwnedWrappers, recipeReleased, resetFieldStatus , LOCKED_TENANT } from './recipe-router.js';
 import { checkClick, logDenial } from './policy.js';
 import { buildManifest, summarizeGaps, VERDICT } from './needs.js';
 import { tenantRefFor } from '../ats/tenant.js';
@@ -42,7 +42,7 @@ import { tenantRefFor } from '../ats/tenant.js';
 // you can confirm (in the PAGE / tab console, NOT the service-worker console) that
 // the freshly-built dist is actually loaded. If you don't see this line on the
 // apply tab, the new build isn't injected (reload the extension + refresh the tab).
-const COPO_BUILD = 'phase0-isolation-2026-08-07l';
+const COPO_BUILD = 'phase0-trace-2026-08-07m';
 try { console.log(`%c[Copo] content-agent build ${COPO_BUILD} loaded → ${location.host}`, 'color:#c43b2e;font-weight:700'); } catch { /* noop */ }
 
 /**
@@ -109,6 +109,27 @@ async function loadSessionCv() {
  * the page" wording, so this variant read as a normal page and the agent kept
  * planning against a form that could not advance.
  */
+// Timing spans are for the tenant being tuned: on for a locked snapshot,
+// silent everywhere else, so no other tenant's trace changes shape.
+setSpanTracking(!!LOCKED_TENANT);
+
+// The iteration currently being timed. Module scope so reportResult can close
+// it — a run that ends mid-iteration would otherwise lose its slowest one.
+let _openIter = null;
+function _iterOpen(n) { _openIter = { n, step: '?', t0: Date.now(), progress: false, phases: {} }; }
+function _iterClose() {
+    if (!_openIter) return;
+    spanIteration({ n: _openIter.n, step: _openIter.step, ms: Date.now() - _openIter.t0, progress: _openIter.progress, phases: _openIter.phases });
+    _openIter = null;
+}
+/** Time one phase of the loop (observe / recipe / planner / fill / advance). */
+async function _phase(name, fn) {
+    const t = Date.now();
+    try { return await fn(); }
+    finally { if (_openIter) _openIter.phases[name] = (_openIter.phases[name] || 0) + (Date.now() - t); }
+}
+function _progress() { if (_openIter) _openIter.progress = true; }
+
 const WORKDAY_ERROR_CARD_RE =
     /something went wrong|refresh the page and (?:then )?try again|page error\s*-\s*error code|error code:\s*vps\b/i;
 
@@ -351,6 +372,8 @@ async function _runAgentLoop(rawProfile) {
 
         const loopDeadline = Date.now() + AGENT_MAX_RUNTIME_MS;
         for (let i = 0; ; i++) {
+            _iterClose();
+            _iterOpen(i + 1);
             // The background has ruled this job (watchdog, tab handover, batch
             // moved on). Stop DRIVING, don't report — a result from an
             // abandoned run would be refused as 'stale tab' anyway, and the
@@ -375,7 +398,7 @@ async function _runAgentLoop(rawProfile) {
 
             // ── 1. OBSERVE ──
             showProgress(i + 1, null, 'Đang phân tích trang...');
-            const state = await observePageState();
+            const state = await _phase('observe', () => observePageState());
 
             // ── TRACE: per-iteration snapshot of what the scanner sees — so it's
             // obvious whether the page has the fields and whether they're already
@@ -394,6 +417,7 @@ async function _runAgentLoop(rawProfile) {
             // with the document on every navigation, so a run that ends three page
             // loads later leaves a dump that says what the agent DID and nothing
             // about what it was looking at — which is the half that explains it.
+            if (_openIter) _openIter.step = state.stepIndicator ? `${state.stepIndicator.current}/${state.stepIndicator.total}` : (_openIter.step || '?');
             trace('loop.iter', {
                 n: i + 1,
                 step: _step,
@@ -987,7 +1011,9 @@ async function _runAgentLoop(rawProfile) {
             // step is done; when it fills something new we re-observe so the LLM
             // sees the pre-filled state and only handles the rest (dropdowns, Next).
             if (recipe) {
-                const rf = await applyRecipeFields(recipe, profile, cvData, cvStructured);
+                const rf = await _phase('recipe', () => applyRecipeFields(recipe, profile, cvData, cvStructured));
+                if (rf?.filled) _progress();
+                if (_openIter && rf?.step) _openIter.step = rf.step;
                 for (const a of rf.answers || []) {
                     reviewAnswers.set(`${rf.step || '?'}::${a.field}`, { ...a, step: rf.step });
                 }
@@ -1198,6 +1224,7 @@ async function _runAgentLoop(rawProfile) {
                         // moved on.
                         const advanced = safeActivate(adv, policyCtx('recipe'), stepNow.advance);
                         trace('advance.click', { selector: stepNow.advance, activated: advanced });
+                        if (advanced) _progress();
                         if (!advanced) {
                             removeProgress();
                             showToast(withTenantFlags('✅ Đã điền xong — kiểm tra rồi tự bấm nộp để hoàn tất.'), 8000);
@@ -1467,7 +1494,7 @@ async function _runAgentLoop(rawProfile) {
             const _planT0 = Date.now();
             console.log(`[Copo Apply] → LLM plan request (fields=${state.formFields.length}, unfilledRequired=${state.unfilledRequired.length})…`);
             try {
-                plan = await callAgentPlan(state, profile, history.slice(-8), hasCV, credentials);
+                plan = await _phase('planner', () => callAgentPlan(state, profile, history.slice(-8), hasCV, credentials));
             } catch (err) {
                 console.warn(`[Copo Apply] ✖ LLM plan FAILED in ${Date.now() - _planT0}ms: ${err.message}`);
                 // Fallback: use simple map-form for the first iteration
@@ -1563,7 +1590,8 @@ async function _runAgentLoop(rawProfile) {
                         lastValue: inst.value,
                     });
                 }
-                const filled = await executeFillInstructions(plan.instructions, cvData, policyCtx('planner'));
+                const filled = await _phase('fill', () => executeFillInstructions(plan.instructions, cvData, policyCtx('planner')));
+                if (filled) _progress();
                 actionResult = { filled, total: plan.instructions.length };
                 if (filled > 0) actionsTaken++;
             } else if (plan.action === 'CLICK' && plan.clickTarget) {
@@ -1726,8 +1754,11 @@ function reportResult(success, detail, outcome, extra = {}) {
     // exists. Print the whole trace here so a failure is one paste, not an
     // archaeology exercise.
     trace('run.end', { success, outcome: o, detail, ...extra });
+    // Where the time went — printed before the buffer is cleared.
+    try { _iterClose(); traceReport(); } catch { /* a report must never break a result */ }
     if (!success) traceDump(`${o} — ${detail}`);
     traceClear();   // this job is over; the next one starts from an empty buffer
+    traceSpansClear();
     if (contextGone()) {
         console.warn('[Copo Apply] extension was reloaded — this tab is orphaned, result not reported');
         return;
