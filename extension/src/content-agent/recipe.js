@@ -19,6 +19,7 @@ import { showToast } from './ui.js';
 import { trace, traceOnce } from './trace.js';
 import { callAgentPlan, callApplyMessage } from './llm.js';
 import { isPickerShape, probeFieldShape } from './probe.js';
+import { hiddenMult, stopRequested } from './run-state.js';
 
 // Keep in sync with frontend/src/lib/applyRecipes.ts (WORKDAY). Fields verified
 // against real 3M Workday captures (My Information, 2026-07-15 / -22). The
@@ -758,7 +759,9 @@ const renderedRows = (getShown) =>
  * on stale evidence and walk the wrong way.
  */
 async function settleAfterScroll(sc, getShown, beforeKey, budgetMs = 1600) {
-    const deadline = Date.now() + budgetMs;
+    // Hidden tab → the virtualiser renders late (throttled timers, frozen rAF),
+    // so the settle budget stretches rather than misreading "late" as "never".
+    const deadline = Date.now() + budgetMs * hiddenMult();
     while (Date.now() < deadline) {
         await sleep(120);
         const now = renderedRows(getShown).join('|');
@@ -909,6 +912,7 @@ async function findInList(getShown, match, label = '', wanted = '') {
     let lastWindow = null;
     let rounds = 0;
     for (let pos = 0; pos <= sc.scrollHeight; pos += step) {
+        if (stopRequested()) return null;   // background abandoned this run
         const before = renderedRows(getShown).join('|');
         sc.scrollTop = pos;
         nudgeScroll(sc);
@@ -3425,7 +3429,7 @@ async function waitForResults(readKey, budgetMs = 4000, priorKey = null) {
     // answer", so it must be allowed to settle on empty without burning the
     // whole window.
     const emptyStableNeeded = budgetMs <= 2500 ? 2 : 4;
-    const deadline = Date.now() + budgetMs;
+    const deadline = Date.now() + budgetMs * hiddenMult();
     let last = null;
     let stable = 0;
     while (Date.now() < deadline) {
@@ -3516,6 +3520,7 @@ async function fillSearchMulti(f, value, ctx = {}) {
     let added = 0;
     const notes = [];
     for (const term of wanted) {
+        if (stopRequested()) break;   // background abandoned this run
         if (chips().some(c => c.toLowerCase() === term.toLowerCase())) { notes.push(`${term}:already`); continue; }
         const before = chips().length;
         const priorResults = readResultKey().key;
@@ -3651,10 +3656,10 @@ async function fillSearchMulti(f, value, ctx = {}) {
         // and "Agentic Systems" matched exactly, every click reported an
         // unrelated overlay at the point, and no chip appeared.
         try { pick.scrollIntoView({ block: 'center' }); await sleep(150); } catch { /* noop */ }
-        const deadline = Date.now() + 2500;
+        const deadline = Date.now() + 2500 * hiddenMult();
         for (const target of targets) {
             safeActivate(target, { source: 'recipe', activation: 'widget-option' }, f.selector || f.labelMatch);
-            const tryBy = Date.now() + 900;
+            const tryBy = Date.now() + 900 * hiddenMult();
             while (Date.now() < tryBy && chips().length === before) await sleep(120);
             if (chips().length > before) break;
         }
@@ -3688,7 +3693,7 @@ async function fillSearchMulti(f, value, ctx = {}) {
                 const row = activeRow();
                 if (row && (row.textContent || '').trim().toLowerCase() === wantTxt) {
                     press('Enter', 13);
-                    const by = Date.now() + 2000;
+                    const by = Date.now() + 2000 * hiddenMult();
                     while (Date.now() < by && chips().length === before) await sleep(120);
                     break;
                 }
@@ -4302,7 +4307,10 @@ async function fillCustomSelect(f, value, ctx = {}) {
      * by hand worked every time. The verification was undoing its own success.
      */
     const waitForCommit = async (budgetMs = 2500) => {
-        const deadline = Date.now() + budgetMs;
+        // ×hiddenMult: in a hidden tab the chip appears ~1s+ after the click
+        // (throttled timers), which a fixed window misread as "never" — the
+        // 2026-08-07 PwC trace failed this exact field four times that way.
+        const deadline = Date.now() + budgetMs * hiddenMult();
         while (Date.now() < deadline) {
             const now = readCommitted();
             if (now && now !== before) return now;
@@ -4330,6 +4338,7 @@ async function fillCustomSelect(f, value, ctx = {}) {
     const attempts = [];
     let inferredAtDrill = false;
     for (let level = 0; level < 4; level++) {
+        if (stopRequested()) break;   // background abandoned this run
         // A field that has already answered is never clicked again — that is how
         // the retry loop used to deselect its own pick.
         const settled = readCommitted();
@@ -4433,8 +4442,11 @@ async function fillCustomSelect(f, value, ctx = {}) {
             return { ok: true, matched: matched.replace(/^=/, '') };
         }
         // No commit. Did the click DRILL IN instead? A changed row set means a
-        // submenu opened and the next pass should match inside it.
-        await sleep(350);
+        // submenu opened and the next pass should match inside it. ×hiddenMult:
+        // the submenu render lands late in a hidden tab, and reading early here
+        // is what turned a working drill into "level0:no-effect" four runs in
+        // five on PwC's source cascade.
+        await sleep(350 * hiddenMult());
         const afterRows = renderedRows(visibleOptions).join('|');
         const drilled = afterRows !== beforeRows && !!visibleOptions().length;
         attempts.push(`level${level}:${drilled ? 'drilled-in' : 'no-effect'}`);

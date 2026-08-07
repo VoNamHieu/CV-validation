@@ -23,7 +23,8 @@ import { auditRequiredBlockers, observePageState, scrollAndCollect } from './obs
 import { isPickerShape, probeFieldShape } from './probe.js';
 import { findApplyButton, isApplicationFormPage, summarizeState, waitForJobPageSignal } from './detect.js';
 import { detectLoginWall, handleLoginWall } from './login.js';
-import { trace, traceClear, traceDump, traceOnce } from './trace.js';
+import { setTraceRun, trace, traceClear, traceDump, traceOnce } from './trace.js';
+import { requestStop, stopRequested } from './run-state.js';
 import { applyRecipeFields, atFinalStep, clickRecipeGateway, FIELD_FAIL_BUDGET, fillResolvedDate, inferFillDynamicField, loadRecipes, recipeBlockingFields, recipeForUrl, recipeOwnedWrappers, recipeReleased, resetFieldStatus } from './recipe.js';
 import { checkClick, logDenial } from './policy.js';
 import { buildManifest, summarizeGaps, VERDICT } from './needs.js';
@@ -33,7 +34,7 @@ import { tenantRefFor } from '../ats/tenant.js';
 // you can confirm (in the PAGE / tab console, NOT the service-worker console) that
 // the freshly-built dist is actually loaded. If you don't see this line on the
 // apply tab, the new build isn't injected (reload the extension + refresh the tab).
-const COPO_BUILD = 'prod-final-2026-08-06m';
+const COPO_BUILD = 'phase0-isolation-2026-08-07a';
 try { console.log(`%c[Copo] content-agent build ${COPO_BUILD} loaded → ${location.host}`, 'color:#c43b2e;font-weight:700'); } catch { /* noop */ }
 
 /**
@@ -65,7 +66,7 @@ async function loadSessionCv() {
         const { applySession, pendingAutoApply } = await chrome.storage.local.get(['applySession', 'pendingAutoApply']);
         const sid = applySession?.sessionId;
         if (sid) {
-            const key = `applyCv:${sid}`;
+            const key = `run:${sid}:cv`;
             const scoped = (await chrome.storage.local.get(key))[key];
             if (scoped?.base64 && scoped?.fileName) {
                 return { cv: { base64: scoped.base64, fileName: scoped.fileName, scope: 'session' }, driven: true };
@@ -120,6 +121,12 @@ async function runAgentLoop(rawProfile) {
         return;
     }
     _loopLive = true;
+    // Heartbeat on a CLOCK, not per iteration. One iteration legitimately runs
+    // 2–5 minutes on a live Workday form (My Information fill + list walks),
+    // and a heartbeat sent only at the top of the loop starved the background
+    // watchdog mid-iteration — which abandoned a healthy job and opened the
+    // next tab on top of it (measured 2026-08-07, PwC + Mondelez double-run).
+    const hb = setInterval(sendHeartbeat, 25000);
     try {
         return await _runAgentLoop(rawProfile);
     } catch (e) {
@@ -129,6 +136,7 @@ async function runAgentLoop(rawProfile) {
         console.error('[Copo Apply] loop crashed:', e);
         try { showToast('⚠️ Agent gặp lỗi và đã dừng — bấm ⚡ để chạy lại.', 9000); } catch { /* noop */ }
     } finally {
+        clearInterval(hb);
         _loopLive = false;
     }
 }
@@ -153,7 +161,16 @@ async function _runAgentLoop(rawProfile) {
     // each page load re-enters here — and the steps worth reading are the ones
     // from before the last navigation. The buffer is cleared when a job's result
     // is reported, not when a page loads.
-    trace('loop.enter', { host: location.hostname, hasProfile: !!profile });
+    trace('loop.enter', { host: location.hostname, hasProfile: !!profile, vis: document.visibilityState });
+    // Visibility changes are load-bearing context for every verify below: a
+    // hidden tab's clicks commit ~1s+ late (throttled timers, delayed render),
+    // which without this line reads exactly like "the widget refused the value".
+    if (!window.__copoVisWatch) {
+        window.__copoVisWatch = true;
+        document.addEventListener('visibilitychange', () => {
+            trace('loop.visibility', { now: document.visibilityState });
+        });
+    }
     const history = [];
     let prevStateHash = '';
     let prevStepCurrent = null;
@@ -325,6 +342,17 @@ async function _runAgentLoop(rawProfile) {
 
         const loopDeadline = Date.now() + AGENT_MAX_RUNTIME_MS;
         for (let i = 0; ; i++) {
+            // The background has ruled this job (watchdog, tab handover, batch
+            // moved on). Stop DRIVING, don't report — a result from an
+            // abandoned run would be refused as 'stale tab' anyway, and the
+            // orphan loop it replaces used to keep clicking for 11 minutes.
+            const stopped = stopRequested();
+            if (stopped) {
+                trace('loop.stopped', { why: stopped.why, iter: i + 1 });
+                removeProgress();
+                showToast('⏹️ Job này đã được hệ thống dừng.', 5000);
+                return;
+            }
             if (Date.now() > loopDeadline) {
                 removeProgress();
                 showToast('⚠️ Một job chạy quá 15 phút — dừng lại. Kiểm tra form rồi chạy tiếp.', 6000);
@@ -1862,13 +1890,25 @@ async function init() {
                 // chain exceeds its hop budget.
                 console.log(`[Copo Agent] Auto-apply triggered (batch: ${isBatch}, host: ${location.hostname})`);
 
+                // This run's identity, stamped into every trace dump — two runs
+                // in one evening produced two anonymous, interleavable pastes.
+                const runId = sess.runId || sess.sessionId;
+                if (runId) setTraceRun(runId);
+
+                // Fill from THIS run's profile snapshot, not the global slot: a
+                // later start overwrites jobfitProfile while this job is still
+                // mid-fill. Global stays as fallback for pre-runId sessions.
+                const runProfile = runId
+                    ? (await chrome.storage.local.get(`run:${runId}:profile`))[`run:${runId}:profile`]
+                    : null;
+
                 showToast(isBatch
                     ? '🚀 Batch Apply — Đang xử lý job này...'
                     : '🚀 Copo Agent đang xử lý...', 0);
                 await sleep(500);
                 document.getElementById('jobfit-toast')?.remove();
 
-                await runAgentLoop(data.jobfitProfile);
+                await runAgentLoop(runProfile || data.jobfitProfile);
                 return;
             }
         }
@@ -2103,6 +2143,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type === 'AGENT_TEST_STEP') {
         runSingleStep(message.opts || {}).then(sendResponse);
         return true; // async
+    }
+    // The background abandoned this run — halt at the next checkpoint. The flag
+    // (not an immediate teardown) lets whatever DOM touch is mid-flight finish,
+    // so we never leave a widget half-toggled.
+    if (message?.type === 'AGENT_STOP') {
+        requestStop(message.why || 'background');
+        trace('loop.stopSignal', { why: message.why || 'background' });
+        sendResponse({ ok: true });
+        return true;
     }
 });
 

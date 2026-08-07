@@ -295,6 +295,27 @@ function clearJobSafetyTimer() {
     chrome.alarms.clear(JOB_ALARM);
 }
 
+/**
+ * Stop the abandoned run's agent and close its tab. Every driven tab was
+ * created by this worker (tabs.create), so closing is ours to do.
+ *
+ * Leaving it alive was measured 2026-08-07: the watchdog moved the queue on,
+ * the orphan agent kept driving its now-hidden tab for 11 more minutes —
+ * burning LLM calls, its clicks misread as no-effect under tab throttling,
+ * its final result refused as 'stale tab'. An abandoned job must END.
+ */
+function stopDrivenTab(tabId, why) {
+    if (tabId == null) return;
+    try {
+        chrome.tabs.sendMessage(tabId, { type: 'AGENT_STOP', why }, () => void chrome.runtime.lastError);
+    } catch { /* tab already gone */ }
+    // A beat for the stop to land and the agent to trace it before the
+    // document dies with the tab.
+    setTimeout(() => {
+        try { chrome.tabs.remove(tabId, () => void chrome.runtime.lastError); } catch { /* gone */ }
+    }, 400);
+}
+
 /** Give up on the job at `idx` and move the queue along. */
 function failStalledJob(idx, detail = 'Timeout — page did not respond') {
     if (!isProcessing || idx !== currentJobIndex) return;
@@ -302,6 +323,8 @@ function failStalledJob(idx, detail = 'Timeout — page did not respond') {
     console.warn(`[Copo] Batch Apply: timeout for job ${idx + 1}, skipping`);
     applyQueue[idx].status = 'error';
     applyQueue[idx].result = { success: false, detail };
+    stopDrivenTab(currentTabId, detail);
+    endApplySession();   // retire the dead run's CV + profile keys
     persistState();
     broadcastProgress();
     processNextJob();
@@ -420,7 +443,7 @@ let applySessionId = null;
 // of bug this agent can have, because it succeeds: the wrong PDF reaches a real
 // employer and nothing reports a failure.
 //
-// So `applyCv:<sessionId>` holds a job's own CV and dies with the session.
+// So `run:<runId>:cv` holds a job's own CV and dies with the run.
 //
 // Note what the global `cvFileBase64` actually is, because the name suggests
 // otherwise: it is NOT a generic CV. The web app's buildCvPdfCache pushes
@@ -429,12 +452,18 @@ let applySessionId = null;
 // own — the floating button on a page the user opened. A driven apply must never
 // fall back to it; doing so re-creates the leak above one hop removed. See
 // loadSessionCv in the content agent.
-const SESSION_CV_PREFIX = 'applyCv:';
+// Per-run keys live under one prefix — `run:<runId>:cv`, `run:<runId>:profile` —
+// so everything a run owns can be retired (or swept) by prefix. The runId IS the
+// sessionId; two names for one identity would just be a bug factory.
+const RUN_PREFIX = 'run:';
+const LEGACY_CV_PREFIX = 'applyCv:';   // pre-runId key, still swept
 
 function newSessionId() {
     return 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
-function sessionCvKey(sessionId) { return SESSION_CV_PREFIX + sessionId; }
+function runKey(runId, part) { return `${RUN_PREFIX}${runId}:${part}`; }
+function sessionCvKey(sessionId) { return runKey(sessionId, 'cv'); }
+function sessionProfileKey(sessionId) { return runKey(sessionId, 'profile'); }
 
 /**
  * Build the storage fragment that OPENS a session. Returned rather than written
@@ -448,12 +477,21 @@ function prepareApplySession(jobUrl, cv, opts = {}) {
     try { jobHost = new URL(jobUrl).hostname; } catch (e) { }
     const fragment = {
         applySession: {
-            sessionId, tabId: null, jobHost, startedAt: Date.now(),
+            // runId === sessionId: the run's identity, stamped into every trace
+            // line the content agent writes for this job.
+            sessionId, runId: sessionId, tabId: null, jobHost, startedAt: Date.now(),
             // Did the user grant the agent permission to accept a company's
         },
     };
     if (cv?.base64 && cv?.fileName) {
         fragment[sessionCvKey(sessionId)] = { base64: cv.base64, fileName: cv.fileName };
+    }
+    // The profile SNAPSHOT this run fills from. The global jobfitProfile stays
+    // (the ⚡ button and profile sync read it), but a driven run must not pick
+    // up whatever a LATER start wrote there — the 2026-08-07 double-run had the
+    // second job's profile write racing the first job's fills.
+    if (opts.profile) {
+        fragment[sessionProfileKey(sessionId)] = opts.profile;
     }
     return { sessionId, fragment };
 }
@@ -467,7 +505,7 @@ function adoptApplySession(sessionId, tabId) {
     applyTabId = tabId;
     applyHops = 0;
     if (previous && previous !== sessionId) {
-        chrome.storage.local.remove(sessionCvKey(previous));
+        chrome.storage.local.remove([sessionCvKey(previous), sessionProfileKey(previous)]);
     }
     chrome.storage.local.get('applySession', (d) => {
         if (d.applySession?.sessionId === sessionId) {
@@ -482,7 +520,7 @@ function endApplySession() {
     applyHops = 0;
     applySessionId = null;
     const keys = ['applySession'];
-    if (stale) keys.push(sessionCvKey(stale));
+    if (stale) keys.push(sessionCvKey(stale), sessionProfileKey(stale));
     chrome.storage.local.remove(keys, () => sweepSessionCvs());
 }
 
@@ -501,11 +539,14 @@ function sweepSessionCvs() {
         // the one the web app had JUST synced for the tab being opened — the
         // agent then fell back to the stale global PDF and uploaded the wrong
         // document to a real application.
-        const live = all.applySession?.sessionId ? `${SESSION_CV_PREFIX}${all.applySession.sessionId}` : null;
-        const dead = Object.keys(all).filter((k) => k.startsWith(SESSION_CV_PREFIX) && k !== live);
+        const liveSid = all.applySession?.sessionId || null;
+        const livePrefix = liveSid ? `${RUN_PREFIX}${liveSid}:` : null;
+        const dead = Object.keys(all).filter((k) =>
+            (k.startsWith(RUN_PREFIX) && !(livePrefix && k.startsWith(livePrefix)))
+            || k.startsWith(LEGACY_CV_PREFIX));   // pre-runId builds left these
         if (dead.length) {
             chrome.storage.local.remove(dead);
-            console.log(`[Copo] session CV sweep: removed ${dead.length} blob(s)`);
+            console.log(`[Copo] run-key sweep: removed ${dead.length} key(s)`);
         }
     });
 }
@@ -540,6 +581,7 @@ chrome.webNavigation.onCommitted.addListener((d) => {
     if (applyHops > APPLY_MAX_HOPS) {
         console.warn(`[Copo] apply: redirect chain > ${APPLY_MAX_HOPS} hops — aborting session`);
         chrome.storage.local.remove(['pendingAutoApply', 'autoApplyJobUrl']);
+        stopDrivenTab(d.tabId, 'Chuỗi redirect quá dài');
         if (isProcessing && currentJobIndex >= 0 && currentJobIndex < applyQueue.length) {
             applyQueue[currentJobIndex].status = 'error';
             applyQueue[currentJobIndex].result = { success: false, detail: 'Chuỗi redirect quá dài — bỏ qua job này.' };
@@ -575,10 +617,17 @@ chrome.webNavigation.onCreatedNavigationTarget.addListener((d) => {
     // known host → declarative agent resumes; unknown → onCompleted injects.
 });
 
-// Single-apply tab closed before reporting → clear the stale pending flag so it
-// can't auto-fire on the next job page the user opens. (Batch has its own
-// watchdog + queue advance, so only touch this outside a batch.)
+// Driven tab closed by the user → the run is over NOW.
+// · Batch: fail the job immediately and move on. Waiting for the 120s watchdog
+//   here just held the queue on a tab that no longer exists.
+// · Single: clear the stale pending flag so it can't auto-fire on the next job
+//   page the user opens.
 chrome.tabs.onRemoved.addListener((tabId) => {
+    if (isProcessing && tabId === currentTabId
+        && applyQueue[currentJobIndex]?.status === 'processing') {
+        failStalledJob(currentJobIndex, 'Tab bị đóng giữa chừng');
+        return;
+    }
     if (tabId === applyTabId && !isProcessing) {
         chrome.storage.local.remove(['pendingAutoApply', 'autoApplyJobUrl']);
         endApplySession();
@@ -605,14 +654,38 @@ function handleAutoApplyStart(message, sendResponse) {
     const jobCv = message.cvFileBase64 && message.cvFileName
         ? { base64: message.cvFileBase64, fileName: message.cvFileName }
         : null;
-    const { sessionId, fragment } = prepareApplySession(jobUrl, jobCv);
     (async () => {
+        // ONE driven run at a time, across tabs. A second single apply while
+        // one is live is the 2026-08-07 double-run exactly: two agents in two
+        // tabs, the new tab hides the old one (whose throttled verify windows
+        // then misread working clicks as no-effect), and adopting the new
+        // session would delete the live run's CV blob mid-flight. The per-page
+        // single-flight (_loopLive) cannot see across tabs; this guard can.
+        const prior = (await chrome.storage.local.get('applySession')).applySession;
+        const priorFresh = prior?.tabId != null
+            && Date.now() - (prior.startedAt || 0) < JOB_HARD_CAP_MS;
+        if (priorFresh) {
+            const alive = await new Promise((r) => {
+                chrome.tabs.get(prior.tabId, (t) => r(!chrome.runtime.lastError && !!t));
+            });
+            if (alive) {
+                sendResponse({
+                    success: false,
+                    error: 'Một job khác đang được ứng tuyển ở tab khác — chờ nó xong hoặc đóng tab đó rồi thử lại.',
+                });
+                return;
+            }
+            // The tab is gone → that run is dead, whatever the flags say.
+            endApplySession();
+        }
+        // MERGE, never clobber: the app's payload wins per key, but keys
+        // only the extension holds (a console-injected gpa, an ethnicity
+        // the web app doesn't ship yet) must survive the trigger — this
+        // write used to erase them the moment a run started from the app.
+        const merged = await mergedProfile(profile);
+        const { sessionId, fragment } = prepareApplySession(jobUrl, jobCv, { profile: merged });
         const storage = {
-            // MERGE, never clobber: the app's payload wins per key, but keys
-            // only the extension holds (a console-injected gpa, an ethnicity
-            // the web app doesn't ship yet) must survive the trigger — this
-            // write used to erase them the moment a run started from the app.
-            jobfitProfile: await mergedProfile(profile),
+            jobfitProfile: merged,
             pendingAutoApply: true,
             autoApplyJobUrl: jobUrl,
             batchMode: false,   // don't inherit a stale batchMode from a prior batch
@@ -1187,6 +1260,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         console.log(`[Copo] Batch Apply: starting ${jobs.length} jobs`);
 
         (async () => {
+            // Same cross-tab single-flight as handleAutoApplyStart: a batch must
+            // not start on top of a live SINGLE run — its first tab would hide
+            // the driven one and both degrade (measured 2026-08-07).
+            const prior = (await chrome.storage.local.get('applySession')).applySession;
+            if (prior?.tabId != null && Date.now() - (prior.startedAt || 0) < JOB_HARD_CAP_MS) {
+                const alive = await new Promise((r) => {
+                    chrome.tabs.get(prior.tabId, (t) => r(!chrome.runtime.lastError && !!t));
+                });
+                if (alive) {
+                    sendResponse({
+                        success: false,
+                        error: 'Một job đang được ứng tuyển ở tab khác — chờ nó xong hoặc đóng tab đó rồi chạy batch.',
+                    });
+                    return;
+                }
+                endApplySession();   // tab gone → dead run, clear and proceed
+            }
             // Load each account-gated tenant's standing verdict BEFORE the first
             // tab opens, so a tenant already waiting on the user is skipped
             // instead of re-probed. Fails open: no verdicts → everything reads as
@@ -1210,9 +1300,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             persistState();
             broadcastProgress();
             processNextJob();
+            // Answered HERE, not synchronously below: the single-flight guard
+            // above must be able to refuse, and a success sent before it ran
+            // would have the web app showing a batch that never started.
+            sendResponse({ success: true, totalJobs: jobs.length });
         })();
 
-        sendResponse({ success: true, totalJobs: jobs.length });
         return true;
     }
 
@@ -1546,9 +1639,12 @@ async function processNextJob() {
     const jobCv = job.cvFileBase64 && job.cvFileName
         ? { base64: job.cvFileBase64, fileName: job.cvFileName }
         : null;
-    const { sessionId, fragment } = prepareApplySession(job.jobUrl, jobCv);
+    const merged = await mergedProfile(job.profile);
+    // The profile rides IN the run (run:<id>:profile), not just the global
+    // slot — a batch job must fill from the snapshot it was enqueued with.
+    const { sessionId, fragment } = prepareApplySession(job.jobUrl, jobCv, { profile: merged });
     const storage = {
-        jobfitProfile: await mergedProfile(job.profile),
+        jobfitProfile: merged,
         pendingAutoApply: true,
         autoApplyJobUrl: job.jobUrl,
         batchMode: true,

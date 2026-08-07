@@ -15,6 +15,7 @@
  */
 
 const KEY = 'copoAgentTrace';
+const RUN_KEY = 'copoTraceRun';
 const MAX = 120;          // a long run, still one screenful when printed
 const VALUE_CAP = 200;    // keep a DOM dump from swallowing the buffer
 
@@ -78,6 +79,22 @@ function scrub(data) {
 }
 
 /**
+ * Which run these steps belong to. Survives navigation with the buffer, so a
+ * dump pasted from a machine that ran two jobs in one evening says WHICH job
+ * it is — the 2026-08-07 diagnosis started by untangling two interleaved runs
+ * that carried no identity at all.
+ */
+export function setTraceRun(runId) {
+    if (!hasStore() || !runId) return;
+    try { sessionStorage.setItem(RUN_KEY, String(runId)); } catch { /* full or blocked */ }
+}
+
+function traceRun() {
+    if (!hasStore()) return null;
+    try { return sessionStorage.getItem(RUN_KEY) || null; } catch { return null; }
+}
+
+/**
  * Record one step.
  *
  * `step` is a short stable tag ('auth.grant', 'auth.fill') so a run can be
@@ -128,8 +145,9 @@ export function traceDump(reason) {
     console.warn(`[Copo Trace] ▼ ${rows.length} steps leading to: ${reason}`);
     try { console.table(rows); } catch { console.warn(rows); }
     // console.table cannot be copied out of every devtools build; the JSON can.
+    const run = traceRun();
     console.warn('[Copo Trace] copy the line below to share this run:\n'
-        + JSON.stringify({ reason, steps: rows }));
+        + JSON.stringify(run ? { run, reason, steps: rows } : { reason, steps: rows }));
     return rows;
 }
 
