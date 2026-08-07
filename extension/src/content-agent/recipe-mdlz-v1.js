@@ -1766,6 +1766,20 @@ async function _applyRecipeFields(recipe, profile, cvData, cv) {
                             || el.closest('label') || cbWrap?.querySelector('[data-automation-id="checkboxPanel"]');
                         if (alt) { safeActivate(alt, { source: 'recipe', activation: 'widget-option' }, f.selector); await sleep(350); }
                     }
+                    // NEVER leave it off. The off-click may land while the
+                    // on-click does not, and this converge would then have
+                    // turned a consent the form merely doubted into one the
+                    // candidate never gave — strictly worse than the bug it
+                    // repairs. Re-tick until it is on, then report honestly.
+                    if (!el.checked) {
+                        for (const target of [el, (el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`)) || el.closest('label'), cbWrap?.querySelector('[data-automation-id="checkboxPanel"]')]) {
+                            if (!target || el.checked) continue;
+                            safeActivate(target, { source: 'recipe', activation: 'widget-option' }, f.selector);
+                            await sleep(400);
+                        }
+                        trace('checkbox.converge', { field: f.label, restored: el.checked, phase: 'after off→on' });
+                        if (!el.checked) { outcomes.push([f.label, 'FAIL', 'converge left it unticked — needs the user']); continue; }
+                    }
                 }
                 if (!safeActivate(el, { source: 'recipe', activation: 'widget-option' }, f.selector)) {
                     outcomes.push([f.label, 'FAIL', 'policy-denied']);

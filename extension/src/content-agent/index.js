@@ -42,7 +42,7 @@ import { tenantRefFor } from '../ats/tenant.js';
 // you can confirm (in the PAGE / tab console, NOT the service-worker console) that
 // the freshly-built dist is actually loaded. If you don't see this line on the
 // apply tab, the new build isn't injected (reload the extension + refresh the tab).
-const COPO_BUILD = 'phase0-exec-2026-08-07v';
+const COPO_BUILD = 'phase0-exec-2026-08-07w';
 try { console.log(`%c[Copo] content-agent build ${COPO_BUILD} loaded → ${location.host}`, 'color:#c43b2e;font-weight:700'); } catch { /* noop */ }
 
 /**
@@ -121,11 +121,16 @@ setSpanTracking(!!LOCKED_TENANT);
  * produced no progress on R-173784). A MutationObserver answers the moment
  * Workday swaps the step in, and costs nothing while it does not.
  */
-function waitForMutation(budgetMs = 4000) {
+function waitForMutation(budgetMs = 4000, meaningful = null) {
     return new Promise((resolve) => {
         let done = false;
         const finish = (why) => { if (done) return; done = true; try { obs.disconnect(); } catch { /* noop */ } clearTimeout(t); resolve(why); };
-        const obs = new MutationObserver(() => finish('mutation'));
+        // A Workday page mutates constantly — spinners, analytics, focus rings.
+        // Waking on ANY of that would make this barrier a faster spin than the
+        // poll it replaced. So the observer is only a trigger: the wait ends
+        // when the caller's own condition says the page really moved.
+        const check = () => { try { if (!meaningful || meaningful()) finish('changed'); } catch { finish('changed'); } };
+        const obs = new MutationObserver(check);
         try { obs.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-automation-id', 'aria-invalid', 'class'] }); } catch { /* noop */ }
         const t = setTimeout(() => finish('timeout'), budgetMs);
     });
@@ -1087,7 +1092,7 @@ async function _runAgentLoop(rawProfile) {
                 // being replaced still answers selectors, so a pass here fills
                 // widgets that are about to be discarded and reads their state
                 // as this step's truth. Wait for the page to become itself.
-                if (_advanceHeld(state, recipe)) { await waitForMutation(2500); continue; }
+                if (_advanceHeld(state, recipe)) { const fp0 = _stepFingerprint(state, recipe); await waitForMutation(2500, () => _stepFingerprint(state, recipe) !== fp0); continue; }
                 const rf = await _phase('recipe', () => applyRecipeFields(recipe, profile, cvData, cvStructured));
                 if (rf?.filled) _progress();
                 if (_openIter && rf?.step) _openIter.step = rf.step;
@@ -1299,7 +1304,7 @@ async function _runAgentLoop(rawProfile) {
                         // `actionsTaken` anyway told the completion check that we
                         // had acted, and let the loop continue as if the step had
                         // moved on.
-                        if (_advanceHeld(state, recipe)) { await waitForMutation(2500); continue; }
+                        if (_advanceHeld(state, recipe)) { const fp0 = _stepFingerprint(state, recipe); await waitForMutation(2500, () => _stepFingerprint(state, recipe) !== fp0); continue; }
                         const advanced = safeActivate(adv, policyCtx('recipe'), stepNow.advance);
                         trace('advance.click', { selector: stepNow.advance, activated: advanced });
                         if (advanced) { _progress(); _advanceTaken(state, recipe); }
