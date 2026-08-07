@@ -24,46 +24,15 @@ import { isPickerShape, probeFieldShape } from './probe.js';
 import { findApplyButton, isApplicationFormPage, summarizeState, waitForJobPageSignal } from './detect.js';
 import { detectLoginWall, handleLoginWall } from './login.js';
 import { setTraceRun, trace, traceClear, traceDump, traceOnce } from './trace.js';
-import { addPausedMs, pausedMs, requestStop, runMode, setPauseGate, setRunMode, stopRequested } from './run-state.js';
+import { requestStop, setRunMode, stopRequested } from './run-state.js';
 
-/**
- * The pause itself. A hidden tab's timers are clamped and its rendering is
- * delayed, so a hidden tab's agent both crawls AND misreads — measured twice
- * on 2026-08-07 (8 wasted minutes on mdlz, 62 on PwC). Waiting costs nothing:
- * the heartbeat interval keeps the watchdog fed, the run cap excludes paused
- * time, and visibilitychange resumes the loop the moment the tab is seen.
- * In batch mode — where the user has handed the browser over — one refocus
- * is requested after a minute rather than waiting forever.
- */
-const HIDDEN_REFOCUS_AFTER_MS = 60000;
-async function waitWhileHidden() {
-    if (!document.hidden || stopRequested()) return;
-    const t0 = Date.now();
-    trace('loop.pause', { mode: runMode(), why: 'tab hidden — widget evidence cannot be trusted' });
-    try { showToast('⏸ Tab đang ẩn — agent tạm dừng, mở tab này để chạy tiếp.', 0); } catch { /* noop */ }
-    let refocusAsked = false;
-    while (document.hidden && !stopRequested()) {
-        await new Promise((resolve) => {
-            const timer = setTimeout(done, 5000);
-            function done() {
-                clearTimeout(timer);
-                document.removeEventListener('visibilitychange', done);
-                resolve();
-            }
-            document.addEventListener('visibilitychange', done);
-        });
-        if (!refocusAsked && runMode() === 'batch' && Date.now() - t0 > HIDDEN_REFOCUS_AFTER_MS) {
-            refocusAsked = true;
-            trace('loop.refocusAsk', { hiddenMs: Date.now() - t0 });
-            try { chrome.runtime.sendMessage({ type: 'FOCUS_RUN_TAB' }).catch(() => { }); } catch { /* orphaned */ }
-        }
-    }
-    const ms = Date.now() - t0;
-    addPausedMs(ms);
-    try { document.getElementById('jobfit-toast')?.remove(); } catch { /* noop */ }
-    trace('loop.resume', { pausedMs: ms, vis: document.visibilityState });
-}
-setPauseGate(waitWhileHidden);
+// NO pause-on-hidden. That behavior shipped 2026-08-07 without the user's
+// sign-off and was rejected outright: the agent EXISTS to work while the user
+// is elsewhere. What makes that viable is not waiting — it is that a hidden
+// tab's clock now borrows the background worker's (see sleep() in dom.js,
+// exempt from tab throttling), the driven page opens in its own small window
+// so it is rarely occluded at all, and verify budgets still stretch under
+// document.hidden for the rendering that genuinely lags.
 import { applyRecipeFields, atFinalStep, clickRecipeGateway, FIELD_FAIL_BUDGET, fillResolvedDate, inferFillDynamicField, loadRecipes, recipeBlockingFields, recipeForUrl, recipeOwnedWrappers, recipeReleased, resetFieldStatus } from './recipe.js';
 import { checkClick, logDenial } from './policy.js';
 import { buildManifest, summarizeGaps, VERDICT } from './needs.js';
@@ -73,7 +42,7 @@ import { tenantRefFor } from '../ats/tenant.js';
 // you can confirm (in the PAGE / tab console, NOT the service-worker console) that
 // the freshly-built dist is actually loaded. If you don't see this line on the
 // apply tab, the new build isn't injected (reload the extension + refresh the tab).
-const COPO_BUILD = 'phase0-isolation-2026-08-07d';
+const COPO_BUILD = 'phase0-isolation-2026-08-07e';
 try { console.log(`%c[Copo] content-agent build ${COPO_BUILD} loaded → ${location.host}`, 'color:#c43b2e;font-weight:700'); } catch { /* noop */ }
 
 /**
@@ -380,7 +349,6 @@ async function _runAgentLoop(rawProfile) {
         let singlePagePasses = 0;   // single-page recipe: total passes on the matched form → hard cap (never spin)
 
         const loopDeadline = Date.now() + AGENT_MAX_RUNTIME_MS;
-        const pausedAtStart = pausedMs();
         for (let i = 0; ; i++) {
             // The background has ruled this job (watchdog, tab handover, batch
             // moved on). Stop DRIVING, don't report — a result from an
@@ -393,11 +361,7 @@ async function _runAgentLoop(rawProfile) {
                 showToast('⏹️ Job này đã được hệ thống dừng.', 5000);
                 return;
             }
-            // A hidden tab waits instead of working (see waitWhileHidden).
-            await waitWhileHidden();
-            // The cap measures WORKING time: a run paused for 40 minutes while
-            // the user was elsewhere has not spent its budget being stuck.
-            if (Date.now() - (pausedMs() - pausedAtStart) > loopDeadline) {
+            if (Date.now() > loopDeadline) {
                 removeProgress();
                 showToast('⚠️ Một job chạy quá 15 phút — dừng lại. Kiểm tra form rồi chạy tiếp.', 6000);
                 reportResult(false, `Quá ${Math.round(AGENT_MAX_RUNTIME_MS / 60000)} phút cho một job — dừng để không treo phiên`);

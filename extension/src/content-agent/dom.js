@@ -2,7 +2,37 @@
 import { checkClick, logDenial } from './policy.js';
 
 // ─── Helpers ───
-export function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+/**
+ * The agent's clock — and the reason a hidden tab can WORK instead of crawl.
+ *
+ * Chrome clamps a hidden tab's setTimeout to ≥1s, and to ~one fire per MINUTE
+ * after five hidden minutes. Measured on run smsik0vk4pw1h46 (PwC,
+ * 2026-08-07): a 30-second list walk stretched to 25 minutes and the run
+ * burned an hour learning nothing. The background service worker's timers are
+ * NOT subject to tab visibility, so a hidden tab borrows its clock over a
+ * message round-trip (~2ms). Visible tabs, and waits too short to matter,
+ * keep the local timer. The local fallback timer stays armed in case the
+ * worker is recycling mid-sleep — late is recoverable, hung is not.
+ */
+export function sleep(ms) {
+    try {
+        if (typeof document !== 'undefined' && document.hidden && ms >= 50
+            && typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+            return new Promise((resolve) => {
+                let done = false;
+                const finish = () => { if (!done) { done = true; resolve(); } };
+                try {
+                    chrome.runtime.sendMessage({ type: 'AGENT_SLEEP', ms }, () => {
+                        void chrome.runtime.lastError;
+                        finish();
+                    });
+                } catch { /* orphaned frame → local timer below */ }
+                setTimeout(finish, ms + 65000);   // belt: clamped, but it fires
+            });
+        }
+    } catch { /* non-browser (unit tests) → plain timer */ }
+    return new Promise(r => setTimeout(r, ms));
+}
 
 /**
  * Every automation-id Workday uses for "a live validation error attached to

@@ -311,6 +311,32 @@ function focusDrivenTab(tab) {
 }
 
 /**
+ * The driven page gets its OWN small window, not a tab in the user's — so
+ * "the user went back to work" no longer means "the page went hidden". A
+ * window stays rendered while any part of it is on screen (only full
+ * occlusion or minimizing hides it, and the borrowed background clock in
+ * sleep() covers even that), and the user's own window keeps its tabs and
+ * its focus habits untouched. Machine-decided, no dialog — the one approval
+ * remains the all-sites grant.
+ */
+function openDrivenWindow(url, cb) {
+    try {
+        chrome.windows.create(
+            { url, type: 'popup', focused: true, width: 680, height: 860 },
+            (win) => {
+                void chrome.runtime.lastError;
+                const tab = win?.tabs?.[0];
+                if (tab) { cb(tab); return; }
+                // Popup refused (rare) → the old path still works.
+                chrome.tabs.create({ url, active: true }, cb);
+            },
+        );
+    } catch {
+        chrome.tabs.create({ url, active: true }, cb);
+    }
+}
+
+/**
  * Stop the abandoned run's agent and close its tab. Every driven tab was
  * created by this worker (tabs.create), so closing is ours to do.
  *
@@ -722,10 +748,10 @@ function handleAutoApplyStart(message, sendResponse) {
             return;
         }
         chrome.storage.local.set(storage, () => {
-            chrome.tabs.create({ url: jobUrl, active: true }, (tab) => {
+            openDrivenWindow(jobUrl, (tab) => {
+                if (!tab) { sendResponse({ success: false, error: 'Không mở được cửa sổ ứng tuyển.' }); return; }
                 adoptApplySession(sessionId, tab.id);  // follow redirects/new-tabs; onCompleted injects unknown hosts
-                focusDrivenTab(tab);
-                console.log('[Copo] Auto Apply: opened tab', tab.id, 'for', jobUrl);
+                console.log('[Copo] Auto Apply: opened agent window, tab', tab.id, 'for', jobUrl);
                 sendResponse({ success: true, tabId: tab.id });
             });
         });
@@ -1542,9 +1568,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return true;  // async response
     }
 
-    // ── Batch agent paused >60s in a hidden tab: bring its window forward ──
-    // Only the DRIVEN tab is obeyed, and only because a batch is the user
-    // having handed the browser over — a single apply waits instead.
+    // ── A hidden tab borrowing the background's clock (see sleep() in dom.js).
+    // Worker timers are exempt from tab throttling; this is what lets the
+    // agent WORK unattended instead of crawling at one tick per minute.
+    if (message.type === 'AGENT_SLEEP') {
+        const ms = Math.min(Math.max(Number(message.ms) || 0, 0), 60000);
+        setTimeout(() => { try { sendResponse({ ok: true }); } catch { /* tab gone */ } }, ms);
+        return true;
+    }
+
+    // ── Bring the driven tab's window forward (only the driven tab is obeyed) ──
     if (message.type === 'FOCUS_RUN_TAB') {
         const tid = sender.tab && sender.tab.id;
         const driven = tid != null && (tid === applyTabId || tid === currentTabId);
@@ -1739,10 +1772,10 @@ async function processNextJob() {
         }
         chrome.storage.local.set(storage, () => {
             // Open the job URL in a new tab
-            chrome.tabs.create({ url: job.jobUrl, active: true }, (tab) => {
+            openDrivenWindow(job.jobUrl, (tab) => {
+                if (!tab) { failStalledJob(currentJobIndex, 'Không mở được cửa sổ ứng tuyển'); return; }
                 currentTabId = tab.id;
                 jobStartedAt = Date.now();
-                focusDrivenTab(tab);
                 // Reset the liveness clock: the PREVIOUS job's heartbeat must not
                 // read as this job's page being alive.
                 lastHeartbeatAt = 0;
