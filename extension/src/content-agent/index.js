@@ -42,7 +42,7 @@ import { tenantRefFor } from '../ats/tenant.js';
 // you can confirm (in the PAGE / tab console, NOT the service-worker console) that
 // the freshly-built dist is actually loaded. If you don't see this line on the
 // apply tab, the new build isn't injected (reload the extension + refresh the tab).
-const COPO_BUILD = 'phase0-date-2026-08-07u';
+const COPO_BUILD = 'phase0-exec-2026-08-07v';
 try { console.log(`%c[Copo] content-agent build ${COPO_BUILD} loaded → ${location.host}`, 'color:#c43b2e;font-weight:700'); } catch { /* noop */ }
 
 /**
@@ -112,6 +112,24 @@ async function loadSessionCv() {
 // Timing spans are for the tenant being tuned: on for a locked snapshot,
 // silent everywhere else, so no other tenant's trace changes shape.
 setSpanTracking(!!LOCKED_TENANT);
+
+/**
+ * Wait for the page to actually change, or for the budget to run out.
+ *
+ * The transition barrier used a fixed 700ms poll, so a step mid-transition
+ * burned ten empty iterations doing nothing but looking (19 of 31 iterations
+ * produced no progress on R-173784). A MutationObserver answers the moment
+ * Workday swaps the step in, and costs nothing while it does not.
+ */
+function waitForMutation(budgetMs = 4000) {
+    return new Promise((resolve) => {
+        let done = false;
+        const finish = (why) => { if (done) return; done = true; try { obs.disconnect(); } catch { /* noop */ } clearTimeout(t); resolve(why); };
+        const obs = new MutationObserver(() => finish('mutation'));
+        try { obs.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-automation-id', 'aria-invalid', 'class'] }); } catch { /* noop */ }
+        const t = setTimeout(() => finish('timeout'), budgetMs);
+    });
+}
 
 // ── PLANNER DEDUP ──
 // The planner is the most expensive thing in the loop (11s on the measured
@@ -1069,7 +1087,7 @@ async function _runAgentLoop(rawProfile) {
                 // being replaced still answers selectors, so a pass here fills
                 // widgets that are about to be discarded and reads their state
                 // as this step's truth. Wait for the page to become itself.
-                if (_advanceHeld(state, recipe)) { await sleep(700); continue; }
+                if (_advanceHeld(state, recipe)) { await waitForMutation(2500); continue; }
                 const rf = await _phase('recipe', () => applyRecipeFields(recipe, profile, cvData, cvStructured));
                 if (rf?.filled) _progress();
                 if (_openIter && rf?.step) _openIter.step = rf.step;
@@ -1281,7 +1299,7 @@ async function _runAgentLoop(rawProfile) {
                         // `actionsTaken` anyway told the completion check that we
                         // had acted, and let the loop continue as if the step had
                         // moved on.
-                        if (_advanceHeld(state, recipe)) { await sleep(800); continue; }
+                        if (_advanceHeld(state, recipe)) { await waitForMutation(2500); continue; }
                         const advanced = safeActivate(adv, policyCtx('recipe'), stepNow.advance);
                         trace('advance.click', { selector: stepNow.advance, activated: advanced });
                         if (advanced) { _progress(); _advanceTaken(state, recipe); }

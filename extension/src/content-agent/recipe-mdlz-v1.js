@@ -948,7 +948,22 @@ async function findInList(getShown, match, label = '', wanted = '') {
         if (firstWindow === null) firstWindow = edge(rows);
         lastWindow = edge(rows);
         const key = rows.join('|');
-        if (seen.has(key)) continue;   // same window re-rendered; already matched it
+        if (seen.has(key)) {
+            // TWO rounds that render the same window, on a list many times
+            // taller than its viewport, means this virtualiser does not honour
+            // a synthetic scroll — walking it is pure cost. Measured: 35
+            // seconds and twelve rounds on Race/Ethnicity before the model was
+            // asked anyway. Stop now; the caller's inference path reads the
+            // widget's own item array.
+            if (rounds >= 2 && seen.size <= 1 && sc.scrollHeight > sc.clientHeight * 2) {
+                traceOnce(`list.unwalkable:${label}`, 'list.unwalkable', {
+                    field: label, rounds, clientH: sc.clientHeight, scrollH: sc.scrollHeight,
+                    note: 'virtualiser ignores synthetic scroll — abandoning the walk early',
+                });
+                break;
+            }
+            continue;   // same window re-rendered; already matched it
+        }
         seen.add(key);
         opt = match(shown);
         if (opt) {
@@ -962,6 +977,17 @@ async function findInList(getShown, match, label = '', wanted = '') {
     // only a real (trusted) wheel refreshed them. `windows: 1` with a scrollHeight
     // many times clientHeight is that failure exactly, and it is a different
     // problem from "the option genuinely is not in this list".
+    // A list whose rendered rows never changed under a synthetic scroll cannot
+    // be walked — 35 seconds and twelve rounds proved that on Race/Ethnicity
+    // (R-173784) before the model was asked anyway. The widget's own item
+    // array is the honest source in that case; the caller's inference path
+    // reads it. Nothing is decided here: this only says walking is pointless.
+    if (seen.size <= 1 && sc.scrollHeight > sc.clientHeight * 2) {
+        traceOnce(`list.unwalkable:${label}`, 'list.unwalkable', {
+            field: label, clientH: sc.clientHeight, scrollH: sc.scrollHeight,
+            note: 'virtualiser ignores synthetic scroll — stop walking, let inference read the item array',
+        });
+    }
     trace('list.exhausted', {
         field: label,
         rounds,
@@ -1718,7 +1744,29 @@ async function _applyRecipeFields(recipe, profile, cvData, cv) {
             } else if (f.type === 'checkbox') {
                 const el = resolveFieldControl(f);
                 if (!el || el.offsetParent === null) { outcomes.push([f.label, 'absent', 'not rendered yet']); continue; }
-                if (el.checked) { outcomes.push([f.label, 'done', 'already ticked']); continue; }
+                // A tick the FORM does not accept is not an answer. Measured on
+                // R-173784: "Yes, I have read and consent…" showed checked while
+                // Workday raised "Field and Value required" on it, and this
+                // early return called it done on every pass until the run gave
+                // up. Same re-hydration family as the fluency tick and the
+                // Overall — the DOM kept the tick, Workday's state did not. So
+                // a checked box beside its own live error is re-driven (off,
+                // then on) instead of respected.
+                const cbWrap = el.closest('[data-automation-id^="formField-"]');
+                const cbErrs = () => (cbWrap ? cbWrap.querySelectorAll(FIELD_ERROR_SEL).length : 0);
+                if (el.checked && !cbErrs()) { outcomes.push([f.label, 'done', 'already ticked']); continue; }
+                if (el.checked && cbErrs()) {
+                    trace('checkbox.converge', { field: f.label, errors: cbErrs(), action: 'off→on to resync' });
+                    safeActivate(el, { source: 'recipe', activation: 'widget-option' }, f.selector);
+                    await sleep(350);
+                    if (el.checked) {
+                        // The off-click did not land either — the label/panel is
+                        // the control this tenant wires.
+                        const alt = (el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`))
+                            || el.closest('label') || cbWrap?.querySelector('[data-automation-id="checkboxPanel"]');
+                        if (alt) { safeActivate(alt, { source: 'recipe', activation: 'widget-option' }, f.selector); await sleep(350); }
+                    }
+                }
                 if (!safeActivate(el, { source: 'recipe', activation: 'widget-option' }, f.selector)) {
                     outcomes.push([f.label, 'FAIL', 'policy-denied']);
                     continue;
