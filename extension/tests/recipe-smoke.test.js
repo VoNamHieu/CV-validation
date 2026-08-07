@@ -205,3 +205,33 @@ describe('mdlz-v1 and the generic still agree on their contract', () => {
         }
     });
 });
+
+// ── STATIC GUARD: a name used must be a name imported ──
+//
+// "recipeFieldStatus is not defined" killed a run because an edit that was
+// supposed to add it to index.js's import list silently matched nothing —
+// and no test could see it, since index.js is the loop and never runs here.
+// esbuild does not catch it either: an unknown identifier is a global as far
+// as a bundler is concerned. So the check is textual and cheap: every name
+// index.js takes FROM the router must appear in the import statement it takes
+// them from.
+describe('index.js imports every router name it uses', () => {
+    test('no identifier is referenced without being imported', async () => {
+        const { readFileSync } = await import('node:fs');
+        const src = readFileSync(new URL('../src/content-agent/index.js', import.meta.url), 'utf8');
+        const routerSrc = readFileSync(new URL('../src/content-agent/recipe-router.js', import.meta.url), 'utf8');
+
+        const importLine = src.split('\n').find(l => l.includes("from './recipe-router.js'"));
+        assert.ok(importLine, 'index.js must import from the router');
+        const imported = new Set(
+            importLine.slice(importLine.indexOf('{') + 1, importLine.indexOf('}'))
+                .split(',').map(x => x.trim().split(/\s+as\s+/)[0]).filter(Boolean),
+        );
+        const exported = [...routerSrc.matchAll(/export const (\w+)/g)].map(m => m[1]);
+
+        const body = src.slice(src.indexOf('\n', src.indexOf(importLine)));
+        const missing = exported.filter(name => !imported.has(name)
+            && new RegExp(`(?<![.\\w])${name}\\s*\\(`).test(body));
+        assert.deepEqual(missing, [], `used but not imported: ${missing.join(', ')}`);
+    });
+});
