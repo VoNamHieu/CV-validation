@@ -3951,8 +3951,18 @@ async function fillSearchMulti(f, value, ctx = {}) {
             });
             for (const bad of alienChips) {
                 const label = String(bad.textContent || '').replace(/\s+/g, ' ').trim();
-                const del = bad.querySelector('button, [role="button"], [aria-label*="elete" i], [aria-label*="emove" i]') || bad;
-                const removed = safeActivate(del, { source: 'recipe', activation: 'widget-option' }, f.selector || f.labelMatch);
+                // MEASURED on the live R-174262 draft: a chip carries no
+                // button — the remove control is a DIV
+                // [data-automation-id="DELETE_charm"] wrapping an svg, and a
+                // plain .click() on the chip does nothing. safeActivate's
+                // pointer/mouse sequence on that svg is what actually clears
+                // it. The selector string names selectedItem on purpose: it
+                // is what policy's chip-eviction exemption keys on, so the
+                // remove is allowed while a section-row Delete stays denied.
+                const charm = bad.querySelector('[data-automation-id="DELETE_charm"]');
+                const del = charm?.querySelector('svg') || charm || bad;
+                const removed = safeActivate(del, { source: 'recipe', activation: 'widget-option' },
+                    '[data-automation-id="selectedItem"] [data-automation-id="DELETE_charm"]');
                 await sleep(400);
                 const stillThere = chips().some(c => norm3(c.textContent) === norm3(label));
                 trace('skills.wrongChip', {
