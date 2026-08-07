@@ -29,13 +29,27 @@ a HAR, it doesn't go in a fixture. Partial knowledge is recorded as partial
   "tenant": "mdlz",                  // tenant key
   "field": "Skills",                 // label as the tenant renders it
   "intent": "candidate.skills",      // WHAT (Phase 2 target)
-  "capability": "searchable-multi",  // HOW family (Wave 1 target)
+  "capability": "searchable-multi",  // HOW family OBSERVED at this tenant — see below
   "commitSignal": "chip",            // the only evidence of success
   "shape": { ... },                  // observed DOM signals (fingerprint input)
   "measured": { ... },               // per-fixture: queries/levels/ladders + expectations
   "source": "which run/trace/HAR this was measured from"
 }
 ```
+
+## `capability` is an observation, never a mapping
+
+The `capability` field records which widget family this tenant happened to
+render for this field — it is data ABOUT the tenant, derived from `shape`.
+It must never be read as "this intent → this capability": Skills on another
+tenant can be a checkbox group or a plain tag input, and the same intent
+carrying DIFFERENT capabilities across fixtures is expected and healthy (the
+two source-hierarchical fixtures in this corpus already differ structurally
+for one label). The orchestrator resolves capability from the FINGERPRINT it
+observes at runtime — the fixture's `capability` only says what that
+resolution produced on the measured run, so drift is detectable. A rule like
+`intent === 'candidate.skills' → searchable-multi` is the forbidden shortcut
+this corpus exists to make impossible to defend.
 
 ## Layout
 
