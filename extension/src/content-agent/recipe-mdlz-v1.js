@@ -2974,7 +2974,58 @@ async function fillLanguageCheckboxGroup(cv, outcomes, profile) {
     return filled;
 }
 
+/**
+ * The Languages section as ROWS, not as three page-wide arrays.
+ *
+ * The same flaw Work Experience had: language[i], overall[i] and tick[i] were
+ * read from separate document-wide queries, so the moment a row is missing or
+ * Workday re-renders one, the three indices stop describing the same row —
+ * and a verify built on them can call a section settled while English has no
+ * row at all and Vietnamese's tick reads No (measured R-173518, review page).
+ *
+ * A row is its CONTAINER: the nearest ancestor holding exactly one
+ * formField-language, with whatever Overall and fluency tick live inside it.
+ */
+function languageRows() {
+    const vis = (e) => !!(e && e.offsetParent !== null);
+    const wraps = [...document.querySelectorAll('[data-automation-id="formField-language"]')].filter(vis);
+    return wraps.map((w) => {
+        let box = w.parentElement;
+        while (box && box !== document.body
+            && box.querySelectorAll('[data-automation-id="formField-language"]').length === 1
+            && !box.querySelector('input[type="checkbox"]')) box = box.parentElement;
+        if (!box || box === document.body) box = w.parentElement;
+        const pick = (el) => {
+            const b = el?.querySelector('button[aria-haspopup="listbox"], button');
+            return String(b?.textContent || el?.querySelector('input')?.value || '').trim();
+        };
+        const overallWrap = [...box.querySelectorAll('[data-automation-id^="formField-"]')].filter(vis)
+            .find((x) => { const l = (x.querySelector('legend, label')?.textContent || '').toLowerCase(); return l.includes('overall') && !/overall result|gpa/.test(l); });
+        const tick = [...box.querySelectorAll('input[type="checkbox"]')].filter(vis)
+            .find((c) => /fluent in this language|thành thạo/i.test(
+                `${c.closest('[data-automation-id^="formField-"]')?.querySelector('legend, label')?.textContent || ''} ${c.getAttribute('aria-label') || ''}`));
+        const name = pick(w);
+        return {
+            container: box, wrap: w, overallWrap, tick,
+            language: /^select one$|^$/i.test(name) ? '' : name,
+            overall: overallWrap ? pick(overallWrap) : '',
+            fluent: !!tick?.checked,
+            errors: box.querySelectorAll(FIELD_ERROR_SEL).length,
+        };
+    });
+}
+
 async function fillLanguageRows(cv, outcomes, profile) {
+    // What the section actually holds, per row, before anything is decided.
+    try {
+        const model = languageRows();
+        traceOnce(`langrows:${model.map(r => `${r.language}|${r.overall}|${r.fluent}`).join(';')}`, 'rows.languages', {
+            rows: model.length
+                ? model.map((r, i) => `#${i + 1} ${r.language || '(empty)'} overall=${r.overall || '∅'} fluent=${r.fluent}${r.errors ? ` errs=${r.errors}` : ''}`).join(' | ')
+                : '(no language rows on this page)',
+        });
+    } catch { /* measurement must never break the fill */ }
+
     const langs = collectLanguages(cv, profile);
     const vis = (e) => !!(e && e.offsetParent !== null);
     const langWraps = () => [...document.querySelectorAll('[data-automation-id="formField-language"]')].filter(vis);
@@ -3002,18 +3053,20 @@ async function fillLanguageRows(cv, outcomes, profile) {
             .filter(c => /fluent in this language|thành thạo/i.test(
                 `${c.closest('[data-automation-id^="formField-"]')?.querySelector('legend, label')?.textContent || ''} ${c.getAttribute('aria-label') || ''}`));
         const rows0 = langWraps();
+        // Read per ROW, never by index across three page-wide lists — that
+        // pairing is what let this check pass while English had no row and
+        // Vietnamese's tick said No.
+        const model0 = languageRows();
         const settled = langs.length > 0 && langs.every((L) => {
-            const idx = rows0.findIndex(w => {
-                const v = rowText(w); const n = String(L.language || '').toLowerCase();
-                return v && (v.includes(n) || n.includes(v));
-            });
-            if (idx < 0) return false;
+            const n = String(L.language || '').toLowerCase();
+            const row = model0.find(r => r.language && (r.language.toLowerCase().includes(n) || n.includes(r.language.toLowerCase())));
+            if (!row) return false;                       // no row for this language
             if (!L.level) return true;
             const ladder = levelLadder(L.level).map(r => String(r).toLowerCase());
             const acceptable = ladder.length > 1 ? ladder.slice(0, -1) : ladder;
-            const ov = overalls0[idx] ? rowText(overalls0[idx]) : '';
+            const ov = String(row.overall || '').toLowerCase();
             if (!ov || !acceptable.some(r => ov.includes(r) || r.includes(ov))) return false;
-            if (/native|fluent|advanced/i.test(String(L.level)) && ticks0[idx] && !ticks0[idx].checked) return false;
+            if (/native|fluent|advanced/i.test(String(L.level)) && row.tick && !row.fluent) return false;
             return true;
         });
         if (settled) {
