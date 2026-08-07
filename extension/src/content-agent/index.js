@@ -1477,6 +1477,19 @@ async function _runAgentLoop(rawProfile) {
                     showProgress(i + 1, null, 'AI phản hồi chậm — thử lại…');
                     await sleep(1500);
                     continue;
+                } else if (/phiên đăng nhập|hết hạn|unauthorized|\b401\b/i.test(err.message || '')) {
+                    // An expired Copo token is the USER's to fix (open copoai.net,
+                    // it refreshes itself) — not a broken form. Measured on run
+                    // smsieakac3jpijn: My Experience was complete and advancing
+                    // when one plan call came back auth-expired and the whole run
+                    // was written off as 'failed'. Blocked ≠ failed: the Workday
+                    // draft is saved server-side, re-running continues it.
+                    removeProgress();
+                    showToast('🔑 Phiên Copo hết hạn — mở copoai.net (đang đăng nhập) rồi chạy lại job này. '
+                        + 'Form đã điền được lưu nháp trên Workday.', 12000);
+                    reportResult(false, `Phiên Copo hết hạn giữa chừng — ${err.message}`,
+                        'blocked', { blockedReason: 'manual' });
+                    return;
                 } else {
                     removeProgress();
                     showToast(`❌ Lỗi AI: ${err.message}`, 5000);

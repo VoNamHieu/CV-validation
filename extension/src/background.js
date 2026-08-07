@@ -296,6 +296,21 @@ function clearJobSafetyTimer() {
 }
 
 /**
+ * Bring the driven tab's WINDOW to front. `active: true` only selects the tab
+ * within its window; if that window isn't focused (or is occluded), the page
+ * loads with visibilityState 'hidden' — and a hidden tab's agent crawls:
+ * measured on run smsieakac3jpijn (2026-08-07), which opened hidden, spent 8
+ * minutes throttled to near-zero, then completed the SAME fields in 90 seconds
+ * the moment the tab was focused. The DOM agent needs a rendered page the way
+ * a hand needs light; focusing once at start is machine-decided (no dialog),
+ * and a user who deliberately switches away mid-run is not fought.
+ */
+function focusDrivenTab(tab) {
+    if (!tab) return;
+    try { chrome.windows.update(tab.windowId, { focused: true }, () => void chrome.runtime.lastError); } catch { /* window gone */ }
+}
+
+/**
  * Stop the abandoned run's agent and close its tab. Every driven tab was
  * created by this worker (tabs.create), so closing is ours to do.
  *
@@ -709,6 +724,7 @@ function handleAutoApplyStart(message, sendResponse) {
         chrome.storage.local.set(storage, () => {
             chrome.tabs.create({ url: jobUrl, active: true }, (tab) => {
                 adoptApplySession(sessionId, tab.id);  // follow redirects/new-tabs; onCompleted injects unknown hosts
+                focusDrivenTab(tab);
                 console.log('[Copo] Auto Apply: opened tab', tab.id, 'for', jobUrl);
                 sendResponse({ success: true, tabId: tab.id });
             });
@@ -1710,6 +1726,7 @@ async function processNextJob() {
             chrome.tabs.create({ url: job.jobUrl, active: true }, (tab) => {
                 currentTabId = tab.id;
                 jobStartedAt = Date.now();
+                focusDrivenTab(tab);
                 // Reset the liveness clock: the PREVIOUS job's heartbeat must not
                 // read as this job's page being alive.
                 lastHeartbeatAt = 0;
