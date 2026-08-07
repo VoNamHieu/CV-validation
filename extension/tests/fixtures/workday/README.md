@@ -51,6 +51,16 @@ resolution produced on the measured run, so drift is detectable. A rule like
 `intent === 'candidate.skills' → searchable-multi` is the forbidden shortcut
 this corpus exists to make impossible to defend.
 
+The same rule cuts the other way: **the capability pool is universal.** A
+pattern proven anywhere is a candidate everywhere its shape fits — if PwC
+renders "How Did You Hear About Us?" with a search box and pickable results,
+discovery must TRY search-and-pick there even though no tenant ever rendered
+a source field that way before. Field history never gates an attempt; shape
+compatibility does. When a shape matches several families (PwC's source
+widget carries BOTH a filter input and a category cascade), the try-order
+ranks by reversibility first — narrowing a search box commits nothing, a
+drill click can — and VERIFY, not the guess, decides what gets recorded.
+
 ## Layout
 
 ```
