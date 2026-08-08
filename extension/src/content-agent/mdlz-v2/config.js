@@ -103,6 +103,10 @@ export const SEL = {
     fileInput: '[data-automation-id="file-upload-input-ref"]',
     addButton: '[data-automation-id="add-button"]',
     option: '[data-automation-id="promptOption"], [data-automation-id="promptLeafNode"], [role="option"]',
+    // The container a prompt's options live in. Workday PORTALS it to the
+    // document root — it has no formField ancestor — which is why a leftover
+    // list cannot be disowned by ownership and has to be counted instead.
+    listContainer: '[data-automation-id="activeListContainer"], [role="listbox"]',
     selectedItem: '[data-automation-id="selectedItem"]',
     selectedItemList: '[data-automation-id="selectedItemList"]',
     deleteCharm: '[data-automation-id="DELETE_charm"]',
@@ -155,3 +159,29 @@ export const INTERACTION_ONLY = new Set([
     RESULT.BLOCKED_BY_POPUP,
     RESULT.OPEN_TIMEOUT,
 ]);
+
+// ── Ownership of the page ────────────────────────────────────────────────
+/**
+ * The lock that decides who may touch this document — and it is v1's own key,
+ * deliberately.
+ *
+ * v1 already refuses to start a fill while `window.__copoFillLock` is held, so
+ * claiming the same key is what makes "either v1 or v2 owns the page, never
+ * both" a mechanism instead of an intention. Two passes on one widget is a
+ * measured failure, not a theoretical one: two "My Experience" summaries 83ms
+ * apart, one reporting the proficiency list as option-not-found (42 shown) and
+ * the other reporting it filled. Neither field was broken — each pass was
+ * clearing the other's open list as a stray.
+ *
+ * It lives on `window`, not in module scope, for the same measured reason v1
+ * puts it there: a document can hold two copies of the content script (the
+ * declarative injection plus a programmatic re-inject after a redirect), and a
+ * module-scoped lock guards only the copy that declares it.
+ */
+export const PAGE_LOCK = '__copoFillLock';
+
+/**
+ * A holder that dies past its own `finally` (context invalidated mid-run) must
+ * not wedge the page forever. Same figure as v1: longer than any real pass.
+ */
+export const LOCK_STALE_MS = 120000;

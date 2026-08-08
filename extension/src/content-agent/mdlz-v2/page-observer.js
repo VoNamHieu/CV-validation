@@ -13,8 +13,51 @@
 
 import { SEL, STEP, STEP_SIGNALS } from './config.js';
 
-const vis = (el) => !!(el && el.offsetParent !== null);
+export const vis = (el) => !!(el && el.offsetParent !== null);
 const seen = (sel) => [...document.querySelectorAll(sel)].some(vis);
+
+/**
+ * The options a human would see as choices, inside `root` (the page by default).
+ *
+ * Three kinds of node answer the option selector and only one of them is a
+ * choice. A COMMITTED CHIP carries `promptOption` too — measured on Mondelez,
+ * where "Vietnam (+84)" sits inside countryPhoneCode's selectedItemList with
+ * that exact id — and clicking a chip DESELECTS it, so counting chips as
+ * options means one field's cleanup can erase another field's answer. The
+ * PLACEHOLDER row ("Select One") is also a real option element that answers
+ * nothing.
+ *
+ * Everything that reads options — the census, the orphan count, a lease's own
+ * list — reads them through here, so the three can never disagree about what
+ * an option is.
+ */
+export function visibleOptions(root = null) {
+    const scope = root || document;
+    return [...scope.querySelectorAll(SEL.option)]
+        .filter(vis)
+        .filter((o) => o.getAttribute('data-automation-id') !== 'selectedItem')
+        .filter((o) => !o.closest(SEL.selectedItemList))
+        .filter((o) => (o.textContent || '').trim().toLowerCase() !== 'select one');
+}
+
+/**
+ * Every option list currently rendered — ours, a stray, or a portal's.
+ *
+ * A list counts as OPEN only while it shows at least one choice. Not a
+ * measurement, a defence: `selectedItemList` is a plausible carrier of
+ * role="listbox", and a container that can never be closed because it is the
+ * field's own committed-chip list would make "the page is clear" unreachable
+ * and every sweep report BLOCKED forever. What must be gone before the next
+ * widget opens is the CHOICES, and that is what this counts.
+ */
+export function visibleLists() {
+    return [...document.querySelectorAll(SEL.listContainer)]
+        .filter(vis)
+        .filter((l) => l.getAttribute('data-automation-id') !== 'selectedItem'
+            && l.getAttribute('data-automation-id') !== 'selectedItemList'
+            && !l.closest(SEL.selectedItemList))
+        .filter((l) => visibleOptions(l).length > 0);
+}
 
 /** Which step is on screen, decided by CONTENT (see STEP_SIGNALS for why). */
 export function observeStep() {
@@ -74,9 +117,7 @@ export function openPopups() {
     for (const t of triggers) {
         const id = t.getAttribute('aria-controls') || t.getAttribute('aria-owns');
         const list = id ? document.getElementById(id) : null;
-        const options = list
-            ? [...list.querySelectorAll(SEL.option)].filter(vis).length
-            : 0;
+        const options = list ? visibleOptions(list).length : 0;
         out.push({
             trigger: t,
             listbox: list,
@@ -91,12 +132,7 @@ export function openPopups() {
 export function orphanOptionCount() {
     const claimed = new Set();
     for (const p of openPopups()) {
-        if (p.listbox) [...p.listbox.querySelectorAll(SEL.option)].forEach((o) => claimed.add(o));
+        if (p.listbox) visibleOptions(p.listbox).forEach((o) => claimed.add(o));
     }
-    return [...document.querySelectorAll(SEL.option)]
-        .filter(vis)
-        .filter((o) => !claimed.has(o))
-        .filter((o) => o.getAttribute('data-automation-id') !== 'selectedItem')
-        .filter((o) => !o.closest(SEL.selectedItemList))
-        .length;
+    return visibleOptions().filter((o) => !claimed.has(o)).length;
 }

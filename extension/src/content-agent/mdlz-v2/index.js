@@ -15,6 +15,7 @@
 
 import { FLAG_KEY, RESULT, isMdlzPage } from './config.js';
 import { observeStep, openPopups, orphanOptionCount, pageFingerprint, waitPageReady } from './page-observer.js';
+import { census } from './popup-manager.js';
 import { trace } from '../trace.js';
 
 /** Is v2 allowed to run here? Storage flag AND an mdlz page. */
@@ -40,6 +41,7 @@ export async function mdlzV2Enabled() {
 export async function observeOnly({ sleep } = {}) {
     const ready = await waitPageReady({ sleep });
     const popups = openPopups();
+    const now = census();
     const report = {
         step: ready.step,
         ready: ready.ready,
@@ -47,6 +49,9 @@ export async function observeOnly({ sleep } = {}) {
         openPopups: popups.length,
         popupOwners: popups.map((p) => p.ownerField || '(portal)').join(',') || '(none)',
         orphanOptions: orphanOptionCount(),
+        // Lists nobody has closed, counted separately from the options in them:
+        // one leftover list is one blocked widget, whatever its row count.
+        openLists: now.lists,
     };
     trace('mdlz.page.observe', report);
     return report;
@@ -56,9 +61,15 @@ export async function observeOnly({ sleep } = {}) {
  * The controller v1 will eventually hand the page to. Not yet: this returns
  * "not taking it" so the existing path continues untouched, and the flag being
  * on costs one observation per pass.
+ *
+ * Milestone 1 added the machinery a taking would need — a popup manager that
+ * can prove the page is clear, and a scheduler that runs one task at a time
+ * under v1's own lock — but no executor to schedule. Shipping the mechanism
+ * before the behavior is deliberate: the sweep and the lease are provable
+ * against a harness, and the fields they will drive are not, yet.
  */
 export async function runMdlzV2(ctx = {}) {
     if (!(await mdlzV2Enabled())) return { took: false, reason: 'flag off' };
     await observeOnly(ctx);
-    return { took: false, reason: 'milestone-0: observation only', result: RESULT.SKIPPED_OPTIONAL };
+    return { took: false, reason: 'milestone-1: mechanism only, no executor', result: RESULT.SKIPPED_OPTIONAL };
 }

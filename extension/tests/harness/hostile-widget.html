@@ -17,11 +17,24 @@
                          render outside it (PwC source popup, clip 542..543)
     · cascade          — categories without radios drill into leaf claims
                          with radios; a breadcrumb row walks back OUT
+    · sticky popups    — a finished field's list STAYS OPEN, and the search
+                         prompt stamps nothing on its box, so its rows belong to
+                         no one (measured: clicking Degree found 39 options, 20
+                         of them Skills'; that is what "Degree would not open"
+                         and "the calendar did not open" both actually were)
+    · scoped Escape    — the widget hears keys aimed at itself, not at the body.
+                         NOT measured on Workday: the pessimistic case, because a
+                         sweep that works only when focus happens to be in the
+                         right place is not a sweep. Off by default.
 
   Serve:   python3 -m http.server 8977 --directory extension/tests/harness
   Drive:   open http://localhost:8977/hostile-widget.html, grant the host in
            the Copo popup, then run the agent (⚡ / AGENT_TEST_STEP).
   Toggles: checkboxes below, or URL params ?delay=550&recycle=1&noscroll=1&clip=1
+           &sticky=0&scopedesc=1
+  Gate:    the readout under the toggles is the M1 number — after a field is
+           done with its list, ORPHAN OPTIONS must read 0. `__copoHostileOrphans()`
+           returns it to a console or a driver.
 -->
 <html lang="en">
 <head>
@@ -60,6 +73,9 @@
   <label><input type="checkbox" id="t-recycle" checked> virtualiser recycles row nodes</label><br>
   <label><input type="checkbox" id="t-noscroll"> ignore synthetic scroll (trusted wheel only)</label><br>
   <label><input type="checkbox" id="t-clip"> collapse list clip rect to 2px</label><br>
+  <label><input type="checkbox" id="t-sticky" checked> a finished field's list stays open (measured)</label><br>
+  <label><input type="checkbox" id="t-scopedesc"> Escape only heard inside the widget</label><br>
+  <div id="orphans" style="margin-top:10px;font:13px/1.5 monospace"></div>
 </fieldset>
 
 <!-- ── Searchable multi-select: the mdlz Skills family ── -->
@@ -95,11 +111,15 @@ if (qp.has('delay')) { $('t-delay-ms').value = qp.get('delay'); }
 if (qp.get('recycle') === '0') $('t-recycle').checked = false;
 if (qp.get('noscroll') === '1') $('t-noscroll').checked = true;
 if (qp.get('clip') === '1') $('t-clip').checked = true;
+if (qp.get('sticky') === '0') $('t-sticky').checked = false;
+if (qp.get('scopedesc') === '1') $('t-scopedesc').checked = true;
 const cfg = () => ({
   delayMs: $('t-delay').checked ? Number($('t-delay-ms').value) || 0 : 0,
   recycle: $('t-recycle').checked,
   noSyntheticScroll: $('t-noscroll').checked,
   clip: $('t-clip').checked,
+  sticky: $('t-sticky').checked,
+  scopedEscape: $('t-scopedesc').checked,
 });
 const log = (m) => {
   const row = document.createElement('div');
@@ -130,10 +150,55 @@ const SOURCE = {
 };
 const PHONE = ['Home', 'Mobile', 'Mobile - Personal', 'Work'];
 
-// ── shared popup machinery (one popup at a time, portal-appended) ─────
-let popup = null;
-function closePopup() { if (popup) { popup.remove(); popup = null; } }
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePopup(); });
+// ── shared popup machinery (portal-appended, and NOT one at a time) ───
+//
+// The real form leaves a finished field's list up. So does this: OPEN is keyed
+// by the trigger that owns each list, a field closes only its own, and nothing
+// sweeps the rest — that is the agent's job, and the readout below is the score.
+const OPEN = new Map();                     // owner element → popup node
+let listSeq = 0;
+
+function closeOwned(owner) {
+  const p = OPEN.get(owner);
+  if (!p) return;
+  p.remove();
+  OPEN.delete(owner);
+  owner.removeAttribute('aria-expanded');
+  owner.removeAttribute('aria-controls');
+}
+function closeAllPopups() { [...OPEN.keys()].forEach(closeOwned); }
+
+// Unscoped, a key anywhere closes everything — which is the polite case.
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !cfg().scopedEscape) closeAllPopups();
+});
+
+// ── the M1 readout ───────────────────────────────────────────────────
+// Counted the way the agent counts it: options nobody's expanded trigger
+// claims, with committed chips and the placeholder row excluded (a chip
+// carries the option id too, and clicking one DESELECTS it).
+const OPTION_SEL = '[data-automation-id="promptOption"], [data-automation-id="promptLeafNode"], [role="option"]';
+function orphanOptions() {
+  const claimed = new Set();
+  document.querySelectorAll('[aria-expanded="true"]').forEach((t) => {
+    const id = t.getAttribute('aria-controls') || t.getAttribute('aria-owns');
+    const list = id ? document.getElementById(id) : null;
+    if (list) list.querySelectorAll(OPTION_SEL).forEach(o => claimed.add(o));
+  });
+  return [...document.querySelectorAll(OPTION_SEL)]
+    .filter(o => o.offsetParent !== null)
+    .filter(o => !claimed.has(o))
+    .filter(o => o.getAttribute('data-automation-id') !== 'selectedItem')
+    .filter(o => !o.closest('[data-automation-id="selectedItemList"]'))
+    .filter(o => (o.textContent || '').trim().toLowerCase() !== 'select one')
+    .length;
+}
+window.__copoHostileOrphans = orphanOptions;
+setInterval(() => {
+  const n = orphanOptions();
+  $('orphans').textContent = `ORPHAN OPTIONS: ${n}   ·   lists open: ${OPEN.size}`;
+  $('orphans').style.color = n ? '#b00020' : '#0a7d29';
+}, 250);
 
 /**
  * A virtualised listbox faithful to the measured pathologies. Renders a POOL
@@ -142,11 +207,18 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePopup
  * reference goes stale. In noSyntheticScroll mode the window only re-renders
  * after a trusted wheel event, whatever scrollTop claims.
  */
-function openList(anchor, items, onPick, { leafRadios = false } = {}) {
-  closePopup();
+function openList(anchor, items, onPick, { leafRadios = false, owner = anchor, stamps = null } = {}) {
   const c = cfg();
-  popup = document.createElement('div');
+  closeOwned(owner);                  // a field replaces its OWN list, always
+  if (!c.sticky) closeAllPopups();    // …and everyone else's only when polite
+  // A BUTTON prompt stamps its trigger with aria-controls, as measured on the
+  // live tenant. A SEARCH BOX stamps nothing — which is why its leftovers were
+  // orphans rather than somebody's open list.
+  const claims = stamps === null ? owner.tagName === 'BUTTON' : stamps;
+  const popup = document.createElement('div');
   popup.setAttribute('data-automation-id', 'activeListContainer');
+  popup.setAttribute('role', 'listbox');
+  popup.id = `hostile-list-${++listSeq}`;
   if (c.clip) popup.className = 'clip-collapsed';
   const r = anchor.getBoundingClientRect();
   popup.style.left = `${r.left}px`;
@@ -221,9 +293,19 @@ function openList(anchor, items, onPick, { leafRadios = false } = {}) {
       render();
     }
   });
+  // Scoped Escape: heard by the widget and its list, never by the body.
+  const onKey = (e) => { if (e.key === 'Escape') closeOwned(owner); };
+  popup.addEventListener('keydown', onKey);
+  owner.addEventListener('keydown', onKey);
+
   document.body.appendChild(popup);
+  if (claims) {
+    owner.setAttribute('aria-expanded', 'true');
+    owner.setAttribute('aria-controls', popup.id);
+  }
+  OPEN.set(owner, popup);
   render();
-  return { close: closePopup };
+  return { close: () => closeOwned(owner) };
 }
 
 /** Commit after the configured latency — the verify-window pathology. */
@@ -277,7 +359,7 @@ function openSourceLevel1(cat) {
   openList($('source-trigger'), rows, (item) => {
     if (item.back) { lateCommit(() => openSourceLevel0(), 'back out'); return; }
     lateCommit(() => {
-      closePopup();
+      closeOwned($('source-trigger'));
       $('source-chips').innerHTML = '';
       const chip = document.createElement('span');
       chip.setAttribute('data-automation-id', 'selectedItem');
@@ -292,11 +374,13 @@ $('source-trigger').onclick = openSourceLevel0;
 // ── Phone type: plain select, the control group ───────────────────────
 $('phone-trigger').onclick = () => {
   openList($('phone-trigger'), PHONE, (label) => {
-    lateCommit(() => { closePopup(); $('phone-trigger').textContent = label; }, label);
+    lateCommit(() => { closeOwned($('phone-trigger')); $('phone-trigger').textContent = label; }, label);
   }, { leafRadios: true });
 };
 
-$('log') && log(`harness ready — delay=${cfg().delayMs}ms recycle=${cfg().recycle} noscroll=${cfg().noSyntheticScroll} clip=${cfg().clip}`);
+$('log') && log(`harness ready — delay=${cfg().delayMs}ms recycle=${cfg().recycle} `
+  + `noscroll=${cfg().noSyntheticScroll} clip=${cfg().clip} sticky=${cfg().sticky} `
+  + `scopedEscape=${cfg().scopedEscape}`);
 </script>
 </body>
 </html>

@@ -249,7 +249,11 @@ describe('the empty My Experience page is still My Experience', () => {
     // three Add buttons — not one formField. The step used to detect by
     // formField-degree alone, matched nothing, and the agent advanced past an
     // application with no work history at all.
-    const step = FALLBACK_RECIPES.workday.steps.find(s => s.name === 'My Experience');
+    // FALLBACK_RECIPES is a LIST of recipes, not a map keyed by ATS. Reading it
+    // as a map threw inside the describe body, which node reports separately
+    // from the failure count — the suite below never registered, the run stayed
+    // green at "fail 0", and the assertion had been dead since it was written.
+    const step = FALLBACK_RECIPES.find(r => r.ats === 'workday').steps.find(s => s.name === 'My Experience');
 
     test('detect covers both the filled and the empty shape', () => {
         assert.ok(step.detect.includes('formField-degree'));

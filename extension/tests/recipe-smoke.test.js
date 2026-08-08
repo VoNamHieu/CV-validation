@@ -251,7 +251,27 @@ describe('mdlz-v2 observes without acting', () => {
         stubBrowser();
         const v2 = await import('../src/content-agent/mdlz-v2/index.js');
         const r = await v2.runMdlzV2({ sleep: () => Promise.resolve() });
-        assert.equal(r.took, false, 'v2 must never take the page in milestone 0');
+        assert.equal(r.took, false, 'v2 must never take the page while there is no executor');
+    });
+
+    // The gate suite drives these against a DOM built for them. This runs the
+    // same entry points against the stub that answers "nothing on the page" to
+    // every query — the shape a real page has for the first seconds of its life,
+    // and the one that catches a helper used above its declaration.
+    test('the sweep and the scheduler run on a page with nothing on it', async () => {
+        stubBrowser();
+        const pm = await import('../src/content-agent/mdlz-v2/popup-manager.js');
+        const sch = await import('../src/content-agent/mdlz-v2/scheduler.js');
+        const sleep = () => Promise.resolve();
+
+        const s = await pm.sweep({ sleep, why: 'smoke' });
+        assert.equal(s.clear, true, 'an empty page is already clear — no rung should be spent');
+        assert.deepEqual(s.rungs, []);
+
+        const ledger = await sch.runSequential([{ id: 'noop', run: () => 'SATISFIED' }], { sleep });
+        assert.equal(ledger.ok, true);
+        assert.equal(ledger.tasks[0].result, 'SATISFIED');
+        assert.equal(ledger.tasks[0].attempts, 1, 'a settled page must not be waited out twice');
     });
 
     test('the config records the measurements that must not be re-learned', async () => {
