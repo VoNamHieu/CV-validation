@@ -18,13 +18,14 @@
  * exist yet.
  */
 
-import { ADD_VIA_KEY, FLAG_KEY, RESULT, SEL, isMdlzPage } from './config.js';
+import { ADD_VIA_KEY, FLAG_KEY, RESULT, SEL, STEP, isMdlzPage } from './config.js';
 import { openPopups, orphanOptionCount, pageFingerprint, waitPageReady } from './page-observer.js';
 import { census } from './popup-manager.js';
 import { addRow, runField } from './executors.js';
 import { fingerprintOf } from './fingerprint.js';
 import { SECTIONS, addButtonFor, planStep, resolveRow, resolveTarget } from './planner.js';
 import { NAV, advance } from './navigation.js';
+import { runAutofillPage } from './page-autofill.js';
 import { READY, observePageState, owns, releasePage } from './pages.js';
 import { preflightReport, resumeEvidence } from './preflight.js';
 import { rowsOf } from './row.js';

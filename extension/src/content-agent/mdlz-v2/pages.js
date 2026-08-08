@@ -38,6 +38,7 @@ export const PAGE = STEP;
  * from it mechanically.
  */
 export const V2_OWNED_STEPS = new Set([
+    PAGE.AUTOFILL,
     PAGE.MY_EXPERIENCE,
 ]);
 

@@ -238,6 +238,23 @@ export class MiniKeyboardEvent extends MiniEvent {
 export class MiniMouseEvent extends MiniEvent { }
 export class MiniPointerEvent extends MiniMouseEvent { }
 
+/**
+ * Enough DataTransfer to carry a file.
+ *
+ * The upload path builds one of these to hand a File to an <input type=file>,
+ * because that is the only way a script can put one there. Node has no such
+ * class, so without this the shared upload helper throws and every upload test
+ * would be testing the catch block.
+ */
+export class MiniDataTransfer {
+    constructor() {
+        this._files = [];
+        this.items = { add: (f) => this._files.push(f) };
+    }
+
+    get files() { return this._files; }
+}
+
 // ── the document ─────────────────────────────────────────────────────────
 
 class MiniDocument {
@@ -294,6 +311,7 @@ export function installDom({ href = 'https://wd3.myworkdaysite.com/en-US/recruit
         KeyboardEvent: globalThis.KeyboardEvent,
         MouseEvent: globalThis.MouseEvent,
         PointerEvent: globalThis.PointerEvent,
+        DataTransfer: globalThis.DataTransfer,
         chrome: globalThis.chrome,
     };
     const url = new URL(href);
@@ -306,6 +324,7 @@ export function installDom({ href = 'https://wd3.myworkdaysite.com/en-US/recruit
     globalThis.KeyboardEvent = MiniKeyboardEvent;
     globalThis.MouseEvent = MiniMouseEvent;
     globalThis.PointerEvent = MiniPointerEvent;
+    globalThis.DataTransfer = MiniDataTransfer;
     globalThis.chrome = globalThis.chrome || {
         storage: { local: { get: (_k, cb) => cb({}) } },
         runtime: { id: 'mini-dom' },
