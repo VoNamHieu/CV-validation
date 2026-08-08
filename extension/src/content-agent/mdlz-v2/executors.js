@@ -24,7 +24,7 @@
 
 import { MONTHS, MONTH_LABEL, RESULT, SEL } from './config.js';
 import { WIDGET, triggerOf } from './fingerprint.js';
-import { errorsIn } from './row.js';
+import { errorsIn, rowsOf } from './row.js';
 import { visibleMonthCells, visiblePanels } from './page-observer.js';
 import { withList } from './popup-manager.js';
 import { trace } from '../trace.js';
@@ -316,6 +316,29 @@ export const CAPABILITY = {
     [WIDGET.SEARCH_MULTI]: searchMulti,
     [WIDGET.DATE]: date,
 };
+
+/**
+ * Add a row to a section, and prove one arrived.
+ *
+ * The commit signal is the row COUNT, read through the same finder the planner
+ * uses — not the click returning, and not a fixed wait. "Add clicked, no row
+ * appeared" was measured twice, and both times the click had hit-tested into
+ * whatever was covering the button because it sat below the fold; so the scroll
+ * is part of the action, and a row that never appears is an INTERACTION failure
+ * that may be retried, not a semantic one that should reach anybody.
+ */
+export async function addRow(button, { sleep, anchor, root = null, budgetMs } = {}) {
+    const budget = budgetMs || 4000;
+    if (!button) return { result: RESULT.USER_REQUIRED, reason: 'no add button for this section' };
+    const before = rowsOf(anchor, { root }).length;
+    try { button.scrollIntoView?.({ block: 'center' }); } catch { /* no layout in a test DOM */ }
+    button.click();
+    const grew = await until(() => rowsOf(anchor, { root }).length > before, { sleep, budgetMs: budget });
+    trace('mdlz.row.add', { anchor, before, after: rowsOf(anchor, { root }).length, grew });
+    return grew
+        ? { result: RESULT.COMMITTED, rows: rowsOf(anchor, { root }).length }
+        : { result: RESULT.OPEN_TIMEOUT, reason: `the section still has ${before} row(s)` };
+}
 
 /** What each verify actually reads, spelled out for the trace. */
 const SIGNAL = {

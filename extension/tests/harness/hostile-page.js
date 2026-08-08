@@ -69,6 +69,9 @@ export const DEGREES = [
 
 export const LANGUAGES = ['English', 'Vietnamese', 'French', 'Japanese', 'Mandarin'];
 
+/** Measured on this tenant: there is no "Native" row. A native speaker is fluent. */
+export const LEVELS = ['1 - Beginner', '2 - Intermediate', '3 - Fluent'];
+
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
     'July', 'August', 'September', 'October', 'November', 'December'];
 
@@ -104,6 +107,8 @@ export function buildHostilePage(doc, opts = {}) {
     // form there is no "row id" to hang identity on and a finder that needs one
     // is a finder that works on this tenant only.
     const workSection = el('div', {}, page);
+    const eduSection = el('div', {}, page);
+    const langSection = el('div', {}, page);
     const rows = [];
     const pickerFor = new Map();   // date wrapper → its open panel
     const dateKeys = [];           // every keydown a spinbutton was sent
@@ -246,15 +251,18 @@ export function buildHostilePage(doc, opts = {}) {
         return model;
     }
 
-    const fields = {};
-    const openLists = new Map();      // field name → list node
+    // ── widgets, keyed by the widget and not by a name ────────────────
+    // Every row of a repeating section owns its own listbox, so the machinery
+    // cannot be keyed on "the degree field" — there are as many as there are
+    // rows, and they hold different answers.
+    const fields = {};                // page-level widgets, by a friendly name
+    const openLists = new Map();      // widget spec → its open list node
     const opening = new Set();        // a list whose open is scheduled but not landed
 
-    function closeList(name, { after = cfg.closeMs } = {}) {
-        const f = fields[name];
-        const list = openLists.get(name);
+    function closeList(f, { after = cfg.closeMs } = {}) {
+        const list = openLists.get(f);
         if (!list) return;
-        openLists.delete(name);
+        openLists.delete(f);
         setTimeout(() => {
             list.remove();
             f.trigger.removeAttribute('aria-expanded');
@@ -262,11 +270,10 @@ export function buildHostilePage(doc, opts = {}) {
         }, after);
     }
 
-    const closeEveryList = () => [...openLists.keys()].forEach((n) => closeList(n, { after: 0 }));
+    const closeEveryList = () => [...openLists.keys()].forEach((f) => closeList(f, { after: 0 }));
 
-    function openFor(name, { filter = null } = {}) {
-        const f = fields[name];
-        if (openLists.has(name) || opening.has(name)) return;
+    function openFor(f, { filter = null } = {}) {
+        if (openLists.has(f) || opening.has(f)) return;
         if (!cfg.sticky) closeEveryList();
         // A search prompt answers a TERM. Typing nothing shows nothing, which is
         // what makes the employer's taxonomy searchable rather than browsable.
@@ -274,9 +281,9 @@ export function buildHostilePage(doc, opts = {}) {
             ? f.catalogue
             : f.catalogue.filter((s) => s.toLowerCase().includes(String(filter).toLowerCase()));
         if (filter !== null && !String(filter).trim()) return;
-        opening.add(name);
+        opening.add(f);
         setTimeout(() => {
-            opening.delete(name);
+            opening.delete(f);
             const list = el('div', {
                 'data-automation-id': 'activeListContainer',
                 role: 'listbox',
@@ -287,7 +294,7 @@ export function buildHostilePage(doc, opts = {}) {
             for (const label of shown) {
                 const o = el('div', { role: 'option', 'data-automation-id': OPT_ID }, list);
                 o.textContent = label;
-                o.addEventListener('click', () => commit(name, label));
+                o.addEventListener('click', () => commit(f, label));
             }
             // The placeholder is a real option that answers nothing.
             const ph = el('div', { role: 'option', 'data-automation-id': OPT_ID, id: 'select-one' }, list);
@@ -300,7 +307,7 @@ export function buildHostilePage(doc, opts = {}) {
             if (f.escapeCloses) {
                 // Scoped: the handler lives on the widget, so a key aimed at the
                 // body never reaches it.
-                const onKey = (e) => { if (e.key === 'Escape') closeList(name); };
+                const onKey = (e) => { if (e.key === 'Escape') closeList(f); };
                 list.addEventListener('keydown', onKey);
                 f.trigger.addEventListener('keydown', onKey);
                 if (!cfg.scopedEscape) doc.addEventListener('keydown', onKey);
@@ -308,15 +315,14 @@ export function buildHostilePage(doc, opts = {}) {
             if (f.outsideClickCloses) {
                 doc.addEventListener('click', (e) => {
                     if (e.target === list || list.contains(e.target) || e.target === f.trigger) return;
-                    closeList(name);
+                    closeList(f);
                 });
             }
-            openLists.set(name, list);
+            openLists.set(f, list);
         }, cfg.openMs);
     }
 
-    function commit(name, label) {
-        const f = fields[name];
+    function commit(f, label) {
         setTimeout(() => {
             if (f.multi) {
                 // A chip that also answers the option selector — and the list
@@ -325,45 +331,117 @@ export function buildHostilePage(doc, opts = {}) {
                 chip.textContent = label;
             } else {
                 f.trigger.textContent = label;
-                closeList(name, { after: 0 });
+                closeList(f, { after: 0 });
             }
             f.committed.push(label);
         }, cfg.commitMs);
     }
 
-    function addField(name, { automationId, tag, catalogue, stamps, multi = false, escapeCloses = true, outsideClickCloses = false }) {
-        const wrap = el('div', { 'data-automation-id': automationId }, page);
+    /** One prompt widget, wherever it lives: the page, or a row of a section. */
+    function makeField({
+        automationId, tag, catalogue, stamps, label = null, parent = page,
+        multi = false, escapeCloses = true, outsideClickCloses = false,
+    }) {
+        const wrap = el('div', { 'data-automation-id': automationId }, parent);
+        if (label) el('label', {}, wrap).textContent = label;
         const chips = multi ? el('div', { 'data-automation-id': 'selectedItemList' }, wrap) : null;
         const trigger = el(tag, tag === 'button' ? { 'aria-haspopup': 'listbox' } : { type: 'text' }, wrap);
         if (tag === 'button') trigger.textContent = 'Select One';
-        fields[name] = {
-            name, wrap, trigger, chips, catalogue, stamps, multi,
+        const f = {
+            wrap, trigger, chips, catalogue, stamps, multi,
             escapeCloses, outsideClickCloses, committed: [],
         };
         trigger.addEventListener('click', () => {
-            if (openLists.has(name) && fields[name].stamps) { closeList(name); return; }   // a stamped trigger toggles
-            openFor(name);
+            if (openLists.has(f) && f.stamps) { closeList(f); return; }   // a stamped trigger toggles
+            openFor(f);
         });
         if (tag === 'input') {
             // Typing a term and pressing Enter is how a search prompt is opened;
             // the results are what the term found, not the catalogue.
             trigger.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') openFor(name, { filter: trigger.value });
+                if (e.key === 'Enter') openFor(f, { filter: trigger.value });
             });
             // Measured on SmartRecruiters: a search list gives itself up when the
             // box loses focus. Used here as the rung it is.
-            trigger.addEventListener('focusout', () => closeList(name));
+            trigger.addEventListener('focusout', () => closeList(f));
         }
-        return fields[name];
+        return f;
     }
+
+    const addField = (name, opts) => { fields[name] = makeField(opts); return fields[name]; };
+
+    // ── Education and Languages, the other two repeating sections ─────
+    const eduRows = [];
+    const langRows = [];
+    let guidSeq = 0;
+
+    function addEducationRow({ school = '', degree = null } = {}) {
+        const row = el('div', {}, eduSection);
+        const schoolInput = textControl(el('div', { 'data-automation-id': 'formField-schoolName' }, row));
+        schoolInput.value = school;
+        const degreeField = makeField({
+            automationId: 'formField-degree', tag: 'button', catalogue: DEGREES,
+            stamps: true, label: 'Degree', parent: row,
+        });
+        if (degree) degreeField.trigger.textContent = degree;
+        const model = { row, schoolInput, degree: degreeField };
+        eduRows.push(model);
+        return model;
+    }
+
+    function addLanguageRow({ language = null, fluent = false, overall = null } = {}) {
+        const row = el('div', {}, langSection);
+        const langField = makeField({
+            automationId: 'formField-language', tag: 'button', catalogue: LANGUAGES,
+            stamps: true, label: 'Language', parent: row,
+        });
+        if (language) langField.trigger.textContent = language;
+        const nativeWrap = el('div', { 'data-automation-id': 'formField-native' }, row);
+        el('label', {}, nativeWrap).textContent = 'I am fluent in this language';
+        const box = el('input', { type: 'checkbox' }, nativeWrap);
+        box.checked = fluent;
+        box.addEventListener('click', () => { box.checked = !box.checked; });
+        // Overall proficiency: a per-tenant GUID instead of an id, so the only
+        // way in is its label, inside this row.
+        const overallField = makeField({
+            automationId: `formField-${(++guidSeq).toString(16)}c41e9a-${guidSeq}`,
+            tag: 'button', catalogue: LEVELS, stamps: true, label: 'Overall', parent: row,
+        });
+        if (overall) overallField.trigger.textContent = overall;
+        const model = { row, language: langField, box, overall: overallField };
+        langRows.push(model);
+        return model;
+    }
+
+    // ── the Add buttons, one per section ─────────────────────────────
+    const ignoredAdds = [];
+
+    /**
+     * "Add Another", with the measured failure built in: a click aimed at a
+     * control below the fold hit-tests as whatever covers that point, and the
+     * row never appears. Scroll it into view first or nothing happens.
+     */
+    function addButtonIn(section, make) {
+        const btn = el('button', { 'data-automation-id': 'add-button' }, section);
+        btn.textContent = 'Add Another';
+        btn.addEventListener('click', () => {
+            if (!btn.scrollIntoViewCount) { ignoredAdds.push(section); return; }
+            setTimeout(() => make(), cfg.openMs);
+        });
+        return btn;
+    }
+    addButtonIn(workSection, () => addWorkRow({}));
+    addButtonIn(eduSection, () => addEducationRow({}));
+    addButtonIn(langSection, () => addLanguageRow({}));
 
     // Skills: the search box whose leftovers were the 20 orphans.
     addField('skills', { automationId: 'formField-skills', tag: 'input', catalogue: SKILLS, stamps: false, multi: true });
     // Degree: a button prompt, and it stamps its trigger.
     addField('degree', { automationId: 'formField-degree', tag: 'button', catalogue: DEGREES, stamps: true });
-    // Language: stamps, but its list is deaf to Escape — only an outside click.
-    addField('language', {
-        automationId: 'formField-language', tag: 'button', catalogue: LANGUAGES,
+    // "How did you hear about us" — stamps, but its list is deaf to Escape and
+    // gives up only on an outside click.
+    addField('source', {
+        automationId: 'formField-source', tag: 'button', catalogue: LANGUAGES,
         stamps: true, escapeCloses: false, outsideClickCloses: true,
     });
 
@@ -372,7 +450,14 @@ export function buildHostilePage(doc, opts = {}) {
         fields,
         page,
         addWorkRow,
+        addEducationRow,
+        addLanguageRow,
         workRows: () => rows,
+        eduRows: () => eduRows,
+        langRows: () => langRows,
+        sections: { work: workSection, education: eduSection, languages: langSection },
+        /** Adds that hit-tested into whatever was covering the button. */
+        ignoredAdds,
         /** Everything a date section was sent and refused — the FORBIDDEN proof. */
         dateKeys,
         dateWrites,
@@ -383,8 +468,8 @@ export function buildHostilePage(doc, opts = {}) {
             chip.textContent = label;
             return chip;
         },
-        /** The list a field currently has open, if any. */
-        listFor: (name) => openLists.get(name) || null,
+        /** The list a page-level field currently has open, if any. */
+        listFor: (name) => openLists.get(fields[name]) || null,
         openCount: () => openLists.size,
         chipsOn: (name) => [...(fields[name].chips?.children || [])].map((c) => c.textContent),
         /**

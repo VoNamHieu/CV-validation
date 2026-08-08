@@ -194,6 +194,41 @@ describe('a field claimed by an owner does not crash the pass', () => {
     });
 });
 
+const SMOKE_RECIPE = {
+    ats: 'workday',
+    steps: [{
+        name: 'Smoke Step',
+        detect: '[data-automation-id="smoke"]',
+        advance: '[data-automation-id="pageFooterNextButton"]',
+        fields: [{ label: 'Postal Code', selector: '#pc', type: 'text', profileKey: 'postalCode' }],
+    }],
+};
+
+describe('the router offers the page to v2 and falls back to v1', () => {
+    // The wrapper is the only place v2 touches the existing flow, so the thing
+    // worth testing is what happens when v2 does NOT take it: v1 must run, with
+    // its own return shape, exactly as before. The flag is off here, which is
+    // how every installation starts.
+    test('a flag that is off costs the pass nothing and v1 still answers', async () => {
+        stubBrowser();
+        const router = await import('../src/content-agent/recipe-router.js');
+        const res = await router.applyRecipeFields(SMOKE_RECIPE, WORKDAY_PROFILE, null, CV);
+        assert.ok(res && typeof res === 'object');
+        assert.equal(res.v2, undefined, 'v2 must not have taken a page with the flag off');
+        assert.equal(typeof res.filled, 'number');
+    });
+
+    test('a v2 that throws hands the pass to v1 instead of breaking the page', async () => {
+        stubBrowser();
+        // chrome.storage missing entirely is one way the flag read can throw;
+        // whatever the cause, the page must end up with the owner it had before.
+        delete globalThis.chrome;
+        const router = await import('../src/content-agent/recipe-router.js');
+        const res = await router.applyRecipeFields(SMOKE_RECIPE, WORKDAY_PROFILE, null, CV);
+        assert.ok(res && typeof res.filled === 'number');
+    });
+});
+
 describe('mdlz-v1 and the generic still agree on their contract', () => {
     test('the router can bind every name it exports', () => {
         const names = ['applyRecipeFields', 'atFinalStep', 'clickRecipeGateway', 'FIELD_FAIL_BUDGET',

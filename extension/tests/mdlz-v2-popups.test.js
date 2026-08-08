@@ -203,13 +203,13 @@ describe('MILESTONE 1 GATE — zero stray options after Skills', () => {
 
 describe('the sweep escalates instead of repeating itself', () => {
     test('a list deaf to Escape is closed by the rung after it', async () => {
-        page.fields.language.trigger.click();
+        page.fields.source.trigger.click();
         await waitUntil(() => observer.visibleOptions().length > 0);
 
         const s = await popups.sweep({ sleep, why: 'test', budgetMs: 800 });
         assert.ok(s.clear, `not cleared: ${brief(s)}`);
-        // Language ignores keys entirely, so the two Escape rungs must have been
-        // spent and found wanting before the outside click did it.
+        // The source prompt ignores keys entirely, so both Escape rungs must have
+        // been spent and found wanting before the trigger was collapsed.
         assert.deepEqual(s.rungs, ['escape@focus', 'escape@owner', 'collapse@owner']);
     });
 
