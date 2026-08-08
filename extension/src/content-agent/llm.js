@@ -1,5 +1,6 @@
 // AUTO-SPLIT from content-agent.js (Phase 2). Part of the Copo apply agent.
 import { LLM_TIMEOUT } from './constants.js';
+import { spanBucket } from './trace.js';
 
 /**
  * Call the original map-form endpoint (for simple single-step fills).
@@ -25,6 +26,14 @@ export async function callLLMMapping(formFields, profileData) {
  * Call the new agent-plan endpoint for the agentic loop.
  */
 export async function callAgentPlan(pageState, profileData, history, hasCV, credentials) {
+    // Model time is the other half of a slow run — measured here so the report
+    // can say "waiting X, thinking Y" instead of one opaque total.
+    const _t0 = Date.now();
+    try { return await _callAgentPlan(pageState, profileData, history, hasCV, credentials); }
+    finally { try { spanBucket('llmMs', Date.now() - _t0); } catch { /* noop */ } }
+}
+
+async function _callAgentPlan(pageState, profileData, history, hasCV, credentials) {
     return new Promise((resolve, reject) => {
         const timeout = setTimeout(() => reject(new Error('Agent plan timeout (65s)')), LLM_TIMEOUT);
         chrome.runtime.sendMessage({

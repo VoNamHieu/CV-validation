@@ -24,6 +24,10 @@ export const PROFILE_GAP_SEEDS = {
     ethnicity: 'Kinh',
     gender: 'Nam',
     noticePeriod: '30 days',
+    // Test salary expectation (user-set 2026-08-07). "USD" marked so the money
+    // reshaper can convert when a tenant's box asks in VND — a bare number
+    // would be ambiguous between currencies. Never overwrites a real profile.
+    desiredSalary: '2000 USD',
 };
 
 const PROFILE_KEY = 'jobfitProfile';

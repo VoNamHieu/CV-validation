@@ -1,8 +1,26 @@
 // AUTO-SPLIT from content-agent.js (Phase 2). Part of the Copo apply agent.
 import { checkClick, logDenial } from './policy.js';
+import { spanBucket } from './trace.js';
 
 // ─── Helpers ───
-export function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+/**
+ * The agent's clock — and the reason a hidden tab can WORK instead of crawl.
+ *
+ * Chrome clamps a hidden tab's setTimeout to ≥1s, and to ~one fire per MINUTE
+ * after five hidden minutes. Measured on run smsik0vk4pw1h46 (PwC,
+ * 2026-08-07): a 30-second list walk stretched to 25 minutes and the run
+ * burned an hour learning nothing. The background service worker's timers are
+ * NOT subject to tab visibility, so a hidden tab borrows its clock over a
+ * message round-trip (~2ms). Visible tabs, and waits too short to matter,
+ * keep the local timer. The local fallback timer stays armed in case the
+ * worker is recycling mid-sleep — late is recoverable, hung is not.
+ */
+export function sleep(ms) {
+    // Waiting is the biggest line item in a slow run, so it is measured
+    // (no-op unless span tracking is on).
+    try { spanBucket('sleepMs', ms); } catch { /* never break a sleep */ }
+    return new Promise(r => setTimeout(r, ms));
+}
 
 /**
  * Every automation-id Workday uses for "a live validation error attached to

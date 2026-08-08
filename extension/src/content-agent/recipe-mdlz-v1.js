@@ -1,3 +1,24 @@
+/**
+ * ═══════════════════════════════════════════════════════════════════════
+ *  MDLZ LOCKED SNAPSHOT — v1 (frozen 2026-08-07, build 07h, commit e5987b1)
+ * ═══════════════════════════════════════════════════════════════════════
+ *
+ *  User rule 2026-08-07: "tenant nào win là ghi bản của nó trước, rồi sau
+ *  đó mới clean đưa vào generic." This file is the EXACT fill machinery
+ *  mdlz won with — a byte copy of recipe.js at the moment above. The
+ *  router (recipe-router.js) sends mdlz pages HERE and every other tenant
+ *  to the live generic recipe.js.
+ *
+ *  RULES FOR THIS FILE:
+ *  · Do NOT edit it for any other tenant's sake, ever. Fixes for PwC,
+ *    Unilever, 3M... go to recipe.js (generic) only.
+ *  · Edit ONLY for a failure reproduced ON MDLZ, with a trace, and say so
+ *    in the commit.
+ *  · Generic improvements reach mdlz ONLY by an explicit re-snapshot
+ *    (v2 file + router flip), after the generic has proven itself and the
+ *    user says promote.
+ * ═══════════════════════════════════════════════════════════════════════
+ */
 // AUTO-APPLY RECIPES (extension side). Part of the Copo apply agent.
 //
 // A per-ATS "recipe" gives the agent exact, verified field selectors so it fills
@@ -16,7 +37,7 @@
 import { FIELD_ERROR_SEL, deepFindControl, deepQuery, deepQueryAll, dropFileOnZone, normalizeNameCase, readFileCommitState, safeActivate, setFileOnInput, setNativeValue, simulateTyping, sleep, waitForElement , isLegalNameLabel } from './dom.js';
 import { isThirdPartyApply } from './detect.js';
 import { showToast } from './ui.js';
-import { trace, traceOnce } from './trace.js';
+import { spanDropdown, spanField, trace, traceOnce } from './trace.js';
 import { callAgentPlan, callApplyMessage } from './llm.js';
 import { isPickerShape, probeFieldShape } from './probe.js';
 import { hiddenMult, pauseGate, stopRequested } from './run-state.js';
@@ -927,7 +948,22 @@ async function findInList(getShown, match, label = '', wanted = '') {
         if (firstWindow === null) firstWindow = edge(rows);
         lastWindow = edge(rows);
         const key = rows.join('|');
-        if (seen.has(key)) continue;   // same window re-rendered; already matched it
+        if (seen.has(key)) {
+            // TWO rounds that render the same window, on a list many times
+            // taller than its viewport, means this virtualiser does not honour
+            // a synthetic scroll — walking it is pure cost. Measured: 35
+            // seconds and twelve rounds on Race/Ethnicity before the model was
+            // asked anyway. Stop now; the caller's inference path reads the
+            // widget's own item array.
+            if (rounds >= 2 && seen.size <= 1 && sc.scrollHeight > sc.clientHeight * 2) {
+                traceOnce(`list.unwalkable:${label}`, 'list.unwalkable', {
+                    field: label, rounds, clientH: sc.clientHeight, scrollH: sc.scrollHeight,
+                    note: 'virtualiser ignores synthetic scroll — abandoning the walk early',
+                });
+                break;
+            }
+            continue;   // same window re-rendered; already matched it
+        }
         seen.add(key);
         opt = match(shown);
         if (opt) {
@@ -941,6 +977,17 @@ async function findInList(getShown, match, label = '', wanted = '') {
     // only a real (trusted) wheel refreshed them. `windows: 1` with a scrollHeight
     // many times clientHeight is that failure exactly, and it is a different
     // problem from "the option genuinely is not in this list".
+    // A list whose rendered rows never changed under a synthetic scroll cannot
+    // be walked — 35 seconds and twelve rounds proved that on Race/Ethnicity
+    // (R-173784) before the model was asked anyway. The widget's own item
+    // array is the honest source in that case; the caller's inference path
+    // reads it. Nothing is decided here: this only says walking is pointless.
+    if (seen.size <= 1 && sc.scrollHeight > sc.clientHeight * 2) {
+        traceOnce(`list.unwalkable:${label}`, 'list.unwalkable', {
+            field: label, clientH: sc.clientHeight, scrollH: sc.scrollHeight,
+            note: 'virtualiser ignores synthetic scroll — stop walking, let inference read the item array',
+        });
+    }
     trace('list.exhausted', {
         field: label,
         rounds,
@@ -1559,8 +1606,32 @@ async function _applyRecipeFields(recipe, profile, cvData, cv) {
         .filter((f, i, arr) => arr.findIndex(x => x.label === f.label) === i)
         .filter(f => !inStep.has(f.label))
         .filter(fieldOnPage);
-    const fieldsToFill = [...stepFields, ...menuExtras];
+    let fieldsToFill = [...stepFields, ...menuExtras];
     const stepName = step?.name || (menuExtras.length ? 'Field Menu' : null);
+    // ── ONE FIELD, ONE OWNER ──
+    // The row helpers below own every Work Experience date and every language
+    // row. Leaving the single-field twins in this loop meant two layers wrote
+    // the same widgets in one pass, each verifying against state the other had
+    // just changed — the "loạn" in a run that finishes but re-reads itself for
+    // minutes. Whoever owns the SECTION owns its fields; the generic entries
+    // step aside (named, so the summary still accounts for them).
+    if (recipe.ats === 'workday') {
+        const ownedByRows = [];
+        const rowsOwnWork = (step?.ensureSections || []).includes('Work Experience')
+            || !!document.querySelector('[data-automation-id="formField-startDate"]');
+        const rowsOwnLang = !!document.querySelector('[data-automation-id="formField-language"]');
+        fieldsToFill = fieldsToFill.filter((f) => {
+            const owned = (rowsOwnWork && /^Work (From|To)$/i.test(f.label || ''))
+                || (rowsOwnLang && /^Language( level)?$/i.test(f.label || ''));
+            if (owned) ownedByRows.push(f.label);
+            return !owned;
+        });
+        if (ownedByRows.length) {
+            traceOnce(`owner.rows:${stepName}:${ownedByRows.join(',')}`, 'owner.delegated', {
+                step: stepName, to: 'row-helpers', fields: ownedByRows.join(' | '),
+            });
+        }
+    }
     // A matched step with NOTHING to fill is still MATCHED — the Autofill page
     // is a dropzone and a Continue button, and returning matched:false there
     // stranded the run between two gates: the recipe advance wants rf.matched,
@@ -1586,6 +1657,26 @@ async function _applyRecipeFields(recipe, profile, cvData, cv) {
     }
 
     const outcomes = [];   // [label, status, note] per field → debug summary below
+    // ── PER-FIELD TIMING ──
+    // A field can be walked by the recipe, a row helper, the validation
+    // recovery and the planner inside ONE iteration, each re-checking widgets
+    // that are already done — and the only symptom is a run that finishes but
+    // takes minutes and reads out of order. The span closes at the START of
+    // the next field (every `continue` in this loop exits that way) and picks
+    // up the outcome the body recorded, so owner/attempt/duration/result land
+    // in one row per touch.
+    let _fLabel = null, _fT0 = 0, _fHandler = null;
+    const _closeField = () => {
+        if (!_fLabel) return;
+        const o = [...outcomes].reverse().find(x => x[0] === _fLabel);
+        spanField(_fLabel, {
+            step: stepName, owner: 'recipe', handler: _fHandler,
+            ms: Date.now() - _fT0,
+            result: o ? String(o[1]) : 'no-outcome',
+            path: o && o[2] ? String(o[2]).slice(0, 80) : undefined,
+        });
+        _fLabel = null;
+    };
     // Provenance for the review hand-off: which answers came from the user's own
     // data, and which are values the agent chose to get the step to validate. The
     // user is going to check the application on the review page, and "these four
@@ -1596,10 +1687,16 @@ async function _applyRecipeFields(recipe, profile, cvData, cv) {
     // schema's single-selector boundary (measured: three CV jobs, a Review
     // page reading "Work Experience: No Response").
     if (recipe.ats === 'workday' && (step?.ensureSections || []).includes('Work Experience')) {
-        try { filled += await fillWorkExperienceRows(cv, outcomes); }
+        try {
+            const _t = Date.now();
+            filled += await fillWorkExperienceRows(cv, outcomes);
+            spanField('§ Work Experience (rows)', { step: stepName, owner: 'rows', ms: Date.now() - _t, result: 'done' });
+        }
         catch (e) { outcomes.push(['Work Experience (rows)', 'FAIL', (e && e.message) || 'exception']); }
     }
     for (const f of fieldsToFill) {
+        _closeField();
+        _fLabel = f.label; _fT0 = Date.now(); _fHandler = f.type || 'text';
         let val = recipeFieldValue(f, profile, cv);
         // Free text nobody stored, that the agent may write itself. Gated on the
         // box being EMPTY on screen — resolving the value happens before the
@@ -1647,7 +1744,43 @@ async function _applyRecipeFields(recipe, profile, cvData, cv) {
             } else if (f.type === 'checkbox') {
                 const el = resolveFieldControl(f);
                 if (!el || el.offsetParent === null) { outcomes.push([f.label, 'absent', 'not rendered yet']); continue; }
-                if (el.checked) { outcomes.push([f.label, 'done', 'already ticked']); continue; }
+                // A tick the FORM does not accept is not an answer. Measured on
+                // R-173784: "Yes, I have read and consent…" showed checked while
+                // Workday raised "Field and Value required" on it, and this
+                // early return called it done on every pass until the run gave
+                // up. Same re-hydration family as the fluency tick and the
+                // Overall — the DOM kept the tick, Workday's state did not. So
+                // a checked box beside its own live error is re-driven (off,
+                // then on) instead of respected.
+                const cbWrap = el.closest('[data-automation-id^="formField-"]');
+                const cbErrs = () => (cbWrap ? cbWrap.querySelectorAll(FIELD_ERROR_SEL).length : 0);
+                if (el.checked && !cbErrs()) { outcomes.push([f.label, 'done', 'already ticked']); continue; }
+                if (el.checked && cbErrs()) {
+                    trace('checkbox.converge', { field: f.label, errors: cbErrs(), action: 'off→on to resync' });
+                    safeActivate(el, { source: 'recipe', activation: 'widget-option' }, f.selector);
+                    await sleep(350);
+                    if (el.checked) {
+                        // The off-click did not land either — the label/panel is
+                        // the control this tenant wires.
+                        const alt = (el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`))
+                            || el.closest('label') || cbWrap?.querySelector('[data-automation-id="checkboxPanel"]');
+                        if (alt) { safeActivate(alt, { source: 'recipe', activation: 'widget-option' }, f.selector); await sleep(350); }
+                    }
+                    // NEVER leave it off. The off-click may land while the
+                    // on-click does not, and this converge would then have
+                    // turned a consent the form merely doubted into one the
+                    // candidate never gave — strictly worse than the bug it
+                    // repairs. Re-tick until it is on, then report honestly.
+                    if (!el.checked) {
+                        for (const target of [el, (el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`)) || el.closest('label'), cbWrap?.querySelector('[data-automation-id="checkboxPanel"]')]) {
+                            if (!target || el.checked) continue;
+                            safeActivate(target, { source: 'recipe', activation: 'widget-option' }, f.selector);
+                            await sleep(400);
+                        }
+                        trace('checkbox.converge', { field: f.label, restored: el.checked, phase: 'after off→on' });
+                        if (!el.checked) { outcomes.push([f.label, 'FAIL', 'converge left it unticked — needs the user']); continue; }
+                    }
+                }
                 if (!safeActivate(el, { source: 'recipe', activation: 'widget-option' }, f.selector)) {
                     outcomes.push([f.label, 'FAIL', 'policy-denied']);
                     continue;
@@ -1856,25 +1989,50 @@ async function _applyRecipeFields(recipe, profile, cvData, cv) {
         }
         await sleep(120);
     }
+    _closeField();   // the last field of the pass has no successor to close it
 
     // Every work-experience row's end date — the field list above only reaches
     // the first formField-endDate on the page.
     // Shape-based, not step-name-based: any page showing language rows gets
     // the per-row pass, whatever the tenant called the step.
-    if (recipe.ats === 'workday' && document.querySelector('[data-automation-id="formField-language"]')) {
-        try { filled += await fillLanguageRows(cv, outcomes, profile); }
+    const langShape = (() => {
+        if (document.querySelector('[data-automation-id="formField-language"]')) return 'ROWS';
+        const box = [...document.querySelectorAll('input[type="checkbox"]')].find(c => {
+            const w = c.closest('[data-automation-id^="formField-"]');
+            return /language|ngôn ngữ/i.test(`${w?.querySelector('legend, label')?.textContent || ''} ${c.getAttribute('aria-label') || ''}`);
+        });
+        return box ? 'CHECKBOX_GROUP' : 'ABSENT';
+    })();
+    if (recipe.ats === 'workday' && langShape === 'ROWS') {
+        try {
+            const _t = Date.now();
+            filled += await fillLanguageRows(cv, outcomes, profile);
+            spanField('§ Languages (rows)', { step: stepName, owner: 'rows', ms: Date.now() - _t, result: 'done' });
+        }
         catch (e) { outcomes.push(['Languages (rows)', 'FAIL', (e && e.message) || 'exception']); }
     }
     // The checkbox-group twin of the same question (Unilever: "What languages
-    // do you speak?*"). Shape-based like the rows — cheap no-op when absent.
-    if (recipe.ats === 'workday') {
-        try { filled += await fillLanguageCheckboxGroup(cv, outcomes, profile); }
+    // do you speak?*"). SHAPE decides which module runs — the rows form and
+    // the checkbox form are different widgets answering one question, and
+    // running both on every Workday iteration (which is what the traces show)
+    // is work that cannot help: whichever shape is absent costs a full scan to
+    // discover it is absent.
+    if (recipe.ats === 'workday' && langShape === 'CHECKBOX_GROUP') {
+        try {
+            const _t = Date.now();
+            filled += await fillLanguageCheckboxGroup(cv, outcomes, profile);
+            spanField('§ Languages (checkbox group)', { step: stepName, owner: 'rows', ms: Date.now() - _t, result: 'done' });
+        }
         catch (e) { outcomes.push(['Languages (checkbox group)', 'FAIL', (e && e.message) || 'exception']); }
     }
     // Shape-based, not step-name-based: any page showing endDate rows gets the
     // per-row pass, whatever the tenant called the step.
     if (recipe.ats === 'workday' && document.querySelector('[data-automation-id="formField-endDate"]')) {
-        try { filled += await fillExperienceEndDates(cv, outcomes); }
+        try {
+            const _t = Date.now();
+            filled += await fillExperienceEndDates(cv, outcomes);
+            spanField('§ Work end dates (rows)', { step: stepName, owner: 'rows', ms: Date.now() - _t, result: 'done' });
+        }
         catch (e) { outcomes.push(['Work To (rows)', 'FAIL', (e && e.message) || 'exception']); }
     }
 
@@ -1994,7 +2152,55 @@ function ensureSectionEntry(sectionName) {
  * currently-work-here tick stay with fillExperienceEndDates (title-matched,
  * verified), which runs after this.
  */
+/**
+ * Remove Work Experience rows that hold NOTHING.
+ *
+ * A draft carried over from an earlier attempt can leave a blank row behind
+ * (measured on HSE_R-173159: four rows, the fourth entirely empty), and
+ * Workday marks its Job Title / Company / From required — so the step cannot
+ * validate and the run ends on fields no CV can answer. The agent added rows
+ * but never removed them; this is the other half.
+ *
+ * Strictly emptiness-gated: every input in the row must be blank and both date
+ * segments unset. A row with any data is never touched — the policy exemption
+ * is granted to the emptiness, not to the button.
+ */
+async function pruneEmptyExperienceRows(outcomes) {
+    const vis = (e) => !!(e && e.offsetParent !== null);
+    let removed = 0;
+    for (let guard = 0; guard < 3; guard++) {
+        const rows = workExperienceRows();
+        if (rows.length <= 1) break;
+        const blank = rows.find(r => !r.title && !r.company
+            && r.from === '∅/∅' && (r.to === '(hidden)' || r.to === '∅/∅')
+            && ![...r.container.querySelectorAll('input')].filter(vis)
+                .some(i => i.type !== 'checkbox' && String(i.value || '').trim()));
+        if (!blank) break;
+        const del = [...blank.container.querySelectorAll('button, [role="button"]')].filter(vis)
+            .find(b => /^delete$/i.test((b.textContent || '').trim())
+                || /delete|remove/i.test(b.getAttribute('aria-label') || ''));
+        if (!del) { trace('rows.pruneNoButton', { note: 'empty row has no Delete control' }); break; }
+        try { del.scrollIntoView({ block: 'center' }); } catch { /* noop */ }
+        await sleep(250);
+        const had = workExperienceRows().length;
+        if (!safeActivate(del, { source: 'recipe', activation: 'empty-row-cleanup' }, 'work-experience-row')) {
+            trace('rows.pruneDenied', { note: 'policy refused the empty-row delete' });
+            break;
+        }
+        const by = Date.now() + 4000 * hiddenMult();
+        while (workExperienceRows().length >= had && Date.now() < by) await sleep(200);
+        const now = workExperienceRows().length;
+        trace('rows.pruned', { was: had, now, verdict: now < had ? 'removed' : 'no change' });
+        if (now >= had) break;
+        removed++;
+    }
+    if (removed) outcomes.push([`Work Experience (empty rows)`, 'OK', `removed ${removed}`]);
+    return removed;
+}
+
 async function fillWorkExperienceRows(cv, outcomes) {
+    try { await pruneEmptyExperienceRows(outcomes); } catch { /* cleanup must never block the fill */ }
+
     const exp = cv?.experience || [];
     if (!exp.length) return 0;
     const vis = (e) => !!(e && e.offsetParent !== null);
@@ -2049,9 +2255,21 @@ async function fillWorkExperienceRows(cv, outcomes) {
         await put(colWraps('formField-location')[i], e.location || e.city || 'Vietnam', 'Location');
         await put(colWraps('formField-roleDescription')[i], e.description, 'Role description');
         const sd = colWraps('formField-startDate')[i];
-        if (sd) {
+        const sdAnswerable = dateAnswerable(e.start_date);
+        if (sd && !sdAnswerable.ok) {
+            // NEED_DATA: named now, before a single keystroke, so the run does
+            // not spend a minute filling Skills to discover this at the end.
+            trace('exp.needData', { row: i + 1, field: 'Work From', why: sdAnswerable.why });
+            outcomes.push([`Work From (row ${i + 1})`, 'NEED_DATA', sdAnswerable.why]);
+        } else if (sd) {
             const r = await setDateOnWrap(sd, String(e.start_date || ''));
-            if (r.ok) { filled++; outcomes.push([`Work From (row ${i + 1})`, 'OK', String(e.start_date).slice(0, 12)]); }
+            // A value that was ALREADY right is not progress. Returning ok for
+            // a lingering-error date made every pass report filled=3, the loop
+            // read that as movement, and it span 170 iterations on a page it
+            // had not changed (R-173518). 'done' ends the streak without
+            // pretending anything moved, so the error breaker can fire.
+            if (r.ok && r.lingeringError) { outcomes.push([`Work From (row ${i + 1})`, 'done', 'value already correct; form error is stale']); }
+            else if (r.ok) { filled++; outcomes.push([`Work From (row ${i + 1})`, 'OK', String(e.start_date).slice(0, 12)]); }
             else if (!['already-selected', 'no value'].includes(r.reason)) outcomes.push([`Work From (row ${i + 1})`, 'FAIL', r.reason]);
         }
     }
@@ -2096,6 +2314,132 @@ async function fillDateField(f, val) {
  *     Workday's segmented date widget is built to consume, and the exit blur
  *     is what triggers its validation pass.
  */
+
+/**
+ * Can this CV value answer a Workday month+year date at all?
+ *
+ * Workday's date sections are BOTH required — a year with no month writes half
+ * a date, which the form rejects as empty and which the recovery then makes
+ * worse. Deciding it here, before anything is typed, turns a minute of fill
+ * work plus a NEED_HUMAN at the end into a named gap the review can carry.
+ */
+function dateAnswerable(text) {
+    const t = String(text || '').trim();
+    if (!t) return { ok: false, why: 'no date in CV' };
+    if (/^(hiện tại|present|current|now)$/i.test(t)) return { ok: true, current: true };
+    const year = /\b(19|20)\d{2}\b/.test(t);
+    if (!year) return { ok: false, why: `no year in "${t.slice(0, 16)}"` };
+    const month = /^\d{4}-\d{2}-\d{2}$/.test(t)
+        || /\b(0?[1-9]|1[0-2])\b(?!\d)/.test(t.replace(/\b(19|20)\d{2}\b/, ''))
+        || /jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|tháng/i.test(t);
+    return month ? { ok: true } : { ok: false, why: `year but no month in "${t.slice(0, 16)}"` };
+}
+
+/**
+ * Write a Workday month/year date THROUGH ITS CALENDAR PICKER.
+ *
+ * MEASURED on the live mdlz form, 2026-08-07, three ways into one field:
+ *   · synthetic KeyboardEvent (all a content script can send) → nothing.
+ *     value stays "", aria-valuenow stays null. This is the path the agent
+ *     has been using, which means it has NEVER written a date: every
+ *     "Work From: filled" in the traces was Workday's own résumé parse.
+ *     When the agent had to write one itself — a row it added, a segment
+ *     the recovery cleared — the field stayed empty and the step died on
+ *     "The field From is required".
+ *   · CDP insertText → nothing either.
+ *   · CDP real keydown (a human at the keyboard) → writes.
+ *   · THE PICKER, driven by ordinary synthetic clicks → WRITES AND COMMITS
+ *     (month=5, year=2024 read back from aria-valuenow).
+ *
+ * Clicks are what a content script CAN send, and this widget accepts them.
+ * So dates are picked, never typed.
+ *
+ * Structure, as measured: [data-automation-id="dateIcon"] opens a panel; a
+ * UL holds twelve div[role="button"] month cells labelled "May 2026" (the
+ * current one prefixed "Selected "); the panel above it carries
+ * button[aria-label="Previous Year"|"Next Year"] and a text node with the
+ * year on display. aria-valuenow on the two dateSection inputs is the
+ * commit signal — .value is not (it reads empty even when committed).
+ */
+async function pickDateOnWrap(wrap, month, year) {
+    const vis = (e) => !!(e && e.offsetParent !== null);
+    const monthEl = wrap.querySelector('[data-automation-id="dateSectionMonth-input"]');
+    const yearEl = wrap.querySelector('[data-automation-id="dateSectionYear-input"]');
+    const now = (el) => String(el?.getAttribute('aria-valuenow') ?? '').trim();
+    const holds = () => now(monthEl) !== '' && Number(now(monthEl)) === Number(month)
+        && now(yearEl) !== '' && Number(now(yearEl)) === Number(year);
+    if (holds()) return { ok: true, reason: 'already-selected' };
+
+    const icon = wrap.querySelector('[data-automation-id="dateIcon"]') || wrap.querySelector('button');
+    if (!icon) return { ok: false, reason: 'no calendar icon on this date field' };
+    const monthCells = () => [...document.querySelectorAll('[role="button"]')].filter(vis)
+        .filter(e => /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)$/i.test((e.textContent || '').trim()));
+    // Measured 2026-08-07 (R-173784): "calendar did not open" five times in a
+    // run where the same click worked by hand — a click aimed at an icon that
+    // is off-screen hit-tests as whatever covers that point. Scroll it under
+    // the cursor first, and give it a second attempt before giving up.
+    for (let attempt = 0; attempt < 2 && !monthCells().length; attempt++) {
+        try { wrap.scrollIntoView({ block: 'center' }); } catch { /* noop */ }
+        await sleep(200);
+        if (!safeActivate(icon, { source: 'recipe', activation: 'widget-open' }, '[data-automation-id="dateIcon"]')) {
+            return { ok: false, reason: 'policy denied the calendar' };
+        }
+        const by = Date.now() + 3000 * hiddenMult();
+        while (!monthCells().length && Date.now() < by) await sleep(150);
+    }
+    const cells0 = monthCells();
+    if (!cells0.length) return { ok: false, reason: 'calendar did not open' };
+
+    // The panel that owns these cells — year arrows live above the UL.
+    const ul = cells0[0].closest('ul') || cells0[0].parentElement;
+    const panel = ul?.parentElement || document;
+    const shownYear = () => {
+        const el = [...panel.querySelectorAll('*')].filter(vis)
+            .find(e => /^(19|20)\d{2}$/.test((e.textContent || '').trim()));
+        return el ? Number((el.textContent || '').trim()) : null;
+    };
+    const arrow = (dir) => [...panel.querySelectorAll('button, [role="button"]')].filter(vis)
+        .find(e => new RegExp(`${dir} year`, 'i').test(e.getAttribute('aria-label') || ''));
+
+    // Walk to the wanted year. Bounded: a date decades away is a data problem,
+    // not a navigation problem, and clicking forty times to discover that is
+    // the kind of spending this agent has done enough of.
+    let hops = 0;
+    const MAX_HOPS = 40;
+    let cur = shownYear();
+    while (cur != null && cur !== Number(year) && hops < MAX_HOPS) {
+        const a = arrow(cur > Number(year) ? 'previous' : 'next');
+        if (!a) break;
+        safeActivate(a, { source: 'recipe', activation: 'widget-option' }, '[aria-label*="Year"]');
+        hops++;
+        const settleBy = Date.now() + 1200 * hiddenMult();
+        const was = cur;
+        while (Date.now() < settleBy) { await sleep(120); if (shownYear() !== was) break; }
+        cur = shownYear();
+    }
+    if (cur !== Number(year)) {
+        trace('date.pickYearFailed', { wanted: String(year), reached: String(cur), hops });
+        try { document.body.click(); } catch { /* close the panel */ }
+        return { ok: false, reason: `calendar could not reach ${year} (stopped at ${cur} after ${hops})` };
+    }
+
+    const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+    const wantCell = MONTHS[Number(month) - 1];
+    const cell = monthCells().find(e => (e.textContent || '').trim().toLowerCase() === wantCell);
+    if (!cell) return { ok: false, reason: `month ${month} not in the calendar` };
+    safeActivate(cell, { source: 'recipe', activation: 'widget-option' }, '[role="button"]');
+
+    const commitBy = Date.now() + 2500 * hiddenMult();
+    while (!holds() && Date.now() < commitBy) await sleep(150);
+    trace('date.picked', {
+        wanted: `${month}/${year}`, hops,
+        committed: holds() ? `${now(monthEl)}/${now(yearEl)}` : '(not committed)',
+    });
+    return holds()
+        ? { ok: true, via: 'calendar' }
+        : { ok: false, reason: `calendar click did not commit ${month}/${year}` };
+}
+
 async function setDateOnWrap(wrap, val) {
     const text = String(val).trim();
     if (/^(hiện tại|present|current|now)$/i.test(text)) return { ok: false, reason: 'no value' };
@@ -2148,6 +2492,20 @@ async function setDateOnWrap(wrap, val) {
     // painted text, or a value beside an error — falls through and re-enters.
     if (committed(yearEl) && (single || !month || committed(monthEl)) && !errorsBefore) {
         return { ok: false, reason: 'already-selected' };
+    }
+
+    // ── SECTIONED DATES ARE PICKED, NOT TYPED ──
+    // Measured 2026-08-07: a content script's synthetic keystrokes write
+    // NOTHING into these spinbuttons (value stays empty, aria-valuenow stays
+    // null), while the calendar accepts an ordinary synthetic click and
+    // commits. Every "date filled" in the old traces was Workday's résumé
+    // parse; the agent's own writes never landed, which is why a row it added
+    // could never satisfy From/To. The typing path below stays for plain
+    // single-input dates, which are a different widget.
+    if (!single && month && wrap.querySelector('[data-automation-id="dateIcon"]')) {
+        const picked = await pickDateOnWrap(wrap, Number(month), Number(year));
+        if (picked.ok) return picked;
+        trace('date.pickFallback', { wanted: `${month}/${year}`, why: String(picked.reason).slice(0, 60) });
     }
 
     // Digits as REAL keystrokes, one at a time. Workday's date sections are
@@ -2208,7 +2566,44 @@ async function setDateOnWrap(wrap, val) {
     // Delta verification: an error that was live before must be gone; a field
     // that never showed one only needs the value present. (Measured on mdlz:
     // a real commit clears the inputAlert immediately, no Continue needed.)
-    if (errorsBefore > 0 && errorsIn() > 0) return { ok: false, reason: 'value shown but error persists' };
+    if (errorsBefore > 0 && errorsIn() > 0) {
+        // The VALUE decides, not the error node. Workday re-validates a date on
+        // Save, not on write, so a correct value can sit beside an error left
+        // over from the failed Save that preceded this pass — measured on
+        // R-174262, where all three rows reported "value shown but error
+        // persists" while every one of them displayed the right date, the
+        // recipe then held the advance, and the run stalled arguing with a
+        // stale banner. So: if the segments now hold exactly what the CV asked
+        // for, this field is answered. Blur first to give Workday the one
+        // event that clears its own error; if the error genuinely belongs to
+        // this field, the next Save says so again and the streak still ends
+        // the step.
+        try {
+            for (const el of [monthEl, yearEl, dayEl]) {
+                if (el) { el.dispatchEvent(new FocusEvent('focusout', { bubbles: true })); el.blur?.(); }
+            }
+        } catch { /* noop */ }
+        await sleep(250);
+        const holds = (el, want) => {
+            if (!el || want == null) return true;
+            const now = el.getAttribute('role') === 'spinbutton'
+                ? String(el.getAttribute('aria-valuenow') ?? '').trim()
+                : String(el.value ?? '').trim();
+            return now !== '' && Number(now) === Number(want);
+        };
+        const valueIsRight = single
+            ? String(yearEl.value || '').includes(String(year))
+            : (holds(yearEl, year) && (!month || holds(monthEl, month)));
+        if (valueIsRight) {
+            trace('date.errorLingers', {
+                wanted: `${month || '?'}/${year}`,
+                errorsInField: errorsIn(),
+                verdict: 'value matches the CV — treating the error as stale or another row\'s',
+            });
+            return { ok: true, lingeringError: true };
+        }
+        return { ok: false, reason: 'value shown but error persists' };
+    }
     return { ok: true };
 }
 
@@ -2627,11 +3022,109 @@ async function fillLanguageCheckboxGroup(cv, outcomes, profile) {
     return filled;
 }
 
+/**
+ * The Languages section as ROWS, not as three page-wide arrays.
+ *
+ * The same flaw Work Experience had: language[i], overall[i] and tick[i] were
+ * read from separate document-wide queries, so the moment a row is missing or
+ * Workday re-renders one, the three indices stop describing the same row —
+ * and a verify built on them can call a section settled while English has no
+ * row at all and Vietnamese's tick reads No (measured R-173518, review page).
+ *
+ * A row is its CONTAINER: the nearest ancestor holding exactly one
+ * formField-language, with whatever Overall and fluency tick live inside it.
+ */
+function languageRows() {
+    const vis = (e) => !!(e && e.offsetParent !== null);
+    const wraps = [...document.querySelectorAll('[data-automation-id="formField-language"]')].filter(vis);
+    return wraps.map((w) => {
+        let box = w.parentElement;
+        while (box && box !== document.body
+            && box.querySelectorAll('[data-automation-id="formField-language"]').length === 1
+            && !box.querySelector('input[type="checkbox"]')) box = box.parentElement;
+        if (!box || box === document.body) box = w.parentElement;
+        const pick = (el) => {
+            const b = el?.querySelector('button[aria-haspopup="listbox"], button');
+            return String(b?.textContent || el?.querySelector('input')?.value || '').trim();
+        };
+        const overallWrap = [...box.querySelectorAll('[data-automation-id^="formField-"]')].filter(vis)
+            .find((x) => { const l = (x.querySelector('legend, label')?.textContent || '').toLowerCase(); return l.includes('overall') && !/overall result|gpa/.test(l); });
+        const tick = [...box.querySelectorAll('input[type="checkbox"]')].filter(vis)
+            .find((c) => /fluent in this language|thành thạo/i.test(
+                `${c.closest('[data-automation-id^="formField-"]')?.querySelector('legend, label')?.textContent || ''} ${c.getAttribute('aria-label') || ''}`));
+        const name = pick(w);
+        return {
+            container: box, wrap: w, overallWrap, tick,
+            language: /^select one$|^$/i.test(name) ? '' : name,
+            overall: overallWrap ? pick(overallWrap) : '',
+            fluent: !!tick?.checked,
+            errors: box.querySelectorAll(FIELD_ERROR_SEL).length,
+        };
+    });
+}
+
 async function fillLanguageRows(cv, outcomes, profile) {
+    // What the section actually holds, per row, before anything is decided.
+    try {
+        const model = languageRows();
+        traceOnce(`langrows:${model.map(r => `${r.language}|${r.overall}|${r.fluent}`).join(';')}`, 'rows.languages', {
+            rows: model.length
+                ? model.map((r, i) => `#${i + 1} ${r.language || '(empty)'} overall=${r.overall || '∅'} fluent=${r.fluent}${r.errors ? ` errs=${r.errors}` : ''}`).join(' | ')
+                : '(no language rows on this page)',
+        });
+    } catch { /* measurement must never break the fill */ }
+
     const langs = collectLanguages(cv, profile);
     const vis = (e) => !!(e && e.offsetParent !== null);
     const langWraps = () => [...document.querySelectorAll('[data-automation-id="formField-language"]')].filter(vis);
     if (!langWraps().length) return 0;
+
+    // ── VERIFY BEFORE EXECUTE ──
+    // A cheap read answers "is this section already right?" — every CV
+    // language has a row, each row's Overall sits inside its level's ladder,
+    // and every fluent tick that should be on is on. When it is, nothing is
+    // touched: no growing, no pruning, no popup, no re-tick. This is the
+    // difference between re-checking (which must keep happening, because
+    // Workday drops values) and re-doing (which costs seconds and can undo a
+    // good value). Anything short of "all three true" falls through to the
+    // full pass below, so a value Workday wiped is still repaired.
+    {
+        const rowText = (w) => {
+            const b = w.querySelector('button[aria-haspopup="listbox"], button');
+            return String(b?.textContent || w.querySelector('input')?.value || '').trim().toLowerCase();
+        };
+        const scope0 = sectionScope('Languages');
+        const inScope0 = scope0 ? scope0.inSection : () => true;
+        const overalls0 = [...document.querySelectorAll('[data-automation-id^="formField-"]')].filter(vis).filter(inScope0)
+            .filter(w => { const l = (w.querySelector('legend, label')?.textContent || '').toLowerCase(); return l.includes('overall') && !/overall result|gpa/.test(l); });
+        const ticks0 = [...document.querySelectorAll('input[type="checkbox"]')].filter(vis).filter(inScope0)
+            .filter(c => /fluent in this language|thành thạo/i.test(
+                `${c.closest('[data-automation-id^="formField-"]')?.querySelector('legend, label')?.textContent || ''} ${c.getAttribute('aria-label') || ''}`));
+        const rows0 = langWraps();
+        // Read per ROW, never by index across three page-wide lists — that
+        // pairing is what let this check pass while English had no row and
+        // Vietnamese's tick said No.
+        const model0 = languageRows();
+        const settled = langs.length > 0 && langs.every((L) => {
+            const n = String(L.language || '').toLowerCase();
+            const row = model0.find(r => r.language && (r.language.toLowerCase().includes(n) || n.includes(r.language.toLowerCase())));
+            if (!row) return false;                       // no row for this language
+            if (!L.level) return true;
+            const ladder = levelLadder(L.level).map(r => String(r).toLowerCase());
+            const acceptable = ladder.length > 1 ? ladder.slice(0, -1) : ladder;
+            const ov = String(row.overall || '').toLowerCase();
+            if (!ov || !acceptable.some(r => ov.includes(r) || r.includes(ov))) return false;
+            if (/native|fluent|advanced/i.test(String(L.level)) && row.tick && !row.fluent) return false;
+            return true;
+        });
+        if (settled) {
+            traceOnce(`lang.settled:${langs.map(l => l.language).join(',')}`, 'lang.settled', {
+                languages: langs.map(l => `${l.language}:${l.level || '?'}`).join(' | '), rows: rows0.length,
+            });
+            outcomes.push(['Languages', 'OK', 'verified settled — nothing to do']);
+            return 0;
+        }
+    }
 
     // Pair rows to languages by CONTENT, not by index. A row that already
     // names a language keeps it — and keeps its CV level, so Overall and the
@@ -2693,11 +3186,19 @@ async function fillLanguageRows(cv, outcomes, profile) {
         if (langWraps().length >= 3) { growStop = 'row cap (3)'; break; }
         const btn = sectionAddButton('Languages');
         if (!btn) { growStop = 'no add button in Languages scope'; break; }
+        // MEASURED (rc4, HSE_R-173159): the section ended with ONE row and the
+        // English row was never created — "add clicked, no row appeared in 4s".
+        // The calendar failed the same way and for the same reason: a click
+        // aimed at a control below the fold hit-tests as whatever covers that
+        // point. Scroll it under the cursor, then click, and give the render
+        // longer than four seconds before calling it a refusal.
+        try { btn.scrollIntoView({ block: 'center' }); } catch { /* noop */ }
+        await sleep(250);
+        const had = langWraps().length;
         if (!safeActivate(btn, { source: 'recipe', activation: 'page-action' }, '[data-automation-id="add-button"]')) {
             growStop = 'add click denied/failed'; break;
         }
-        const had = langWraps().length;
-        const by = Date.now() + 4000;
+        const by = Date.now() + 8000 * hiddenMult();
         while (langWraps().length <= had && Date.now() < by) await sleep(200);
         if (langWraps().length <= had) { growStop = 'add clicked, no row appeared in 4s'; break; }
         trace('section.addRow', {
@@ -2853,6 +3354,49 @@ async function fillLanguageRows(cv, outcomes, profile) {
                 outcomes.push([`Overall (row ${i + 1})`, 'FAIL',
                     `still "${onPage().slice(0, 24) || '(empty)'}" after reselect ×2 (${String(last?.reason || 'no commit')})`]);
             }
+
+            // MDLZ-REPRODUCED (R-174262 review page): "I am fluent in this
+            // language: No" printed beside "Overall: 3 - Fluent". The tick
+            // lives under the same re-hydration contradiction the Overall did
+            // — Workday drops it and the earlier pass, which saw it go on,
+            // never looks again. The CV's level decides this box, so converge
+            // it: re-read the LIVE node each attempt (re-hydration replaces
+            // the element), climb click -> label/panel, verify after settle.
+            const wantsTick = /native|fluent|advanced/i.test(String(L.level || ''));
+            if (wantsTick) {
+                // The tick belongs to THIS row. Reading fluentBoxes()[i] paired
+                // an index across a page-wide list — the same flaw that lost
+                // English — so the box is found inside the row's own container,
+                // re-read every attempt because re-hydration replaces it.
+                const liveBox = () => {
+                    const rowNow = languageRows().find(r => r.language
+                        && String(L.language || '').toLowerCase().includes(r.language.toLowerCase()));
+                    return rowNow?.tick || fluentBoxes()[i] || null;
+                };
+                for (let attempt = 0; attempt < 2 && !(liveBox()?.checked); attempt++) {
+                    const box2 = liveBox();
+                    if (!box2) break;
+                    trace('lang.convergeTick', {
+                        row: i + 1, language: String(L.language).slice(0, 20),
+                        onPage: 'unticked', attempt: attempt + 1,
+                    });
+                    safeActivate(box2, { source: 'recipe', activation: 'widget-option' }, 'fluent-language');
+                    await sleep(300);
+                    const box3 = liveBox();
+                    if (box3 && !box3.checked) {
+                        const alt = (box3.id && document.querySelector(`label[for="${CSS.escape(box3.id)}"]`))
+                            || box3.closest('label')
+                            || box3.closest('[data-automation-id^="formField-"]')?.querySelector('[data-automation-id="checkboxPanel"]');
+                        if (alt) { safeActivate(alt, { source: 'recipe', activation: 'widget-option' }, 'fluent-language'); await sleep(300); }
+                    }
+                    await sleep(500);   // let the section's re-hydration land
+                }
+                const finalBox = liveBox();
+                if (finalBox) {
+                    outcomes.push([`Fluent (row ${i + 1})`, finalBox.checked ? 'OK' : 'FAIL',
+                        finalBox.checked ? 'verified after settle' : 'tick did not stay after 2 attempts']);
+                }
+            }
         }
     }
 
@@ -2891,7 +3435,69 @@ async function fillLanguageRows(cv, outcomes, profile) {
  * DATED → fill month/year; MISSING → a user gap, named in the trace, never
  * papered over with a current-employment claim.
  */
+/**
+ * The Work Experience section as ROWS, not as parallel column arrays.
+ *
+ * Index pairing across page-wide arrays is what let a current role — whose To
+ * field is HIDDEN — shift every later row by one (measured: "3 boxes / 2
+ * rows"), and it is why an error on one row was read as an error on all three.
+ * A row is its CONTAINER: the nearest ancestor holding exactly one Job Title,
+ * and with it whatever else that row owns. Identity is title+company, so a row
+ * survives Workday re-rendering it.
+ *
+ * Pure observation — nothing here writes. It exists so the next measurement
+ * can say WHICH row owns the From/To error that has been ending these runs.
+ */
+function workExperienceRows() {
+    const vis = (e) => !!(e && e.offsetParent !== null);
+    const titles = [...document.querySelectorAll('[data-automation-id="formField-jobTitle"]')].filter(vis);
+    const rows = [];
+    for (const t of titles) {
+        let box = t.parentElement;
+        while (box && box !== document.body
+            && box.querySelectorAll('[data-automation-id="formField-jobTitle"]').length === 1
+            && !box.querySelector('[data-automation-id="formField-startDate"]')) box = box.parentElement;
+        if (!box || box === document.body) box = t.parentElement;
+        const val = (sel) => {
+            const w = box.querySelector(sel);
+            const i = w?.querySelector('input');
+            return String(i?.value || '').trim();
+        };
+        const seg = (sel, which) => {
+            const w = box.querySelector(sel);
+            const el = w?.querySelector(`[data-automation-id="dateSection${which}-input"]`);
+            return el ? String(el.getAttribute('aria-valuenow') ?? '').trim() : null;
+        };
+        rows.push({
+            container: box,
+            identity: `${val('[data-automation-id="formField-jobTitle"]')}@${val('[data-automation-id="formField-companyName"]')}`.toLowerCase(),
+            title: val('[data-automation-id="formField-jobTitle"]'),
+            company: val('[data-automation-id="formField-companyName"]'),
+            from: `${seg('[data-automation-id="formField-startDate"]', 'Month') || '∅'}/${seg('[data-automation-id="formField-startDate"]', 'Year') || '∅'}`,
+            to: box.querySelector('[data-automation-id="formField-endDate"]')
+                ? `${seg('[data-automation-id="formField-endDate"]', 'Month') || '∅'}/${seg('[data-automation-id="formField-endDate"]', 'Year') || '∅'}`
+                : '(hidden)',
+            current: !![...box.querySelectorAll('input[type="checkbox"]')].find(c => c.checked
+                && /currently work here|đang làm việc/i.test(`${c.closest('[data-automation-id^="formField-"]')?.querySelector('legend, label')?.textContent || ''} ${c.getAttribute('aria-label') || ''}`)),
+            errors: box.querySelectorAll(FIELD_ERROR_SEL).length,
+        });
+    }
+    return rows;
+}
+
 async function fillExperienceEndDates(cv, outcomes) {
+    // Row-scoped truth, once per pass: which row holds which dates, whether it
+    // claims to be current, and — the question three runs could not answer —
+    // which row the live error actually belongs to.
+    try {
+        const model = workExperienceRows();
+        if (model.length) {
+            traceOnce(`rows:${model.map(r => `${r.identity}|${r.from}|${r.to}|${r.errors}`).join(';')}`, 'rows.model', {
+                rows: model.map((r, i) => `#${i + 1} ${r.title.slice(0, 18)}@${r.company.slice(0, 14)} from=${r.from} to=${r.to}${r.current ? ' CURRENT' : ''} errs=${r.errors}`).join(' | '),
+            });
+        }
+    } catch { /* measurement must never break the fill */ }
+
     const exp = cv?.experience || [];
     if (!exp.length) return 0;
     const visible = (sel) => [...document.querySelectorAll(sel)].filter(el => el.offsetParent !== null);
@@ -2915,11 +3521,11 @@ async function fillExperienceEndDates(cv, outcomes) {
         const monthVal = monthEl && monthEl !== yearEl ? String(monthEl.value || '').trim() : yearVal;
         if (yearVal && monthVal) continue;   // truly filled → not ours to touch
         if (yearVal || monthVal) {
-            // HALF a date is not "filled". A resumed draft carried "2" in one
-            // segment (measured R-174262: recovery cleared it, but the
-            // year-only check here read the row as filled and skipped it on
-            // every later pass while Workday demanded To — error.stubborn ×4,
-            // run blocked). Clear both segments and fill the whole date below.
+            // MDLZ-REPRODUCED FIX (R-174262, 2026-08-07, error.stubborn ×4):
+            // HALF a date is not "filled" — a resumed draft carried "2" in one
+            // segment, the year-only check read the row as filled and skipped
+            // it forever while Workday demanded To. Clear both segments and
+            // fill the whole date below. Identical fix lives in generic.
             trace('exp.endDate', {
                 row: i, title: norm(titleInputs[i]?.value).slice(0, 30) || '(no title)',
                 verdict: `half-filled (${monthVal || '∅'}/${yearVal || '∅'}) — cleared to refill`,
@@ -2948,7 +3554,28 @@ async function fillExperienceEndDates(cv, outcomes) {
         }
         if (endState.kind === 'CURRENT') {
             // Index pairing is only a candidate — the PROOF is structural below.
-            const box = currentBoxes.length === endWraps.length ? currentBoxes[i] : null;
+            let box = currentBoxes.length === endWraps.length ? currentBoxes[i] : null;
+            if (!box) {
+                // Counts differ the moment a current role HIDES its To field:
+                // three rows, three checkboxes, two endDate wrappers — and index
+                // pairing is meaningless then anyway. Measured on R-172088
+                // ("3 boxes / 2 rows"), where the row that needed the tick was
+                // refused it and the step died on a To it never had to answer.
+                // So pair by CONTAINMENT: the nearest ancestor of THIS To
+                // wrapper that holds exactly one endDate field and exactly one
+                // of these checkboxes is that row.
+                let scope = wrap.parentElement;
+                while (scope && scope !== document.body) {
+                    const boxesIn = currentBoxes.filter(c => scope.contains(c));
+                    if (boxesIn.length === 1
+                        && scope.querySelectorAll('[data-automation-id="formField-endDate"]').length === 1) {
+                        box = boxesIn[0];
+                        trace('exp.endDate', { row: i, title: rowTitle.slice(0, 30), verdict: 'checkbox paired structurally (counts differ)' });
+                        break;
+                    }
+                    scope = scope.parentElement;
+                }
+            }
             if (!box) {
                 trace('exp.endDate', { row: i, title: rowTitle.slice(0, 30), verdict: `current role but checkbox pairing ambiguous (${currentBoxes.length} boxes / ${endWraps.length} rows)` });
                 outcomes.push([`Work To (row ${i + 1})`, 'FAIL', 'currently-work-here checkbox not found for this row']);
@@ -2990,6 +3617,15 @@ async function fillExperienceEndDates(cv, outcomes) {
             };
             const wasChecked = box.checked;
             if (wasChecked && satisfied()) {
+                // Traced, not silent: a pass where this row skipped left NO
+                // line in the trace at all, so "the tick survived" and "the
+                // helper never looked" read identically while Workday kept
+                // demanding To (R-174262).
+                trace('exp.endDate', {
+                    row: i, title: rowTitle.slice(0, 30),
+                    verdict: 'current role already committed — no action',
+                    rowErrors: rowScope.querySelectorAll(FIELD_ERROR_SEL).length,
+                });
                 outcomes.push([`Work To (row ${i + 1})`, 'done', 'current role already committed']);
                 continue;
             }
@@ -3038,6 +3674,12 @@ async function fillExperienceEndDates(cv, outcomes) {
             if (!box.checked) outcomes.push([`Work To (row ${i + 1})`, 'FAIL', 'tick did not take']);
             else if (okNow) { filled++; outcomes.push([`Work To (row ${i + 1})`, 'OK', 'currently work here']); }
             else outcomes.push([`Work To (row ${i + 1})`, 'PARTIAL', 'checked but end-date still required']);
+            continue;
+        }
+        const edAnswerable = dateAnswerable(endState.value);
+        if (!edAnswerable.ok) {
+            trace('exp.needData', { row: i + 1, field: 'Work To', why: edAnswerable.why });
+            outcomes.push([`Work To (row ${i + 1})`, 'NEED_DATA', edAnswerable.why]);
             continue;
         }
         const r = await setDateOnWrap(wrap, endState.value);
@@ -3621,6 +4263,23 @@ async function fillSearchMulti(f, value, ctx = {}) {
     const wanted = splitSkillList(value).slice(0, f.max || 8);
     if (!wanted.length) return { ok: false, reason: 'no value' };
 
+    // ── ALREADY SATISFIED → TOUCH NOTHING ──
+    // Every pass re-typed all eight terms into the search box to conclude
+    // "already" eight times: ~5 seconds per iteration, five iterations, on a
+    // field that was complete before the first of them. A committed chip is
+    // the answer; asking the server again is not verification, it is cost.
+    {
+        const norm0 = (x) => String(x || '').replace(/\s+/g, ' ').trim().toLowerCase();
+        const have = chips().map(norm0);
+        const missing = wanted.filter(t => {
+            const n = norm0(t);
+            return !have.some(h => h === n || h.includes(n) || n.includes(h));
+        });
+        if (!missing.length) {
+            return { satisfied: true, changed: false, added: 0, already: wanted.length, reason: 'already-selected' };
+        }
+    }
+
     // A stale popup from the previous field misreads as this field's results, and
     // text a crashed pass left in the box corrupts the first query — clear both.
     await closeStrayPopups(f.label);
@@ -3786,18 +4445,45 @@ async function fillSearchMulti(f, value, ctx = {}) {
         // stayed empty and no chip appeared, while two other skills committed on
         // the same code path. Clicking the input directly is a guess, and it was
         // the wrong one often enough to lose skills silently.
+        // Clear of the sticky footer first. With several chips committed the
+        // results list sits lower, and a row's click point can land under the
+        // page's "Back / Save and Continue" bar — measured: "AI Workflow Design"
+        // and "Agentic Systems" matched exactly, every click reported an
+        // unrelated overlay at the point, and no chip appeared.
+        //
+        // MDLZ-REPRODUCED (R-174262): the review page carried "Agentic AI", a
+        // skill the CV never states, beside the "Agentic Systems" that was
+        // wanted. The virtualiser RECYCLES row nodes while scrolling, so the
+        // node matched a moment ago can be displaying a different skill by the
+        // time it is clicked — and the targets were computed off that stale
+        // node. So: remember the LABEL, scroll, then re-resolve the row by
+        // that label and rebuild the targets from what is on screen NOW. No
+        // row carrying it any more means the list moved under us: abandon the
+        // term rather than click whatever took its place.
+        const wantLabel = (pick.textContent || '').trim();
+        try { pick.scrollIntoView({ block: 'center' }); await sleep(150); } catch { /* noop */ }
+        {
+            const norm2 = (x) => String(x || '').replace(/\s+/g, ' ').trim().toLowerCase();
+            const fresh = [...document.querySelectorAll(OPTION_SEL)]
+                .filter(o => o.offsetParent !== null)
+                .filter(o => o.getAttribute('data-automation-id') !== 'selectedItem')
+                .filter(o => !o.closest('[data-automation-id="selectedItemList"]'))
+                .find(o => norm2(o.textContent) === norm2(wantLabel));
+            if (!fresh) {
+                trace('skills.rowRecycled', { term, wanted: wantLabel.slice(0, 40), note: 'row no longer on screen after scroll — not clicking its replacement' });
+                notes.push(`${term}:row-recycled`);
+                await resetSearchBox();
+                continue;
+            }
+            pick = fresh;
+        }
         const targets = [
             pick.querySelector('[data-automation-id="promptLeafNode"]'),
             pick.querySelector('input[type="checkbox"], input[type="radio"]'),
             pick.querySelector('label'),
             pick,
         ].filter((el, i, arr) => el && arr.indexOf(el) === i);
-        // Clear of the sticky footer first. With several chips committed the
-        // results list sits lower, and a row's click point can land under the
-        // page's "Back / Save and Continue" bar — measured: "AI Workflow Design"
-        // and "Agentic Systems" matched exactly, every click reported an
-        // unrelated overlay at the point, and no chip appeared.
-        try { pick.scrollIntoView({ block: 'center' }); await sleep(150); } catch { /* noop */ }
+        const beforeChipTexts = chips().map(c => String(c.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase());
         const deadline = Date.now() + 2500 * hiddenMult();
         for (const target of targets) {
             safeActivate(target, { source: 'recipe', activation: 'widget-option' }, f.selector || f.labelMatch);
@@ -3849,6 +4535,53 @@ async function fillSearchMulti(f, value, ctx = {}) {
             }
             viaKeyboard = chips().length > before;
             if (viaKeyboard) trace('skills.keyboardCommit', { term });
+        }
+        // THE CHIP THAT APPEARED MUST BE THE ONE WE ASKED FOR.
+        // Any chip counted as success before, so a neighbour committed by a
+        // recycled row was recorded as the wanted skill and reached the review
+        // page as a claim the candidate never made (R-174262: "Agentic AI").
+        // An alien chip is removed here, at the one moment we KNOW we put it
+        // there — chips already on the candidate before this pass are never
+        // touched, because those may be the user's own from another
+        // application.
+        if (chips().length > before) {
+            const norm3 = (x) => String(x || '').replace(/\s+/g, ' ').trim().toLowerCase();
+            const wanted3 = norm3(wantLabel);
+            const addedChips = chips().filter(c => !beforeChipTexts.includes(norm3(c.textContent)));
+            const alienChips = addedChips.filter(c => {
+                const t = norm3(c.textContent);
+                return !(t === wanted3 || t.includes(wanted3) || wanted3.includes(t));
+            });
+            for (const bad of alienChips) {
+                const label = String(bad.textContent || '').replace(/\s+/g, ' ').trim();
+                // MEASURED on the live R-174262 draft: a chip carries no
+                // button — the remove control is a DIV
+                // [data-automation-id="DELETE_charm"] wrapping an svg, and a
+                // plain .click() on the chip does nothing. safeActivate's
+                // pointer/mouse sequence on that svg is what actually clears
+                // it. The selector string names selectedItem on purpose: it
+                // is what policy's chip-eviction exemption keys on, so the
+                // remove is allowed while a section-row Delete stays denied.
+                const charm = bad.querySelector('[data-automation-id="DELETE_charm"]');
+                const del = charm?.querySelector('svg') || charm || bad;
+                const removed = safeActivate(del, { source: 'recipe', activation: 'widget-option' },
+                    '[data-automation-id="selectedItem"] [data-automation-id="DELETE_charm"]');
+                await sleep(400);
+                const stillThere = chips().some(c => norm3(c.textContent) === norm3(label));
+                trace('skills.wrongChip', {
+                    term, wanted: wantLabel.slice(0, 40), committed: label.slice(0, 40),
+                    removeAttempted: removed, stillOnForm: stillThere,
+                });
+                notes.push(`${term}:wrong-chip "${label.slice(0, 24)}"${stillThere ? ' (STILL ON FORM)' : ' (removed)'}`);
+            }
+            if (alienChips.length && !chips().some(c => {
+                const t = norm3(c.textContent);
+                return t === wanted3 || t.includes(wanted3) || wanted3.includes(t);
+            })) {
+                // The wanted skill never landed; only the wrong one did.
+                await resetSearchBox();
+                continue;
+            }
         }
         if (chips().length > before) { added++; notes.push(`${term}:${viaKeyboard ? 'ok-kb' : 'ok'}`); } else {
             notes.push(`${term}:no-effect`);
@@ -4009,6 +4742,28 @@ export function optionMatchAll(list, rawWanted) {
 export const optionUniqueMatch = (list, wanted) => optionMatchAll(list, wanted)[0] || null;
 
 async function fillCustomSelect(f, value, ctx = {}) {
+    // One open→commit cycle, timed. The fallback ladder this widget walked is
+    // the interesting part when a run is slow: `reason` already spells it out
+    // on failure, and the success returns carry `path`. Only slow or
+    // unsuccessful cycles are kept — a dropdown that answers on the first
+    // click has nothing to explain.
+    const _t0 = Date.now();
+    let _r = null;
+    try {
+        _r = await _fillCustomSelectTimed(f, value, ctx);
+        return _r;
+    } finally {
+        try {
+            spanDropdown(f.label, {
+                ms: Date.now() - _t0,
+                result: _r?.ok ? 'ok' : (_r?.reason ? String(_r.reason).split(' (')[0] : 'threw'),
+                path: _r?.path || (_r?.reason ? String(_r.reason) : ''),
+            });
+        } catch { /* measurement must never break a fill */ }
+    }
+}
+
+async function _fillCustomSelectTimed(f, value, ctx = {}) {
     // Same entry gate as fillSearchMulti: a hidden tab must not even try to
     // OPEN the prompt — the 6.5s open-wait expires against a page that isn't
     // rendering and reports listbox-timeout on a healthy widget.
@@ -4175,6 +4930,27 @@ async function fillCustomSelect(f, value, ctx = {}) {
         }
     }
     await sleep(150);
+    // ── A DEMOGRAPHIC FIELD ANSWERS FROM DEMOGRAPHIC DATA, OR NOT AT ALL ──
+    // Measured on R-173784: the gap-filler handed Race/Ethnicity the value
+    // "Hà Nội" — the candidate's CITY — because its own mapping fell through
+    // to the nearest populated profile key. A wrong ethnicity is not a slow
+    // field, it is a false statement about a person on a real application, and
+    // it fails silently. So on these questions the value must come from the
+    // demographic keys or be a decline; anything else is dropped here, and the
+    // ladder's decline rungs answer instead.
+    if (/gender|sex\b|race|ethnic|dân tộc|giới tính/i.test(String(f.label || ''))) {
+        const own = String(ctx?.profile?.ethnicity || ctx?.profile?.gender || '').trim();
+        const v = String(value || '').trim();
+        const looksDecline = /prefer not|wish|decline|not specified|unspecified|choose not|no answer|không|từ chối/i.test(v);
+        const isOwn = own && (v.toLowerCase().includes(own.toLowerCase()) || own.toLowerCase().includes(v.toLowerCase()));
+        if (v && !looksDecline && !isOwn) {
+            trace('demographic.valueDropped', {
+                field: f.label, given: v.slice(0, 24), profileHas: own.slice(0, 20) || '(none)',
+                note: 'value did not come from a demographic key — falling back to the ladder',
+            });
+            value = own || '';
+        }
+    }
     const want = String(value || '').trim().toLowerCase();
     // Type-to-filter: the trigger itself when it's an input (Mondelez renders the
     // source and phone-code prompts as a search box, placeholder "Search"), else a
@@ -4392,6 +5168,40 @@ async function fillCustomSelect(f, value, ctx = {}) {
             trace('list.inferDenied', { field: f.label, picked: r.value.slice(0, 30), why: 'substantive value on a decline-only field' });
             inferNote = `model picked "${r.value.slice(0, 20)}" — refused (decline-only field)`;
         }
+        // ── DEMOGRAPHIC BELT, INDEPENDENT OF THE FIELD DEFINITION ──
+        // Measured on R-173784: the profile asked for "I don't wish to answer",
+        // this tenant's Gender list offers only Female/Male/Other, the ladder
+        // exhausted, and the model was asked to choose — it answered "Male",
+        // which was written to a real application as a statement about the
+        // candidate. The deny belt only ran when the FIELD carried inferDeny,
+        // and this call came in without one. The question decides now, not the
+        // field's definition: on a demographic prompt, an inferred substantive
+        // value is refused whatever asked for it.
+        const demographicQ = /gender|sex\b|race|ethnic|dân tộc|giới tính|disability|khuyết tật|veteran|cựu chiến binh/i
+            .test(String(f.label || ''));
+        // A DECLINE is what this belt exists to allow — including the wording
+        // tenants actually ship. Measured on R-173784 (07w): the belt refused
+        // "Not Specified", which IS the decline option, and refused "Kinh
+        // (Vietnam)", which is the candidate's OWN stored ethnicity — 58
+        // seconds spent turning two correct answers into empty fields. So:
+        // decline wording passes, and so does a value the profile itself
+        // states. Only an INVENTED demographic claim is refused.
+        const decliney = /prefer not|wish not|don'?t wish|do not wish|decline|not disclose|not specified|unspecified|choose not|no answer|không muốn|từ chối|không tiết lộ/i;
+        const fromProfile = (() => {
+            const v = String(r?.value || '').toLowerCase();
+            for (const k of ['ethnicity', 'raceEthnicity', 'race', 'gender', 'sex']) {
+                const own = String(ctx?.profile?.[k] || '').trim().toLowerCase();
+                if (own && (v.includes(own) || own.includes(v.split('(')[0].trim()))) return true;
+            }
+            return false;
+        })();
+        if (r?.value && demographicQ && !decliney.test(String(r.value)) && !fromProfile) {
+            trace('list.inferDenied', {
+                field: f.label, picked: String(r.value).slice(0, 30),
+                why: 'demographic question — an inferred value would be a claim about the person',
+            });
+            return { ok: false, reason: `demographic answer refused ("${String(r.value).slice(0, 20)}") — left for the candidate` };
+        }
         if (r?.value && !inferDenied) {
             matched = r.value.toLowerCase();
             // RE-OPEN first. Asking the model takes seconds, and the prompt does
@@ -4433,19 +5243,7 @@ async function fillCustomSelect(f, value, ctx = {}) {
             const chips = [...wrap.querySelectorAll('[data-automation-id="selectedItem"]')];
             if (chips.length) return chips.map(c => (c.textContent || '').trim()).join(' | ');
             const t = (wrap.querySelector('button')?.textContent || '').trim();
-            if (t && !/select one/i.test(t)) return t;
-            // A searchable single-select commits INTO ITS INPUT and closes the
-            // popup — no chip, no button. Measured on Province or City
-            // (R-174262): search-pick committed for real (the next pass read
-            // the field as done and Workday never objected), but this reader
-            // saw nothing and a working click was recorded as no-commit. The
-            // popup-closed condition is what separates a commit from the text
-            // we typed ourselves while it was open.
-            if (trigger.tagName === 'INPUT') {
-                const v = String(trigger.value || '').trim();
-                if (v && !visibleOptions().length) return v;
-            }
-            return '';
+            return t && !/select one/i.test(t) ? t : '';
         } catch { return ''; }
     };
     // Without a wrapper there is no field state to read. "Cannot tell" must not
@@ -4635,7 +5433,7 @@ async function fillCustomSelect(f, value, ctx = {}) {
                 await sleep(150);
             }
             trace('list.result', { field: f.label, picked: matched, onPage: now, levels: level + 1, stuck: true });
-            return { ok: true, matched: matched.replace(/^=/, '') };
+            return { ok: true, matched: matched.replace(/^=/, ''), path: attempts.join('→') || 'first-click' };
         }
         attempts.push(`level${level}:${drilled ? 'drilled-in' : 'no-effect'}`);
         // On no-effect, name what actually sits at the row's click point — "the
@@ -4707,7 +5505,7 @@ async function fillCustomSelect(f, value, ctx = {}) {
                         try { trigger.blur?.(); } catch { /* noop */ }
                     }
                     trace('list.result', { field: f.label, picked: matched, onPage: committed, via: 'search-pick', stuck: true });
-                    return { ok: true, matched: matched.replace(/^=/, '') };
+                    return { ok: true, matched: matched.replace(/^=/, ''), path: attempts.join('→') };
                 }
                 attempts.push('searchPick:no-commit');
             } else {
@@ -4754,7 +5552,7 @@ async function fillCustomSelect(f, value, ctx = {}) {
                 if (now2) {
                     attempts.push('keyboard:committed');
                     trace('list.result', { field: f.label, picked: matched, onPage: now2, levels: attempts.length, via: 'keyboard', stuck: true });
-                    return { ok: true, matched: matched.replace(/^=/, '') };
+                    return { ok: true, matched: matched.replace(/^=/, ''), path: attempts.join('→') };
                 }
                 break;
             }
