@@ -161,7 +161,7 @@ describe('one owner per page, enforced rather than requested', () => {
         assert.equal(pages.mayActivate('recipe'), true);
     });
 
-    test('the advance button is the one thing v1 may still click here', async () => {
+    test('not even the advance button — v2 leaves its own pages now', async () => {
         renderPage('applyFlowMyExpPage');
         await pages.observePageState({ sleep });
 
@@ -169,14 +169,12 @@ describe('one owner per page, enforced rather than requested', () => {
         next.setAttribute('data-automation-id', 'pageFooterNextButton');
         dom.document.body.appendChild(next);
 
-        // Named exception with an end date: v2 owns what goes INTO a page before
-        // it owns moving off one. Refusing this would park the flow on a page v2
-        // had finished filling — a worse failure than the one exclusivity
-        // prevents. It goes away when the navigation transaction (C3) lands.
-        assert.equal(pages.mayActivate('recipe', next), true);
-        const somethingElse = dom.document.createElement('button');
-        dom.document.body.appendChild(somethingElse);
-        assert.equal(pages.mayActivate('recipe', somethingElse), false);
+        // There was an exception here while v2 could fill a page but not leave
+        // one. C3 ended it: a page v2 owns and does not advance is a page v2
+        // says is unfinished, and pressing Next on it produces the validation
+        // wall that v1 would then have to read as ours.
+        assert.equal(pages.mayActivate('recipe', next), false);
+        assert.equal(pages.mayActivate('mdlz-v2', next), true);
     });
 });
 

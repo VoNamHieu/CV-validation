@@ -157,27 +157,18 @@ export function pageOwner(pageNow = null) {
  * executors do not come through here — they drive the widgets directly — so
  * this cannot lock v2 out of its own page.
  *
- * ONE NAMED EXCEPTION, and it has an end date: the page footer Next button.
- * v2 owns what goes INTO a page before it owns moving off one — the navigation
- * transaction is C3, and until it lands the wizard has to be advanced by
- * somebody. Refusing that click would leave the flow parked on a page v2 had
- * finished filling, which is a worse failure than the one exclusivity prevents.
- * The exception is this narrow on purpose: one control, by its own id, and it
- * goes away when C3 arrives.
+ * There is no longer an exception for the page footer Next button. There was
+ * one while v2 could fill a page but not leave it; C3 gave it the navigation
+ * transaction, so the last reason for anybody else to click here is gone. A
+ * page v2 owns that does not advance is a page v2 says is not finished — and
+ * pressing Next on it would only produce the validation wall that v1 would then
+ * have to read as ours.
  */
-export function mayActivate(source, el = null) {
+export function mayActivate(source) {
     const owner = pageOwner();
     if (!owner) return true;
-    if (source === 'mdlz-v2') return true;
-    return isAdvanceControl(el);
+    return source === 'mdlz-v2';
 }
-
-const isAdvanceControl = (el) => {
-    try {
-        return !!el && (el.matches?.(SEL_NEXT) || !!el.closest?.(SEL_NEXT));
-    } catch { return false; }
-};
-const SEL_NEXT = '[data-automation-id="pageFooterNextButton"]';
 
 /** One line, for a trace that has to explain why a click did not happen. */
 export function ownershipNote() {

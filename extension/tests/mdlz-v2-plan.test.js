@@ -43,7 +43,9 @@ const CV = {
 /** Run one pass of the controller, as the router would. */
 // addMs is tight on purpose: an Add that never lands should fail this gate
 // fast rather than sit out its full live-page budget three times over.
-const pass = () => v2.runMdlzV2({ cv: CV, sleep, addMs: 500 });
+// advance:false — these tests are about what gets FILLED. Leaving the page
+// mid-assertion would measure the wizard instead.
+const pass = () => v2.runMdlzV2({ cv: CV, sleep, addMs: 500, advance: false });
 
 /** Passes until nothing changes — the loop v1's caller already runs. */
 async function settle(maxPasses = 8) {
@@ -261,6 +263,20 @@ describe('MILESTONE 3 GATE — a second pass writes nothing', () => {
         }
         assert.equal(page.openCount(), 0);
         assert.equal(page.pickerOpen(), 0);
+    });
+
+    test('a pass that finds everything already right is the one that advances', async () => {
+        // Filling and then advancing in one breath means leaving on the strength
+        // of what we just wrote. This leaves on the strength of what the page
+        // says — the same check the second-pass gate makes.
+        draft();
+        await settle();
+        const moved = await v2.runMdlzV2({ cv: CV, sleep, addMs: 500 });
+
+        assert.equal(moved.report.filled, 0, 'nothing left to do');
+        assert.equal(moved.navigation.result, 'ADVANCED', JSON.stringify(moved.navigation?.reason || ''));
+        assert.equal(moved.report.advancedTo, 'APPLICATION_QUESTIONS');
+        assert.equal(page.nav.clicks, 1);
     });
 
     test('an Add that hit-tested into thin air is retried, not reported as done', async () => {

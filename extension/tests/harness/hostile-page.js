@@ -89,6 +89,11 @@ export function buildHostilePage(doc, opts = {}) {
         commitMs: 15,
         closeMs: 15,
         pickerYear: 2026,        // where an empty picker opens
+        nextLabel: 'Save and Continue',
+        nextPageId: 'applyFlowPrimaryQuestionsPage',
+        navMs: 20,               // the click lands, the page changes later
+        navHydrateMs: 25,        // and the new one arrives busy
+        blockAdvance: false,     // a page that refuses to be left
         ...opts,
     };
 
@@ -100,7 +105,33 @@ export function buildHostilePage(doc, opts = {}) {
     };
 
     const page = el('div', { 'data-automation-id': 'applyFlowMyExpPage' }, doc.body);
-    el('button', { 'data-automation-id': 'pageFooterNextButton' }, page).textContent = 'Save and Continue';
+
+    // ── the wizard ───────────────────────────────────────────────────
+    // Advancing is the one action that cannot be undone from inside the flow,
+    // so the harness models what it really does: the page NODE is replaced, the
+    // URL never moves, the new page arrives hydrating, and a page that is not
+    // finished answers with an error instead of going anywhere.
+    const nav = { clicks: 0, advancedTo: null };
+    const next = el('button', { 'data-automation-id': 'pageFooterNextButton' }, page);
+    next.textContent = cfg.nextLabel;
+    next.addEventListener('click', () => {
+        nav.clicks += 1;
+        if (cfg.blockAdvance) {
+            // Validation: the page stays, and says why.
+            if (!page.querySelector('[data-automation-id="errorMessage"]')) {
+                el('div', { 'data-automation-id': 'errorMessage' }, page).textContent = 'The field From is required';
+            }
+            return;
+        }
+        setTimeout(() => {
+            page.remove();
+            const arrived = el('div', { 'data-automation-id': cfg.nextPageId }, doc.body);
+            // The next page renders busy before it renders itself.
+            const spinner = el('div', { 'data-automation-id': 'loadingPanel' }, arrived);
+            setTimeout(() => spinner.remove(), cfg.navHydrateMs);
+            nav.advancedTo = cfg.nextPageId;
+        }, cfg.navMs);
+    });
 
     // ── Work Experience ──────────────────────────────────────────────
     // The section holds the rows; a row is an unnamed DIV, because on the live
@@ -460,6 +491,8 @@ export function buildHostilePage(doc, opts = {}) {
         page,
         addWorkRow,
         addEducationRow,
+        /** How many times Next was pressed, and where it went. */
+        nav,
         addLanguageRow,
         workRows: () => rows,
         eduRows: () => eduRows,

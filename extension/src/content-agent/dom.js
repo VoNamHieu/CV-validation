@@ -466,7 +466,7 @@ export function safeActivate(el, ctx = {}, originSelector) {
     // disorder the rewrite exists to end, and a rule that depends on every call
     // site remembering it is not a rule. This is the choke point every click
     // already goes through, so a new caller cannot miss it either.
-    if (!mayActivate(ctx.source, el)) {
+    if (!mayActivate(ctx.source)) {
         console.warn(`[Copo] click refused — ${ownershipNote()} and this page is not shared`
             + ` (asked by: ${ctx.source || 'planner'})`);
         return false;

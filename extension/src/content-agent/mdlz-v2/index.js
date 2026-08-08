@@ -18,12 +18,13 @@
  * exist yet.
  */
 
-import { ADD_VIA_KEY, FLAG_KEY, RESULT, STEP, isMdlzPage } from './config.js';
+import { ADD_VIA_KEY, FLAG_KEY, RESULT, SEL, isMdlzPage } from './config.js';
 import { openPopups, orphanOptionCount, pageFingerprint, waitPageReady } from './page-observer.js';
 import { census } from './popup-manager.js';
 import { addRow, runField } from './executors.js';
 import { fingerprintOf } from './fingerprint.js';
 import { SECTIONS, addButtonFor, planStep, resolveRow, resolveTarget } from './planner.js';
+import { NAV, advance } from './navigation.js';
 import { READY, observePageState, owns, releasePage } from './pages.js';
 import { preflightReport, resumeEvidence } from './preflight.js';
 import { rowsOf } from './row.js';
@@ -228,6 +229,28 @@ export async function runMdlzV2(ctx = {}) {
         ledger,
         gaps,
     };
+    // ── leaving the page ─────────────────────────────────────────────
+    //
+    // Only from a pass that needed to do NOTHING. Filling and then advancing in
+    // one breath means leaving on the strength of what we just wrote; waiting
+    // for a pass that finds everything already right means leaving on the
+    // strength of what the page says. It costs one cheap pass — a satisfied
+    // field spends no click — and it is the same check the second-pass gate
+    // makes.
+    const quiet = ledger.tasks.length > 0 && ledger.tasks.every((t) => t.result === RESULT.SATISFIED);
+    let navigation = null;
+    // `advance: false` is for a caller that wants the fill and not the move —
+    // the Review controller is read-only by definition, and a pass being
+    // measured should not walk off the page it is being measured on.
+    if (quiet && !ledger.halted && ctx.advance !== false) {
+        navigation = await advance({
+            sleep: ctx.sleep,
+            verifyComplete: () => pageComplete(ledger, gaps),
+        });
+        if (navigation.result === NAV.ADVANCED) report.advancedTo = navigation.to;
+        else report.advanceBlocked = navigation.result;
+    }
+
     trace('mdlz.pass', {
         filled: report.filled,
         satisfied: ledger.tasks.filter((t) => t.result === RESULT.SATISFIED).length,
@@ -235,8 +258,38 @@ export async function runMdlzV2(ctx = {}) {
         halted: ledger.halted || '(none)',
         leaks: ledger.leaks,
         gaps: gaps.length,
+        advance: navigation ? navigation.result : '(not attempted — the page still needed work)',
     });
-    return { took: true, report, ledger, gaps, pageIsV2Owned: true };
+    return { took: true, report, ledger, gaps, navigation, pageIsV2Owned: true };
+}
+
+/**
+ * Is this page finished — the question the navigation transaction asks before
+ * it presses anything.
+ *
+ * Three ways it can be unfinished, and each is reported as itself: a task that
+ * did not end well, an answer the CV never held, and an error the form is
+ * showing. The third one matters most: leaving a page that is complaining means
+ * arriving at the next one with the complaint still behind you.
+ */
+export function pageComplete(ledger, gaps = []) {
+    const unfinished = (ledger?.tasks || [])
+        .filter((t) => ![RESULT.SATISFIED, RESULT.COMMITTED].includes(t.result));
+    if (unfinished.length) {
+        return { complete: false, reason: `${unfinished[0].id} ended ${unfinished[0].result}`, unfinished };
+    }
+    if (gaps.length) {
+        const g = gaps[0];
+        return { complete: false, reason: `${g.section}${g.field ? `.${g.field}` : ''}: ${g.why}`, gaps };
+    }
+    let errors = [];
+    try {
+        errors = [...document.querySelectorAll(SEL.fieldError)]
+            .filter((e) => e.offsetParent !== null)
+            .map((e) => (e.textContent || '').trim());
+    } catch { /* no DOM to ask */ }
+    if (errors.length) return { complete: false, reason: errors[0], errors };
+    return { complete: true };
 }
 
 /**
