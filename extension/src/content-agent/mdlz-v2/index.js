@@ -24,20 +24,35 @@ import { census } from './popup-manager.js';
 import { addRow, runField } from './executors.js';
 import { fingerprintOf } from './fingerprint.js';
 import { SECTIONS, addButtonFor, planStep, resolveRow, resolveTarget } from './planner.js';
+import { preflightReport } from './preflight.js';
 import { rowsOf } from './row.js';
 import { runSequential } from './scheduler.js';
 import { trace } from '../trace.js';
 
-/** Is v2 allowed to run here? Storage flag AND an mdlz page. */
-export async function mdlzV2Enabled() {
-    if (!isMdlzPage()) return false;
+/**
+ * Three settings, not two.
+ *
+ * `dry` is the one that matters before a first live run: v2 reads the page,
+ * says what it would have done, and hands it straight back to v1 — so the first
+ * contact with somebody's real application is a measurement and not a write.
+ */
+export const MODE = { OFF: 'off', DRY: 'dry', ON: 'on' };
+
+export async function flagMode() {
+    if (!isMdlzPage()) return MODE.OFF;
     try {
         const d = await new Promise((r) => chrome.storage.local.get(FLAG_KEY, r));
-        return d?.[FLAG_KEY] === true;
+        const v = d?.[FLAG_KEY];
+        if (v === true || v === 'on') return MODE.ON;
+        if (v === 'dry' || v === 'preflight') return MODE.DRY;
+        return MODE.OFF;
     } catch {
-        return false;
+        return MODE.OFF;
     }
 }
+
+/** Is v2 allowed to WRITE here? The strongest setting, and only that one. */
+export const mdlzV2Enabled = async () => (await flagMode()) === MODE.ON;
 
 /**
  * One observation pass. Returns what v2 believes about this page.
@@ -113,6 +128,30 @@ function runnable(task, ctx) {
 }
 
 /**
+ * Would v2 take this page, and why not?
+ *
+ * ONE decision, used by the pass and by the dry run alike — a preflight that
+ * decided separately could report "would take" about a page the controller
+ * declines, which is the one thing a preflight must never do.
+ */
+export async function decideTake(ctx = {}) {
+    const seen = await observeOnly(ctx);
+    const no = (reason, extra = {}) => ({ take: false, reason, seen, ...extra });
+
+    if (seen.step !== STEP.MY_EXPERIENCE) return no(`v2 does not own ${seen.step}`);
+    if (!seen.ready) return no('page still settling');
+    if (!resumeAttached()) return no('résumé not attached yet — v1 owns the upload');
+
+    const plan = planStep(ctx.cv, { root: ctx.root });
+    const blocking = plan.gaps.filter((g) => /add button/.test(g.why));
+    if (blocking.length) {
+        return no(`cannot finish ${blocking.map((g) => g.section).join(', ')}`, { plan });
+    }
+    if (!plan.tasks.length) return no('nothing planned for this page', { plan });
+    return { take: true, reason: '', seen, plan };
+}
+
+/**
  * The controller. Takes the page, or says why it did not.
  *
  * Everything that makes it decline is a REASON, not a silence: a step v2 does
@@ -120,24 +159,25 @@ function runnable(task, ctx) {
  * from the other three on the page. v1 then runs exactly as it did before.
  */
 export async function runMdlzV2(ctx = {}) {
-    if (!(await mdlzV2Enabled())) return { took: false, reason: 'flag off' };
+    const mode = await flagMode();
+    if (mode === MODE.OFF) return { took: false, reason: 'flag off' };
 
-    const seen = await observeOnly(ctx);
-    if (seen.step !== STEP.MY_EXPERIENCE) {
-        return { took: false, reason: `v2 does not own ${seen.step}`, result: RESULT.SKIPPED_OPTIONAL };
-    }
-    if (!seen.ready) return { took: false, reason: 'page still settling' };
-    if (!resumeAttached()) return { took: false, reason: 'résumé not attached yet — v1 owns the upload' };
+    const decision = await decideTake(ctx);
 
-    const { tasks, gaps } = planStep(ctx.cv, { root: ctx.root });
-    const blocking = gaps.filter((g) => /add button/.test(g.why));
-    if (blocking.length) {
-        trace('mdlz.plan.declined', { sections: blocking.map((g) => g.section).join(','), gaps: gaps.length });
-        return { took: false, reason: `cannot finish ${blocking.map((g) => g.section).join(', ')}`, gaps };
+    // Dry run: report and stand down, whatever the decision was. v1 fills this
+    // page exactly as it does today, and what comes back is a table.
+    if (mode === MODE.DRY) {
+        const preflight = preflightReport(ctx.cv, decision, { root: ctx.root });
+        return { took: false, reason: `dry run — ${preflight.verdict}`, preflight, dry: true };
     }
-    if (!tasks.length) {
-        return { took: false, reason: 'nothing planned for this page', gaps };
+
+    if (!decision.take) {
+        if (decision.plan) {
+            trace('mdlz.plan.declined', { reason: decision.reason, gaps: decision.plan.gaps.length });
+        }
+        return { took: false, reason: decision.reason, gaps: decision.plan?.gaps, result: RESULT.SKIPPED_OPTIONAL };
     }
+    const { tasks, gaps } = decision.plan;
 
     trace('mdlz.plan', {
         tasks: tasks.length,
@@ -171,3 +211,26 @@ export async function runMdlzV2(ctx = {}) {
     });
     return { took: true, report, ledger, gaps };
 }
+
+/**
+ * The last CV the router handed in, kept for the console hook alone.
+ *
+ * A dry run is worth most when it can be asked for at a moment somebody chose —
+ * mid-draft, on the row that looks wrong — and not only when the loop happens
+ * to come round. The value is already in this page's memory; nothing is stored,
+ * sent, or written down.
+ */
+let _lastCv = null;
+export const rememberCv = (cv) => { if (cv) _lastCv = cv; };
+
+/** `copoMdlzPreflight()` in the extension's console context, any time. */
+export async function preflightNow(cv) {
+    const decision = await decideTake({ cv: cv || _lastCv });
+    return preflightReport(cv || _lastCv, decision, {});
+}
+
+try {
+    if (isMdlzPage() && typeof globalThis !== 'undefined') {
+        globalThis.copoMdlzPreflight = preflightNow;
+    }
+} catch { /* not a browser, or a page v2 has no business on */ }

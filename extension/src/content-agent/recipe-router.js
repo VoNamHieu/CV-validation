@@ -16,7 +16,7 @@
 
 import * as generic from './recipe.js';
 import * as mdlzV1 from './recipe-mdlz-v1.js';
-import { runMdlzV2 } from './mdlz-v2/index.js';
+import { rememberCv, runMdlzV2 } from './mdlz-v2/index.js';
 
 const LOCKED = [
     {
@@ -55,6 +55,7 @@ try {
  */
 export const applyRecipeFields = async (recipe, profile, cvData, cv) => {
     try {
+        rememberCv(cv);                       // so copoMdlzPreflight() can be asked for on demand
         const v2 = await runMdlzV2({ recipe, profile, cvData, cv });
         if (v2?.took) return v2.report;
         if (v2?.reason && v2.reason !== 'flag off') {

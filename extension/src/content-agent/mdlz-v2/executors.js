@@ -87,6 +87,28 @@ export function chooseOption(options, want) {
 /** The row a field sits in, if the caller gave us one — errors live there. */
 const rowClean = (ctx) => !ctx?.row || errorsIn(ctx.row).length === 0;
 
+/**
+ * What this field is showing, in words, for a human reading a report.
+ *
+ * NOT a commit signal and never used as one: each capability's `verify` stays
+ * the only authority on whether something committed. This is for the preflight
+ * table, where the useful column is "what is in there right now".
+ */
+export function readNow(f) {
+    const c = f.controls();
+    if (f.kind === WIDGET.DATE) {
+        const at = (el) => el?.getAttribute('aria-valuenow') || '—';
+        return `${at(c.month)}/${at(c.year)}`;
+    }
+    if (f.kind === WIDGET.SEARCH_MULTI) return c.chips.map(txt).join(' | ') || '(no chips)';
+    if (f.kind === WIDGET.CHECKBOX) return c.checkbox?.checked ? 'ticked' : 'unticked';
+    if (f.kind === WIDGET.LISTBOX) {
+        const shown = txt(c.button) || c.text?.value || '';
+        return isPlaceholder(shown) || !shown ? '(Select One)' : shown;
+    }
+    return (c.text || c.textarea)?.value || '(empty)';
+}
+
 // ── the capabilities ─────────────────────────────────────────────────────
 
 const text = {
