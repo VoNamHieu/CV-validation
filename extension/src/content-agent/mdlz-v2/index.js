@@ -18,7 +18,7 @@
  * exist yet.
  */
 
-import { FLAG_KEY, RESULT, SEL, STEP, isMdlzPage } from './config.js';
+import { ADD_VIA_KEY, FLAG_KEY, RESULT, STEP, isMdlzPage } from './config.js';
 import { openPopups, orphanOptionCount, pageFingerprint, waitPageReady } from './page-observer.js';
 import { census } from './popup-manager.js';
 import { addRow, runField } from './executors.js';
@@ -39,15 +39,26 @@ import { trace } from '../trace.js';
 export const MODE = { OFF: 'off', DRY: 'dry', ON: 'on' };
 
 export async function flagMode() {
-    if (!isMdlzPage()) return MODE.OFF;
+    return (await settings()).mode;
+}
+
+/**
+ * Everything storage says about this run, read in one go.
+ *
+ * `addVia` restricts how a section's Add button may be identified — 'rows' turns
+ * off the heading strategy from a console, for a live run that finds it wrong.
+ */
+export async function settings() {
+    if (!isMdlzPage()) return { mode: MODE.OFF, addVia: 'any' };
     try {
-        const d = await new Promise((r) => chrome.storage.local.get(FLAG_KEY, r));
+        const d = await new Promise((r) => chrome.storage.local.get([FLAG_KEY, ADD_VIA_KEY], r));
         const v = d?.[FLAG_KEY];
-        if (v === true || v === 'on') return MODE.ON;
-        if (v === 'dry' || v === 'preflight') return MODE.DRY;
-        return MODE.OFF;
+        const addVia = d?.[ADD_VIA_KEY] === 'rows' ? 'rows' : 'any';
+        if (v === true || v === 'on') return { mode: MODE.ON, addVia };
+        if (v === 'dry' || v === 'preflight') return { mode: MODE.DRY, addVia };
+        return { mode: MODE.OFF, addVia };
     } catch {
-        return MODE.OFF;
+        return { mode: MODE.OFF, addVia: 'any' };
     }
 }
 
@@ -109,7 +120,7 @@ function runnable(task, ctx) {
             run: async () => {
                 const spec = SECTIONS.find((s) => s.name === task.section);
                 const rows = rowsOf(spec.anchor, { root: ctx.root });
-                return addRow(addButtonFor(spec, rows), {
+                return addRow(addButtonFor(spec, rows, ctx.addVia), {
                     sleep: ctx.sleep, anchor: spec.anchor, root: ctx.root, budgetMs: ctx.addMs,
                 });
             },
@@ -143,7 +154,7 @@ export async function decideTake(ctx = {}) {
     if (!seen.ready) return no('page still settling');
     if (!resumeAttached(ctx.cvData)) return no('résumé not attached yet — v1 owns the upload');
 
-    const plan = planStep(ctx.cv, { root: ctx.root });
+    const plan = planStep(ctx.cv, { root: ctx.root, addVia: ctx.addVia || 'any' });
     const blocking = plan.gaps.filter((g) => /add button/.test(g.why));
     if (blocking.length) {
         return no(`cannot finish ${blocking.map((g) => g.section).join(', ')}`, { plan });
@@ -160,15 +171,15 @@ export async function decideTake(ctx = {}) {
  * from the other three on the page. v1 then runs exactly as it did before.
  */
 export async function runMdlzV2(ctx = {}) {
-    const mode = await flagMode();
+    const { mode, addVia } = await settings();
     if (mode === MODE.OFF) return { took: false, reason: 'flag off' };
 
-    const decision = await decideTake(ctx);
+    const decision = await decideTake({ ...ctx, addVia });
 
     // Dry run: report and stand down, whatever the decision was. v1 fills this
     // page exactly as it does today, and what comes back is a table.
     if (mode === MODE.DRY) {
-        const preflight = preflightReport(ctx.cv, decision, { root: ctx.root, cvData: ctx.cvData });
+        const preflight = preflightReport(ctx.cv, decision, { root: ctx.root, cvData: ctx.cvData, addVia });
         return { took: false, reason: `dry run — ${preflight.verdict}`, preflight, dry: true };
     }
 
@@ -187,7 +198,7 @@ export async function runMdlzV2(ctx = {}) {
         first: tasks.slice(0, 3).map((t) => t.id).join(' · '),
     });
 
-    const ledger = await runSequential(tasks.map((t) => runnable(t, ctx)), { sleep: ctx.sleep });
+    const ledger = await runSequential(tasks.map((t) => runnable(t, { ...ctx, addVia })), { sleep: ctx.sleep });
     if (ledger.busy) return { took: false, reason: 'another pass owns this page', report: { matched: false, filled: 0, busy: true } };
 
     // v1's report shape, because v1's caller is what reads it: how many fields

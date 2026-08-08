@@ -189,12 +189,16 @@ export function sectionByHeading(title) {
  * sits in, and failing that the section its HEADING names. Returns which one
  * answered, because on a live page that is the interesting half.
  */
-export function addButtonFound(spec, rows) {
+export function addButtonFound(spec, rows, addVia = 'any') {
     if (rows.length) {
         const section = rows.length > 1 ? rows[0].parentNode : rows[0];
         const byRows = section?.querySelector?.(SEL.addButton);
         if (byRows) return { button: byRows, via: 'rows' };
     }
+    // The heading strategy is grounded in Workday's own copy and has never met a
+    // real page. `addVia: 'rows'` is the switch that turns it off from a console
+    // if a live run puts a row in the wrong section.
+    if (addVia === 'rows') return { button: null, via: null };
     const heading = sectionByHeading(COPY.sections[spec.name]);
     const byHeading = heading?.querySelector?.(SEL.addButton);
     if (byHeading) return { button: byHeading, via: 'heading' };
@@ -202,7 +206,7 @@ export function addButtonFound(spec, rows) {
 }
 
 /** Just the button, for callers that only want to click it. */
-export const addButtonFor = (spec, rows) => addButtonFound(spec, rows).button;
+export const addButtonFor = (spec, rows, addVia) => addButtonFound(spec, rows, addVia).button;
 
 /**
  * Everything this page still needs, in the order it should be done.
@@ -210,7 +214,7 @@ export const addButtonFor = (spec, rows) => addButtonFound(spec, rows).button;
  * Rows before their fields, fields of one entry together, and the whole thing
  * derived from the page as it is right now.
  */
-export function planStep(cv, { root = null, maxRows = 8 } = {}) {
+export function planStep(cv, { root = null, maxRows = 8, addVia = 'any' } = {}) {
     const tasks = [];
     const gaps = [];
 
@@ -223,7 +227,7 @@ export function planStep(cv, { root = null, maxRows = 8 } = {}) {
         for (const entry of entries) {
             const { row, how } = claimRow(spec, entry, rows, taken);
             if (!row) {
-                const { button: add, via } = addButtonFound(spec, rows);
+                const { button: add, via } = addButtonFound(spec, rows, addVia);
                 if (!add) {
                     // Neither a row nor a heading names this section's button,
                     // and four of them are on the page: say so, and let something

@@ -131,6 +131,16 @@ describe('the plan is derived from the page, every time it is asked', () => {
         assert.deepEqual(gaps.filter((g) => /add button/.test(g.why)), []);
     });
 
+    test('the heading strategy can be switched off from a console', () => {
+        // It is grounded in Workday's own copy and has never met a real page.
+        // If a live run puts a row in the wrong section, this is how it gets
+        // turned off — without a rebuild, and without giving up the sections
+        // that already have rows to be found through.
+        const { tasks, gaps } = planner.planStep(CV, { addVia: 'rows' });
+        assert.equal(tasks.filter((t) => t.kind === 'addRow').length, 0);
+        assert.ok(gaps.some((g) => g.section === 'work' && /add button/.test(g.why)));
+    });
+
     test('a section it can name NEITHER way is declared, not guessed at', () => {
         // No rows and no heading: nothing on the page says which button belongs
         // to Work Experience, and clicking the wrong one writes a job into

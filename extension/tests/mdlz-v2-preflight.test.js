@@ -130,6 +130,16 @@ describe('a dry run reads the page and changes nothing on it', () => {
         assert.match(r.preflight.reason, /cannot finish work/);
     });
 
+    test('and the switch that turns that strategy off is read from storage', async () => {
+        globalThis.chrome = {
+            storage: { local: { get: (_k, cb) => cb({ copoMdlzV2: 'dry', copoMdlzV2AddVia: 'rows' }) } },
+        };
+        const r = await dryRun();
+        const work = r.preflight.sections.find((s) => s.section === 'work');
+        assert.equal(work.addFound, false, 'with no rows and no heading strategy, nothing names it');
+        assert.equal(r.preflight.verdict, 'WOULD HAND BACK');
+    });
+
     test('a section with no rows is found by the heading Workday gives it', async () => {
         // The case that used to make v2 hand back a fresh draft. "Work
         // Experience" is the product's own string, from the language bundle the

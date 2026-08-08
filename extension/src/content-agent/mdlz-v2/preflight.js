@@ -7,12 +7,12 @@
  * way at all to discover what was not. Two things in particular are assumptions
  * that only a live page can settle:
  *
- *   · that `input.files.length` is what "the résumé is attached" looks like —
- *     if it is not, v2 declines forever and v1 keeps the page, which is the
- *     safe direction but a silent one;
- *   · that a section's Add button sits inside the container its rows live in —
- *     four of them are visible at once on this step, and picking the wrong one
- *     writes an entry into another section.
+ *   · that the résumé is attached — asked three ways now, and every answer
+ *     reported, because one signal that could be wrong with nothing to notice
+ *     it is how v2 would decline forever in silence;
+ *   · that a section's Add button can be told from the other three, either
+ *     through a row the section already has or through the heading Workday's
+ *     own copy gives it. The second has never met a real page.
  *
  * So the first contact with a real application is a READ. This produces the
  * table that answers both, plus the verdict v2 would have reached and the row
@@ -95,7 +95,7 @@ export function resumeEvidence(cvData) {
 export const resumeReport = resumeEvidence;
 
 /** Where each section's Add button is, and whether it can be told from the others. */
-export function sectionReport(cv, { root = null } = {}) {
+export function sectionReport(cv, { root = null, addVia = 'any' } = {}) {
     const everyAdd = (() => {
         try { return [...document.querySelectorAll(SEL.addButton)].length; } catch { return 0; }
     })();
@@ -103,7 +103,7 @@ export function sectionReport(cv, { root = null } = {}) {
         addButtonsOnPage: everyAdd,
         sections: SECTIONS.map((spec) => {
             const rows = rowsOf(spec.anchor, { root });
-            const { button, via } = addButtonFound(spec, rows);
+            const { button, via } = addButtonFound(spec, rows, addVia);
             return {
                 section: spec.name,
                 heading: COPY.sections[spec.name] || '',
@@ -156,7 +156,7 @@ export function fieldReport(tasks, { root = null } = {}) {
  * re-implemented, so a preflight can never say "would take" about a page the
  * controller would decline.
  */
-export function preflightReport(cv, decision, { root = null, cvData = null } = {}) {
+export function preflightReport(cv, decision, { root = null, cvData = null, addVia = 'any' } = {}) {
     const { tasks = [], gaps = [] } = decision.plan || {};
     const report = {
         verdict: decision.take ? 'WOULD TAKE' : 'WOULD HAND BACK',
@@ -164,7 +164,8 @@ export function preflightReport(cv, decision, { root = null, cvData = null } = {
         step: decision.seen?.step || STEP.UNKNOWN,
         ready: !!decision.seen?.ready,
         resume: resumeEvidence(cvData),
-        ...sectionReport(cv, { root }),
+        ...sectionReport(cv, { root, addVia }),
+        addVia,
         adds: tasks.filter((t) => t.kind === 'addRow').map((t) => t.section),
         fields: fieldReport(tasks, { root }),
         gaps,

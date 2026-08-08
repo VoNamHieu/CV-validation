@@ -25,6 +25,17 @@ export const isMdlzPage = () => {
  */
 export const FLAG_KEY = 'copoMdlzV2';
 
+/**
+ * Which ways v2 may identify a section's Add button: 'any' or 'rows'.
+ *
+ * A kill switch for the one strategy that has never met a real page. Finding a
+ * section by its HEADING is grounded in Workday's own copy, and grounded is not
+ * the same as proven — if a live run puts a row in the wrong section, this turns
+ * that strategy off from the console, without a rebuild and without giving up
+ * the sections that already have rows.
+ */
+export const ADD_VIA_KEY = 'copoMdlzV2AddVia';
+
 // ── Steps ────────────────────────────────────────────────────────────────
 export const STEP = {
     AUTOFILL: 'AUTOFILL',
