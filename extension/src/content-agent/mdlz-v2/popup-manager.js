@@ -27,7 +27,7 @@
  */
 
 import { RESULT } from './config.js';
-import { openPopups, orphanOptionCount, vis, visibleLists, visibleOptions } from './page-observer.js';
+import { openPopups, orphanOptionCount, vis, visibleLists, visibleOptions, visiblePanels } from './page-observer.js';
 import { trace } from '../trace.js';
 
 const napper = (sleep) => sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
@@ -36,14 +36,17 @@ const napper = (sleep) => sleep || ((ms) => new Promise((r) => setTimeout(r, ms)
 export function census() {
     const popups = openPopups();
     const lists = visibleLists();
+    const panels = visiblePanels();
     return {
         expanded: popups.length,
         lists: lists.length,
+        panels: panels.length,
         orphans: orphanOptionCount(),
         options: visibleOptions().length,
         owners: popups.map((p) => p.ownerField || '(portal)'),
         popups,
         listNodes: lists,
+        panelNodes: panels,
     };
 }
 
@@ -55,7 +58,7 @@ export function census() {
  */
 export function isClear(c) {
     const s = c || census();
-    return s.orphans === 0 && s.lists === 0;
+    return s.orphans === 0 && s.lists === 0 && s.panels === 0;
 }
 
 // ── The rungs ────────────────────────────────────────────────────────────
@@ -104,10 +107,11 @@ const RUNGS = [
         // widget's own subtree never hears an Escape aimed there — so aim at
         // the trigger AND at the list, for every one that is open.
         name: 'escape@owner',
-        applies: (c) => c.popups.length > 0 || c.listNodes.length > 0,
+        applies: (c) => c.popups.length > 0 || c.listNodes.length > 0 || c.panelNodes.length > 0,
         run: (c) => {
             for (const p of c.popups) { escapeAt(p.trigger); escapeAt(p.listbox); }
             for (const l of c.listNodes) escapeAt(l);
+            for (const p of c.panelNodes) escapeAt(p);
         },
     },
     {

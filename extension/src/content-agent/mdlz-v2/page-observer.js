@@ -11,7 +11,7 @@
  * My Experience first rendered 4 fields and only later the full 38.
  */
 
-import { SEL, STEP, STEP_SIGNALS } from './config.js';
+import { MONTH_LABEL, SEL, STEP, STEP_SIGNALS } from './config.js';
 
 export const vis = (el) => !!(el && el.offsetParent !== null);
 const seen = (sel) => [...document.querySelectorAll(sel)].some(vis);
@@ -101,6 +101,33 @@ export async function waitPageReady({ quietMs = 600, budgetMs = 12000, sleep } =
         await nap(quietMs);
     }
     return { ready: false, step: observeStep(), fingerprint: pageFingerprint(), reason: 'page never settled' };
+}
+
+/** The twelve month cells of an open picker, wherever it was portalled to. */
+export function visibleMonthCells() {
+    return [...document.querySelectorAll(SEL.monthCell)]
+        .filter(vis)
+        .filter((c) => MONTH_LABEL.test((c.getAttribute('aria-label') || '').trim()));
+}
+
+/**
+ * Open date pickers, as panel nodes.
+ *
+ * A picker is not a listbox and its cells are not options, so the option census
+ * cannot see it — but it is portalled over the page just the same, and a leftover
+ * one covers the next widget exactly as a leftover list does ("the calendar did
+ * not open" was that, in the other direction). The panel has no id of its own;
+ * it is the parent of the UL that holds the cells, which is where the year arrows
+ * live.
+ */
+export function visiblePanels() {
+    const out = new Set();
+    for (const cell of visibleMonthCells()) {
+        const ul = cell.closest('ul');
+        const panel = (ul && ul.parentNode) || cell.parentNode;
+        if (panel) out.add(panel);
+    }
+    return [...out];
 }
 
 /**

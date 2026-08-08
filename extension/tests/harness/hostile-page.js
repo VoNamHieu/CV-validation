@@ -26,6 +26,23 @@
  *    and a manager that clicked them would erase answers.
  *  · A LIST THAT REFUSES KEYS — Language ignores Escape and closes only on an
  *    outside click, so the ladder has to escalate rather than repeat.
+ *
+ * And, for the field layer:
+ *
+ *  · A DATE THAT CANNOT BE TYPED — a synthetic write into a date section does
+ *    NOTHING (measured: value stays "", aria-valuenow stays null; only the
+ *    picker or a trusted keydown commits). The spinbuttons here revert every
+ *    write, so an executor that types is not "unlucky", it is wrong.
+ *  · A COMMIT THAT .value DENIES — the picker writes aria-valuenow and leaves
+ *    .value empty, exactly as the live form does. A verifier reading .value
+ *    calls a committed date empty; that false verdict is reproduced here.
+ *  · A TEXT BOX THAT HANDS BACK THE OLD TEXT — the React-controlled shape, where
+ *    a value goes in and the next render puts the previous one back. The other
+ *    false verdict: reported done, actually empty.
+ *  · A CONDITIONAL FIELD — ticking "I currently work here" removes To from the
+ *    DOM, so page-wide checkbox[i] and endDate[i] stop describing the same row
+ *    (measured: 3 boxes, 2 To's). Rows here are unnamed on purpose: a row must
+ *    be found by structure, not by an id the next tenant will not have.
  */
 
 const OPT_ID = 'promptOption';
@@ -52,6 +69,9 @@ export const DEGREES = [
 
 export const LANGUAGES = ['English', 'Vietnamese', 'French', 'Japanese', 'Mandarin'];
 
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'];
+
 /**
  * Build the page.
  *
@@ -65,6 +85,7 @@ export function buildHostilePage(doc, opts = {}) {
         openMs: 5,
         commitMs: 15,
         closeMs: 15,
+        pickerYear: 2026,        // where an empty picker opens
         ...opts,
     };
 
@@ -78,11 +99,152 @@ export function buildHostilePage(doc, opts = {}) {
     const page = el('div', { 'data-automation-id': 'applyFlowMyExpPage' }, doc.body);
     el('button', { 'data-automation-id': 'pageFooterNextButton' }, page).textContent = 'Save and Continue';
 
-    // A Work Experience row, so the step reads as MY_EXPERIENCE and the
-    // fingerprint has something real to count.
-    const row = el('div', { 'data-automation-id': 'workExperienceRow' }, page);
-    el('div', { 'data-automation-id': 'formField-jobTitle' }, row);
-    el('div', { 'data-automation-id': 'formField-companyName' }, row);
+    // ── Work Experience ──────────────────────────────────────────────
+    // The section holds the rows; a row is an unnamed DIV, because on the live
+    // form there is no "row id" to hang identity on and a finder that needs one
+    // is a finder that works on this tenant only.
+    const workSection = el('div', {}, page);
+    const rows = [];
+    const pickerFor = new Map();   // date wrapper → its open panel
+    const dateKeys = [];           // every keydown a spinbutton was sent
+    const dateWrites = [];         // every .value a spinbutton refused
+
+    /** A text box that can be told to hand the old value back, React-style. */
+    function textControl(wrap, { reverts = false, tag = 'input' } = {}) {
+        const input = el(tag, tag === 'input' ? { type: 'text' } : {}, wrap);
+        if (!reverts) return input;
+        let held = '';
+        Object.defineProperty(input, 'value', {
+            get: () => held,
+            set: (v) => {
+                // Accepted for a moment, then the next render puts back what
+                // the component's own state still says.
+                held = String(v);
+                setTimeout(() => { held = ''; }, cfg.commitMs);
+            },
+            configurable: true,
+        });
+        return input;
+    }
+
+    /**
+     * A date, as measured: two spinbuttons that REFUSE every synthetic write,
+     * a calendar icon, and a commit that shows up in aria-valuenow only.
+     */
+    function dateControl(wrap, name) {
+        const icon = el('button', { 'data-automation-id': 'dateIcon' }, wrap);
+        icon.textContent = 'Calendar';
+        const mk = (id) => {
+            const input = el('input', { 'data-automation-id': id, role: 'spinbutton', type: 'text' }, wrap);
+            let refused = '';
+            Object.defineProperty(input, 'value', {
+                get: () => refused,
+                set: () => { dateWrites.push(name); },   // written to, never written
+                configurable: true,
+            });
+            input.addEventListener('keydown', () => dateKeys.push(name));
+            return input;
+        };
+        const month = mk('dateSectionMonth-input');
+        const year = mk('dateSectionYear-input');
+        icon.addEventListener('click', () => openPicker(wrap, month, year));
+        return { icon, month, year };
+    }
+
+    /**
+     * The picker: a UL of twelve cells labelled "May 2026", the selected one
+     * prefixed, and the year arrows in the UL's parent. Portalled to the body,
+     * like every other popup here.
+     */
+    function openPicker(wrap, month, year) {
+        if (pickerFor.has(wrap)) return;
+        let shownYear = Number(year.getAttribute('aria-valuenow')) || cfg.pickerYear;
+        const panel = el('div', {}, doc.body);
+        const back = el('button', { 'aria-label': 'Previous Year' }, panel);
+        const fwd = el('button', { 'aria-label': 'Next Year' }, panel);
+        const ul = el('ul', {}, panel);
+        const paint = () => {
+            ul.children.forEach((c) => { c.parentNode = null; });
+            ul.children = [];
+            MONTHS.forEach((m, i) => {
+                const li = el('li', {}, ul);
+                const cell = el('div', { role: 'button' }, li);
+                const selected = Number(month.getAttribute('aria-valuenow')) === i + 1
+                    && Number(year.getAttribute('aria-valuenow')) === shownYear;
+                cell.setAttribute('aria-label', `${selected ? 'Selected ' : ''}${m} ${shownYear}`);
+                cell.textContent = m;
+                cell.addEventListener('click', () => {
+                    setTimeout(() => {
+                        // The commit the live form makes: aria-valuenow, and
+                        // nothing in .value.
+                        month.setAttribute('aria-valuenow', String(i + 1));
+                        year.setAttribute('aria-valuenow', String(shownYear));
+                        closePicker(wrap);
+                    }, cfg.commitMs);
+                });
+            });
+        };
+        back.addEventListener('click', () => { shownYear -= 1; paint(); });
+        fwd.addEventListener('click', () => { shownYear += 1; paint(); });
+        panel.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePicker(wrap); });
+        pickerFor.set(wrap, panel);
+        paint();
+    }
+
+    function closePicker(wrap) {
+        const p = pickerFor.get(wrap);
+        if (!p) return;
+        pickerFor.delete(wrap);
+        p.remove();
+    }
+
+    /**
+     * One Work Experience row. `current: true` ticks the box and takes To out of
+     * the DOM, which is the shape that breaks index pairing.
+     */
+    function addWorkRow({ title = '', company = '', current = false, revertsTitle = false } = {}) {
+        const row = el('div', {}, workSection);
+        const field = (id) => el('div', { 'data-automation-id': id }, row);
+
+        const titleInput = textControl(field('formField-jobTitle'), { reverts: revertsTitle });
+        titleInput.value = title;
+        const companyInput = textControl(field('formField-companyName'));
+        companyInput.value = company;
+
+        const box = el('input', { type: 'checkbox' }, field('formField-currentlyWorkHere'));
+        const start = dateControl(field('formField-startDate'), 'startDate');
+        let endWrap = field('formField-endDate');
+        let end = dateControl(endWrap, 'endDate');
+        const desc = textControl(field('formField-roleDescription'), { tag: 'textarea' });
+
+        const applyCurrent = () => {
+            if (box.checked && endWrap) { endWrap.remove(); endWrap = null; end = null; }
+            else if (!box.checked && !endWrap) {
+                endWrap = field('formField-endDate');
+                end = dateControl(endWrap, 'endDate');
+            }
+        };
+        box.addEventListener('click', () => { box.checked = !box.checked; applyCurrent(); });
+        if (current) { box.checked = true; applyCurrent(); }
+
+        const model = {
+            row, titleInput, companyInput, box, desc,
+            start: () => start,
+            end: () => end,
+            /** Workday says only "The field From is required" — the row is the
+             *  only thing that says WHICH one. */
+            raiseError(text = 'The field From is required') {
+                const node = el('div', { 'data-automation-id': 'errorMessage' }, row);
+                node.textContent = text;
+                return node;
+            },
+            clearErrors() {
+                row.querySelectorAll('[data-automation-id="errorMessage"]').forEach((e) => e.remove());
+            },
+        };
+        rows.push(model);
+        return model;
+    }
 
     const fields = {};
     const openLists = new Map();      // field name → list node
@@ -102,10 +264,16 @@ export function buildHostilePage(doc, opts = {}) {
 
     const closeEveryList = () => [...openLists.keys()].forEach((n) => closeList(n, { after: 0 }));
 
-    function openFor(name) {
+    function openFor(name, { filter = null } = {}) {
         const f = fields[name];
         if (openLists.has(name) || opening.has(name)) return;
         if (!cfg.sticky) closeEveryList();
+        // A search prompt answers a TERM. Typing nothing shows nothing, which is
+        // what makes the employer's taxonomy searchable rather than browsable.
+        const shown = filter === null
+            ? f.catalogue
+            : f.catalogue.filter((s) => s.toLowerCase().includes(String(filter).toLowerCase()));
+        if (filter !== null && !String(filter).trim()) return;
         opening.add(name);
         setTimeout(() => {
             opening.delete(name);
@@ -116,7 +284,7 @@ export function buildHostilePage(doc, opts = {}) {
             });
             // Portalled: the body, never the field's own wrapper.
             doc.body.appendChild(list);
-            for (const label of f.catalogue) {
+            for (const label of shown) {
                 const o = el('div', { role: 'option', 'data-automation-id': OPT_ID }, list);
                 o.textContent = label;
                 o.addEventListener('click', () => commit(name, label));
@@ -177,6 +345,11 @@ export function buildHostilePage(doc, opts = {}) {
             openFor(name);
         });
         if (tag === 'input') {
+            // Typing a term and pressing Enter is how a search prompt is opened;
+            // the results are what the term found, not the catalogue.
+            trigger.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') openFor(name, { filter: trigger.value });
+            });
             // Measured on SmartRecruiters: a search list gives itself up when the
             // box loses focus. Used here as the rung it is.
             trigger.addEventListener('focusout', () => closeList(name));
@@ -198,6 +371,18 @@ export function buildHostilePage(doc, opts = {}) {
         cfg,
         fields,
         page,
+        addWorkRow,
+        workRows: () => rows,
+        /** Everything a date section was sent and refused — the FORBIDDEN proof. */
+        dateKeys,
+        dateWrites,
+        pickerOpen: () => pickerFor.size,
+        /** A chip that was already there — the candidate's own, not ours to touch. */
+        seedChip(name, label) {
+            const chip = el('div', { 'data-automation-id': 'selectedItem', role: 'option' }, fields[name].chips);
+            chip.textContent = label;
+            return chip;
+        },
         /** The list a field currently has open, if any. */
         listFor: (name) => openLists.get(name) || null,
         openCount: () => openLists.size,

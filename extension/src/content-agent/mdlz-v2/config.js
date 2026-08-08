@@ -113,6 +113,14 @@ export const SEL = {
     dateIcon: '[data-automation-id="dateIcon"]',
     dateMonth: '[data-automation-id="dateSectionMonth-input"]',
     dateYear: '[data-automation-id="dateSectionYear-input"]',
+    // The picker panel carries no automation id of its own. What it does carry,
+    // measured: a UL of twelve cells, each a div[role="button"] labelled
+    // "May 2026" (the current one prefixed "Selected "), with the year arrows in
+    // the UL's parent. So the panel is found through its cells, not by name.
+    monthCell: '[role="button"][aria-label]',
+    yearBack: '[aria-label="Previous Year"]',
+    yearForward: '[aria-label="Next Year"]',
+    spinbutton: '[role="spinbutton"]',
     fieldError: '[data-automation-id="errorMessage"], [data-automation-id="formFieldError"], [data-automation-id="inputAlert"]',
     row: {
         jobTitle: '[data-automation-id="formField-jobTitle"]',
@@ -132,6 +140,12 @@ export const SEL = {
     },
     skills: '[data-automation-id="formField-skills"]',
 };
+
+/** "May 2026", or "Selected May 2026" for the month the picker is sitting on. */
+export const MONTH_LABEL = /^(?:Selected\s+)?([A-Z][a-z]+)\s+(\d{4})$/;
+
+export const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'];
 
 // ── Task outcomes ────────────────────────────────────────────────────────
 /**
