@@ -144,6 +144,7 @@ describe('one owner per page, enforced rather than requested', () => {
     });
 
     test('a page outside the set is left alone entirely', async () => {
+        // Not ported yet — and until it is, v1 owns it whole.
         renderPage('applyFlowPrimaryQuestionsPage');
         const state = await pages.observePageState({ sleep });
 

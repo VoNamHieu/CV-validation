@@ -293,11 +293,14 @@ describe('MILESTONE 3 GATE — a second pass writes nothing', () => {
 // ── the decision to take the page ────────────────────────────────────────
 
 describe('v2 takes a step it can finish, and hands back one it cannot', () => {
-    test('it declines a step that is not My Experience', async () => {
+    test('it declines a step that is not v2\'s at all', async () => {
+        // Application Questions is not ported. (My Information used to stand in
+        // for "not ours" here — it is v2's now, which is the point of a set you
+        // add names to.)
         dom.document.body.children.forEach((c) => { c.parentNode = null; });
         dom.document.body.children = [];
         const other = dom.document.createElement('div');
-        other.setAttribute('data-automation-id', 'formField-addressLine1');
+        other.setAttribute('data-automation-id', 'applyFlowPrimaryQuestionsPage');
         dom.document.body.appendChild(other);
 
         const r = await v2.runMdlzV2({ cv: CV, sleep });

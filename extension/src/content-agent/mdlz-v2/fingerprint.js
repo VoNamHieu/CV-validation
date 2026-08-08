@@ -28,6 +28,8 @@ export const WIDGET = {
     LISTBOX: 'listbox',
     SEARCH_MULTI: 'searchMulti',
     DATE: 'date',
+    RADIO: 'radio',
+    SEARCH_SINGLE: 'searchSingle',
     FILE: 'file',
     UNKNOWN: 'unknown',
 };
@@ -51,6 +53,10 @@ export function controlsOf(wrap) {
         button: first(wrap, 'button'),
         textarea: first(wrap, 'textarea'),
         checkbox: inputs.find((i) => (i.getAttribute('type') || '').toLowerCase() === 'checkbox') || null,
+        // NOT filtered by visibility. Workday styles its radios with a custom
+        // control and the real input can be invisible — a finder that only sees
+        // visible ones finds a group of none and reports the field absent.
+        radios: inputs.filter((i) => (i.getAttribute('type') || '').toLowerCase() === 'radio'),
         file: inputs.find((i) => (i.getAttribute('type') || '').toLowerCase() === 'file') || null,
         text: inputs.find((i) => {
             const t = (i.getAttribute('type') || 'text').toLowerCase();
@@ -73,6 +79,7 @@ export function kindOf(wrap) {
     if (!wrap) return WIDGET.UNKNOWN;
     if (c.spins.length >= 2 || (c.month && c.year)) return WIDGET.DATE;
     if (c.file) return WIDGET.FILE;
+    if (c.radios.length) return WIDGET.RADIO;
     if (c.checkbox) return WIDGET.CHECKBOX;
     if (c.chipList) return WIDGET.SEARCH_MULTI;
     if (c.textarea) return WIDGET.TEXTAREA;
@@ -80,6 +87,12 @@ export function kindOf(wrap) {
     // Mondelez renders some prompts as a search box with no button at all — an
     // input that says it owns a popup is a listbox, whatever it looks like.
     if (c.text && (c.text.getAttribute('aria-haspopup') || '').includes('listbox')) return WIDGET.LISTBOX;
+    // A SEARCHABLE single-select looks exactly like a text box until you type.
+    // What tells them apart is measured: Province or City renders a button
+    // listbox on 3M and a searchable input placeholdered "Search" on Mondelez —
+    // two widgets behind one automation id, so the NAME cannot decide and the
+    // placeholder can.
+    if (c.text && /search/i.test(c.text.getAttribute('placeholder') || '')) return WIDGET.SEARCH_SINGLE;
     if (c.text) return WIDGET.TEXT;
     if (c.button) return WIDGET.LISTBOX;
     return WIDGET.UNKNOWN;

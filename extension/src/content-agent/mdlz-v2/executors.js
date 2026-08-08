@@ -25,7 +25,7 @@
 import { MONTHS, MONTH_LABEL, RESULT, SEL } from './config.js';
 import { WIDGET, triggerOf } from './fingerprint.js';
 import { errorsIn, rowsOf } from './row.js';
-import { visibleMonthCells, visiblePanels } from './page-observer.js';
+import { visibleMonthCells, visibleOptions, visiblePanels } from './page-observer.js';
 import { withList } from './popup-manager.js';
 import { trace } from '../trace.js';
 
@@ -216,9 +216,21 @@ const searchMulti = {
      * re-learn "already there" cost 39-44 seconds a pass, which is what this
      * check buys back.
      */
+    /**
+     * A chip counts when it is the ANSWER to what was asked, which is not always
+     * the same string. Measured on countryPhoneCode: the value asked for is
+     * "Vietnam" and the committed chip reads "Vietnam (+84)" — the catalogue's
+     * own wording. So a chip is matched the way an option is chosen: exactly, or
+     * as the single chip that contains it. Two chips containing it is not an
+     * answer, it is two.
+     */
     satisfied(f, want) {
-        const have = new Set(f.controls().chips.map((c) => fold(txt(c))));
-        return [...want].every((w) => have.has(fold(w)));
+        const chips = f.controls().chips.map((c) => fold(txt(c)));
+        return [...want].every((w) => {
+            const t = fold(w);
+            if (chips.includes(t)) return true;
+            return chips.filter((c) => c.includes(t)).length === 1;
+        });
     },
     async commit(f, want, ctx = {}) {
         const missing = [...want].filter((w) => !this.satisfied(f, [w]));
@@ -330,6 +342,127 @@ const date = {
     },
 };
 
+
+/**
+ * A radio group — three defects' worth of rules, each already paid for.
+ *
+ * The recipe had no radio support at all, which is why My Information stalled:
+ * Mondelez marks "Have you previously worked for this organization?" REQUIRED
+ * and renders it as radios, so eleven fields were filled, that one was left, and
+ * the advance is withheld while anything required is empty.
+ *
+ * What this does NOT do, each learned from a real defect:
+ *   · It does not set `.checked`. An earlier version did, dispatched `change`,
+ *     and reported success even when the policy had REFUSED the click — a
+ *     refusal that silently became a mutation.
+ *   · It does not match by substring alone. "No" is inside "Not applicable" and
+ *     "None of the above", so an exact label wins first and a substring counts
+ *     only when exactly one option has it.
+ *   · It does not believe the click. Workday's radios sit under overlays; the
+ *     only proof is re-reading `checked` afterwards.
+ *
+ * And it clicks the LABEL: the input itself is commonly invisible under a
+ * styled control, so it is not a thing a click can land on.
+ */
+const radio = {
+    options(f) {
+        const wrap = f.find();
+        return f.controls().radios.map((r) => {
+            const byFor = r.id && wrap ? wrap.querySelector(`label[for="${r.id}"]`) : null;
+            const label = byFor || r.closest?.('label') || null;
+            return { input: r, label, text: (label?.textContent || '').replace(/\s+/g, ' ').trim() };
+        });
+    },
+    pick(f, want) {
+        const rows = this.options(f);
+        const w = fold(want);
+        const exact = rows.filter((r) => fold(r.text) === w);
+        if (exact.length === 1) return exact[0];
+        const loose = rows.filter((r) => fold(r.text).includes(w));
+        return loose.length === 1 ? loose[0] : null;
+    },
+    satisfied(f, want) {
+        const hit = this.pick(f, want);
+        return !!hit && !!hit.input.checked;
+    },
+    async commit(f, want) {
+        const hit = this.pick(f, want);
+        if (!hit) {
+            const shown = this.options(f).map((r) => r.text).filter(Boolean);
+            return shown.length
+                ? { result: RESULT.AMBIGUOUS, reason: `no single option matches "${want}"`, saw: shown.slice(0, 4) }
+                : { result: RESULT.WAITING_HYDRATION, reason: 'the group has no options yet' };
+        }
+        const target = hit.label || hit.input;
+        try { target.scrollIntoView?.({ block: 'center' }); } catch { /* no layout */ }
+        target.click();
+        return { result: RESULT.COMMITTED };
+    },
+    async verify(f, want, ctx = {}) {
+        // Re-read, always: the click may have been swallowed by whatever was
+        // over it, and `checked` is the only thing that knows.
+        const ok = await until(() => this.satisfied(f, want), { sleep: ctx.sleep, budgetMs: ctx.commitMs || 900 });
+        if (!ok) return { result: RESULT.COMMIT_FAILED, reason: 'the click did not select it' };
+        if (!rowClean(ctx)) return { result: RESULT.COMMIT_FAILED, reason: `row error: ${errorsIn(ctx.row)[0]}` };
+        return { result: RESULT.COMMITTED };
+    },
+};
+
+/**
+ * A searchable single-select — the widget that commits into its own box.
+ *
+ * Measured on Province or City (R-174262): a search-pick commits FOR REAL — the
+ * next pass read the field as done and Workday never objected — but it leaves
+ * no chip and no button text, only the value sitting in the input. A verifier
+ * looking for a chip records a working click as no-commit.
+ *
+ * The catch is that the text we TYPED also sits in that input. What separates a
+ * commit from our own typing is the popup: it closes on a pick. So the signal
+ * is "the input holds the value AND no list is open" — both halves, or neither
+ * means anything.
+ */
+const searchSingle = {
+    shown: (f) => String(f.controls().text?.value || '').trim(),
+    satisfied(f, want) {
+        return fold(this.shown(f)) === fold(want) && visibleOptions().length === 0;
+    },
+    async commit(f, want, ctx = {}) {
+        const trigger = f.controls().text;
+        if (!trigger) return { result: RESULT.WAITING_HYDRATION, reason: 'no search box yet' };
+        let picked = null;
+        const r = await withList(trigger, async (lease) => {
+            const choice = chooseOption(lease.options(), want);
+            if (!choice.option) return { result: choice.why, saw: choice.saw };
+            picked = choice.matched;
+            choice.option.click();
+            return { result: RESULT.COMMITTED };
+        }, {
+            sleep: ctx.sleep,
+            label: f.name,
+            // Typing IS the activation here, exactly as for the chip search.
+            activate: (t) => {
+                t.focus?.();
+                setNativeValue(t, String(want));
+                try { t.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); }
+                catch { /* a box that answers to typing alone has already opened */ }
+            },
+        });
+        if (!r.ok) return { result: r.result || RESULT.COMMIT_FAILED, reason: r.reason };
+        return { ...r.value, picked };
+    },
+    async verify(f, want, ctx = {}) {
+        const ok = await until(() => this.satisfied(f, want), { sleep: ctx.sleep, budgetMs: ctx.commitMs || 1200 });
+        if (!ok) {
+            return {
+                result: RESULT.COMMIT_FAILED,
+                reason: `box reads "${this.shown(f) || 'empty'}"${visibleOptions().length ? ' with its list still open' : ''}`,
+            };
+        }
+        if (!rowClean(ctx)) return { result: RESULT.COMMIT_FAILED, reason: `row error: ${errorsIn(ctx.row)[0]}` };
+        return { result: RESULT.COMMITTED };
+    },
+};
+
 export const CAPABILITY = {
     [WIDGET.TEXT]: text,
     [WIDGET.TEXTAREA]: text,
@@ -337,6 +470,8 @@ export const CAPABILITY = {
     [WIDGET.LISTBOX]: listbox,
     [WIDGET.SEARCH_MULTI]: searchMulti,
     [WIDGET.DATE]: date,
+    [WIDGET.RADIO]: radio,
+    [WIDGET.SEARCH_SINGLE]: searchSingle,
 };
 
 /**
@@ -365,6 +500,8 @@ export async function addRow(button, { sleep, anchor, root = null, budgetMs } = 
 /** What each verify actually reads, spelled out for the trace. */
 const SIGNAL = {
     [WIDGET.DATE]: 'aria-valuenow',
+    [WIDGET.RADIO]: 'checked, re-read after the click',
+    [WIDGET.SEARCH_SINGLE]: 'the value in its own box, with the list closed',
     [WIDGET.SEARCH_MULTI]: 'chips',
     [WIDGET.LISTBOX]: 'button text',
     [WIDGET.CHECKBOX]: 'checked + no row error',

@@ -26,6 +26,7 @@ import { fingerprintOf } from './fingerprint.js';
 import { SECTIONS, addButtonFor, planStep, resolveRow, resolveTarget } from './planner.js';
 import { NAV, advance } from './navigation.js';
 import { runAutofillPage } from './page-autofill.js';
+import { runMyInfoPage } from './page-myinfo.js';
 import { READY, observePageState, owns, releasePage } from './pages.js';
 import { preflightReport, resumeEvidence } from './preflight.js';
 import { rowsOf } from './row.js';
@@ -186,6 +187,42 @@ export async function runMdlzV2(ctx = {}) {
         // somebody else's click.
         releasePage();
         return { took: false, reason: 'flag off', pageIsV2Owned: false };
+    }
+
+    // ── Tầng B: one controller per page ──────────────────────────────
+    //
+    // The page decides who runs. A page v2 owns but has no controller for must
+    // never fall through to another page's logic — which is exactly what
+    // happened when this dispatch was missing: My Information landed in My
+    // Experience's planner and came back "cannot finish work, education,
+    // languages" about a page that has none of them.
+    const where = await observePageState(ctx);
+    if (!owns(where.page)) {
+        return { took: false, reason: `v2 does not own ${where.page}`, pageIsV2Owned: false, result: RESULT.SKIPPED_OPTIONAL };
+    }
+    const CONTROLLERS = {
+        [STEP.AUTOFILL]: runAutofillPage,
+        [STEP.MY_INFORMATION]: runMyInfoPage,
+    };
+    const controller = CONTROLLERS[where.page];
+    if (controller) {
+        if (mode === MODE.DRY) {
+            // A dry run reads; it must not hold the page either, or the reading
+            // would stop v1 filling it.
+            releasePage();
+            return {
+                took: false, dry: true, pageIsV2Owned: false,
+                reason: `dry run — ${where.page} reads only`,
+                preflight: { verdict: 'WOULD TAKE', step: where.page, resume: resumeEvidence(ctx.cvData) },
+            };
+        }
+        const r = await controller(ctx);
+        return { ...r, pageIsV2Owned: true };
+    }
+    if (where.page !== STEP.MY_EXPERIENCE) {
+        // Owned, ported nowhere. Say so instead of guessing which controller
+        // might cope.
+        return { took: false, reason: `no controller for ${where.page}`, pageIsV2Owned: true };
     }
 
     const decision = await decideTake({ ...ctx, addVia });
