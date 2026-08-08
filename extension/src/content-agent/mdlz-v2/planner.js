@@ -119,13 +119,52 @@ export function dedupeLanguages(list) {
     for (const raw of list) {
         const name = String(raw?.language || '').trim();
         if (!name) continue;
-        const key = fold(name).replace(/\s*[-(].*$/, '');
+        const key = canonicalLanguage(name);
         const seen = out.find((o) => o.key === key);
-        if (!seen) { out.push({ key, language: name, level: raw.level || '' }); continue; }
+        if (!seen) { out.push({ key, language: askableLanguage(name), level: raw.level || '' }); continue; }
         // The entry that states a level is the one worth keeping.
         if (!seen.level && raw.level) seen.level = raw.level;
     }
     return out;
+}
+
+/**
+ * The name to ask the FORM for — which is not always the name the CV used.
+ *
+ * The extractor writes what the CV wrote: "English (IELTS 7.5)" from a
+ * certificate, "Tiếng Việt" from a Vietnamese CV's own language. The employer's
+ * catalogue holds neither. Asking it for a certificate finds nothing, and
+ * asking it in Vietnamese finds nothing either — the field would come back
+ * option-not-found for a language the candidate plainly speaks.
+ *
+ * So: a qualification is stripped, and the two languages this market always
+ * carries are asked for by the name the catalogue uses. Anything else is left
+ * exactly as written — inventing an English name for a language we have no
+ * mapping for would be guessing at what the form calls it.
+ */
+export function askableLanguage(name) {
+    const key = canonicalLanguage(name);
+    const KNOWN = { vietnamese: 'Vietnamese', english: 'English' };
+    if (KNOWN[key]) return KNOWN[key];
+    return String(name || '').replace(/[(（].*$/, '').replace(/\s+[-–—:,].*$/, '').trim() || String(name || '');
+}
+
+/**
+ * One name for one language, whatever the CV wrote.
+ *
+ * The market rule is not decoration: the extractor derives Vietnamese from the
+ * CV's own written language and English from a certificate, so a Vietnamese CV
+ * that also names its mother tongue arrives as BOTH "Vietnamese" and "Tiếng
+ * Việt". That is the exact pair behind the three-row screenshot — folding a
+ * qualification ("English (IELTS 7.5)") but not a translation would leave the
+ * measured case unfixed.
+ */
+export function canonicalLanguage(name) {
+    const s = fold(name);
+    if (/vietnamese|tiếng việt|tieng viet/.test(s)) return 'vietnamese';
+    if (/english|tiếng anh|tieng anh/.test(s)) return 'english';
+    // Everything after a bracket or a dash is a qualification, not a language.
+    return s.replace(/[(（].*$/, '').replace(/[-–—:,].*$/, '').replace(/\s+/g, ' ').trim();
 }
 
 /**
@@ -264,6 +303,9 @@ export function planStep(cv, { root = null, maxRows = 8, addVia = 'any' } = {}) 
                     anchor: spec.anchor,
                     field: f.id || null,
                     byLabel: f.byLabel || null,
+                    // A field reached by its label has no id to be named by — and
+                    // "Overall" is what a report has to call it.
+                    name: f.name || null,
                     want: f.want,
                     optional: !!f.optional,
                 });
