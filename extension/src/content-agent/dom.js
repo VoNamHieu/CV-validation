@@ -16,25 +16,9 @@ import { spanBucket } from './trace.js';
  * worker is recycling mid-sleep — late is recoverable, hung is not.
  */
 export function sleep(ms) {
-    // Waiting is the single biggest line item in a slow run, so it is
-    // measured rather than guessed (no-op unless span tracking is on).
+    // Waiting is the biggest line item in a slow run, so it is measured
+    // (no-op unless span tracking is on).
     try { spanBucket('sleepMs', ms); } catch { /* never break a sleep */ }
-    try {
-        if (typeof document !== 'undefined' && document.hidden && ms >= 50
-            && typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
-            return new Promise((resolve) => {
-                let done = false;
-                const finish = () => { if (!done) { done = true; resolve(); } };
-                try {
-                    chrome.runtime.sendMessage({ type: 'AGENT_SLEEP', ms }, () => {
-                        void chrome.runtime.lastError;
-                        finish();
-                    });
-                } catch { /* orphaned frame → local timer below */ }
-                setTimeout(finish, ms + 65000);   // belt: clamped, but it fires
-            });
-        }
-    } catch { /* non-browser (unit tests) → plain timer */ }
     return new Promise(r => setTimeout(r, ms));
 }
 
