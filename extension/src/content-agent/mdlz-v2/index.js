@@ -24,6 +24,7 @@ import { census } from './popup-manager.js';
 import { addRow, runField } from './executors.js';
 import { fingerprintOf } from './fingerprint.js';
 import { SECTIONS, addButtonFor, planStep, resolveRow, resolveTarget } from './planner.js';
+import { READY, observePageState, owns, releasePage } from './pages.js';
 import { preflightReport, resumeEvidence } from './preflight.js';
 import { rowsOf } from './row.js';
 import { runSequential } from './scheduler.js';
@@ -147,11 +148,17 @@ function runnable(task, ctx) {
  * declines, which is the one thing a preflight must never do.
  */
 export async function decideTake(ctx = {}) {
-    const seen = await observeOnly(ctx);
-    const no = (reason, extra = {}) => ({ take: false, reason, seen, ...extra });
+    // C0 first: which page, settled or not, and whose it is. The claim it takes
+    // is what stops anything else clicking here.
+    const state = await observePageState(ctx);
+    const seen = { ...(await observeOnly(ctx)), ...state };
+    const owned = owns(state.page);
+    const no = (reason, extra = {}) => ({ take: false, reason, seen, pageIsV2Owned: owned, ...extra });
 
-    if (seen.step !== STEP.MY_EXPERIENCE) return no(`v2 does not own ${seen.step}`);
-    if (!seen.ready) return no('page still settling');
+    if (!owned) return no(`v2 does not own ${state.page}`);
+    if (state.state === READY.HYDRATING) return no('page still settling');
+    // EMPTY_READY is a page, not a non-page: a fresh draft is exactly where
+    // "Add Another" is the only work there is.
     if (!resumeAttached(ctx.cvData)) return no('résumé not attached yet — v1 owns the upload');
 
     const plan = planStep(ctx.cv, { root: ctx.root, addVia: ctx.addVia || 'any' });
@@ -160,7 +167,7 @@ export async function decideTake(ctx = {}) {
         return no(`cannot finish ${blocking.map((g) => g.section).join(', ')}`, { plan });
     }
     if (!plan.tasks.length) return no('nothing planned for this page', { plan });
-    return { take: true, reason: '', seen, plan };
+    return { take: true, reason: '', seen, plan, pageIsV2Owned: true };
 }
 
 /**
@@ -172,7 +179,12 @@ export async function decideTake(ctx = {}) {
  */
 export async function runMdlzV2(ctx = {}) {
     const { mode, addVia } = await settings();
-    if (mode === MODE.OFF) return { took: false, reason: 'flag off' };
+    if (mode === MODE.OFF) {
+        // Off means off: v2 holds no page, so nothing it left behind can refuse
+        // somebody else's click.
+        releasePage();
+        return { took: false, reason: 'flag off', pageIsV2Owned: false };
+    }
 
     const decision = await decideTake({ ...ctx, addVia });
 
@@ -180,14 +192,17 @@ export async function runMdlzV2(ctx = {}) {
     // page exactly as it does today, and what comes back is a table.
     if (mode === MODE.DRY) {
         const preflight = preflightReport(ctx.cv, decision, { root: ctx.root, cvData: ctx.cvData, addVia });
-        return { took: false, reason: `dry run — ${preflight.verdict}`, preflight, dry: true };
+        // A dry run reads. It must not own the page either, or the reading
+        // itself would stop v1 filling it.
+        releasePage();
+        return { took: false, reason: `dry run — ${preflight.verdict}`, preflight, dry: true, pageIsV2Owned: false };
     }
 
     if (!decision.take) {
         if (decision.plan) {
             trace('mdlz.plan.declined', { reason: decision.reason, gaps: decision.plan.gaps.length });
         }
-        return { took: false, reason: decision.reason, gaps: decision.plan?.gaps, result: RESULT.SKIPPED_OPTIONAL };
+        return { took: false, reason: decision.reason, gaps: decision.plan?.gaps, result: RESULT.SKIPPED_OPTIONAL, pageIsV2Owned: !!decision.pageIsV2Owned };
     }
     const { tasks, gaps } = decision.plan;
 
@@ -199,7 +214,7 @@ export async function runMdlzV2(ctx = {}) {
     });
 
     const ledger = await runSequential(tasks.map((t) => runnable(t, { ...ctx, addVia })), { sleep: ctx.sleep });
-    if (ledger.busy) return { took: false, reason: 'another pass owns this page', report: { matched: false, filled: 0, busy: true } };
+    if (ledger.busy) return { took: false, reason: 'another pass owns this page', report: { matched: false, filled: 0, busy: true }, pageIsV2Owned: true };
 
     // v1's report shape, because v1's caller is what reads it: how many fields
     // moved, which step, and the answers that were actually committed.
@@ -221,7 +236,7 @@ export async function runMdlzV2(ctx = {}) {
         leaks: ledger.leaks,
         gaps: gaps.length,
     });
-    return { took: true, report, ledger, gaps };
+    return { took: true, report, ledger, gaps, pageIsV2Owned: true };
 }
 
 /**

@@ -1,5 +1,6 @@
 // AUTO-SPLIT from content-agent.js (Phase 2). Part of the Copo apply agent.
 import { checkClick, logDenial } from './policy.js';
+import { mayActivate, ownershipNote } from './mdlz-v2/pages.js';
 import { spanBucket } from './trace.js';
 
 // ─── Helpers ───
@@ -456,6 +457,20 @@ export async function simulateTyping(el, text, { commit = false } = {}) {
  */
 export function safeActivate(el, ctx = {}, originSelector) {
     if (!el) return false;
+
+    // ONE OWNER PER PAGE, enforced here rather than asked of each caller.
+    //
+    // While mdlz-v2 holds a page, nothing else may click on it — not the v1
+    // recipe, not the generic one, not the planner. Two owners writing the same
+    // widget, each verifying against state the other just changed, is the
+    // disorder the rewrite exists to end, and a rule that depends on every call
+    // site remembering it is not a rule. This is the choke point every click
+    // already goes through, so a new caller cannot miss it either.
+    if (!mayActivate(ctx.source, el)) {
+        console.warn(`[Copo] click refused — ${ownershipNote()} and this page is not shared`
+            + ` (asked by: ${ctx.source || 'planner'})`);
+        return false;
+    }
 
     // The selector the caller USED to reach this element. It matters because the
     // exact-control rule (`ctx.submitSelector`) can only fire when the descriptor

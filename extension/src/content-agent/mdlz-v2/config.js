@@ -41,8 +41,8 @@ export const STEP = {
     AUTOFILL: 'AUTOFILL',
     MY_INFORMATION: 'MY_INFORMATION',
     MY_EXPERIENCE: 'MY_EXPERIENCE',
-    QUESTIONS: 'QUESTIONS',
-    DISCLOSURES: 'DISCLOSURES',
+    APPLICATION_QUESTIONS: 'APPLICATION_QUESTIONS',
+    VOLUNTARY_DISCLOSURES: 'VOLUNTARY_DISCLOSURES',
     REVIEW: 'REVIEW',
     UNKNOWN: 'UNKNOWN',
 };
@@ -59,16 +59,27 @@ export const STEP = {
  *
  * So recognition is by CONTENT: which sections exist on the page right now.
  */
+/**
+ * PAGE ID FIRST, fields second — for all six.
+ *
+ * Every one of these pages renders an id of its own, and that id is there
+ * before any field is. A recogniser that needs a field cannot see an empty
+ * draft at all: measured on PwC's /apply flow, three bare sections and three
+ * Add buttons, not one formField, where v1 detected on formField-degree,
+ * matched nothing, and advanced past an application with no work history in it.
+ *
+ * The field selectors stay as a second line, for a page whose id a tenant
+ * renames. Review comes first because its page summarises the others.
+ */
 export const STEP_SIGNALS = [
     { step: STEP.REVIEW, any: ['[data-automation-id="applyFlowReviewPage"]'] },
-    // The page id comes FIRST because an empty draft has none of the fields.
-    // Measured on PwC's /apply flow (no résumé autofill): three bare sections
-    // and three Add buttons, not one formField. v1 detected on formField-degree
-    // alone, matched nothing, and advanced past an application with no work
-    // history in it at all. v2 was one signal away from inheriting that.
+    { step: STEP.AUTOFILL, any: ['[data-automation-id="applyFlowAutoFillPage"]'] },
+    { step: STEP.APPLICATION_QUESTIONS, any: ['[data-automation-id="applyFlowPrimaryQuestionsPage"]'] },
+    { step: STEP.VOLUNTARY_DISCLOSURES, any: ['[data-automation-id="applyFlowVoluntaryDisclosuresPage"]', '[data-automation-id="formField-gender"]', '[data-automation-id="formField-ethnicity"]'] },
     { step: STEP.MY_EXPERIENCE, any: ['[data-automation-id="applyFlowMyExpPage"]', '[data-automation-id="formField-jobTitle"]', '[data-automation-id="formField-schoolName"]', '[data-automation-id="formField-language"]'] },
-    { step: STEP.MY_INFORMATION, any: ['[data-automation-id="formField-addressLine1"]', '[data-automation-id="formField-phoneNumber"]', '[data-automation-id="formField-country"]'] },
-    { step: STEP.DISCLOSURES, any: ['[data-automation-id="formField-gender"]', '[data-automation-id="formField-ethnicity"]'] },
+    { step: STEP.MY_INFORMATION, any: ['[data-automation-id="formField-legalName--firstName"]', '[data-automation-id="formField-addressLine1"]', '[data-automation-id="formField-phoneNumber"]', '[data-automation-id="formField-country"]'] },
+    // Last: the upload input also appears on My Experience (Resume/CV), so on
+    // its own it names the Autofill page only when nothing above matched.
     { step: STEP.AUTOFILL, any: ['[data-automation-id="file-upload-input-ref"]'] },
 ];
 

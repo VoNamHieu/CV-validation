@@ -17,6 +17,7 @@
 import * as generic from './recipe.js';
 import * as mdlzV1 from './recipe-mdlz-v1.js';
 import { rememberCv, runMdlzV2 } from './mdlz-v2/index.js';
+import { pageOwner } from './mdlz-v2/pages.js';
 
 const LOCKED = [
     {
@@ -53,19 +54,53 @@ try {
  * The try/catch is the point of the wrapper: a fault in v2 must cost this pass
  * and nothing else. A page that v2 breaks would be a page v1 never got to try.
  */
+/**
+ * What happens after v2 has had its say — as a decision, so it can be checked.
+ *
+ * The rule that makes the migration safe is a NEGATIVE one, and negatives are
+ * the easy thing to get wrong by accident: on a page v2 owns, v1 never runs.
+ * Not when v2 declined the page, and not when v2 CRASHED on it — handing over a
+ * half-written widget puts two owners on it, each verifying against state the
+ * other left behind, which is the exact disorder the split exists to end.
+ */
+export function routeAfterV2(v2, error = null) {
+    const owned = !!v2?.pageIsV2Owned;
+    if (v2?.took && !error) return { useV1: false, result: v2.report };
+    if (error) {
+        if (owned) {
+            return {
+                useV1: false,
+                result: { matched: false, filled: 0, error: `mdlz-v2: ${error.message || error}`, v2: true },
+            };
+        }
+        return { useV1: true };
+    }
+    // Declined ON A PAGE IT OWNS means "not yet" — not ready, not answerable —
+    // and never "free for somebody else".
+    if (owned) return { useV1: false, result: { matched: false, filled: 0, v2: true, deferred: true } };
+    return { useV1: true };
+}
+
 export const applyRecipeFields = async (recipe, profile, cvData, cv) => {
+    let decision = { useV1: true };
     try {
         rememberCv(cv);                       // so copoMdlzPreflight() can be asked for on demand
         const v2 = await runMdlzV2({ recipe, profile, cvData, cv });
-        if (v2?.took) return v2.report;
-        if (v2?.reason && v2.reason !== 'flag off') {
-            console.log(`[Copo mdlz-v2] handing back to v1: ${v2.reason}`);
+        decision = routeAfterV2(v2);
+        if (!v2?.took && v2?.reason && v2.reason !== 'flag off') {
+            console.log(`[Copo mdlz-v2] ${v2.pageIsV2Owned ? 'owns this page but stood down' : 'handing back to v1'}`
+                + `: ${v2.reason}`);
         }
     } catch (e) {
-        console.warn('[Copo mdlz-v2] stood down after an error — v1 takes the pass:', e?.message || e);
+        // The claim on `window` outlives the crash that took the return value
+        // with it — and it is the same record the click choke point reads.
+        decision = routeAfterV2({ pageIsV2Owned: pageOwner() === 'mdlz-v2' }, e);
+        if (decision.useV1) console.warn('[Copo mdlz-v2] stood down after an error — v1 takes the pass:', e?.message || e);
+        else console.error('[Copo mdlz-v2] failed on a page it owns — v1 will NOT take over:', e?.message || e);
     }
-    return impl.applyRecipeFields(recipe, profile, cvData, cv);
+    return decision.useV1 ? impl.applyRecipeFields(recipe, profile, cvData, cv) : decision.result;
 };
+
 export const atFinalStep = impl.atFinalStep;
 export const clickRecipeGateway = impl.clickRecipeGateway;
 export const FIELD_FAIL_BUDGET = impl.FIELD_FAIL_BUDGET;
