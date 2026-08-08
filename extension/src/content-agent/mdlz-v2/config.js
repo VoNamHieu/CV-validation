@@ -77,7 +77,11 @@ export const STEP_SIGNALS = [
     { step: STEP.APPLICATION_QUESTIONS, any: ['[data-automation-id="applyFlowPrimaryQuestionsPage"]'] },
     { step: STEP.VOLUNTARY_DISCLOSURES, any: ['[data-automation-id="applyFlowVoluntaryDisclosuresPage"]', '[data-automation-id="formField-gender"]', '[data-automation-id="formField-ethnicity"]'] },
     { step: STEP.MY_EXPERIENCE, any: ['[data-automation-id="applyFlowMyExpPage"]', '[data-automation-id="formField-jobTitle"]', '[data-automation-id="formField-schoolName"]', '[data-automation-id="formField-language"]'] },
-    { step: STEP.MY_INFORMATION, any: ['[data-automation-id="formField-legalName--firstName"]', '[data-automation-id="formField-addressLine1"]', '[data-automation-id="formField-phoneNumber"]', '[data-automation-id="formField-country"]'] },
+    // applyFlowMyInfoPage is MEASURED the same way its siblings are (PwC
+    // 715624WD draft, 2026-08-06, read off the live DOM alongside
+    // applyFlowMyExpPage). An id nobody measured is not a detect — but this one
+    // was, and leaving it out made this the only page that needed a field.
+    { step: STEP.MY_INFORMATION, any: ['[data-automation-id="applyFlowMyInfoPage"]', '[data-automation-id="formField-legalName--firstName"]', '[data-automation-id="formField-addressLine1"]', '[data-automation-id="formField-phoneNumber"]', '[data-automation-id="formField-country"]'] },
     // Last: the upload input also appears on My Experience (Resume/CV), so on
     // its own it names the Autofill page only when nothing above matched.
     { step: STEP.AUTOFILL, any: ['[data-automation-id="file-upload-input-ref"]'] },

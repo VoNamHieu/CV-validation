@@ -118,8 +118,8 @@ export function buildHostilePage(doc, opts = {}) {
         nav.clicks += 1;
         if (cfg.blockAdvance) {
             // Validation: the page stays, and says why.
-            if (!page.querySelector('[data-automation-id="errorMessage"]')) {
-                el('div', { 'data-automation-id': 'errorMessage' }, page).textContent = 'The field From is required';
+            if (!page.querySelector('[data-automation-id="inputAlert"]')) {
+                el('div', { 'data-automation-id': 'inputAlert' }, page).textContent = 'The field From is required';
             }
             return;
         }
@@ -279,12 +279,16 @@ export function buildHostilePage(doc, opts = {}) {
             /** Workday says only "The field From is required" — the row is the
              *  only thing that says WHICH one. */
             raiseError(text = 'The field From is required') {
-                const node = el('div', { 'data-automation-id': 'errorMessage' }, row);
+                // MEASURED on mdlz 2026-08-03: the per-field error is
+                // `inputAlert`. errorMessage and formFieldError never appeared —
+                // a verify reading only those two saw "0 errors" beside a red
+                // "The field From is required and must have a value."
+                const node = el('div', { 'data-automation-id': 'inputAlert' }, row);
                 node.textContent = text;
                 return node;
             },
             clearErrors() {
-                row.querySelectorAll('[data-automation-id="errorMessage"]').forEach((e) => e.remove());
+                row.querySelectorAll('[data-automation-id="inputAlert"]').forEach((e) => e.remove());
             },
         };
         rows.push(model);

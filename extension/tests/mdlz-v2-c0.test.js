@@ -78,9 +78,17 @@ describe('all six pages are recognised, and recognised while empty', () => {
         });
     }
 
-    test('My Information is recognised by its legal-name field', async () => {
-        // The one page whose own id is not in the measured set; the field that
-        // names it is (formField-legalName--firstName).
+    test('applyFlowMyInfoPage → MY_INFORMATION, with no field on it at all', async () => {
+        // Measured on the same live draft its siblings were (PwC 715624WD,
+        // 2026-08-06). Writing this page off as "the one without an id" made it
+        // the only page that could not be seen while empty.
+        renderPage('applyFlowMyInfoPage');
+        const r = await pages.readiness({ sleep });
+        assert.equal(r.page, PAGE.MY_INFORMATION);
+        assert.equal(r.fields, 0);
+    });
+
+    test('and by its legal-name field when the id is not there', async () => {
         renderPage('someOtherWrapper', ['formField-legalName--firstName']);
         const r = await pages.readiness({ sleep });
         assert.equal(r.page, PAGE.MY_INFORMATION);

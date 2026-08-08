@@ -26,8 +26,8 @@
  *
  *   NEVER BY URL. The URL changes exactly once in this entire flow
  *   (/apply → /apply/autofillWithResume) and then never again, so "did the page
- *   change" cannot be asked of it. The page's own node is the instance: when it
- *   is gone, we left.
+ *   change" cannot be asked of it. What answers instead is the page's own id —
+ *   measured, one per step — and, as a second reading, its wrapper node.
  *
  *   NEVER SUBMIT. Workday's review page reuses pageFooterNextButton for Submit.
  *   An advance that does not know which page it is on WILL send the application.
@@ -75,15 +75,15 @@ function dropLock(token) {
 }
 
 /**
- * The node that IS this page instance.
+ * The page instance: its measured id, and the node carrying it.
  *
- * Every page of this flow renders a wrapper carrying its own automation id, and
- * that node is replaced when the wizard moves. Holding it is how "we left" gets
- * answered without asking the URL, which does not move.
+ * The ids are read off live drafts (applyFlowMyInfoPage, applyFlowMyExpPage and
+ * siblings). Whether the NODE survives a step change is not measured — see
+ * `gone` below, which is why it does not depend on the answer.
  */
 export function pageInstance() {
-    const ids = ['applyFlowReviewPage', 'applyFlowMyExpPage', 'applyFlowPrimaryQuestionsPage',
-        'applyFlowVoluntaryDisclosuresPage', 'applyFlowAutoFillPage'];
+    const ids = ['applyFlowReviewPage', 'applyFlowMyExpPage', 'applyFlowMyInfoPage',
+        'applyFlowPrimaryQuestionsPage', 'applyFlowVoluntaryDisclosuresPage', 'applyFlowAutoFillPage'];
     for (const id of ids) {
         const node = document.querySelector(`[data-automation-id="${id}"]`);
         if (node) return { node, id };
@@ -93,7 +93,20 @@ export function pageInstance() {
     return { node: null, id: `${observeStep()}:${document.querySelectorAll('[data-automation-id^="formField-"]').length}` };
 }
 
+/**
+ * We left when the page we were on is no longer the page we are on.
+ *
+ * Asked TWO ways, because only one of them is measured. That each step renders
+ * its own page id IS measured (applyFlowMyInfoPage, applyFlowMyExpPage and
+ * siblings, read off a live draft) — so a change of page NAME is solid ground.
+ * That the wrapper NODE is detached rather than re-used is not measured: it is
+ * how a re-render usually goes, and "usually" is not a signal to hang a
+ * transaction on. If Workday keeps the wrapper and swaps its children, the node
+ * test never fires and every advance would report a timeout on a page that had
+ * moved. Either answer is enough.
+ */
 const gone = (before) => {
+    if (before.page && observeStep() !== before.page) return true;
     if (before.node) {
         try { return !document.contains(before.node); } catch { return true; }
     }
@@ -172,7 +185,7 @@ export async function advance({
             return { result: NAV.REFUSED_FINAL, from, label };
         }
 
-        const before = pageInstance();
+        const before = { ...pageInstance(), page: from };
         // Below the fold, a click hit-tests as whatever covers that point.
         try { btn.scrollIntoView?.({ block: 'center' }); } catch { /* no layout */ }
 
