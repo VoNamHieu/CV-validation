@@ -21,6 +21,7 @@
  */
 
 import { COPY, SEL, STEP } from './config.js';
+import { readFileCommitState } from '../dom.js';
 import { CAPABILITY, readNow } from './executors.js';
 import { WIDGET, fingerprintOf } from './fingerprint.js';
 import { census } from './popup-manager.js';
@@ -36,55 +37,61 @@ const short = (v) => {
 };
 
 /**
- * Has the résumé landed? Asked three ways, and every answer reported.
+ * Has the résumé landed?
  *
- * One signal was a guess with no way to notice it was wrong: if
- * `input.files.length` is not how Workday shows an attached file, v2 declines
- * forever and says nothing. So the question is asked by every means the page
- * offers, ranked by how durable each is:
+ * ONE DEFINITION, and it is not v2's. `readFileCommitState` in dom.js is the
+ * shared answer the recipe and the observer already use, and the reason it is
+ * shared is a measured freeze: the two of them once answered differently — the
+ * recipe read uploadedRows=2 and skipped the upload while the observer read the
+ * input, which WORKDAY CLEARS AFTER INGESTING — so the same upload was reported
+ * as an unfilled required field, advance was withheld, and the planner was
+ * consulted about a page that was finished. A third module with its own
+ * definition is that bug again with more steps.
  *
- *   1. THE FILENAME ON THE PAGE. The Resume/CV section lists what was uploaded,
- *      and the name is one we already know. Durable — it survives re-render.
- *   2. THE UPLOAD CONFIRMATION. "Successfully Uploaded!" is Workday's own
- *      string (APPLY.FILE.Virus_Scan_Successful, read out of the shipped
- *      language bundle). Its key reads like a MOMENT rather than a state, so it
- *      is trusted as evidence and never required.
- *   3. `input.files.length` — true when it is true, absent on an input that
- *      never exposed the API.
+ * That also settles a guess of mine: `input.files` cannot be the signal here,
+ * because Workday empties it. What testifies is Workday's own row markers —
+ * `file-upload-item` / `file-upload-successful` — the ids the recipe's
+ * advanceWhen already trusts, and the same measurement records what re-uploading
+ * on a false negative costs: 5+ duplicate rows in one run.
  *
- * The filename is reported as a yes/no. It is somebody's name in a file name,
- * and a report meant to be pasted into a chat has no business carrying it.
+ * The two readings below the line are NOT part of the answer. They are carried
+ * so a live run can say whether they are worth anything: the CV's filename on
+ * the page, and Workday's "Successfully Uploaded!" (APPLY.FILE.Virus_Scan_Successful,
+ * out of the shipped language bundle — a key that reads like a moment, not a
+ * state). Neither has been measured on this tenant. The filename is reported as
+ * a yes/no: it is somebody's name in a file name, and a report meant to be
+ * pasted has no business carrying it.
  */
 export function resumeEvidence(cvData) {
     try {
         const input = document.querySelector(SEL.fileInput);
+        const state = readFileCommitState(input, document);
+
+        // Unmeasured, and reported only so the live run can judge them.
         const pageText = (document.body?.textContent || '');
-        const fileName = String(cvData?.fileName || '').trim();
-        const stem = fileName.replace(/\.[a-z0-9]+$/i, '').slice(0, 40);
+        const stem = String(cvData?.fileName || '').trim().replace(/\.[a-z0-9]+$/i, '').slice(0, 40);
         const filenameOnPage = !!stem && pageText.includes(stem);
         const banner = pageText.includes(COPY.uploadedBanner);
 
-        if (!input && !filenameOnPage && !banner) {
-            return { present: false, attached: true, signals: [], note: 'no upload target on this page' };
+        if (!input && !state.uploadedRows) {
+            return {
+                present: false, attached: true, signals: [], uploadedRows: 0,
+                unmeasured: { filenameOnPage, banner },
+                note: 'no upload target on this page',
+            };
         }
-        const hasFilesApi = !!input && 'files' in input;
-        const files = input && input.files ? input.files.length : null;
-        const signals = [
-            filenameOnPage && 'filename-on-page',
-            banner && 'upload-confirmation',
-            files > 0 && 'input.files',
-        ].filter(Boolean);
         return {
             present: !!input,
-            hasFilesApi,
-            files,
-            filenameOnPage,
-            banner,
-            knewFileName: !!stem,
-            signals,
-            attached: signals.length > 0,
-            note: !input ? 'no file input, but the page says a file is there'
-                : hasFilesApi ? '' : 'the input exposes no .files — that signal cannot be read here',
+            files: input?.files?.length ?? null,
+            uploadedRows: state.uploadedRows,
+            scoped: state.scoped,
+            attached: state.committed,
+            signals: [
+                state.nativeFiles > 0 && 'input.files',
+                state.uploadedRows > 0 && `upload-rows(${state.uploadedRows})`,
+            ].filter(Boolean),
+            unmeasured: { filenameOnPage, banner, knewFileName: !!stem },
+            note: state.committed ? '' : 'no upload row and no file on the input',
         };
     } catch (e) {
         return { present: null, attached: false, signals: [], note: `unreadable: ${e?.message || e}` };
@@ -179,7 +186,10 @@ export function preflightReport(cv, decision, { root = null, cvData = null, addV
         step: report.step,
         resume: `${report.resume.attached ? 'attached' : 'NOT attached'} via [${report.resume.signals.join(',') || 'nothing'}]`
             + ` (input=${report.resume.present ? `yes, files=${report.resume.files}` : 'absent'},`
-            + ` filenameKnown=${report.resume.knewFileName})`,
+            + ` rows=${report.resume.uploadedRows})`,
+        // Carried separately because neither has been measured on this tenant —
+        // the live run is what decides whether they are worth anything.
+        resumeUnmeasured: `filenameOnPage=${report.resume.unmeasured?.filenameOnPage} banner=${report.resume.unmeasured?.banner}`,
         sections: report.sections.map((s) => `${s.section}:${s.rows}r/${s.entries}e/add=${s.addFound ? s.addVia : 'NO'}`).join(' '),
         addButtonsOnPage: report.addButtonsOnPage,
         adds: report.adds.join(',') || '(none)',

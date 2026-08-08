@@ -156,7 +156,7 @@ describe('a dry run reads the page and changes nothing on it', () => {
 });
 
 describe('the report answers the two questions only a live page can', () => {
-    test('the résumé signal is reported in full, not as a boolean', async () => {
+    test('the résumé question is answered by the shared definition, not v2\'s own', async () => {
         page.addWorkRow({});
         const input = dom.document.createElement('input');
         input.setAttribute('data-automation-id', 'file-upload-input-ref');
@@ -165,69 +165,69 @@ describe('the report answers the two questions only a live page can', () => {
         page.page.appendChild(input);
 
         const r = await dryRun();
-        // `attached` is what the take decision uses; the rest is what says
-        // whether that reading means anything on this page at all.
         assert.equal(r.preflight.resume.present, true);
-        assert.equal(r.preflight.resume.files, 0);
+        assert.equal(r.preflight.resume.uploadedRows, 0);
         assert.equal(r.preflight.resume.attached, false);
-        assert.equal(r.preflight.resume.hasFilesApi, true);
+        assert.deepEqual(r.preflight.resume.signals, []);
     });
 
-    test('an input with no .files at all is named as a signal to re-measure', async () => {
+    test('an input Workday has EMPTIED still reads attached, because a row says so', async () => {
+        // The measurement this rests on: Workday ingests the file and CLEARS the
+        // input, so `input.files` reads false on every later pass. Reading only
+        // that is what made an agent re-upload the CV each iteration — 5+
+        // duplicate rows in one run.
         page.addWorkRow({});
         const input = dom.document.createElement('input');
         input.setAttribute('data-automation-id', 'file-upload-input-ref');
         input.setAttribute('type', 'file');
-        page.page.appendChild(input);                 // no `files` property
+        input.files = [];                       // emptied, exactly as measured
+        page.page.appendChild(input);
+        const row = dom.document.createElement('div');
+        row.setAttribute('data-automation-id', 'file-upload-item');
+        page.page.appendChild(row);
 
         const r = await dryRun();
-        assert.equal(r.preflight.resume.hasFilesApi, false);
-        assert.match(r.preflight.resume.note, /cannot be read/);
-        assert.deepEqual(r.preflight.resume.signals, [], 'and no other signal claimed otherwise');
-        assert.equal(r.preflight.resume.attached, false);
+        assert.equal(r.preflight.resume.attached, true);
+        assert.equal(r.preflight.resume.uploadedRows, 1);
+        assert.deepEqual(r.preflight.resume.signals, ['upload-rows(1)']);
     });
 
-    test('the filename on the page is enough on its own', async () => {
-        // The durable signal: the Resume/CV section lists what was uploaded, and
-        // the name is one we already know. It survives a re-render, which the
-        // upload confirmation may not.
+    test('the filename on the page is reported but does NOT decide', async () => {
+        // Unmeasured on this tenant. Carried so a live run can judge it; never
+        // allowed to answer the question — an id nobody measured is not a
+        // signal, which is the rule this whole file exists under.
         page.addWorkRow({});
+        const input = dom.document.createElement('input');
+        input.setAttribute('data-automation-id', 'file-upload-input-ref');
+        input.setAttribute('type', 'file');
+        input.files = [];
+        page.page.appendChild(input);
         const tile = dom.document.createElement('div');
         tile.textContent = 'HIEU_VO_Product_Owner.pdf';
         page.page.appendChild(tile);
 
         const r = await v2.runMdlzV2({ cv: CV, sleep, cvData: { fileName: 'HIEU_VO_Product_Owner.pdf' } });
-        assert.equal(r.preflight.resume.filenameOnPage, true);
-        assert.equal(r.preflight.resume.attached, true);
-        assert.deepEqual(r.preflight.resume.signals, ['filename-on-page']);
+        assert.equal(r.preflight.resume.unmeasured.filenameOnPage, true, 'reported');
+        assert.equal(r.preflight.resume.attached, false, 'but not counted');
     });
 
-    test('Workday\'s own upload confirmation counts too', async () => {
-        // "Successfully Uploaded!" is APPLY.FILE.Virus_Scan_Successful, read out
-        // of the bundle the apply flow loads. Its key reads like a MOMENT rather
-        // than a state, so it is evidence and never a requirement.
-        page.addWorkRow({});
-        const banner = dom.document.createElement('div');
-        banner.textContent = 'Successfully Uploaded!';
-        page.page.appendChild(banner);
-
-        const r = await dryRun();
-        assert.equal(r.preflight.resume.banner, true);
-        assert.equal(r.preflight.resume.attached, true);
-    });
-
-    test('a page that says nothing about a résumé is not claimed as attached', async () => {
+    test('and neither does Workday\'s upload banner', async () => {
+        // "Successfully Uploaded!" is real product copy (APPLY.FILE.Virus_Scan_Successful)
+        // but its key reads like a moment rather than a state, and nobody has
+        // measured whether it survives. Reported, not trusted.
         page.addWorkRow({});
         const input = dom.document.createElement('input');
         input.setAttribute('data-automation-id', 'file-upload-input-ref');
         input.setAttribute('type', 'file');
         input.files = [];
         page.page.appendChild(input);
+        const banner = dom.document.createElement('div');
+        banner.textContent = 'Successfully Uploaded!';
+        page.page.appendChild(banner);
 
-        const r = await v2.runMdlzV2({ cv: CV, sleep, cvData: { fileName: 'Nobody.pdf' } });
+        const r = await dryRun();
+        assert.equal(r.preflight.resume.unmeasured.banner, true);
         assert.equal(r.preflight.resume.attached, false);
-        assert.deepEqual(r.preflight.resume.signals, []);
-        assert.equal(r.preflight.verdict, 'WOULD HAND BACK');
     });
 
     test('each section reports its rows and whether its own Add was found', async () => {
