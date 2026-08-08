@@ -235,3 +235,30 @@ describe('index.js imports every router name it uses', () => {
         assert.deepEqual(missing, [], `used but not imported: ${missing.join(', ')}`);
     });
 });
+
+// ── MDLZ v2, Milestone 0: reads the page, never touches it ──
+describe('mdlz-v2 observes without acting', () => {
+    test('the module loads and reports a step on an empty page', async () => {
+        stubBrowser();
+        const v2 = await import('../src/content-agent/mdlz-v2/index.js');
+        const r = await v2.observeOnly({ sleep: () => Promise.resolve() });
+        assert.ok(r && typeof r.step === 'string');
+        assert.equal(typeof r.orphanOptions, 'number');
+        assert.equal(typeof r.openPopups, 'number');
+    });
+
+    test('it refuses to take the page while the flag is off', async () => {
+        stubBrowser();
+        const v2 = await import('../src/content-agent/mdlz-v2/index.js');
+        const r = await v2.runMdlzV2({ sleep: () => Promise.resolve() });
+        assert.equal(r.took, false, 'v2 must never take the page in milestone 0');
+    });
+
+    test('the config records the measurements that must not be re-learned', async () => {
+        const c = await import('../src/content-agent/mdlz-v2/config.js');
+        assert.match(c.FORBIDDEN.typeIntoDateSection, /writes NOTHING/);
+        assert.equal(c.COMMIT_SIGNAL.dateSection, 'aria-valuenow');
+        assert.ok(c.INTERACTION_ONLY.has(c.RESULT.BLOCKED_BY_POPUP));
+        assert.ok(!c.INTERACTION_ONLY.has(c.RESULT.OPTION_NOT_FOUND));
+    });
+});
