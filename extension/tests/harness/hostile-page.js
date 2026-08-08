@@ -106,9 +106,18 @@ export function buildHostilePage(doc, opts = {}) {
     // The section holds the rows; a row is an unnamed DIV, because on the live
     // form there is no "row id" to hang identity on and a finder that needs one
     // is a finder that works on this tenant only.
-    const workSection = el('div', {}, page);
-    const eduSection = el('div', {}, page);
-    const langSection = el('div', {}, page);
+    // The headings are Workday's own copy, from the language bundle the apply
+    // flow loads (APPLY.MY_EXPERIENCE.Work_Experience and its siblings). On a
+    // page whose section has no rows yet, they are the only thing that says
+    // which of the Add buttons belongs to which section.
+    const section = (title) => {
+        const box = el('div', {}, page);
+        if (title !== null) el('h3', {}, box).textContent = title;
+        return box;
+    };
+    const workSection = section(opts.headings === false ? null : 'Work Experience');
+    const eduSection = section(opts.headings === false ? null : 'Education');
+    const langSection = section(opts.headings === false ? null : 'Languages');
     const rows = [];
     const pickerFor = new Map();   // date wrapper → its open panel
     const dateKeys = [];           // every keydown a spinbutton was sent

@@ -24,7 +24,7 @@
  *      it is somewhere to put the next entry.
  */
 
-import { MONTHS, SEL } from './config.js';
+import { COPY, MONTHS, SEL } from './config.js';
 import { fieldByLabel, fieldIn, isEmptyRow, rowsOf, valueIn } from './row.js';
 
 const fold = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
@@ -148,17 +148,61 @@ export function claimRow(spec, entry, rows, taken) {
     return { row: null, how: 'needs-add' };
 }
 
-/** The section container, and the Add button that belongs to IT. */
-export function addButtonFor(spec, rows) {
-    // Four Add buttons are visible at once on this step, so a page-wide query
-    // adds a row to whichever section happens to come first. The button has to
-    // be found inside the section, and the section is found through its rows —
-    // which means a section with NO rows has no findable button. That is a real
-    // limit, and it is reported rather than guessed around.
-    if (!rows.length) return null;
-    const section = rows.length > 1 ? rows[0].parentNode : rows[0];
-    return section?.querySelector?.(SEL.addButton) || null;
+/**
+ * The container a section's HEADING belongs to.
+ *
+ * The headings are Workday's own copy, from the language bundle the apply flow
+ * loads ("Work Experience", "Education", "Languages", "Skills") — the same
+ * words a human uses to tell one Add button from the next, and the only thing
+ * on the page that distinguishes them when a section has no rows yet.
+ *
+ * The climb stops where the ancestor would take in ANOTHER section's heading:
+ * one heading, one section, exactly the rule rows are found by.
+ */
+export function sectionByHeading(title) {
+    if (typeof document === 'undefined' || !title) return null;
+    const others = Object.values(COPY.sections).filter((t) => t !== title);
+    const holds = (node, text) => [...(node.querySelectorAll?.('h1,h2,h3,h4,h5,label,div,span') || [])]
+        .some((el) => (el.textContent || '').trim() === text);
+
+    const heads = [...document.querySelectorAll('h1,h2,h3,h4,h5,label,div,span')]
+        .filter((el) => (el.textContent || '').trim() === title)
+        .filter((el) => el.offsetParent !== null);
+    for (const head of heads) {
+        let node = head;
+        while (node.parentNode && node.parentNode !== document.documentElement) {
+            const parent = node.parentNode;
+            if (others.some((t) => holds(parent, t))) break;      // the next section starts here
+            node = parent;
+            if (node.querySelector?.(SEL.addButton)) return node; // its own Add, and nobody else's
+        }
+    }
+    return null;
 }
+
+/**
+ * The section container, and the Add button that belongs to IT.
+ *
+ * Four Add buttons are visible at once on this step, so a page-wide query adds
+ * a row to whichever section comes first in the document. Two ways to be sure
+ * which is which, in order of how much they rely on: the section a row already
+ * sits in, and failing that the section its HEADING names. Returns which one
+ * answered, because on a live page that is the interesting half.
+ */
+export function addButtonFound(spec, rows) {
+    if (rows.length) {
+        const section = rows.length > 1 ? rows[0].parentNode : rows[0];
+        const byRows = section?.querySelector?.(SEL.addButton);
+        if (byRows) return { button: byRows, via: 'rows' };
+    }
+    const heading = sectionByHeading(COPY.sections[spec.name]);
+    const byHeading = heading?.querySelector?.(SEL.addButton);
+    if (byHeading) return { button: byHeading, via: 'heading' };
+    return { button: null, via: null };
+}
+
+/** Just the button, for callers that only want to click it. */
+export const addButtonFor = (spec, rows) => addButtonFound(spec, rows).button;
 
 /**
  * Everything this page still needs, in the order it should be done.
@@ -179,18 +223,22 @@ export function planStep(cv, { root = null, maxRows = 8 } = {}) {
         for (const entry of entries) {
             const { row, how } = claimRow(spec, entry, rows, taken);
             if (!row) {
-                const add = addButtonFor(spec, rows);
+                const { button: add, via } = addButtonFound(spec, rows);
                 if (!add) {
-                    // No row to copy the shape from and no button we can prove is
-                    // this section's: say so, and let something that can see the
-                    // page decide. Guessing which Add to click writes an entry
-                    // into another section.
+                    // Neither a row nor a heading names this section's button,
+                    // and four of them are on the page: say so, and let something
+                    // that can see the page decide. Guessing which Add to click
+                    // writes an entry into another section.
                     gaps.push({ section: spec.name, why: 'no row and no add button we can identify' });
                     break;
                 }
                 tasks.push({
                     kind: 'addRow', section: spec.name, id: `${spec.name}.add`,
                     entryKey: spec.keyOfEntry(entry),
+                    // How the button was identified — worth carrying, because on
+                    // a live page "by heading" is the claim that has never been
+                    // tested against a real one.
+                    via,
                 });
                 // Everything after an add is planned on the NEXT pass, against
                 // the page the add produced. A plan that assumes what the click

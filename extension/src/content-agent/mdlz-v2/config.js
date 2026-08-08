@@ -50,7 +50,12 @@ export const STEP = {
  */
 export const STEP_SIGNALS = [
     { step: STEP.REVIEW, any: ['[data-automation-id="applyFlowReviewPage"]'] },
-    { step: STEP.MY_EXPERIENCE, any: ['[data-automation-id="formField-jobTitle"]', '[data-automation-id="formField-schoolName"]', '[data-automation-id="formField-language"]'] },
+    // The page id comes FIRST because an empty draft has none of the fields.
+    // Measured on PwC's /apply flow (no résumé autofill): three bare sections
+    // and three Add buttons, not one formField. v1 detected on formField-degree
+    // alone, matched nothing, and advanced past an application with no work
+    // history in it at all. v2 was one signal away from inheriting that.
+    { step: STEP.MY_EXPERIENCE, any: ['[data-automation-id="applyFlowMyExpPage"]', '[data-automation-id="formField-jobTitle"]', '[data-automation-id="formField-schoolName"]', '[data-automation-id="formField-language"]'] },
     { step: STEP.MY_INFORMATION, any: ['[data-automation-id="formField-addressLine1"]', '[data-automation-id="formField-phoneNumber"]', '[data-automation-id="formField-country"]'] },
     { step: STEP.DISCLOSURES, any: ['[data-automation-id="formField-gender"]', '[data-automation-id="formField-ethnicity"]'] },
     { step: STEP.AUTOFILL, any: ['[data-automation-id="file-upload-input-ref"]'] },
@@ -139,6 +144,41 @@ export const SEL = {
         overallByLabel: /overall/i,
     },
     skills: '[data-automation-id="formField-skills"]',
+};
+
+// ── Workday's own words ──────────────────────────────────────────────────
+/**
+ * Copy read out of the product, not off a page.
+ *
+ * Source: the compiled language bundles the apply flow itself loads —
+ * wd3.myworkdaycdn.com/wday/asset/candidate-experience-apply-flow/2026.31.14/
+ * compiled-lang/{cxs_apply_flow,generic}/en-US.json, captured in a session HAR
+ * on 2026-08-04. Every Workday tenant loads the SAME asset, so these strings
+ * are the product's, not one tenant's — which is what makes them usable to
+ * find a section on a page that has not been measured yet.
+ *
+ * Why this beats a selector: the section headings and the Add label are how a
+ * HUMAN tells Work Experience from Education, and the step renders four Add
+ * buttons at once with nothing else to tell them apart.
+ *
+ * Not measured, and therefore not relied on alone: whether "Successfully
+ * Uploaded!" PERSISTS after the upload settles (its key is Virus_Scan_Successful,
+ * which reads like a moment rather than a state). It is one signal among
+ * several, never the only one.
+ */
+export const COPY = {
+    addAnother: 'Add Another',           // APPLY.Add_Another
+    add: 'Add',                          // GENERIC.Add
+    uploadedBanner: 'Successfully Uploaded!',   // APPLY.FILE.Virus_Scan_Successful
+    autofillWithResume: 'Autofill with Resume', // APPLY.BUTTON.Autofill_with_Resume
+    sections: {
+        work: 'Work Experience',         // APPLY.MY_EXPERIENCE.Work_Experience
+        education: 'Education',          // APPLY.MY_EXPERIENCE.Education
+        languages: 'Languages',          // APPLY.MY_EXPERIENCE.Languages
+        skills: 'Skills',                // APPLY.MY_EXPERIENCE.Skills
+        websites: 'Websites',            // APPLY.MY_EXPERIENCE.Websites
+        attachments: 'Additional Attachments',
+    },
 };
 
 /** "May 2026", or "Selected May 2026" for the month the picker is sitting on. */

@@ -24,7 +24,7 @@ import { census } from './popup-manager.js';
 import { addRow, runField } from './executors.js';
 import { fingerprintOf } from './fingerprint.js';
 import { SECTIONS, addButtonFor, planStep, resolveRow, resolveTarget } from './planner.js';
-import { preflightReport } from './preflight.js';
+import { preflightReport, resumeEvidence } from './preflight.js';
 import { rowsOf } from './row.js';
 import { runSequential } from './scheduler.js';
 import { trace } from '../trace.js';
@@ -89,15 +89,16 @@ export async function observeOnly({ sleep } = {}) {
  * fields underneath that is a pass writing into a page that is about to be
  * replaced.
  *
- * The conservative direction on purpose: when this cannot be read, v2 declines
- * and v1 keeps the page it has always had.
+ * The reading is `resumeEvidence`, which asks three ways and keeps them
+ * separate: the filename on the page, Workday's own upload confirmation, and
+ * `input.files`. One signal was a guess that could be wrong with nothing to
+ * notice it — v2 would simply decline forever and say nothing.
+ *
+ * Still the conservative direction: no evidence at all means v1 keeps the page
+ * it has always had.
  */
-export function resumeAttached() {
-    try {
-        const input = document.querySelector(SEL.fileInput);
-        if (!input) return true;                       // nothing to upload here
-        return !!(input.files && input.files.length);
-    } catch { return false; }
+export function resumeAttached(cvData) {
+    return !!resumeEvidence(cvData).attached;
 }
 
 /** Turn one planned descriptor into something the scheduler can run. */
@@ -140,7 +141,7 @@ export async function decideTake(ctx = {}) {
 
     if (seen.step !== STEP.MY_EXPERIENCE) return no(`v2 does not own ${seen.step}`);
     if (!seen.ready) return no('page still settling');
-    if (!resumeAttached()) return no('résumé not attached yet — v1 owns the upload');
+    if (!resumeAttached(ctx.cvData)) return no('résumé not attached yet — v1 owns the upload');
 
     const plan = planStep(ctx.cv, { root: ctx.root });
     const blocking = plan.gaps.filter((g) => /add button/.test(g.why));
@@ -167,7 +168,7 @@ export async function runMdlzV2(ctx = {}) {
     // Dry run: report and stand down, whatever the decision was. v1 fills this
     // page exactly as it does today, and what comes back is a table.
     if (mode === MODE.DRY) {
-        const preflight = preflightReport(ctx.cv, decision, { root: ctx.root });
+        const preflight = preflightReport(ctx.cv, decision, { root: ctx.root, cvData: ctx.cvData });
         return { took: false, reason: `dry run — ${preflight.verdict}`, preflight, dry: true };
     }
 

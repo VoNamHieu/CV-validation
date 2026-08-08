@@ -88,7 +88,7 @@ describe('the plan is derived from the page, every time it is asked', () => {
         page.addWorkRow({});                       // two blanks, two jobs
         const { tasks } = planner.planStep(CV);
 
-        assert.equal(tasks.filter((t) => t.kind === 'addRow').length, 0,
+        assert.equal(tasks.filter((t) => t.kind === 'addRow' && t.section === 'work').length, 0,
             'a blank row is somewhere to put an entry, not nothing');
         // Both entries were placed, each into its own blank.
         assert.deepEqual(
@@ -104,7 +104,7 @@ describe('the plan is derived from the page, every time it is asked', () => {
         // The blank takes the first entry; the second needs a row that does not
         // exist yet. What must never happen is an Add for BOTH — that is the
         // shape that filled a section to its cap with blanks.
-        assert.equal(tasks.filter((t) => t.kind === 'addRow').length, 1);
+        assert.equal(tasks.filter((t) => t.kind === 'addRow' && t.section === 'work').length, 1);
         assert.ok(tasks.some((t) => t.rowKey === 'product owner@acme'),
             'the blank is used, not skipped');
     });
@@ -120,12 +120,27 @@ describe('the plan is derived from the page, every time it is asked', () => {
         assert.deepEqual(dates.map((t) => t.rowKey), ['product owner@acme', 'business analyst@globex']);
     });
 
-    test('a section that needs a row it cannot add is declared, not guessed at', () => {
-        // Four Add buttons are visible at once on this step. With no row to find
-        // the section through, there is nothing that says which button is which,
-        // and clicking the wrong one writes an entry into another section.
+    test('a section it can name by its heading is addable even with no rows', () => {
+        // "Work Experience" is Workday's own string for this section, from the
+        // language bundle the apply flow loads. It is what tells one of the four
+        // Add buttons from the next when no row exists yet.
         const { tasks, gaps } = planner.planStep(CV);       // no rows on the page at all
-        assert.equal(tasks.filter((t) => t.kind === 'addRow').length, 0);
+        const add = tasks.find((t) => t.kind === 'addRow' && t.section === 'work');
+        assert.ok(add, 'the section is identifiable');
+        assert.equal(add.via, 'heading');
+        assert.deepEqual(gaps.filter((g) => /add button/.test(g.why)), []);
+    });
+
+    test('a section it can name NEITHER way is declared, not guessed at', () => {
+        // No rows and no heading: nothing on the page says which button belongs
+        // to Work Experience, and clicking the wrong one writes a job into
+        // Education.
+        dom.document.body.children.forEach((c) => { c.parentNode = null; });
+        dom.document.body.children = [];
+        page = buildHostilePage(dom.document, { headings: false });
+
+        const { tasks, gaps } = planner.planStep(CV);
+        assert.equal(tasks.filter((t) => t.kind === 'addRow' && t.section === 'work').length, 0);
         assert.ok(gaps.some((g) => g.section === 'work' && /add button/.test(g.why)));
     });
 
@@ -278,8 +293,12 @@ describe('v2 takes a step it can finish, and hands back one it cannot', () => {
     });
 
     test('it declines a section whose Add button it cannot tell from the others', async () => {
-        // Education and Languages have rows; Work has none, so there is no way
-        // to say which of the three Add buttons belongs to it.
+        // Education and Languages have rows; Work has neither a row nor a
+        // heading, so there is no way to say which of the three Add buttons is
+        // its own.
+        dom.document.body.children.forEach((c) => { c.parentNode = null; });
+        dom.document.body.children = [];
+        page = buildHostilePage(dom.document, { headings: false });
         page.addEducationRow({});
         page.addLanguageRow({});
 

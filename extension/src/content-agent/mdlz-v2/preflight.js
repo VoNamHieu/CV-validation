@@ -20,11 +20,11 @@
  * and leaves the page to v1 exactly as it is today.
  */
 
-import { SEL, STEP } from './config.js';
+import { COPY, SEL, STEP } from './config.js';
 import { CAPABILITY, readNow } from './executors.js';
 import { WIDGET, fingerprintOf } from './fingerprint.js';
 import { census } from './popup-manager.js';
-import { SECTIONS, addButtonFor, resolveRow, resolveTarget } from './planner.js';
+import { SECTIONS, addButtonFound, resolveRow, resolveTarget } from './planner.js';
 import { errorsIn, rowsOf } from './row.js';
 import { trace } from '../trace.js';
 
@@ -36,29 +36,63 @@ const short = (v) => {
 };
 
 /**
- * The résumé question, answered in full rather than as a boolean.
+ * Has the résumé landed? Asked three ways, and every answer reported.
  *
- * `attached` is what the take decision uses; the rest is what says whether that
- * reading is even meaningful on this page — an input with no `files` property at
- * all would mean the signal is wrong, not that nothing was uploaded.
+ * One signal was a guess with no way to notice it was wrong: if
+ * `input.files.length` is not how Workday shows an attached file, v2 declines
+ * forever and says nothing. So the question is asked by every means the page
+ * offers, ranked by how durable each is:
+ *
+ *   1. THE FILENAME ON THE PAGE. The Resume/CV section lists what was uploaded,
+ *      and the name is one we already know. Durable — it survives re-render.
+ *   2. THE UPLOAD CONFIRMATION. "Successfully Uploaded!" is Workday's own
+ *      string (APPLY.FILE.Virus_Scan_Successful, read out of the shipped
+ *      language bundle). Its key reads like a MOMENT rather than a state, so it
+ *      is trusted as evidence and never required.
+ *   3. `input.files.length` — true when it is true, absent on an input that
+ *      never exposed the API.
+ *
+ * The filename is reported as a yes/no. It is somebody's name in a file name,
+ * and a report meant to be pasted into a chat has no business carrying it.
  */
-export function resumeReport() {
+export function resumeEvidence(cvData) {
     try {
         const input = document.querySelector(SEL.fileInput);
-        if (!input) return { present: false, attached: true, note: 'no upload target on this page' };
-        const hasFilesApi = 'files' in input;
-        const count = input.files ? input.files.length : null;
+        const pageText = (document.body?.textContent || '');
+        const fileName = String(cvData?.fileName || '').trim();
+        const stem = fileName.replace(/\.[a-z0-9]+$/i, '').slice(0, 40);
+        const filenameOnPage = !!stem && pageText.includes(stem);
+        const banner = pageText.includes(COPY.uploadedBanner);
+
+        if (!input && !filenameOnPage && !banner) {
+            return { present: false, attached: true, signals: [], note: 'no upload target on this page' };
+        }
+        const hasFilesApi = !!input && 'files' in input;
+        const files = input && input.files ? input.files.length : null;
+        const signals = [
+            filenameOnPage && 'filename-on-page',
+            banner && 'upload-confirmation',
+            files > 0 && 'input.files',
+        ].filter(Boolean);
         return {
-            present: true,
+            present: !!input,
             hasFilesApi,
-            files: count,
-            attached: !!count,
-            note: hasFilesApi ? '' : 'input exposes no .files — the attach signal needs re-measuring',
+            files,
+            filenameOnPage,
+            banner,
+            knewFileName: !!stem,
+            signals,
+            attached: signals.length > 0,
+            note: !input ? 'no file input, but the page says a file is there'
+                : hasFilesApi ? '' : 'the input exposes no .files — that signal cannot be read here',
         };
     } catch (e) {
-        return { present: null, attached: false, note: `unreadable: ${e?.message || e}` };
+        return { present: null, attached: false, signals: [], note: `unreadable: ${e?.message || e}` };
     }
 }
+
+/** Kept as the old name, because the report reads better as one word. */
+export const resumeReport = resumeEvidence;
 
 /** Where each section's Add button is, and whether it can be told from the others. */
 export function sectionReport(cv, { root = null } = {}) {
@@ -69,16 +103,17 @@ export function sectionReport(cv, { root = null } = {}) {
         addButtonsOnPage: everyAdd,
         sections: SECTIONS.map((spec) => {
             const rows = rowsOf(spec.anchor, { root });
-            const add = addButtonFor(spec, rows);
+            const { button, via } = addButtonFound(spec, rows);
             return {
                 section: spec.name,
+                heading: COPY.sections[spec.name] || '',
                 rows: rows.length,
                 entries: spec.entries(cv).length,
-                addFound: !!add,
-                // The point of the whole check: the button we would click has to
-                // be the one this section owns, and with no rows there is nothing
-                // that says which of the four it is.
-                addIsScopedToSection: !!add && rows.length > 0,
+                addFound: !!button,
+                // WHICH way found it is the interesting half on a live page: by
+                // a row this section already has, or by the heading Workday's own
+                // copy gives it. The second has never been tried on a real page.
+                addVia: via || '(none)',
                 rowErrors: rows.map((r) => errorsIn(r).length).reduce((a, b) => a + b, 0),
             };
         }),
@@ -121,14 +156,14 @@ export function fieldReport(tasks, { root = null } = {}) {
  * re-implemented, so a preflight can never say "would take" about a page the
  * controller would decline.
  */
-export function preflightReport(cv, decision, { root = null } = {}) {
+export function preflightReport(cv, decision, { root = null, cvData = null } = {}) {
     const { tasks = [], gaps = [] } = decision.plan || {};
     const report = {
         verdict: decision.take ? 'WOULD TAKE' : 'WOULD HAND BACK',
         reason: decision.reason || '',
         step: decision.seen?.step || STEP.UNKNOWN,
         ready: !!decision.seen?.ready,
-        resume: resumeReport(),
+        resume: resumeEvidence(cvData),
         ...sectionReport(cv, { root }),
         adds: tasks.filter((t) => t.kind === 'addRow').map((t) => t.section),
         fields: fieldReport(tasks, { root }),
@@ -141,8 +176,10 @@ export function preflightReport(cv, decision, { root = null } = {}) {
         verdict: report.verdict,
         reason: report.reason,
         step: report.step,
-        resume: `${report.resume.present ? `present, files=${report.resume.files}` : 'absent'}`,
-        sections: report.sections.map((s) => `${s.section}:${s.rows}r/${s.entries}e/add=${s.addFound ? 'y' : 'n'}`).join(' '),
+        resume: `${report.resume.attached ? 'attached' : 'NOT attached'} via [${report.resume.signals.join(',') || 'nothing'}]`
+            + ` (input=${report.resume.present ? `yes, files=${report.resume.files}` : 'absent'},`
+            + ` filenameKnown=${report.resume.knewFileName})`,
+        sections: report.sections.map((s) => `${s.section}:${s.rows}r/${s.entries}e/add=${s.addFound ? s.addVia : 'NO'}`).join(' '),
         addButtonsOnPage: report.addButtonsOnPage,
         adds: report.adds.join(',') || '(none)',
         unknownWidgets: report.fields.filter((f) => !f.capable).map((f) => f.id).join(',') || '(none)',

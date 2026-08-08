@@ -42,6 +42,14 @@ const setFlag = (value) => {
 
 const dryRun = () => v2.runMdlzV2({ cv: CV, sleep });
 
+/** A page built from scratch — the body cleared first, or the old one is still there. */
+const freshPage = (opts) => {
+    dom.document.body.children.forEach((c) => { c.parentNode = null; });
+    dom.document.body.children = [];
+    page = buildHostilePage(dom.document, opts);
+    return page;
+};
+
 /** Everything a write would show up in. */
 const snapshot = () => ({
     titles: page.workRows().map((r) => r.titleInput.value),
@@ -110,12 +118,30 @@ describe('a dry run reads the page and changes nothing on it', () => {
     });
 
     test('a page it would decline says so, with the reason', async () => {
+        // No rows in Work AND no headings to name the sections by: nothing on
+        // this page says which of the Add buttons is Work Experience's, and
+        // clicking the wrong one writes a job into Education.
+        freshPage({ headings: false });
         page.addEducationRow({});
-        page.addLanguageRow({});          // work has no rows → no Add it can identify
+        page.addLanguageRow({});
         const r = await dryRun();
 
         assert.equal(r.preflight.verdict, 'WOULD HAND BACK');
         assert.match(r.preflight.reason, /cannot finish work/);
+    });
+
+    test('a section with no rows is found by the heading Workday gives it', async () => {
+        // The case that used to make v2 hand back a fresh draft. "Work
+        // Experience" is the product's own string, from the language bundle the
+        // apply flow loads — the same word a human reads to tell the sections
+        // apart.
+        const r = await dryRun();                       // nothing added: every section is empty
+        const work = r.preflight.sections.find((s) => s.section === 'work');
+
+        assert.equal(work.rows, 0);
+        assert.equal(work.addFound, true);
+        assert.equal(work.addVia, 'heading');
+        assert.equal(r.preflight.verdict, 'WOULD TAKE');
     });
 });
 
@@ -146,7 +172,52 @@ describe('the report answers the two questions only a live page can', () => {
 
         const r = await dryRun();
         assert.equal(r.preflight.resume.hasFilesApi, false);
-        assert.match(r.preflight.resume.note, /re-measur/);
+        assert.match(r.preflight.resume.note, /cannot be read/);
+        assert.deepEqual(r.preflight.resume.signals, [], 'and no other signal claimed otherwise');
+        assert.equal(r.preflight.resume.attached, false);
+    });
+
+    test('the filename on the page is enough on its own', async () => {
+        // The durable signal: the Resume/CV section lists what was uploaded, and
+        // the name is one we already know. It survives a re-render, which the
+        // upload confirmation may not.
+        page.addWorkRow({});
+        const tile = dom.document.createElement('div');
+        tile.textContent = 'HIEU_VO_Product_Owner.pdf';
+        page.page.appendChild(tile);
+
+        const r = await v2.runMdlzV2({ cv: CV, sleep, cvData: { fileName: 'HIEU_VO_Product_Owner.pdf' } });
+        assert.equal(r.preflight.resume.filenameOnPage, true);
+        assert.equal(r.preflight.resume.attached, true);
+        assert.deepEqual(r.preflight.resume.signals, ['filename-on-page']);
+    });
+
+    test('Workday\'s own upload confirmation counts too', async () => {
+        // "Successfully Uploaded!" is APPLY.FILE.Virus_Scan_Successful, read out
+        // of the bundle the apply flow loads. Its key reads like a MOMENT rather
+        // than a state, so it is evidence and never a requirement.
+        page.addWorkRow({});
+        const banner = dom.document.createElement('div');
+        banner.textContent = 'Successfully Uploaded!';
+        page.page.appendChild(banner);
+
+        const r = await dryRun();
+        assert.equal(r.preflight.resume.banner, true);
+        assert.equal(r.preflight.resume.attached, true);
+    });
+
+    test('a page that says nothing about a résumé is not claimed as attached', async () => {
+        page.addWorkRow({});
+        const input = dom.document.createElement('input');
+        input.setAttribute('data-automation-id', 'file-upload-input-ref');
+        input.setAttribute('type', 'file');
+        input.files = [];
+        page.page.appendChild(input);
+
+        const r = await v2.runMdlzV2({ cv: CV, sleep, cvData: { fileName: 'Nobody.pdf' } });
+        assert.equal(r.preflight.resume.attached, false);
+        assert.deepEqual(r.preflight.resume.signals, []);
+        assert.equal(r.preflight.verdict, 'WOULD HAND BACK');
     });
 
     test('each section reports its rows and whether its own Add was found', async () => {
@@ -160,12 +231,14 @@ describe('the report answers the two questions only a live page can', () => {
         assert.equal(work.rows, 1);
         assert.equal(work.entries, 2);
         assert.equal(work.addFound, true);
-        assert.equal(work.addIsScopedToSection, true);
-        // Languages has no row, so nothing says which of the Add buttons is its
-        // own — the exact condition that must never be guessed past.
+        assert.equal(work.addVia, 'rows', 'a section with rows is found through them');
+        // Languages has no row — and is still identifiable, because its heading
+        // is Workday's own word for it. Three Add buttons are on the page and
+        // only one of them is inside the Languages section.
         assert.equal(langs.rows, 0);
-        assert.equal(langs.addFound, false);
-        assert.equal(r.preflight.addButtonsOnPage, 3, 'all three are on the page, and that is the problem');
+        assert.equal(langs.addFound, true);
+        assert.equal(langs.addVia, 'heading');
+        assert.equal(r.preflight.addButtonsOnPage, 3, 'all three are on the page — that is the whole difficulty');
     });
 });
 

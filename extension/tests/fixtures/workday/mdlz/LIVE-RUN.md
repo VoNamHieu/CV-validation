@@ -5,6 +5,13 @@ những gì đã đo, và **không nói được gì về những gì chưa đo*
 phép đo thật, và nó bắt đầu bằng một lần **ĐỌC** — lần chạm đầu tiên vào một đơn
 ứng tuyển thật không được phép là một lần ghi.
 
+> **M5 đã thu hẹp phần phải đo.** Hai giả định trước đây (`input.files.length`
+> và "nút Add nằm trong container của row") giờ dựa trên **chuỗi của chính
+> Workday** — đọc từ bundle `compiled-lang/{cxs_apply_flow,generic}/en-US.json`
+> mà apply flow tự tải (HAR 2026-08-04, asset dùng chung cho mọi tenant). Thứ
+> **chưa** đo được là: chiến lược tìm section **theo tiêu đề** có đúng trên DOM
+> thật không. Đó là câu hỏi số một của bước 2.
+
 ---
 
 ## 0. Ba mức của cờ
@@ -51,23 +58,39 @@ bảng preflight:
 
 ### 2.1 `resume:` — tín hiệu "CV đã đính kèm"
 
+Dòng đọc như: `resume: attached via [filename-on-page,input.files] (input=yes, files=1, filenameKnown=true)`
+
+Ba tín hiệu, hỏi độc lập, **báo hết**:
+
+| Tín hiệu | Là gì | Độ bền |
+|---|---|---|
+| `filename-on-page` | tên file CV xuất hiện trên trang (section Resume/CV liệt kê file đã upload) | bền nhất, sống qua re-render |
+| `upload-confirmation` | chuỗi `"Successfully Uploaded!"` (`APPLY.FILE.Virus_Scan_Successful` trong bundle của Workday) | có thể chỉ là khoảnh khắc |
+| `input.files` | `input.files.length > 0` | giả định ban đầu, giờ chỉ là một trong ba |
+
 | Đọc được gì | Nghĩa là | Phải làm gì |
 |---|---|---|
-| `present, files=1` (hoặc hơn) | đoán đúng, v2 nhận trang được | đi tiếp bước 3 |
-| `present, files=0` **sau khi v1 đã upload xong** | tín hiệu SAI → v2 sẽ không bao giờ nhận trang | đổi `resumeAttached()` sang tín hiệu thật (tile hiện tên file?) rồi đo lại |
-| `hasFilesApi: false` | input không có `.files` | như trên — cần đo lại tín hiệu |
-| `absent` | step này không có ô upload | không sao |
+| `attached via [...]` có ≥1 tín hiệu | đủ để v2 nhận trang | đi tiếp bước 3 |
+| `NOT attached via [nothing]` **sau khi v1 upload xong** | cả ba tín hiệu đều sai trên tenant này | ghi lại DOM quanh vùng Resume/CV rồi thêm tín hiệu thứ tư |
+| `filenameKnown=false` | không có `cvData.fileName` để so | tín hiệu bền nhất đang không dùng được — kiểm tra đường truyền cvData |
+| `input=absent` mà vẫn `attached` | trang tự nói có file dù không có input | bình thường |
 
 ### 2.2 `sections:` — nút Add của từng section
 
-Đọc dòng `sections: work:2r/2e/add=y education:1r/1e/add=y languages:1r/1e/add=y`
+Đọc dòng `sections: work:2r/2e/add=rows education:0r/1e/add=heading languages:1r/1e/add=NO`
 và `addButtonsOnPage: N`.
 
-| Đọc được gì | Nghĩa là |
+Hai cách xác định, ghi rõ cách nào đã dùng:
+
+| `add=` | Nghĩa là |
 |---|---|
-| section có row và `add=y` | nút Add nằm trong container của row → giả định đúng |
-| section có row nhưng `add=n` | nút Add **không** nằm trong container → planner sẽ báo gap và trả trang lại (an toàn nhưng v2 vô dụng cho section đó) → cần đo lại vị trí nút |
-| section 0 row | không xác định được nút nào của nó (trang có `N` nút Add cùng lúc) — đúng như thiết kế, v2 trả trang lại |
+| `rows` | tìm qua container của row có sẵn — đường chắc nhất |
+| `heading` | tìm qua **tiêu đề section** ("Work Experience"/"Education"/"Languages" — chuỗi của chính Workday). **Đường này CHƯA từng chạy trên trang thật** → đây là thứ quan trọng nhất cần xác nhận ở bước 2 |
+| `NO` | không xác định được → planner báo gap, v2 trả trang lại (an toàn) |
+
+**Cách kiểm `heading` đúng hay sai:** section 0 row mà báo `add=heading` thì
+sang bước 3, xem row mới có mọc **đúng section đó** không. Mọc nhầm section =
+chiến lược heading sai trên tenant này → phải bỏ, quay về chỉ dùng `rows`.
 
 ### 2.3 Những thứ khác đáng đọc trong bảng
 
