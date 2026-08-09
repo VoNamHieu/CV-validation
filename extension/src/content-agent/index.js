@@ -42,7 +42,6 @@ import { tenantRefFor } from '../ats/tenant.js';
 // The review READER. It cannot click — that is its whole design — and it runs
 // here because the loop returns at the final step BEFORE it ever reaches the
 // fill, so a controller wired only into the fill path would never see this page.
-import { isMdlzPage } from './mdlz-v2/config.js';
 import { pageOwner } from './mdlz-v2/pages.js';
 import { runReviewPage } from './mdlz-v2/page-review.js';
 
