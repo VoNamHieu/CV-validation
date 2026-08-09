@@ -308,7 +308,17 @@ describe('v2 takes a step it can finish, and hands back one it cannot', () => {
         assert.match(r.reason, /does not own/);
     });
 
-    test('it declines while the résumé is still v1\'s to upload', async () => {
+    test('it attaches the résumé itself instead of waiting for a v1 that is locked out', async () => {
+        // MEASURED 2026-08-09, live on R-174102 — and it was a DEADLOCK, not a
+        // decline. v2 owned My Experience and stood down every pass ("résumé
+        // not attached yet — v1 owns the upload") while routeAfterV2 refuses v1
+        // on every page v2 owns. So the only code that could attach the file
+        // was never allowed to run: seven iterations, five of them identical,
+        // then the loop gave up with "v2 owns this page and recorded nothing".
+        //
+        // What is pinned here is that v2 TAKES the page. A page whose owner
+        // will not act and whose fallback may not is not a slow page, it is a
+        // stopped one, and no widget has to be broken for that to happen.
         page.addWorkRow({});
         const input = dom.document.createElement('input');
         input.setAttribute('data-automation-id', 'file-upload-input-ref');
@@ -317,8 +327,14 @@ describe('v2 takes a step it can finish, and hands back one it cannot', () => {
         page.page.appendChild(input);
 
         const r = await v2.runMdlzV2({ cv: CV, sleep });
-        assert.equal(r.took, false);
-        assert.match(r.reason, /résumé/);
+        assert.equal(r.took, true, 'the page v2 owns is the page v2 must act on');
+        assert.equal(r.pageIsV2Owned, true);
+        // No CV was handed in, so the honest outcome is a NAMED gap — the stuck
+        // detector reads `v2.gaps`, and an empty one is exactly what printed
+        // "recorded nothing" about a page whose problem was perfectly sayable.
+        assert.match(r.reason, /no CV file/);
+        assert.equal(r.gaps.length, 1);
+        assert.match(r.gaps[0].field, /Resume/);
     });
 
     test('it declines a section whose Add button it cannot tell from the others', async () => {

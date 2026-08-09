@@ -470,7 +470,14 @@ describe('v2 owns the pages it can actually finish', () => {
         const { STEP } = await import('../src/content-agent/mdlz-v2/config.js');
         assert.equal(owns(STEP.MY_INFORMATION), false,
             'putting MY_INFORMATION back is the act of porting it — after the ladder exists AND is measured on that field');
-        assert.equal(V2_OWNED_STEPS.has(STEP.MY_EXPERIENCE), true, 'My Experience stays with v2');
+        // My Experience is v2's, and stays v2's. It was withdrawn earlier on
+        // 2026-08-09; the live re-measurement that followed found the page had
+        // never actually run — v2 declined it every pass for a résumé it would
+        // not attach and v1 was not allowed to — so the widget faults the
+        // withdrawal cited had not been reproduced at all, and withdrawing hid
+        // the deadlock instead of fixing it.
+        assert.equal(V2_OWNED_STEPS.has(STEP.MY_EXPERIENCE), true,
+            'My Experience stays with v2 — and owning it is what obliges v2 to attach the résumé');
         assert.equal(owns(STEP.UNKNOWN), false, 'a job posting is nobody\'s page');
     });
 });

@@ -25,7 +25,7 @@ import { addRow, runField } from './executors.js';
 import { fingerprintOf } from './fingerprint.js';
 import { SECTIONS, addButtonFor, planStep, resolveRow, resolveTarget } from './planner.js';
 import { NAV, advance } from './navigation.js';
-import { runAutofillPage } from './page-autofill.js';
+import { ATTACH, attachResume, runAutofillPage } from './page-autofill.js';
 import { runMyInfoPage } from './page-myinfo.js';
 import { runDisclosuresPage } from './page-disclosures.js';
 import { runQuestionsPage } from './page-questions.js';
@@ -234,6 +234,62 @@ export async function runMdlzV2(ctx = {}) {
         // Owned, ported nowhere. Say so instead of guessing which controller
         // might cope.
         return { took: false, reason: `no controller for ${where.page}`, pageIsV2Owned: true };
+    }
+
+    // ── the résumé, on the page v2 owns ──────────────────────────────
+    //
+    // MEASURED 2026-08-09, live on R-174102: this was a DEADLOCK, and it cost a
+    // whole run without a single widget being at fault.
+    //
+    // v2 owned My Experience and declined it every pass — "résumé not attached
+    // yet, v1 owns the upload" — while `routeAfterV2` refuses v1 on every page
+    // v2 owns. So the only code that could attach the résumé was never allowed
+    // to run, and v2 waited for a file that nothing on the page would ever
+    // deliver: seven iterations, five of them byte-identical, then the loop gave
+    // up with "v2 owns this page and recorded nothing". A page with an owner
+    // that will not act and a fallback that is not allowed to is not a slow
+    // page; it is a stopped one.
+    //
+    // Owning a page means finishing it, and the résumé is PART of this page —
+    // Workday renders the upload here and marks it required. So v2 attaches it,
+    // through the same routine the Autofill page uses. Not a second copy (two
+    // definitions of "the ATS has the file" froze a run once already), and not
+    // an exception that lets v1 back onto a page v2 holds.
+    //
+    // A dry run must not reach this: it writes, and the DRY gate below this
+    // point is too late to be the thing that stops it.
+    if (mode === MODE.ON && !resumeAttached(ctx.cvData)) {
+        const att = await attachResume(ctx);
+        trace('mdlz.myexp.resume', {
+            state: att.state,
+            rows: att.detail?.uploadedRows ?? 0,
+            reason: att.reason || '',
+        });
+        // NOTHING IS PLANNED IN THE PASS THAT ATTACHED IT. Workday re-renders
+        // every section it parses the CV into, so a plan derived now is a plan
+        // about a page that is about to be replaced — which is the very reason
+        // this gate was put here in the first place. The next pass sees the
+        // page the parse produced, and `readiness` waits for it to settle.
+        if (att.state !== ATTACH.NO_TARGET) {
+            const unanswerable = att.state === ATTACH.NO_CV || att.state === ATTACH.FAILED;
+            return {
+                took: true,
+                result: att.result,
+                reason: att.reason || `résumé ${att.state.toLowerCase()}`,
+                pageIsV2Owned: true,
+                // A state a person has to fix is recorded as a GAP, so the loop's
+                // stuck detector can name it instead of saying v2 recorded
+                // nothing — which is exactly what it said about this deadlock.
+                gaps: unanswerable ? [{ section: 'resume', field: 'Resume/CV', why: att.reason }] : [],
+                report: {
+                    matched: true,
+                    filled: att.state === ATTACH.ATTACHED ? 1 : 0,
+                    step: 'My Experience',
+                    answers: [],
+                    v2: true,
+                },
+            };
+        }
     }
 
     const decision = await decideTake({ ...ctx, addVia });

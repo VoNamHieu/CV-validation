@@ -87,12 +87,30 @@ export const resumeState = () => readFileCommitState(fileInput(), document);
 export const resumeAcknowledged = () => resumeState().uploadedRows > 0;
 
 /**
- * Run the page.
- *
- * Returns the shape every controller returns: what happened, and whether the
- * page was left.
+ * The five states attaching a résumé can be in — named, because two different
+ * pages now ask for it and a boolean cannot tell "still ingesting" from "there
+ * is no CV to send", which are opposite instructions to the caller.
  */
-export async function runAutofillPage(ctx = {}) {
+export const ATTACH = {
+    ATTACHED: 'ATTACHED',     // Workday has acknowledged it — a row exists
+    WAITING: 'WAITING',       // handed over, or still hydrating: come back
+    NO_TARGET: 'NO_TARGET',   // nothing on this page takes a file
+    NO_CV: 'NO_CV',           // nothing to send
+    FAILED: 'FAILED',         // the file would not go, or was never acknowledged
+};
+
+/**
+ * Get the résumé onto the page, wherever that page is.
+ *
+ * Lifted out of the Autofill controller UNCHANGED, because My Experience needs
+ * exactly this and a second copy would be a second definition of "the ATS has
+ * the file" — which is the shape of bug that froze a run once already (see
+ * `readFileCommitState` in dom.js). What the Autofill page adds on top is only
+ * the decision to LEAVE; everything about attaching is here.
+ *
+ * Writes, so a dry run must not call it.
+ */
+export async function attachResume(ctx = {}) {
     const { sleep, cvData } = ctx;
     const id = cvIdentity(cvData);
 
@@ -105,16 +123,16 @@ export async function runAutofillPage(ctx = {}) {
     //    work is none. Reading the INPUT here would say "empty" about a file
     //    Workday has already taken.
     if (before.uploadedRows > 0) {
-        trace('mdlz.autofill', { state: 'already attached', rows: before.uploadedRows, files: before.nativeFiles });
+        trace('mdlz.attach', { state: 'already attached', rows: before.uploadedRows, files: before.nativeFiles });
         rememberUpload(id);
-        return finish({ ...ctx, result: RESULT.SATISFIED, detail: before });
+        return { state: ATTACH.ATTACHED, result: RESULT.SATISFIED, detail: before };
     }
 
     if (!haveInput) {
         // Measured: the file input is ABSENT on the first pass and appears on
         // the second. A page without it is early, not broken.
-        trace('mdlz.autofill', { state: 'no upload target yet' });
-        return { took: true, result: RESULT.WAITING_HYDRATION, reason: 'the file input has not rendered' };
+        trace('mdlz.attach', { state: 'no upload target yet' });
+        return { state: ATTACH.NO_TARGET, result: RESULT.WAITING_HYDRATION, reason: 'the file input has not rendered' };
     }
 
     // 3. HANDED OVER, NOT YET ACKNOWLEDGED — either the file is still sitting on
@@ -126,16 +144,16 @@ export async function runAutofillPage(ctx = {}) {
     if (before.nativeFiles > 0 || alreadyUploaded(id)) {
         rememberUpload(id);
         const landed = await until(resumeAcknowledged, { sleep, budgetMs: ctx.commitMs || 8000 });
-        trace('mdlz.autofill', {
+        trace('mdlz.attach', {
             state: landed ? 'acknowledged on a later pass' : 'still ingesting',
             onInput: before.nativeFiles, uploadedThisRun: alreadyUploaded(id),
         });
-        if (!landed) return { took: true, result: RESULT.WAITING_HYDRATION, reason: 'the upload has not been acknowledged yet' };
-        return finish({ ...ctx, result: RESULT.SATISFIED, detail: resumeState() });
+        if (!landed) return { state: ATTACH.WAITING, result: RESULT.WAITING_HYDRATION, reason: 'the upload has not been acknowledged yet' };
+        return { state: ATTACH.ATTACHED, result: RESULT.SATISFIED, detail: resumeState() };
     }
 
     if (!cvData?.base64 || !cvData?.fileName) {
-        return { took: true, result: RESULT.USER_REQUIRED, reason: 'no CV file to upload' };
+        return { state: ATTACH.NO_CV, result: RESULT.USER_REQUIRED, reason: 'no CV file to upload' };
     }
 
     // 5. Upload, through the shared implementation. Its own note is worth
@@ -144,20 +162,33 @@ export async function runAutofillPage(ctx = {}) {
     const el = fileInput();
     let ok = false;
     try { ok = setFileOnInput(el, cvData.base64, cvData.fileName); } catch { ok = false; }
-    if (!ok) return { took: true, result: RESULT.COMMIT_FAILED, reason: 'the file would not go onto the input' };
+    if (!ok) return { state: ATTACH.FAILED, result: RESULT.COMMIT_FAILED, reason: 'the file would not go onto the input' };
     rememberUpload(id);
 
     // 6. Prove it landed — by the ROW, never by the input we just wrote to.
     const landed = await until(resumeAcknowledged, { sleep, budgetMs: ctx.commitMs || 8000 });
     const after = resumeState();
-    trace('mdlz.autofill', {
+    trace('mdlz.attach', {
         state: landed ? 'attached' : 'never acknowledged',
         rows: after.uploadedRows, files: after.nativeFiles, scoped: after.scoped,
     });
     if (!landed) {
-        return { took: true, result: RESULT.COMMIT_FAILED, reason: 'no upload row appeared', detail: after };
+        return { state: ATTACH.FAILED, result: RESULT.COMMIT_FAILED, reason: 'no upload row appeared', detail: after };
     }
-    return finish({ ...ctx, result: RESULT.COMMITTED, detail: after });
+    return { state: ATTACH.ATTACHED, result: RESULT.COMMITTED, detail: after };
+}
+
+/**
+ * Run the page.
+ *
+ * Attach, then decide whether to leave — and those are the only two things this
+ * page is. Returns the shape every controller returns: what happened, and
+ * whether the page was left.
+ */
+export async function runAutofillPage(ctx = {}) {
+    const att = await attachResume(ctx);
+    if (att.state === ATTACH.ATTACHED) return finish({ ...ctx, result: att.result, detail: att.detail });
+    return { took: true, result: att.result, reason: att.reason, detail: att.detail };
 }
 
 /**
