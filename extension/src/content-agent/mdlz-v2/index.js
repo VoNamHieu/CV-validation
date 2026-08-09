@@ -61,9 +61,14 @@ export async function settings() {
         const d = await new Promise((r) => chrome.storage.local.get([FLAG_KEY, ADD_VIA_KEY], r));
         const v = d?.[FLAG_KEY];
         const addVia = d?.[ADD_VIA_KEY] === 'rows' ? 'rows' : 'any';
-        if (v === true || v === 'on') return { mode: MODE.ON, addVia };
+        if (v === false || v === 'off') return { mode: MODE.OFF, addVia };   // explicit opt-out
         if (v === 'dry' || v === 'preflight') return { mode: MODE.DRY, addVia };
-        return { mode: MODE.OFF, addVia };
+        // DEFAULT ON for mdlz (2026-08-09). v1 is frozen: it is the fallback
+        // for pages v2 declines, not something a console command has to switch
+        // on before every run. The escape hatch stays a single key —
+        // `chrome.storage.local.set({ copoMdlzV2: false })` — because a young
+        // controller that cannot be turned off is worse than one nobody uses.
+        return { mode: MODE.ON, addVia };
     } catch {
         return { mode: MODE.OFF, addVia: 'any' };
     }

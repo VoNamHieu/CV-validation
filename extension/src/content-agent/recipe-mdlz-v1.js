@@ -9,6 +9,11 @@
  *  router (recipe-router.js) sends mdlz pages HERE and every other tenant
  *  to the live generic recipe.js.
  *
+ *  FROZEN 2026-08-09. mdlz runs v2 by default now; this file is the FALLBACK
+ *  for pages v2 declines, and nothing else. It takes no new behavior — not for
+ *  mdlz either. A fix that belongs to a page v2 owns belongs in v2; a fix for a
+ *  page v2 declines is a reason to make v2 take that page, not to grow this one.
+ *
  *  RULES FOR THIS FILE:
  *  · Do NOT edit it for any other tenant's sake, ever. Fixes for PwC,
  *    Unilever, 3M... go to recipe.js (generic) only.

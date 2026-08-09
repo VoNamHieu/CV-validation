@@ -49,7 +49,7 @@ import { runReviewPage } from './mdlz-v2/page-review.js';
 // you can confirm (in the PAGE / tab console, NOT the service-worker console) that
 // the freshly-built dist is actually loaded. If you don't see this line on the
 // apply tab, the new build isn't injected (reload the extension + refresh the tab).
-const COPO_BUILD = 'mdlz-rc7-revert-2026-08-08';
+const COPO_BUILD = 'mdlz-v2-default-2026-08-09';
 try { console.log(`%c[Copo] content-agent build ${COPO_BUILD} loaded → ${location.host}`, 'color:#c43b2e;font-weight:700'); } catch { /* noop */ }
 
 /**

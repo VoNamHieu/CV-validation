@@ -324,11 +324,30 @@ describe('mdlz-v2 observes without acting', () => {
         assert.equal(typeof r.openPopups, 'number');
     });
 
-    test('it refuses to take the page while the flag is off', async () => {
-        stubBrowser();
+    test('v2 is ON by default on an mdlz page — no console command', async () => {
+        stubBrowser();                       // storage answers {} : nothing set
         const v2 = await import('../src/content-agent/mdlz-v2/index.js');
-        const r = await v2.runMdlzV2({ sleep: () => Promise.resolve() });
-        assert.equal(r.took, false, 'v2 must never take the page while there is no executor');
+        assert.equal(await v2.flagMode(), v2.MODE.ON,
+            'an unset flag must mean ON: v1 is frozen, and a run should not need a command first');
+    });
+
+    test('and one key still turns it off', async () => {
+        // A young controller that cannot be turned off is worse than one nobody
+        // uses. `copoMdlzV2: false` is the whole escape hatch.
+        stubBrowser();
+        globalThis.chrome.storage.local.get = (keys, cb) => {
+            const d = { copoMdlzV2: false };
+            return cb ? cb(d) : Promise.resolve(d);
+        };
+        const v2 = await import('../src/content-agent/mdlz-v2/index.js');
+        assert.equal(await v2.flagMode(), v2.MODE.OFF);
+    });
+
+    test('off an mdlz host it stays off whatever the flag says', async () => {
+        stubBrowser();
+        globalThis.location = { hostname: 'jobs.example.com', pathname: '/apply', href: 'https://jobs.example.com/apply' };
+        const v2 = await import('../src/content-agent/mdlz-v2/index.js');
+        assert.equal(await v2.flagMode(), v2.MODE.OFF);
     });
 
     // The gate suite drives these against a DOM built for them. This runs the
