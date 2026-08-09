@@ -43,6 +43,11 @@ export const V2_OWNED_STEPS = new Set([
     PAGE.MY_EXPERIENCE,
     PAGE.APPLICATION_QUESTIONS,
     PAGE.VOLUNTARY_DISCLOSURES,
+    // Review is owned precisely BECAUSE nothing may act on it: owning the page
+    // is what makes the click choke point refuse v1, the generic recipe and the
+    // planner as well. The page whose one button submits is the last page to
+    // leave to whoever remembered.
+    PAGE.REVIEW,
 ]);
 
 export const owns = (page) => V2_OWNED_STEPS.has(page);

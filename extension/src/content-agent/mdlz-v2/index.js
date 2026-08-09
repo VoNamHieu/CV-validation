@@ -29,6 +29,7 @@ import { runAutofillPage } from './page-autofill.js';
 import { runMyInfoPage } from './page-myinfo.js';
 import { runDisclosuresPage } from './page-disclosures.js';
 import { runQuestionsPage } from './page-questions.js';
+import { runReviewPage } from './page-review.js';
 import { READY, observePageState, owns, releasePage } from './pages.js';
 import { preflightReport, resumeEvidence } from './preflight.js';
 import { rowsOf } from './row.js';
@@ -207,6 +208,7 @@ export async function runMdlzV2(ctx = {}) {
         [STEP.MY_INFORMATION]: runMyInfoPage,
         [STEP.APPLICATION_QUESTIONS]: runQuestionsPage,
         [STEP.VOLUNTARY_DISCLOSURES]: runDisclosuresPage,
+        [STEP.REVIEW]: runReviewPage,
     };
     const controller = CONTROLLERS[where.page];
     if (controller) {
