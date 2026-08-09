@@ -166,6 +166,28 @@ describe('the plan is derived from the page, every time it is asked', () => {
         assert.equal(langs[0].want, 'English');
     });
 
+    test('a row that already holds the answer is not a row to add to', () => {
+        // THE ROW-GROWTH BUG, as a plan question.
+        //
+        // MEASURED (R-174102, 2026-08-09): a committed Language row shows
+        // "English" on its button while its hidden input holds the OPTION'S
+        // GUID. Read the input and every committed row keys the same, matches
+        // no entry, and never looks like the language it plainly holds — so the
+        // planner asks for another row, on every pass, forever. Three
+        // "Vietnamese" rows and a fresh blank behind each one.
+        page.addLanguageRow({ language: 'English' });
+        const guid = page.langRows()[0].language.guid.value;
+        assert.match(guid, /^[0-9a-f]{32}$/, 'the fixture must carry the GUID the real page does');
+
+        const { tasks } = planner.planStep(CV);
+        assert.equal(tasks.filter((t) => t.kind === 'addRow' && t.section === 'languages').length, 0,
+            'the English row is already there — adding another is the growth');
+        // And it is recognised as ALREADY holding English, not merely as a spare
+        // blank that happens to be free.
+        const row = page.langRows()[0].row;
+        assert.equal(rowlib.valueIn(row, 'formField-language'), 'English');
+    });
+
     test('a current role plans the tick and no To at all', () => {
         page.addWorkRow({});
         page.addWorkRow({});

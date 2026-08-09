@@ -25,7 +25,7 @@
  */
 
 import { SEL } from './config.js';
-import { labelOf } from './fingerprint.js';
+import { WIDGET, kindOf, labelOf } from './fingerprint.js';
 
 const vis = (el) => !!(el && el.offsetParent !== null);
 const txt = (el) => (el?.textContent || '').trim();
@@ -104,17 +104,41 @@ export function keyOfWorkRow(row) {
     return `${valueIn(row, 'formField-jobTitle')}@${valueIn(row, 'formField-companyName')}`;
 }
 
-/** The text a row's field currently holds, whatever kind of control holds it. */
+/**
+ * The text a row's field currently holds, whatever kind of control holds it.
+ *
+ * A PROMPT'S INPUT HOLDS A GUID, NOT AN ANSWER — and reading it is what grew the
+ * rows.
+ *
+ * MEASURED on My Experience (R-174102, 2026-08-09): three Language rows each
+ * showed "Vietnamese" on their button while every one of their hidden inputs
+ * read `05fb736b3afb01d98f0cecaeb500d269`. This function preferred the input, so
+ * `keyOf` returned that SAME GUID for all three; it matched no entry, no row
+ * looked like the Vietnamese it already held, and `claimRow` fell through to
+ * "needs-add" every pass. Each pass then wrote Vietnamese into the blank row and
+ * added another for English — 1 row, 2, 3, and a fresh blank behind each one.
+ *
+ * Work rows were never affected, and that is the tell: their fields are plain
+ * text boxes, where `.value` IS the answer. So the rule is not "prefer the
+ * button", it is that a LISTBOX's value is what it displays — its chips or its
+ * button — and its input is Workday's bookkeeping, which no key should be built
+ * out of. Resolved from the widget's SHAPE, like every other capability here.
+ */
 export function valueIn(row, automationId) {
-    const wrap = fieldIn(row, automationId);
+    return valueOf(fieldIn(row, automationId));
+}
+
+/** The same reading, for a wrapper the caller already has. */
+export function valueOf(wrap) {
     if (!wrap) return '';
-    const input = wrap.querySelector('input') || wrap.querySelector('textarea');
-    if (input && typeof input.value === 'string' && input.value.trim()) return input.value.trim();
     const chips = [...wrap.querySelectorAll(SEL.selectedItem)];
     if (chips.length) return chips.map(txt).join(' | ');
-    const button = wrap.querySelector('button');
-    const label = txt(button);
-    return /^select one$/i.test(label) ? '' : label;
+    const shown = txt(wrap.querySelector('button'));
+    const placeheld = /^select one$/i.test(shown);
+    if (kindOf(wrap) === WIDGET.LISTBOX) return placeheld ? '' : shown;
+    const input = wrap.querySelector('input') || wrap.querySelector('textarea');
+    if (input && typeof input.value === 'string' && input.value.trim()) return input.value.trim();
+    return placeheld ? '' : shown;
 }
 
 /**

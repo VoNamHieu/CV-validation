@@ -366,6 +366,13 @@ export function buildHostilePage(doc, opts = {}) {
         }, cfg.openMs);
     }
 
+    /** A stable 32-hex id for an option label — same answer, same string. */
+    function fakeGuid(label) {
+        let h = 0x811c9dc5;
+        for (let i = 0; i < label.length; i++) { h ^= label.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+        return h.toString(16).padStart(8, '0').repeat(4);
+    }
+
     function commit(f, label) {
         setTimeout(() => {
             if (f.multi) {
@@ -375,6 +382,10 @@ export function buildHostilePage(doc, opts = {}) {
                 chip.textContent = label;
             } else {
                 f.trigger.textContent = label;
+                // Workday's bookkeeping, written alongside the visible answer:
+                // one GUID per OPTION, so two rows holding the same choice hold
+                // the same string.
+                if (f.guid) f.guid.value = fakeGuid(label);
                 closeList(f, { after: 0 });
             }
             f.committed.push(label);
@@ -391,8 +402,17 @@ export function buildHostilePage(doc, opts = {}) {
         const chips = multi ? el('div', { 'data-automation-id': 'selectedItemList' }, wrap) : null;
         const trigger = el(tag, tag === 'button' ? { 'aria-haspopup': 'listbox' } : { type: 'text' }, wrap);
         if (tag === 'button') trigger.textContent = 'Select One';
+        // A PROMPT'S HIDDEN INPUT HOLDS A GUID, NOT THE ANSWER.
+        //
+        // MEASURED (R-174102, My Experience, 2026-08-09): three Language rows
+        // each displayed "Vietnamese" on their button while every one of their
+        // inputs read `05fb736b3afb01d98f0cecaeb500d269` — the GUID of the
+        // OPTION, so rows holding the same answer are indistinguishable by it.
+        // The harness had no such input at all, which is why a planner keyed on
+        // it looked correct here and grew a row per pass on the real form.
+        const guid = tag === 'button' ? el('input', { type: 'text' }, wrap) : null;
         const f = {
-            wrap, trigger, chips, catalogue, stamps, multi,
+            wrap, trigger, chips, catalogue, stamps, multi, guid,
             escapeCloses, outsideClickCloses, committed: [],
         };
         trigger.addEventListener('click', () => {
@@ -427,7 +447,7 @@ export function buildHostilePage(doc, opts = {}) {
             automationId: 'formField-degree', tag: 'button', catalogue: DEGREES,
             stamps: true, label: 'Degree', parent: row,
         });
-        if (degree) degreeField.trigger.textContent = degree;
+        if (degree) { degreeField.trigger.textContent = degree; degreeField.guid.value = fakeGuid(degree); }
         const model = { row, schoolInput, degree: degreeField };
         eduRows.push(model);
         return model;
@@ -439,7 +459,9 @@ export function buildHostilePage(doc, opts = {}) {
             automationId: 'formField-language', tag: 'button', catalogue: LANGUAGES,
             stamps: true, label: 'Language', parent: row,
         });
-        if (language) langField.trigger.textContent = language;
+        // Seeded the way a commit leaves it: the answer on the button, the
+        // option's GUID in the hidden input.
+        if (language) { langField.trigger.textContent = language; langField.guid.value = fakeGuid(language); }
         const nativeWrap = el('div', { 'data-automation-id': 'formField-native' }, row);
         el('label', {}, nativeWrap).textContent = 'I am fluent in this language';
         const box = el('input', { type: 'checkbox' }, nativeWrap);
