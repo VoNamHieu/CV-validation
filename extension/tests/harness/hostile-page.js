@@ -385,8 +385,16 @@ export function buildHostilePage(doc, opts = {}) {
                 // A chip that also answers the option selector — and the list
                 // stays open, as a multi-select does. The chip LIST arrives with
                 // the first chip, which is when the live form creates it.
-                const chip = el('div', { 'data-automation-id': 'selectedItem', role: 'option' }, chipListOf(f));
-                chip.textContent = label;
+                //
+                // `misbehave` is how the two ways a pick can go wrong are made
+                // reproducible: a catalogue row that answers for a GROUP (one
+                // click, several chips), and a virtualiser that swaps the row
+                // out between reading it and clicking it (a chip nobody asked
+                // for — measured once as "Agentforce" / "Agile Systems").
+                for (const text of (f.instead ? [f.instead] : [label, ...(f.alsoAdds || [])])) {
+                    const chip = el('div', { 'data-automation-id': 'selectedItem', role: 'option' }, chipListOf(f));
+                    chip.textContent = text;
+                }
             } else {
                 f.trigger.textContent = label;
                 // Workday's bookkeeping, written alongside the visible answer:
@@ -563,6 +571,16 @@ export function buildHostilePage(doc, opts = {}) {
         listFor: (name) => openLists.get(fields[name]) || null,
         openCount: () => openLists.size,
         chipsOn: (name) => [...(fields[name].chips?.children || [])].map((c) => c.textContent),
+        /**
+         * Make a multi-select pick badly, on purpose.
+         *
+         * `alsoAdds` — one click, several chips (a group row).
+         * `instead`  — the row moved under the click, so a different chip lands.
+         */
+        misbehave(name, { alsoAdds = null, instead = null } = {}) {
+            fields[name].alsoAdds = alsoAdds;
+            fields[name].instead = instead;
+        },
         /**
          * A list nobody owns, left over from a field that is gone.
          *

@@ -71,15 +71,28 @@ export function setNativeValue(el, value) {
  * AMBIGUOUS, because "SQL" offering SQL Server, MySQL and PL/SQL is three
  * answers the candidate never gave.
  */
+/**
+ * Rows a list renders that are not choices.
+ *
+ * MEASURED on Skills (R-174102): an empty catalogue answers "No Items." — as
+ * THREE nested nodes (menuItem / promptLeafNode / promptOption) that all answer
+ * the option selector. They are counted as options on purpose, so the list still
+ * registers as OPEN and the field reports a semantic refusal rather than a
+ * timeout; but they are never something a click may land on.
+ */
+const NOT_A_CHOICE = /^(select one|no items\.?)$/i;
+
 export function chooseOption(options, want) {
-    const rows = options.map((o) => ({ node: o, text: txt(o) })).filter((r) => r.text);
+    const all = options.map((o) => ({ node: o, text: txt(o) })).filter((r) => r.text);
+    // Placeholders are counted in the evidence and excluded from the choosing.
+    const rows = all.filter((r) => !NOT_A_CHOICE.test(r.text));
     const w = fold(want);
     // EVERY refusal carries its evidence. A live run came back
     // `OPTION_NOT_FOUND, reason: ""` about a list of 249 countries, and there
     // was no way to tell from it what had been wanted, what was on the list, or
     // why 249 rows held no match — so the cause had to be guessed at. v1 logs
     // tried/shown/sample for exactly this; this returns the same.
-    const evidence = { want: String(want ?? ''), shown: rows.length, sample: rows.slice(0, 4).map((r) => r.text) };
+    const evidence = { want: String(want ?? ''), shown: all.length, sample: all.slice(0, 4).map((r) => r.text) };
     if (!w) return { option: null, why: RESULT.OPTION_NOT_FOUND, ...evidence };
     const exact = rows.filter((r) => fold(r.text) === w);
     if (exact.length) return { option: exact[0].node, matched: exact[0].text };
@@ -102,7 +115,8 @@ export function chooseOption(options, want) {
  * field is left for the person whose answer it is.
  */
 export function chooseFromLadder(options, ladder) {
-    const rows = options.map((o) => ({ node: o, text: txt(o) })).filter((r) => r.text);
+    const rows = options.map((o) => ({ node: o, text: txt(o) }))
+        .filter((r) => r.text && !NOT_A_CHOICE.test(r.text));
     for (const raw of ladder) {
         const anchored = raw.startsWith('=');
         const cand = fold(anchored ? raw.slice(1) : raw);
@@ -121,6 +135,22 @@ export function chooseFromLadder(options, ladder) {
 
 /** The row a field sits in, if the caller gave us one — errors live there. */
 const rowClean = (ctx) => !ctx?.row || errorsIn(ctx.row).length === 0;
+
+/**
+ * What `after` holds that `before` did not — as a MULTISET, so a second copy of
+ * a chip that was already there counts as new. Comparing sets would call a
+ * duplicate "nothing happened", which is the one answer it must not give.
+ */
+export function freshOnes(before, after) {
+    const pool = [...before];
+    const out = [];
+    for (const c of after) {
+        const i = pool.indexOf(c);
+        if (i >= 0) pool.splice(i, 1);
+        else out.push(c);
+    }
+    return out;
+}
 
 /**
  * What this field is showing, in words, for a human reading a report.
@@ -295,8 +325,46 @@ const searchMulti = {
             return chips.filter((c) => c.includes(t)).length === 1;
         });
     },
+    /** The chips this field is showing right now, as text. */
+    chipsNow: (f) => f.controls().chips.map((c) => txt(c)),
+    /**
+     * The chips that could be this term's answer — read exactly as `satisfied`
+     * reads them, or the two would disagree about the same page.
+     *
+     * An EXACT chip settles it: "Figma" answered by a chip reading "Figma" is
+     * one answer, and a "Figma Design" sitting beside it is a different skill,
+     * quite possibly the candidate's own. Only when nothing matches exactly do
+     * the loose ones count, and then two of them is an ambiguity rather than an
+     * answer.
+     */
+    holding(f, term) {
+        const t = fold(term);
+        const chips = this.chipsNow(f);
+        const exact = chips.filter((c) => fold(c) === t);
+        return exact.length ? exact : chips.filter((c) => fold(c).includes(t));
+    },
     async commit(f, want, ctx = {}) {
-        const missing = [...want].filter((w) => !this.satisfied(f, [w]));
+        // A TERM THAT ALREADY HAS A CHIP IS NEVER CLICKED AGAIN — and that is
+        // not the same question as "is it satisfied".
+        //
+        // `satisfied` is strict: two chips containing one term is not an answer,
+        // it is two, so it reports false. Driving the click list off it meant a
+        // term with two chips read as MISSING on every pass and was picked
+        // again, and again — one more chip each time. That is the row-growth
+        // shape, in chips, and it is why this asks a different question: does
+        // the page already hold anything for this term?
+        const already = [...want].filter((w) => this.holding(f, w).length > 1);
+        if (already.length) {
+            // Over-answered. Semantic, so it is remembered and never repeated;
+            // nothing here removes a chip, because a chip may be the
+            // candidate's own.
+            return {
+                result: RESULT.AMBIGUOUS,
+                reason: `"${already[0]}" already has ${this.holding(f, already[0]).length} chips`,
+                saw: this.holding(f, already[0]).slice(0, 4),
+            };
+        }
+        const missing = [...want].filter((w) => this.holding(f, w).length === 0);
         const added = [];
         for (const term of missing) {
             const trigger = triggerOf(f);
@@ -340,8 +408,38 @@ const searchMulti = {
                 // was chips for "Agentforce" and "Agile Systems" nobody asked for.
                 const again = chooseOption(lease.options(), choice.matched);
                 if (!again.option) return { result: RESULT.OPEN_TIMEOUT, term, reason: 'the row moved under us' };
+
+                // WHAT THE PAGE GAINED IS THE VERDICT — not what we meant to
+                // click. Re-reading by label narrows the window in which the
+                // virtualiser can swap a row out from under us; it does not
+                // close it, and nothing downstream would ever notice. `added`
+                // used to record our INTENTION, and the only check afterwards
+                // asked whether the wanted terms had chips — never whether
+                // anything else had arrived with them.
+                const before = this.chipsNow(f);
                 again.option.click();
-                added.push(choice.matched);
+                await until(() => this.chipsNow(f).length !== before.length,
+                    { sleep: ctx.sleep, budgetMs: ctx.commitMs || 1200 });
+                const fresh = freshOnes(before, this.chipsNow(f));
+
+                if (fresh.length === 0) {
+                    // Nothing landed. Nothing was added either, so this is safe
+                    // to try again — unlike every branch below it.
+                    return { result: RESULT.COMMIT_FAILED, term, reason: 'the click added no chip' };
+                }
+                if (fresh.length > 1) {
+                    // One click, several answers — a parent row, or a group.
+                    // Semantic: it will do the same thing next pass.
+                    return { result: RESULT.AMBIGUOUS, term, reason: `one click added ${fresh.length} chips`, saw: fresh.slice(0, 4) };
+                }
+                const got = fold(fresh[0]);
+                const meant = fold(choice.matched);
+                if (got !== meant && !got.includes(fold(term))) {
+                    // A chip arrived that is neither what we picked nor an
+                    // answer to what was asked: the row moved under the click.
+                    return { result: RESULT.AMBIGUOUS, term, reason: `clicked "${choice.matched}" but got "${fresh[0]}"`, saw: fresh };
+                }
+                added.push(fresh[0]);
                 return { result: RESULT.COMMITTED, term };
             }, { sleep: ctx.sleep, label: `${f.name}:${term}`, activate });
             if (!r.ok) return { result: r.result || RESULT.COMMIT_FAILED, reason: r.reason, term };

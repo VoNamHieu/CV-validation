@@ -60,6 +60,10 @@ beforeEach(() => {
     dom.document.body.children = [];
     dom.document.activeElement = dom.document.body;
     globalThis.window[PAGE_LOCK] = null;
+    // A refusal is true of a PAGE, and it lives on `window` so two copies of
+    // the content script share it. A fresh page is a fresh catalogue — without
+    // this, one test's "already refused" answers the next test's question.
+    exec.forgetRefusals();
     page = buildHostilePage(dom.document);
 });
 
@@ -303,6 +307,49 @@ describe('MILESTONE 2 GATE — the verdict matches the page, in both directions'
         assert.equal(again.result, RESULT.SATISFIED);
         assert.equal(page.fields.skills.trigger.clickCount, before,
             're-typing eight terms to re-learn "already there" cost 39-44s a pass');
+    });
+
+    test('one click that answers twice is a refusal, not two skills', async () => {
+        // A catalogue row that stands for a GROUP. The click "works", the term
+        // asked for does get a chip — and a second one nobody asked for arrives
+        // with it. Judging the click by what we MEANT to pick can never see it.
+        page.misbehave('skills', { alsoAdds: ['Agile Systems'] });
+        const r = await exec.runField(field('formField-skills'), ['Figma'], ctx());
+
+        assert.equal(r.result, RESULT.AMBIGUOUS);
+        assert.match(r.reason, /added 2 chips/);
+        // And the next pass adds nothing. Without this the count climbs by one
+        // every pass — the row-growth bug, in chips.
+        const second = await exec.runField(field('formField-skills'), ['Figma'], ctx());
+        assert.equal(second.result, RESULT.SATISFIED, 'the term it asked for does have its chip');
+        assert.equal(page.chipsOn('skills').length, 2, 'nothing was added on the second pass');
+    });
+
+    test('a chip that is not what was clicked is a refusal too', async () => {
+        // The virtualiser swapped the row between reading it and clicking it —
+        // measured once as chips for "Agentforce" and "Agile Systems" nobody
+        // asked for. Re-reading by label narrows that window; it does not close
+        // it, so the chip that ARRIVES is what gets judged.
+        page.misbehave('skills', { instead: 'Agentforce' });
+        const r = await exec.runField(field('formField-skills'), ['Figma'], ctx());
+
+        assert.equal(r.result, RESULT.AMBIGUOUS);
+        assert.match(r.reason, /but got "Agentforce"/);
+        assert.deepEqual(page.chipsOn('skills'), ['Agentforce'],
+            'the wrong chip is reported, never quietly removed — a chip may be the candidate\'s own');
+    });
+
+    test('a term the page already answers twice is never picked again', async () => {
+        // Two chips CONTAINING one term, and none that IS it, is not an answer
+        // — it is two. `satisfied` says false, and driving the click list off
+        // that read the term as MISSING on every pass and picked it again each
+        // time. An exact chip would have settled it; these do not.
+        page.seedChip('skills', 'Figma Design');
+        page.seedChip('skills', 'Figma Prototyping');
+        const r = await exec.runField(field('formField-skills'), ['Figma'], ctx());
+
+        assert.equal(r.result, RESULT.AMBIGUOUS);
+        assert.equal(page.chipsOn('skills').length, 2, 'no third chip');
     });
 
     test('a widget with no handler asks for a human instead of improvising', async () => {
