@@ -39,7 +39,19 @@ export const PAGE = STEP;
  */
 export const V2_OWNED_STEPS = new Set([
     PAGE.AUTOFILL,
-    PAGE.MY_INFORMATION,
+    // MY_INFORMATION is NOT here — withdrawn 2026-08-09, measured.
+    //
+    // v2 took it the moment the flag defaulted on, and its single-select
+    // executor stopped at an open prompt on "How Did You Hear About Us": that
+    // field is a TWO-LEVEL cascade (a category row with no radio, whose leaf
+    // lives one click deeper), and reaching a leaf takes the ladder v1 spent
+    // days earning — drill in, re-resolve, search-pick, keyboard. Owning a page
+    // is a claim that every widget on it can be finished; for this page that
+    // claim was false, so the page goes back whole to v1 rather than being
+    // half-driven by the newer engine.
+    //
+    // Putting the name back is the entire act of porting it — after the
+    // cascade ladder exists in v2 AND has been measured on this field.
     PAGE.MY_EXPERIENCE,
     PAGE.APPLICATION_QUESTIONS,
     PAGE.VOLUNTARY_DISCLOSURES,

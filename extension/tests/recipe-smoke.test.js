@@ -458,3 +458,19 @@ describe('ownership, not list length, gates the outer loop', () => {
         assert.equal((src.match(/if \(_v2Owns\)/g) || []).length >= 2, true, 'needs and planner must both gate on ownership');
     });
 });
+
+// ── A page is owned only when every widget on it can be finished ──
+describe('v2 owns the pages it can actually finish', () => {
+    test('My Information belongs to v1 until the cascade ladder is ported', async () => {
+        // Measured 2026-08-09 (R-172088 → My Information): with the page owned
+        // by v2, "How Did You Hear About Us" got its prompt opened and nothing
+        // else. It is a two-level cascade; reaching a leaf needs drill →
+        // re-resolve → search-pick → keyboard, which lives in v1 today.
+        const { V2_OWNED_STEPS, owns } = await import('../src/content-agent/mdlz-v2/pages.js');
+        const { STEP } = await import('../src/content-agent/mdlz-v2/config.js');
+        assert.equal(owns(STEP.MY_INFORMATION), false,
+            'putting MY_INFORMATION back is the act of porting it — after the ladder exists AND is measured on that field');
+        assert.equal(V2_OWNED_STEPS.has(STEP.MY_EXPERIENCE), true, 'My Experience stays with v2');
+        assert.equal(owns(STEP.UNKNOWN), false, 'a job posting is nobody\'s page');
+    });
+});
