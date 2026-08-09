@@ -140,6 +140,16 @@ export const SEL = {
     listContainer: '[data-automation-id="activeListContainer"], [role="listbox"]',
     selectedItem: '[data-automation-id="selectedItem"]',
     selectedItemList: '[data-automation-id="selectedItemList"]',
+    // What a multi-select is BEFORE it has an answer.
+    //
+    // MEASURED on My Experience (R-174102, 2026-08-09): an empty Skills field
+    // carries `multiSelectContainer` and `data-uxi-widget-type="multiselect"`
+    // and NO selectedItemList — Workday creates the chip list with the first
+    // chip. Nothing else on that page carries either marker (checked against
+    // all 14 formFields: jobTitle, company, location, the two dates, degree,
+    // language and Overall are all something else), so this identifies the
+    // widget rather than merely describing it.
+    multiSelect: '[data-automation-id="multiSelectContainer"], [data-uxi-widget-type="multiselect"]',
     deleteCharm: '[data-automation-id="DELETE_charm"]',
     dateIcon: '[data-automation-id="dateIcon"]',
     dateMonth: '[data-automation-id="dateSectionMonth-input"]',

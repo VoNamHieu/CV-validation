@@ -76,6 +76,24 @@ describe('what a control IS, asked of the page and not of its name', () => {
         assert.equal(field('formField-skills').kind, WIDGET.SEARCH_MULTI);
     });
 
+    test('an EMPTY multi-select is still a multi-select', () => {
+        // MEASURED on the live form (R-174102, My Experience, 2026-08-09):
+        // Workday creates `selectedItemList` with the FIRST CHIP, so a chip-list
+        // test can only ever recognise a multi-select that is already answered
+        // — and Skills is empty every time, because being empty is why we are
+        // there. Classified SEARCH_SINGLE, the executor typed all eight skills
+        // into the box as one comma-joined string, nothing matched, and the
+        // field burned OPEN_TIMEOUT ×3 at ~8s each on a widget that worked.
+        const skills = field('formField-skills');
+        assert.equal(skills.controls().chipList, null, 'no chip list until there is a chip');
+        assert.equal(skills.kind, WIDGET.SEARCH_MULTI);
+        // And the marker is what decides it, not the automation id: the next
+        // tenant will call this field something else.
+        const wrap = rowlib.fieldIn(page.page, 'formField-skills');
+        wrap.setAttribute('data-automation-id', 'formField-someGuidNobodyPublished');
+        assert.equal(fp.kindOf(wrap), WIDGET.SEARCH_MULTI);
+    });
+
     test('a date is a date even though it is made of text inputs', () => {
         const row = page.addWorkRow({ title: 'PO', company: 'Acme' });
         const date = inRow(row, 'formField-startDate');

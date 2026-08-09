@@ -49,6 +49,7 @@ export function controlsOf(wrap) {
         year: first(wrap, SEL.dateYear),
         icon: first(wrap, SEL.dateIcon),
         chipList: first(wrap, SEL.selectedItemList),
+        multiSelect: first(wrap, SEL.multiSelect),
         chips: all(SEL.selectedItem),
         button: first(wrap, 'button'),
         textarea: first(wrap, 'textarea'),
@@ -81,7 +82,21 @@ export function kindOf(wrap) {
     if (c.file) return WIDGET.FILE;
     if (c.radios.length) return WIDGET.RADIO;
     if (c.checkbox) return WIDGET.CHECKBOX;
-    if (c.chipList) return WIDGET.SEARCH_MULTI;
+    // A MULTI-SELECT IS ONE BEFORE IT HAS AN ANSWER, and the chip list alone
+    // could never say so.
+    //
+    // MEASURED (R-174102, My Experience, 2026-08-09): Workday creates
+    // `selectedItemList` with the FIRST CHIP. So a chip-list test recognises
+    // only a multi-select that is already answered — and Skills is empty every
+    // time, because being empty is why we are there. It fell through to the
+    // rung below, which reads a "Search" placeholder and calls it a searchable
+    // SINGLE select; the executor then typed all eight skills into the box as
+    // one comma-joined string, no option matched it, and the field spent
+    // OPEN_TIMEOUT ×3 at ~8 seconds each on a widget that was working.
+    //
+    // The container is the signal that exists from the first render. The chip
+    // list stays as the second, for a tenant that renders one and not the other.
+    if (c.multiSelect || c.chipList) return WIDGET.SEARCH_MULTI;
     if (c.textarea) return WIDGET.TEXTAREA;
     if (c.button && (c.button.getAttribute('aria-haspopup') || '').includes('listbox')) return WIDGET.LISTBOX;
     // Mondelez renders some prompts as a search box with no button at all — an

@@ -373,12 +373,19 @@ export function buildHostilePage(doc, opts = {}) {
         return h.toString(16).padStart(8, '0').repeat(4);
     }
 
+    /** The chip list, created the moment there is a chip to put in it. */
+    function chipListOf(f) {
+        if (!f.chips) f.chips = el('div', { 'data-automation-id': 'selectedItemList' }, f.wrap);
+        return f.chips;
+    }
+
     function commit(f, label) {
         setTimeout(() => {
             if (f.multi) {
                 // A chip that also answers the option selector — and the list
-                // stays open, as a multi-select does.
-                const chip = el('div', { 'data-automation-id': 'selectedItem', role: 'option' }, f.chips);
+                // stays open, as a multi-select does. The chip LIST arrives with
+                // the first chip, which is when the live form creates it.
+                const chip = el('div', { 'data-automation-id': 'selectedItem', role: 'option' }, chipListOf(f));
                 chip.textContent = label;
             } else {
                 f.trigger.textContent = label;
@@ -399,7 +406,23 @@ export function buildHostilePage(doc, opts = {}) {
     }) {
         const wrap = el('div', { 'data-automation-id': automationId }, parent);
         if (label) el('label', {}, wrap).textContent = label;
-        const chips = multi ? el('div', { 'data-automation-id': 'selectedItemList' }, wrap) : null;
+        // A MULTI-SELECT IS ONE BEFORE IT HAS AN ANSWER.
+        //
+        // This harness used to render the chip list up front, which made an
+        // empty multi-select look like an answered one — and the fixture is why
+        // the real defect passed every test. MEASURED on the live form
+        // (R-174102, My Experience, 2026-08-09): an empty Skills field carries
+        // `multiSelectContainer` / data-uxi-widget-type="multiselect" and NO
+        // selectedItemList at all; Workday creates the chip list with the first
+        // chip. So the container is rendered here from the start and the chip
+        // list is created on the first commit, exactly as the page does it.
+        if (multi) {
+            el('div', {
+                'data-automation-id': 'multiSelectContainer',
+                'data-uxi-widget-type': 'multiselect',
+            }, wrap);
+        }
+        const chips = null;
         const trigger = el(tag, tag === 'button' ? { 'aria-haspopup': 'listbox' } : { type: 'text' }, wrap);
         if (tag === 'button') trigger.textContent = 'Select One';
         // A PROMPT'S HIDDEN INPUT HOLDS A GUID, NOT THE ANSWER.
@@ -532,7 +555,7 @@ export function buildHostilePage(doc, opts = {}) {
         pickerOpen: () => pickerFor.size,
         /** A chip that was already there — the candidate's own, not ours to touch. */
         seedChip(name, label) {
-            const chip = el('div', { 'data-automation-id': 'selectedItem', role: 'option' }, fields[name].chips);
+            const chip = el('div', { 'data-automation-id': 'selectedItem', role: 'option' }, chipListOf(fields[name]));
             chip.textContent = label;
             return chip;
         },
