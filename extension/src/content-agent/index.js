@@ -42,7 +42,8 @@ import { tenantRefFor } from '../ats/tenant.js';
 // The review READER. It cannot click — that is its whole design — and it runs
 // here because the loop returns at the final step BEFORE it ever reaches the
 // fill, so a controller wired only into the fill path would never see this page.
-import { pageOwner } from './mdlz-v2/pages.js';
+import { owns, pageOwner } from './mdlz-v2/pages.js';
+import { observeStep } from './mdlz-v2/page-observer.js';
 import { runReviewPage } from './mdlz-v2/page-review.js';
 
 // Build marker — logs the moment content-agent.js injects on a matched page, so
@@ -473,8 +474,21 @@ async function _runAgentLoop(rawProfile) {
             // ran on a page v2 was about to own, which is one of the three
             // opinions this split exists to remove. The flag plus the host
             // answers the same question before anyone has acted.
+            // OWNERSHIP OF THIS PAGE — not "is v2 switched on".
+            // Measured 2026-08-09 (R-172088): the flag defaults on and the host
+            // is mdlz, so this read TRUE on the job POSTING page — a page v2
+            // had just declined (page=UNKNOWN, owner=v1). needs and planner
+            // were both skipped, v1 was never asked to click Apply, and the
+            // stuck detector reported "v2 owns this page and recorded nothing"
+            // four iterations later. Being enabled on a host is not owning a
+            // page.
+            //
+            // Two ways to own it, both about THIS page: v2 has claimed it, or
+            // it is one of the steps v2 takes (which answers on the first pass,
+            // before the claim exists — the ordering problem the flag test was
+            // a wrong fix for).
             const _v2Owns = pageOwner() === 'mdlz-v2'
-                || (isMdlzPage() && (await flagMode()) === MODE.ON);
+                || (isMdlzPage() && (await flagMode()) === MODE.ON && owns(observeStep()));
             const stopped = stopRequested();
             if (stopped) {
                 trace('loop.stopped', { why: stopped.why, iter: i + 1 });

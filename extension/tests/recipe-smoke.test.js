@@ -242,7 +242,16 @@ describe('on a page v2 owns, nothing else forms an opinion', () => {
     });
 
     test('the ownership check is imported, not re-implemented', () => {
-        assert.match(src, /import \{ pageOwner \} from '\.\/mdlz-v2\/pages\.js'/);
+        assert.match(src, /import \{ owns, pageOwner \} from '\.\/mdlz-v2\/pages\.js'/);
+    });
+
+    test('being enabled on the host is not owning the page', () => {
+        // R-172088: the flag defaults on and the host is mdlz, so an
+        // enabled-means-owned test read true on the job POSTING page — one v2
+        // had just declined — and silenced needs, planner and v1 alike. The
+        // step has to be one v2 actually takes.
+        assert.match(src, /owns\(observeStep\(\)\)/,
+            'ownership must be qualified by the step, not by the flag alone');
     });
 });
 
