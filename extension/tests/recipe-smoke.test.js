@@ -14,6 +14,7 @@
 
 import { test, describe, before } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 function stubBrowser() {
     const nullNode = () => null;
@@ -203,6 +204,34 @@ const SMOKE_RECIPE = {
         fields: [{ label: 'Postal Code', selector: '#pc', type: 'text', profileKey: 'postalCode' }],
     }],
 };
+
+// ── STATIC GUARD: one verdict source on a page v2 owns ──
+//
+// A live run produced THREE verdicts for one pass — v2 saying Country
+// OPTION_NOT_FOUND, the needs manifest saying one required field unfilled, and
+// the stuck detector naming a third field — and none of them agreed. The loop
+// is not executable from a test, so the wiring is checked textually, the same
+// way this file already checks that every name used is imported.
+describe('on a page v2 owns, nothing else forms an opinion', () => {
+    const src = readFileSync(new URL('../src/content-agent/index.js', import.meta.url), 'utf8');
+
+    test('the needs engine is gated on ownership', () => {
+        assert.match(src, /if \(pageOwner\(\) === 'mdlz-v2'\) \{[\s\S]{0,200}engine: 'needs'/);
+    });
+
+    test('the planner is gated on ownership', () => {
+        assert.match(src, /if \(pageOwner\(\) === 'mdlz-v2'\) \{[\s\S]{0,200}engine: 'planner'/);
+    });
+
+    test('and the stuck report names v2\'s gaps rather than auditing the page again', () => {
+        assert.match(src, /const v2Gaps = pageOwner\(\) === 'mdlz-v2'/);
+        assert.match(src, /const blockers = v2Gaps\.length \? \[\] : auditRequiredBlockers\(\)/);
+    });
+
+    test('the ownership check is imported, not re-implemented', () => {
+        assert.match(src, /import \{ pageOwner \} from '\.\/mdlz-v2\/pages\.js'/);
+    });
+});
 
 describe('the router offers the page to v2 and falls back to v1', () => {
     // The wrapper is the only place v2 touches the existing flow, so the thing

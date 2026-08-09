@@ -41,6 +41,7 @@ import { tenantRefFor } from '../ats/tenant.js';
 // here because the loop returns at the final step BEFORE it ever reaches the
 // fill, so a controller wired only into the fill path would never see this page.
 import { isMdlzPage } from './mdlz-v2/config.js';
+import { pageOwner } from './mdlz-v2/pages.js';
 import { runReviewPage } from './mdlz-v2/page-review.js';
 
 // Build marker — logs the moment content-agent.js injects on a matched page, so
@@ -446,6 +447,10 @@ async function _runAgentLoop(rawProfile) {
 
         // Scroll to discover all fields
         await scrollAndCollect();
+
+        /** v2's own account of what it could not answer, for the stuck report. */
+
+        let _lastV2Gaps = [];
 
         let sameStateCount = 0;
         let emptyStreak = 0;   // consecutive empty/error observes → triggers a recovery reload
@@ -884,7 +889,15 @@ async function _runAgentLoop(rawProfile) {
             // filled. That last gap is the expensive one — the recipe treats any
             // non-empty value as finished, so a parser that read the job title as
             // "Consultant" when the CV says "Product Owner" was left standing.
-            {
+            // ONE VERDICT SOURCE. On a page mdlz-v2 owns, the needs engine does
+            // not get to decide anything: a live run had three verdicts for one
+            // pass — v2 saying Country OPTION_NOT_FOUND, the needs manifest
+            // saying one required field unfilled, and the stuck detector naming a
+            // third field — and none of them agreed about what was wrong. A
+            // specialized controller cannot have three opinions.
+            if (pageOwner() === 'mdlz-v2') {
+                trace('mdlz.outer.skipped', { engine: 'needs', why: 'v2 owns this page' });
+            } else {
                 const manifest = buildManifest(state.formFields, { profile, cv: cvStructured });
 
                 // The candidate's own data wins. A mismatch the pipeline can
@@ -1112,6 +1125,9 @@ async function _runAgentLoop(rawProfile) {
                 // as this step's truth. Wait for the page to become itself.
                 if (_advanceHeld(state, recipe)) { const fp0 = _stepFingerprint(state, recipe); await waitForMutation(2500, () => _stepFingerprint(state, recipe) !== fp0); continue; }
                 const rf = await _phase('recipe', () => applyRecipeFields(recipe, profile, cvData, cvStructured));
+                // v2's own account of what it could not answer — the only
+                // blocker list that matters on a page it owns.
+                if (rf?.v2) _lastV2Gaps = rf.gaps || rf.fieldGaps || [];
                 if (rf?.filled) _progress();
                 if (_openIter && rf?.step) _openIter.step = rf.step;
                 for (const a of rf.answers || []) {
@@ -1449,8 +1465,15 @@ async function _runAgentLoop(rawProfile) {
                     // Don't just give up "stuck" — audit WHY the step won't advance
                     // (which required fields are still empty / what validation errors
                     // are shown) so the user (and the log) knows what to complete.
-                    const blockers = auditRequiredBlockers();
-                    const miss = blockers.slice(0, 6).map(b => b.kind === 'error' ? b.label : `${b.label} (${b.kind})`).join(', ');
+                    // The blockers come from whoever OWNS the page. v2's report
+                    // names what its own plan could not answer; auditing the DOM
+                    // separately produced a third opinion that disagreed with
+                    // both of the other two.
+                    const v2Gaps = pageOwner() === 'mdlz-v2' ? (_lastV2Gaps || []) : [];
+                    const blockers = v2Gaps.length ? [] : auditRequiredBlockers();
+                    const miss = v2Gaps.length
+                        ? v2Gaps.slice(0, 6).map(g => `${g.id || g.field || g.section} (${g.why})`).join(', ')
+                        : blockers.slice(0, 6).map(b => b.kind === 'error' ? b.label : `${b.label} (${b.kind})`).join(', ');
                     console.warn('[Copo Apply] STUCK — required blockers:', blockers.length ? blockers : '(none detected — likely a captcha / login / unknown widget)');
                     removeProgress();
                     showToast(miss
@@ -1617,6 +1640,14 @@ async function _runAgentLoop(rawProfile) {
                     buttons: state.buttons.length,
                 });
                 await sleep(1500);
+                continue;
+            }
+            // The planner may not act on a page v2 owns, so asking it costs ~25s
+            // and produces instructions the click choke point would refuse. Wait
+            // for v2's next pass instead.
+            if (pageOwner() === 'mdlz-v2') {
+                trace('mdlz.outer.skipped', { engine: 'planner', why: 'v2 owns this page' });
+                await sleep(1200);
                 continue;
             }
             showProgress(i + 1, null, `AI đang lên kế hoạch (iteration ${i + 1})...`);
