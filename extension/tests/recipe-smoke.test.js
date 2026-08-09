@@ -292,6 +292,26 @@ describe('mdlz-v1 and the generic still agree on their contract', () => {
     });
 });
 
+// ── mdlz enters the form by hand, not through Workday's parse ──
+describe('mdlz reaches the form the way it can key', () => {
+    test('Apply Manually is tried before Autofill with Resume', () => {
+        // MEASURED on R-173159: Workday's résumé parse wrote the school as
+        // "University of Illinois" while the CV says "University of Illinois at
+        // Urbana-Champaign". The planner could not match its own entry to that
+        // row, added a SECOND Education row, and the parsed row kept its empty
+        // required Degree — one CV, one school, two rows, and a step that could
+        // never advance.
+        //
+        // Order is the whole fix: clickRecipeGateway takes the FIRST gateway
+        // that resolves, so a reversed list silently restores the defect.
+        const src = readFileSync(new URL('../src/content-agent/recipe-mdlz-v1.js', import.meta.url), 'utf8');
+        const manual = src.indexOf('applyManually');
+        const autofill = src.indexOf("detect: '[data-automation-id=\"autofillWithResume\"]'");
+        assert.ok(manual > 0 && autofill > 0, 'both gateways must still exist');
+        assert.ok(manual < autofill, 'Apply Manually must come first — a pre-fill we did not write is a row we cannot key');
+    });
+});
+
 // ── STATIC GUARD: a name used must be a name imported ──
 //
 // "recipeFieldStatus is not defined" killed a run because an edit that was

@@ -81,11 +81,27 @@ export const FALLBACK_RECIPES = [
         // Non-form gateway the agent clicks to reach the form. The "Start Your
         // Application" modal renders its options as <a role="button"> (not
         // <button>), which the generic scan misses — so drive it by exact selector.
-        // ONLY "Autofill with Resume": the flow always syncs a CV PDF first, and
-        // letting Workday parse the résumé pre-fills the tricky required dropdowns
-        // (Country/source). "Apply Manually" is intentionally omitted — it skips
-        // that pre-fill and leaves every required field to fill by hand.
+        // "APPLY MANUALLY" FIRST — reversed 2026-08-09, measured.
+        //
+        // The old order preferred "Autofill with Resume" so Workday's own parse
+        // would pre-fill the tricky required dropdowns. Measured on R-173159,
+        // that parse is also what breaks the page: it wrote the school as
+        // "University of Illinois" while the CV says "University of Illinois at
+        // Urbana-Champaign", the planner could not match its own entry to that
+        // row, added a SECOND Education row, and the parsed row kept its empty
+        // required Degree — so the step could never advance. One CV, one school,
+        // two rows, and a wall.
+        //
+        // A pre-fill we did not write is a row we cannot key, and every such row
+        // is one we have to reconcile. Filling an empty form is the thing v2 was
+        // built to do, and the run that went end to end today did exactly that:
+        // Workday declined to autofill ("you don't have a previous
+        // application"), the form arrived empty, and v1+v2 filled all five steps.
+        //
+        // Autofill stays as a FALLBACK, for a posting that offers no manual
+        // option — reaching the form badly still beats not reaching it.
         gateways: [
+            { label: 'Apply Manually', detect: '[data-automation-id="applyManually"]' },
             { label: 'Autofill with Resume', detect: '[data-automation-id="autofillWithResume"]', needsCV: true },
         ],
         steps: [
