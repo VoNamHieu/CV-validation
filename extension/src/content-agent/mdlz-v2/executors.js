@@ -275,14 +275,36 @@ const searchMulti = {
         for (const term of missing) {
             const trigger = triggerOf(f);
             if (!trigger) return { result: RESULT.WAITING_HYDRATION, reason: 'no search box yet' };
-            // For a search prompt the ACTIVATION is the typing: opening it with a
-            // bare click shows a catalogue, and the whole point of this widget is
-            // that the employer's taxonomy is too long to be one.
+            // THE CLICK OPENS IT, THE TYPING FILTERS IT — two acts, and this
+            // used to do only the second.
+            //
+            // MEASURED on Skills (R-174102, 2026-08-09), by hand on the live
+            // widget: focus + a written value opens NOTHING, and that is the
+            // whole of the OPEN_TIMEOUT ×3 at ~8 seconds each. A plain click
+            // opens the list immediately — `activeListContainer[role=listbox]`,
+            // which is exactly what `visibleLists()` looks for — and the value
+            // written after it filters what is inside. Enter is not part of it:
+            // pressed on a real keyboard it committed nothing.
+            //
+            // Also measured, and the reason a refusal here is not a defect: this
+            // tenant's Skills catalogue answers "No Items." to every term tried,
+            // including plain ones like "Sales", typed on a REAL keyboard. So
+            // the honest outcome is OPTION_NOT_FOUND — semantic, remembered
+            // once, never retried — rather than an interaction failure the
+            // scheduler pays for again on every pass.
+            //
+            // The Enter stays, and is deliberately last. It is what opens a
+            // search prompt that answers to typing alone (v1 measured that shape
+            // on SmartRecruiters, and the harness models it); on the Mondelez
+            // widget above it is inert — pressed on a real keyboard it neither
+            // opened, filtered nor committed anything. Two measured shapes, one
+            // activation, and neither rung undoes the other.
             const activate = (t) => {
                 t.focus?.();
+                t.click?.();
                 setNativeValue(t, term);
                 try { t.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); }
-                catch { /* a box that answers to typing alone has already opened */ }
+                catch { /* a box that answers to the click alone is already open */ }
             };
             const r = await withList(trigger, async (lease) => {
                 const choice = chooseOption(lease.options(), term);
