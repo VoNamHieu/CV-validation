@@ -149,6 +149,23 @@ export function readNow(f) {
 const text = {
     /** Idempotent: a box that already says it is not typed into again. */
     satisfied: (f, want) => fold(f.controls().text?.value || f.controls().textarea?.value) === fold(want),
+    /**
+     * Write it, then LET GO of it — the blur is not politeness, it is the
+     * commit.
+     *
+     * MEASURED (R-174102, 2026-08-09), and it cost a whole run: every text
+     * field on My Experience displayed its value, every verify passed, no row
+     * showed an error — and Save and Continue came back "The field Job Title is
+     * required and must have a value" for three titles that were plainly on the
+     * screen. Workday's model had none of them. Blurring each field, changing
+     * nothing else, cleared all seven errors: 3 × Job Title, 3 × Company, 1 ×
+     * School.
+     *
+     * So `setNativeValue` paints the box and Workday takes the value on blur.
+     * Without it a field is written, verified, and still empty as far as the
+     * ATS is concerned — the `valueAsCommitProof` hazard in config.js, arriving
+     * from the one direction nothing here was watching.
+     */
     async commit(f, want) {
         const c = f.controls();
         const el = c.text || c.textarea;
@@ -156,6 +173,11 @@ const text = {
         try { el.scrollIntoView?.({ block: 'center' }); } catch { /* no layout */ }
         el.focus?.();
         setNativeValue(el, String(want));
+        // The order is the measurement: focusout is what Workday's own handler
+        // listens through, and blur() alone does not bubble to it.
+        try { el.dispatchEvent(new FocusEvent('focusout', { bubbles: true })); }
+        catch { try { el.dispatchEvent(new Event('focusout', { bubbles: true })); } catch { /* noop */ } }
+        try { el.blur?.(); } catch { /* the control refuses; verify will say so */ }
         return { result: RESULT.COMMITTED };
     },
     /**
@@ -180,6 +202,10 @@ const text = {
             await nap(40);
             if (now() !== fold(want)) return { result: RESULT.COMMIT_FAILED, reason: 'value did not stick' };
         }
+        // A row error is checked AFTER the field has been let go of, because
+        // that is when Workday gets to disagree. Checked before the blur it says
+        // nothing at all — which is exactly how seven required-field errors
+        // stayed invisible until Save and Continue.
         if (!rowClean(ctx)) return { result: RESULT.COMMIT_FAILED, reason: `row error: ${errorsIn(ctx.row)[0]}` };
         return { result: RESULT.COMMITTED };
     },

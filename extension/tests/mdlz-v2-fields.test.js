@@ -234,6 +234,25 @@ describe('MILESTONE 2 GATE — the verdict matches the page, in both directions'
         assert.equal(row.titleInput.value, 'Product Owner');
     });
 
+    test('a text field is LET GO of, because that is when Workday takes it', async () => {
+        // MEASURED (R-174102, 2026-08-09) and it cost a whole run: every text
+        // field showed its value, every verify passed, no row showed an error —
+        // and Save and Continue answered "The field Job Title is required and
+        // must have a value" for three titles plainly on the screen. Workday's
+        // model had none of them. Blurring each field, changing nothing else,
+        // cleared all seven errors (3 × Job Title, 3 × Company, 1 × School).
+        //
+        // So the write paints the box and the BLUR is the commit. A field that
+        // is never let go of is written, verified, and still empty to the ATS.
+        const row = page.addWorkRow({ title: '', company: '' });
+        const seen = [];
+        row.titleInput.addEventListener('focusout', () => seen.push('focusout'));
+
+        const r = await exec.runField(inRow(row, 'formField-jobTitle'), 'Product Owner', { ...ctx(), row: row.row });
+        assert.equal(r.result, RESULT.COMMITTED);
+        assert.ok(seen.includes('focusout'), 'the field must be released, or the ATS never takes the value');
+    });
+
     test('a tick with the row still complaining is not a commit', async () => {
         const row = page.addWorkRow({ title: 'PO', company: 'Acme' });
         row.raiseError('The field From is required');
