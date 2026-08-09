@@ -23,7 +23,6 @@
  */
 
 import { MONTHS, MONTH_LABEL, RESULT, SEL, SEMANTIC } from './config.js';
-import { simulateTyping } from '../dom.js';
 import { WIDGET, triggerOf } from './fingerprint.js';
 import { errorsIn, rowsOf } from './row.js';
 import { visibleMonthCells, visibleOptions, visiblePanels } from './page-observer.js';
@@ -149,6 +148,35 @@ const rowClean = (ctx) => !ctx?.row || errorsIn(ctx.row).length === 0;
  * keyCode 13, because a widget that listens for the legacy code hears nothing
  * from `{ key: 'Enter' }` alone.
  */
+/**
+ * Type a term the way a keyboard does — WITHOUT paying a throttled timer per
+ * character.
+ *
+ * MEASURED in a hidden tab on 2026-08-09: `setTimeout(…, 30)` actually took
+ * 989.6ms. Chrome clamps a hidden tab's timers to ≥1s (and to ~one fire a
+ * minute after five hidden minutes — dom.js records the same measurement, "a
+ * 30-second list walk stretched to 25 minutes"). `simulateTyping` sleeps 30ms
+ * PER CHARACTER through exactly that clock, so "Agile/Scrum" cost 10.9 seconds
+ * and eight skills cost 87 — before a single search had been submitted. The
+ * page advanced on its optional-field rule long before the field was done, and
+ * the result looked exactly like Skills being skipped.
+ *
+ * The pause is not what makes this work: the search does not fire until ENTER,
+ * so nothing debounces between the keystrokes. What matters is that each
+ * character arrives as its own keydown/value/keyup, and that is kept.
+ */
+export function typeInto(el, text) {
+    el.focus?.();
+    setNativeValue(el, '');
+    let typed = '';
+    for (const char of String(text)) {
+        try { el.dispatchEvent(new KeyboardEvent('keydown', { key: char, bubbles: true })); } catch { /* noop */ }
+        typed += char;
+        setNativeValue(el, typed);
+        try { el.dispatchEvent(new KeyboardEvent('keyup', { key: char, bubbles: true })); } catch { /* noop */ }
+    }
+}
+
 export function pressEnter(el) {
     for (const type of ['keydown', 'keypress', 'keyup']) {
         try {
@@ -458,8 +486,7 @@ const searchMulti = {
             const activate = async (t) => {
                 t.focus?.();
                 t.click?.();
-                setNativeValue(t, '');            // a crashed pass may have left text
-                await simulateTyping(t, term);
+                typeInto(t, term);                // clears first, then char by char
                 pressEnter(t);
             };
             const r = await withList(trigger, async (lease) => {
