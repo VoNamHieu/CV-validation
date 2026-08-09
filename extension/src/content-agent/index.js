@@ -37,6 +37,11 @@ import { applyRecipeFields, atFinalStep, clickRecipeGateway, FIELD_FAIL_BUDGET, 
 import { checkClick, logDenial } from './policy.js';
 import { buildManifest, summarizeGaps, VERDICT } from './needs.js';
 import { tenantRefFor } from '../ats/tenant.js';
+// The review READER. It cannot click — that is its whole design — and it runs
+// here because the loop returns at the final step BEFORE it ever reaches the
+// fill, so a controller wired only into the fill path would never see this page.
+import { isMdlzPage } from './mdlz-v2/config.js';
+import { runReviewPage } from './mdlz-v2/page-review.js';
 
 // Build marker — logs the moment content-agent.js injects on a matched page, so
 // you can confirm (in the PAGE / tab console, NOT the service-worker console) that
@@ -668,8 +673,21 @@ async function _runAgentLoop(rawProfile) {
             // Next click would otherwise send the application. Fill up to here only.
             if (recipe && atFinalStep(recipe)) {
                 removeProgress();
+                // What the REVIEW PAGE says, beside what we believe we filled.
+                // Read-only by construction: a row the page does not show is the
+                // last chance to notice that a step three pages back did not
+                // take, and reading it must never be able to break the handoff.
+                let pageReview = null;
+                try {
+                    if (isMdlzPage()) pageReview = await runReviewPage({ cv: cvStructured });
+                } catch (e) { console.warn('[Copo] review read failed (harmless):', e?.message || e); }
                 showToast(withTenantFlags('✅ Đã điền xong tới bước cuối — kiểm tra rồi bấm "Submit" để nộp.'), 7000);
-                reportResult(true, 'Reached review step — filled, awaiting user submit', 'filled', { review: summarizeAnswers(reviewAnswers), fieldGaps: [...fieldGaps.values()] });
+                reportResult(true, 'Reached review step — filled, awaiting user submit', 'filled', {
+                    review: summarizeAnswers(reviewAnswers),
+                    fieldGaps: [...fieldGaps.values()],
+                    pageReview: pageReview?.snapshot || null,
+                    pageReviewGaps: pageReview?.gaps || [],
+                });
                 showConfirmation(state.totalFields, state.totalFields, false);
                 return;
             }
