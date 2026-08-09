@@ -436,8 +436,24 @@ export function planStep(cv, { root = null, maxRows = 8, addVia = 'any' } = {}) 
     // page: it is reported as a gap and the step still finishes. A tenant that
     // DOES require it still stops us, through the row error Workday shows —
     // which `pageComplete` reads independently of this flag.
+    //
+    // AND ONLY WHERE IT EXISTS. MEASURED on the Demand Planning Intern posting
+    // (R-173704, 2026-08-09): its My Experience renders Work Experience,
+    // Education, Languages, Résumé and Websites — and NO Skills section at all.
+    // Planned unconditionally, the task resolved to nothing and came back
+    // WAITING_HYDRATION on every pass forever; that is an INTERACTION outcome,
+    // so it is never forgiven as an optional semantic gap and the page could
+    // never advance. Worse, WAITING_HYDRATION is not a terminal result either,
+    // so it was not even listed as a blocker — the run named the only other
+    // unsatisfied task instead and sent us after the wrong field.
+    //
+    // Same rule the education fields already use: a field this posting does not
+    // render is not a gap and not a task; it is simply not there.
     const skills = normaliseSkills(cv?.skills);
-    if (skills.length) {
+    const skillsField = typeof document !== 'undefined'
+        ? (root || document).querySelector('[data-automation-id="formField-skills"]')
+        : null;
+    if (skills.length && skillsField) {
         tasks.push({ kind: 'field', section: 'skills', id: 'skills', field: 'formField-skills', want: skills, optional: true });
     }
 

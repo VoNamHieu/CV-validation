@@ -312,6 +312,9 @@ export function installDom({ href = 'https://wd3.myworkdaysite.com/en-US/recruit
         MouseEvent: globalThis.MouseEvent,
         PointerEvent: globalThis.PointerEvent,
         DataTransfer: globalThis.DataTransfer,
+        HTMLInputElement: globalThis.HTMLInputElement,
+        HTMLTextAreaElement: globalThis.HTMLTextAreaElement,
+        HTMLSelectElement: globalThis.HTMLSelectElement,
         chrome: globalThis.chrome,
     };
     const url = new URL(href);
@@ -325,6 +328,16 @@ export function installDom({ href = 'https://wd3.myworkdaysite.com/en-US/recruit
     globalThis.MouseEvent = MiniMouseEvent;
     globalThis.PointerEvent = MiniPointerEvent;
     globalThis.DataTransfer = MiniDataTransfer;
+    // Every browser has these, and production code reads them to pick the right
+    // native `value` setter (calling HTMLInputElement's on a <textarea> throws
+    // "Illegal invocation"). Their absence here made `setNativeValue` throw
+    // "HTMLTextAreaElement is not defined" the moment anything typed — which
+    // surfaced as OPEN_TIMEOUT from a widget that was never touched. A stub the
+    // elements are not instances of is enough and is honest: the descriptor
+    // lookup finds no setter and the assignment path is taken.
+    globalThis.HTMLInputElement = class HTMLInputElement { };
+    globalThis.HTMLTextAreaElement = class HTMLTextAreaElement { };
+    globalThis.HTMLSelectElement = class HTMLSelectElement { };
     globalThis.chrome = globalThis.chrome || {
         storage: { local: { get: (_k, cb) => cb({}) } },
         runtime: { id: 'mini-dom' },

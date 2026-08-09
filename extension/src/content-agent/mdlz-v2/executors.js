@@ -23,6 +23,7 @@
  */
 
 import { MONTHS, MONTH_LABEL, RESULT, SEL, SEMANTIC } from './config.js';
+import { simulateTyping } from '../dom.js';
 import { WIDGET, triggerOf } from './fingerprint.js';
 import { errorsIn, rowsOf } from './row.js';
 import { visibleMonthCells, visibleOptions, visiblePanels } from './page-observer.js';
@@ -135,6 +136,59 @@ export function chooseFromLadder(options, ladder) {
 
 /** The row a field sits in, if the caller gave us one — errors live there. */
 const rowClean = (ctx) => !ctx?.row || errorsIn(ctx.row).length === 0;
+
+/**
+ * ENTER IS WHAT RUNS THE SEARCH — and the list says "No Items." until it does.
+ *
+ * v1 paid for this once and wrote it down: "Typing alone leaves the list showing
+ * 'No Items.' no matter what the term is — I read that as an empty taxonomy and
+ * was wrong: the query had simply never been submitted." Measured again the same
+ * way on 2026-08-09 before anyone read that comment.
+ *
+ * So the keystroke is sent as a real one: keypress as well as keydown/keyup, and
+ * keyCode 13, because a widget that listens for the legacy code hears nothing
+ * from `{ key: 'Enter' }` alone.
+ */
+export function pressEnter(el) {
+    for (const type of ['keydown', 'keypress', 'keyup']) {
+        try {
+            el.dispatchEvent(new KeyboardEvent(type, {
+                key: 'Enter', code: 'Enter', keyCode: 13, which: 13,
+                bubbles: true, cancelable: true, composed: true,
+            }));
+        } catch { /* a control that cannot take an event will fail the verify */ }
+    }
+}
+
+/**
+ * A signature of what the results list is showing, so "has the search answered?"
+ * is a question about the ROWS and not about elapsed time.
+ *
+ * "No Items." is excluded deliberately: it is the state BEFORE an answer, so a
+ * key built from it would report the pre-search list as a result.
+ */
+export function resultsKey() {
+    const rows = visibleOptions()
+        .map((o) => txt(o))
+        .filter((t) => t && !NOT_A_CHOICE.test(t));
+    return rows.join('|');
+}
+
+/**
+ * Wait for the result set to become something other than what it was.
+ *
+ * Not "wait for options to exist" — they already do, and they say "No Items."
+ */
+export async function waitForResults(before, { sleep, budgetMs = 6000 } = {}) {
+    const nap = napper(sleep);
+    const by = Date.now() + budgetMs;
+    for (;;) {
+        const now = resultsKey();
+        if (now && now !== before) return now;
+        if (Date.now() >= by) return null;
+        await nap(120);
+    }
+}
 
 /**
  * What `after` holds that `before` did not — as a MULTISET, so a second copy of
@@ -367,6 +421,10 @@ const searchMulti = {
         const missing = [...want].filter((w) => this.holding(f, w).length === 0);
         const added = [];
         for (const term of missing) {
+            // What the list showed BEFORE this term's search — the thing the
+            // answer has to differ from. Read per term, because the previous
+            // term's results are still on screen.
+            const baseline = resultsKey();
             const trigger = triggerOf(f);
             if (!trigger) return { result: RESULT.WAITING_HYDRATION, reason: 'no search box yet' };
             // THE CLICK OPENS IT, THE TYPING FILTERS IT — two acts, and this
@@ -393,14 +451,32 @@ const searchMulti = {
             // widget above it is inert — pressed on a real keyboard it neither
             // opened, filtered nor committed anything. Two measured shapes, one
             // activation, and neither rung undoes the other.
-            const activate = (t) => {
+            // TYPE IT LIKE A KEYBOARD, THEN SUBMIT IT. A single setNativeValue
+            // leaves the widget with a value it never saw arrive, and the search
+            // never fires — measured, and measured the same way by v1 before
+            // this file existed.
+            const activate = async (t) => {
                 t.focus?.();
                 t.click?.();
-                setNativeValue(t, term);
-                try { t.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); }
-                catch { /* a box that answers to the click alone is already open */ }
+                setNativeValue(t, '');            // a crashed pass may have left text
+                await simulateTyping(t, term);
+                pressEnter(t);
             };
             const r = await withList(trigger, async (lease) => {
+                // THE LIST OPENS BEFORE THE SEARCH ANSWERS. Reading it now gets
+                // the "No Items." placeholder, which is how a taxonomy that has
+                // the term reports OPTION_NOT_FOUND. Wait for the ROWS to change.
+                let answered = await waitForResults(baseline, { sleep: ctx.sleep, budgetMs: ctx.searchMs || 6000 });
+                if (!answered) {
+                    // A slow search answers after the budget, and one more Enter
+                    // re-runs the same query — measured by v1: terms that
+                    // committed in one run no-matched in the next, purely on
+                    // server latency. Retry once before concluding anything.
+                    pressEnter(trigger);
+                    answered = await waitForResults(baseline, { sleep: ctx.sleep, budgetMs: 4000 });
+                }
+                if (!answered) return { result: RESULT.OPEN_TIMEOUT, term, reason: 'the search never answered' };
+
                 const choice = chooseOption(lease.options(), term);
                 if (!choice.option) return { result: choice.why, term, saw: choice.saw };
                 // Re-read by LABEL and click that, never the node found a moment

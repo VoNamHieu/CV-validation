@@ -309,6 +309,33 @@ describe('MILESTONE 2 GATE — the verdict matches the page, in both directions'
             're-typing eight terms to re-learn "already there" cost 39-44s a pass');
     });
 
+    test('the search is SUBMITTED, not just typed into', async () => {
+        // THE LESSON THIS PROJECT HAS NOW PAID FOR TWICE. v1 wrote it down:
+        // "Typing alone leaves the list showing 'No Items.' no matter what the
+        // term is — I read that as an empty taxonomy and was wrong: the query
+        // had simply never been submitted." Measured again the same way on
+        // 2026-08-09, and a gateway was changed on the strength of it.
+        //
+        // So the keystrokes are pinned. Enter must arrive as a REAL key —
+        // keypress as well as keydown/keyup, and keyCode 13, because a widget
+        // listening for the legacy code hears nothing from { key: 'Enter' }.
+        const seen = [];
+        const inp = page.fields.skills.trigger;
+        for (const t of ['keydown', 'keypress', 'keyup']) {
+            inp.addEventListener(t, (e) => { if (e.key === 'Enter') seen.push(`${t}:${e.keyCode}`); });
+        }
+        const typedChars = [];
+        // Escape belongs to the lease closing itself afterwards, not to the typing.
+        inp.addEventListener('keyup', (e) => { if (!['Enter', 'Escape'].includes(e.key)) typedChars.push(e.key); });
+
+        await exec.runField(field('formField-skills'), ['Figma'], ctx());
+
+        assert.deepEqual(seen, ['keydown:13', 'keypress:13', 'keyup:13'],
+            'Enter must be a real keystroke — this is what runs the search');
+        assert.deepEqual(typedChars, ['F', 'i', 'g', 'm', 'a'],
+            'typed character by character; one setNativeValue never reaches the search');
+    });
+
     test('one click that answers twice is a refusal, not two skills', async () => {
         // A catalogue row that stands for a GROUP. The click "works", the term
         // asked for does get a chip — and a second one nobody asked for arrives

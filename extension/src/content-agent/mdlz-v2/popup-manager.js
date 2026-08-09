@@ -247,7 +247,10 @@ export async function openList(trigger, {
     // policy gate (v1 spends `activation: 'widget-open'` here) without this
     // module having to know what a policy is.
     try {
-        if (activate) activate(trigger);
+        // AWAITED: a search prompt is activated by TYPING, character by
+        // character, and a fire-and-forget activation would have this reading
+        // the list while the keystrokes are still going in.
+        if (activate) await activate(trigger);
         else { trigger.focus?.(); trigger.click?.(); }
     } catch (e) {
         return { ok: false, result: RESULT.OPEN_TIMEOUT, label, reason: `activate threw: ${e?.message || e}` };
