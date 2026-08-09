@@ -89,7 +89,8 @@ export const SECTIONS = [
         emptyWhen: ['formField-schoolName'],
         fields: (e) => [
             { id: 'formField-schoolName', want: e.institution || e.school },
-            { id: 'formField-degree', want: e.degree, optional: true },
+            // Degree is asked for as a LADDER, not a value — see degreeLadder.
+            { id: 'formField-degree', ladder: degreeLadder(e), optional: true },
             // REQUIRED where it renders, and it does not render on every tenant
             // (measured: absent on mdlz, present and required on others). Planned
             // only when the row actually has it — a plan full of fields nobody
@@ -107,11 +108,110 @@ export const SECTIONS = [
         fields: (e) => [
             { id: 'formField-language', want: e.language },
             // Overall proficiency has a per-tenant GUID for an id, so it is
-            // reached by its label INSIDE the row — never page-wide.
-            { byLabel: /overall/i, want: e.level, optional: !e.level, name: 'Overall' },
+            // reached by its label INSIDE the row — never page-wide. And it is
+            // asked for as a LADDER, for the same reason Degree is.
+            { byLabel: /overall/i, ladder: proficiencyLadder(e.level), optional: !e.level, name: 'Overall' },
         ],
     },
 ];
+
+/**
+ * WHAT QUALIFICATION TO ASK THE CATALOGUE FOR — as a ladder, because the answer
+ * depends on options that cannot be read until the list is open.
+ *
+ * MEASURED, the mdlz Degree catalogue (R-174102, 2026-08-09), 18 entries all
+ * shaped `CODE - Full Name or equivalent`:
+ *
+ *   A.A. · B.Arch · B.B.A. · B.C.S. · B.Com · B.Ed · B.Eng · B.F.A. ·
+ *   B.S. Acc · L.L.B. · B.S. · B.A. · M.A. · MBA · M.S. · HS · PhD · JD
+ *
+ * Two things follow from that list. There is NO plain "Bachelor's Degree" row,
+ * so a bare want of "Bachelor" matches eleven of them and comes back AMBIGUOUS —
+ * which is why this is a ladder and not a string. And every label ends "or
+ * equivalent", which is what makes a default defensible at all.
+ *
+ * THE DEFECT THIS REPLACES: the field was sent `e.degree`, and the CV's degree
+ * field holds "Marketing" — a field of STUDY, not a qualification. The catalogue
+ * has no such row, so Degree refused itself USER_REQUIRED every pass and, being
+ * required, held the whole application on the page.
+ *
+ * THE RULE (the user's, 2026-08-09): the CV parse decides, because a master's is
+ * written out explicitly; anything ambiguous defaults to a bachelor. So an
+ * explicit qualification anywhere in the education entry always wins, and only
+ * when none is stated does the bachelor default apply.
+ *
+ * What this deliberately does NOT do: infer a bachelor's FLAVOUR from the field
+ * of study. "Marketing" is not evidence of a B.B.A. rather than a B.S., and
+ * putting a qualification the candidate never claimed on a real application is
+ * worse than a generic one that says "or equivalent".
+ */
+export function degreeLadder(entry) {
+    const s = fold(`${entry?.degree || ''} ${entry?.qualification || ''} ${entry?.degree_level || ''}`);
+    // Anchored on purpose: "ma" lives inside "marketing", and an unanchored
+    // rung would read a marketing degree as a Master of Arts.
+    if (/\bph\.?\s?d\b|doctorate|doctoral|tiến sĩ/.test(s)) return ['Doctor of Philosophy', 'PhD'];
+    if (/\bj\.?d\.?\b|juris doctor/.test(s)) return ['Juris Doctor', 'JD'];
+    // Vietnamese names the LEVEL and the FIELD as one phrase, and the two must
+    // be read together: "thạc sĩ quản trị kinh doanh" is an MBA while "cử nhân
+    // quản trị kinh doanh" is a B.B.A. — the field alone decides neither.
+    if (/\bmba\b|master of business|thạc sĩ quản trị kinh doanh/.test(s)) return ['Master of Business Administration', 'MBA'];
+    if (/\bm\.?sc?\.?\b|master of science/.test(s)) return ['Master of Science', 'Master of Arts'];
+    if (/\bm\.?a\.?\b|master of arts/.test(s)) return ['Master of Arts', 'Master of Science'];
+    if (/\bmaster|thạc sĩ/.test(s)) return ['Master of Science', 'Master of Arts'];
+    if (/\bassociate\b|\ba\.?a\.?\b/.test(s)) return ['Associate of Arts', 'Associate'];
+    if (/high school|secondary school|thpt|trung học/.test(s)) return ['High School'];
+    // An explicit bachelor flavour the candidate DID claim.
+    if (/\bb\.?arch\b|bachelor of architecture/.test(s)) return ['Bachelor of Architecture', ...BACHELOR];
+    if (/\bb\.?b\.?a\.?\b|business administration|cử nhân quản trị kinh doanh/.test(s)) return ['Bachelor of Business Administration', ...BACHELOR];
+    if (/\bb\.?c\.?s\.?\b|computer science/.test(s)) return ['Bachelor of Computer Science', ...BACHELOR];
+    if (/\bb\.?com\b|bachelor of commerce/.test(s)) return ['Bachelor of Commerce', ...BACHELOR];
+    if (/\bb\.?ed\b|bachelor of education/.test(s)) return ['Bachelor of Education', ...BACHELOR];
+    if (/\bb\.?eng\b|bachelor of engineering|kỹ sư/.test(s)) return ['Bachelor of Engineering', ...BACHELOR];
+    if (/\bb\.?f\.?a\.?\b|fine arts/.test(s)) return ['Bachelor of Fine Arts', ...BACHELOR];
+    if (/accountancy|accounting/.test(s)) return ['Bachelor of Accountancy', ...BACHELOR];
+    if (/\bl\.?l\.?b\.?\b|bachelor of laws/.test(s)) return ['Bachelor of Laws', ...BACHELOR];
+    if (/\bb\.?a\.?\b|bachelor of arts/.test(s)) return ['Bachelor of Arts', ...BACHELOR];
+    if (/\bb\.?sc?\.?\b|bachelor of science/.test(s)) return ['Bachelor of Science', ...BACHELOR];
+    return BACHELOR;
+}
+
+/** The default, in the order a catalogue with no generic row must be asked. */
+const BACHELOR = ['Bachelor of Arts', 'Bachelor of Science', 'Bachelor'];
+
+/**
+ * HOW WELL SOMEBODY SPEAKS A LANGUAGE — against a scale that may not have the
+ * word the CV used.
+ *
+ * MEASURED, the mdlz Overall proficiency catalogue (R-174102, 2026-08-09):
+ * exactly three rows — `1 - Beginner`, `2 - Intermediate`, `3 - Fluent`.
+ *
+ * There is no "Native". So the CV's Vietnamese, written by the extractor as
+ * "Native", matched nothing and the field refused itself USER_REQUIRED, while
+ * English ("Fluent") committed on the first try — the same field, the same
+ * widget, one word apart. A three-rung scale simply does not have a word for a
+ * mother tongue.
+ *
+ * The CV'S OWN WORD IS ALWAYS TRIED FIRST, so a tenant that does offer "Native"
+ * gets "Native". Only when the scale has no such row does a native speaker fall
+ * to the highest rung it does offer — which understates nothing: somebody's
+ * mother tongue is fluent by any reading. Nothing is stretched upward: an
+ * intermediate never becomes fluent.
+ *
+ * A level the CV does not state returns nothing, and the field stays the
+ * candidate's to answer.
+ */
+export function proficiencyLadder(level) {
+    const own = String(level || '').trim();
+    const s = fold(own);
+    if (!s) return null;
+    if (/native|mother tongue|first language|bản ngữ|tiếng mẹ đẻ/.test(s)) return [own, 'Native', 'Fluent', 'Advanced', 'Proficient'];
+    if (/fluent|advanced|proficient|thành thạo|lưu loát|\bc[12]\b/.test(s)) return [own, 'Fluent', 'Advanced', 'Proficient'];
+    if (/intermediate|conversational|trung cấp|\bb[12]\b/.test(s)) return [own, 'Intermediate', 'Conversational'];
+    if (/beginner|basic|elementary|novice|cơ bản|sơ cấp|\ba[12]\b/.test(s)) return [own, 'Beginner', 'Basic', 'Elementary'];
+    // A word we have no scale for is still the candidate's own — try it, and
+    // let the catalogue refuse it rather than inventing a level for them.
+    return [own];
+}
 
 /**
  * One row per language, whatever the CV called it.
@@ -299,7 +399,10 @@ export function planStep(cv, { root = null, maxRows = 8, addVia = 'any' } = {}) 
                 // A field this tenant does not render is not a gap and not a
                 // task; it is simply not there.
                 if (f.whenPresent && f.id && !fieldIn(row, f.id)) continue;
-                if (f.want === null || f.want === undefined || f.want === '') {
+                // A LADDER IS AN ANSWER, it just is not a single value — the
+                // rung can only be chosen against options that are not on the
+                // page until the list is open.
+                if (!f.ladder?.length && (f.want === null || f.want === undefined || f.want === '')) {
                     if (!f.optional) gaps.push({ section: spec.name, field: f.id || f.name, why: 'the CV does not say' });
                     continue;
                 }
@@ -311,6 +414,7 @@ export function planStep(cv, { root = null, maxRows = 8, addVia = 'any' } = {}) 
                     anchor: spec.anchor,
                     field: f.id || null,
                     byLabel: f.byLabel || null,
+                    ladder: f.ladder || null,
                     // A field reached by its label has no id to be named by — and
                     // "Overall" is what a report has to call it.
                     name: f.name || null,

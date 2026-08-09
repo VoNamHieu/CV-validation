@@ -550,6 +550,42 @@ const searchSingle = {
     },
 };
 
+/**
+ * A prompt answered by walking a ladder against the options it really offers.
+ *
+ * ONE lease: the options cannot be read without opening the list, and the rung
+ * cannot be chosen without the options. Lives here, beside the capabilities,
+ * because two pages now need it — My Information's "How Did You Hear About Us"
+ * and My Experience's Degree — and a second copy would be a second answer to
+ * "what counts as already answered".
+ *
+ * ALREADY ANSWERED WINS. A ladder is a DEFAULT: a value already on the page is
+ * either what the ATS parsed out of the résumé or what the candidate chose, and
+ * both outrank anything we would pick for them.
+ */
+export async function answerFromLadder(f, ladder, ctx = {}) {
+    const shown = readNow(f);
+    if (shown && !/^\((select one|no chips|empty)\)$/i.test(shown)) {
+        return { result: RESULT.SATISFIED, detail: { picked: shown } };
+    }
+    const trigger = triggerOf(f);
+    if (!trigger) return { result: RESULT.WAITING_HYDRATION, reason: 'no trigger yet' };
+
+    let rung = null;
+    const opened = await withList(trigger, async (lease) => {
+        const choice = chooseFromLadder(lease.options(), ladder);
+        if (!choice.option) return { result: choice.why, want: choice.want, shown: choice.shown, sample: choice.sample };
+        rung = choice.rung;
+        choice.option.click();
+        return { result: RESULT.COMMITTED, picked: choice.matched };
+    }, { sleep: ctx.sleep, label: f.name });
+
+    if (!opened.ok) return { result: opened.result || RESULT.COMMIT_FAILED, reason: opened.reason };
+    if (opened.value?.result !== RESULT.COMMITTED) return { ...opened.value };
+    const proof = await CAPABILITY[f.kind].verify(f, opened.value.picked, ctx);
+    return { ...proof, picked: opened.value.picked, rung };
+}
+
 export const CAPABILITY = {
     [WIDGET.TEXT]: text,
     [WIDGET.TEXTAREA]: text,

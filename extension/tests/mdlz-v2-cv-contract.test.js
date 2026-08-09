@@ -138,7 +138,12 @@ describe('the CV the app produces is the CV the planner reads', () => {
         // The first spelling wins the NAME; the entry that states a level wins
         // the level. Dropping it would leave a required field empty because the
         // CV happened to say it twice.
-        assert.deepEqual(overall.map((t) => t.want), ['Fluent', 'Native']);
+        //
+        // The level travels as the LADDER'S LEADING RUNG now, not as a bare
+        // want: the mdlz scale has only Beginner/Intermediate/Fluent, so
+        // "Native" needs somewhere to fall to. What is pinned here is unchanged
+        // — the CV's own word is what gets asked for first.
+        assert.deepEqual(overall.map((t) => t.ladder?.[0]), ['Fluent', 'Native']);
     });
 
     test('a description with several bullets goes in whole', () => {

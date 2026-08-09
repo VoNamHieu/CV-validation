@@ -188,6 +188,62 @@ describe('the plan is derived from the page, every time it is asked', () => {
         assert.equal(rowlib.valueIn(row, 'formField-language'), 'English');
     });
 
+    test('a field of study is not a qualification, and defaults to a bachelor', () => {
+        // THE MEASURED DEFECT (R-174102, 2026-08-09): Degree was sent
+        // `e.degree`, which held "Marketing" — the field of STUDY. The
+        // catalogue has no such row, so a REQUIRED field refused itself
+        // USER_REQUIRED every pass and held the whole application on the page.
+        const ladder = planner.degreeLadder({ degree: 'Marketing' });
+        assert.deepEqual(ladder, ['Bachelor of Arts', 'Bachelor of Science', 'Bachelor']);
+        // "ma" lives inside "marketing" — an unanchored rung reads a marketing
+        // degree as a Master of Arts, which is a qualification nobody claimed.
+        assert.ok(!ladder.some((r) => /master/i.test(r)));
+    });
+
+    test('a qualification the CV states outright wins over the default', () => {
+        const say = (degree) => planner.degreeLadder({ degree })[0];
+        assert.equal(say('MS in Computer Science'), 'Master of Science');
+        assert.equal(say('M.S.'), 'Master of Science');
+        assert.equal(say('MBA'), 'Master of Business Administration');
+        assert.equal(say('PhD in Economics'), 'Doctor of Philosophy');
+        // Vietnamese names level and field as one phrase — and the field alone
+        // decides neither of these two.
+        assert.equal(say('Thạc sĩ Quản trị Kinh doanh'), 'Master of Business Administration');
+        assert.equal(say('Cử nhân Quản trị Kinh doanh'), 'Bachelor of Business Administration');
+        assert.equal(say('Kỹ sư Xây dựng'), 'Bachelor of Engineering');
+        assert.equal(say('Bachelor of Engineering'), 'Bachelor of Engineering');
+        assert.equal(say('B.A. English'), 'Bachelor of Arts');
+        // Nothing stated at all is still a bachelor — the row exists, so the
+        // candidate has a degree; only its level is unsaid.
+        assert.equal(say(''), 'Bachelor of Arts');
+    });
+
+    test('a mother tongue falls to the top rung a three-level scale offers', () => {
+        // MEASURED (R-174102, 2026-08-09): the Overall catalogue is exactly
+        // `1 - Beginner`, `2 - Intermediate`, `3 - Fluent`. The CV wrote the
+        // candidate's Vietnamese as "Native", which matched nothing and refused
+        // itself USER_REQUIRED — while English ("Fluent") committed first try.
+        const native = planner.proficiencyLadder('Native');
+        assert.equal(native[0], 'Native', 'the CV\'s own word is always tried first');
+        assert.ok(native.includes('Fluent'), 'a scale with no Native row must still take a mother tongue');
+        // Nothing is stretched upward.
+        const mid = planner.proficiencyLadder('Intermediate');
+        assert.ok(!mid.some((r) => /fluent|advanced/i.test(r)));
+        assert.ok(planner.proficiencyLadder('B2').includes('Intermediate'));
+        assert.ok(planner.proficiencyLadder('Sơ cấp').includes('Beginner'));
+        // A level the CV never stated stays the candidate's to answer.
+        assert.equal(planner.proficiencyLadder(''), null);
+    });
+
+    test('the degree task carries a ladder, and is not mistaken for a gap', () => {
+        page.addEducationRow({});
+        const { tasks, gaps } = planner.planStep(CV);
+        const degree = tasks.find((t) => t.field === 'formField-degree');
+        assert.ok(degree, 'degree must be planned even though it has no single want');
+        assert.ok(Array.isArray(degree.ladder) && degree.ladder.length);
+        assert.ok(!gaps.some((g) => g.field === 'formField-degree'));
+    });
+
     test('a current role plans the tick and no To at all', () => {
         page.addWorkRow({});
         page.addWorkRow({});

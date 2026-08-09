@@ -41,10 +41,9 @@
 
 import { RESULT } from './config.js';
 import { repairProfileNames, splitLegalName } from '../dom.js';
-import { CAPABILITY, chooseFromLadder, readNow, runField } from './executors.js';
-import { fingerprintOf, triggerOf } from './fingerprint.js';
+import { answerFromLadder, readNow, runField } from './executors.js';
+import { fingerprintOf } from './fingerprint.js';
 import { NAV, advance } from './navigation.js';
-import { withList } from './popup-manager.js';
 import { errorsIn } from './row.js';
 import { runSequential } from './scheduler.js';
 import { trace } from '../trace.js';
@@ -187,37 +186,6 @@ function taskFor(entry, ctx) {
             return r;
         },
     };
-}
-
-/**
- * A prompt answered by walking a ladder against the options it really offers.
- *
- * ONE lease: the options cannot be read without opening the list, and the rung
- * cannot be chosen without the options.
- */
-async function answerFromLadder(f, ladder, ctx) {
-    const shown = readNow(f);
-    if (shown && !/^\((select one|no chips|empty)\)$/i.test(shown)) {
-        // Already answered — by us, or by the candidate. Their claim about how
-        // they found the job is not ours to replace.
-        return { result: RESULT.SATISFIED, detail: { picked: shown } };
-    }
-    const trigger = triggerOf(f);
-    if (!trigger) return { result: RESULT.WAITING_HYDRATION, reason: 'no trigger yet' };
-
-    let rung = null;
-    const opened = await withList(trigger, async (lease) => {
-        const choice = chooseFromLadder(lease.options(), ladder);
-        if (!choice.option) return { result: choice.why, want: choice.want, shown: choice.shown, sample: choice.sample };
-        rung = choice.rung;
-        choice.option.click();
-        return { result: RESULT.COMMITTED, picked: choice.matched };
-    }, { sleep: ctx.sleep, label: f.name });
-
-    if (!opened.ok) return { result: opened.result || RESULT.COMMIT_FAILED, reason: opened.reason };
-    if (opened.value?.result !== RESULT.COMMITTED) return { ...opened.value };
-    const proof = await CAPABILITY[f.kind].verify(f, opened.value.picked, ctx);
-    return { ...proof, picked: opened.value.picked, rung };
 }
 
 /** Is the page finished — asked the way the navigation transaction needs it. */
