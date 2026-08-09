@@ -215,17 +215,30 @@ const SMOKE_RECIPE = {
 describe('on a page v2 owns, nothing else forms an opinion', () => {
     const src = readFileSync(new URL('../src/content-agent/index.js', import.meta.url), 'utf8');
 
-    test('the needs engine is gated on ownership', () => {
-        assert.match(src, /if \(pageOwner\(\) === 'mdlz-v2'\) \{[\s\S]{0,200}engine: 'needs'/);
+    // These used to pin the literal `if (pageOwner() === ...)` at each of three
+    // sites — which is how they stayed green while the FIRST pass of every new
+    // page still ran the needs engine (pageOwner() cannot answer before v2 has
+    // claimed the page, and v2 claims it inside applyRecipeFields, which runs
+    // later). What matters is that all three read ONE answer, computed before
+    // anything acts.
+    test('ownership is decided once, before any engine acts', () => {
+        assert.match(src, /const _v2Owns = pageOwner\(\) === 'mdlz-v2'/,
+            'ownership must be resolved into a single value at the top of the iteration');
+        assert.match(src, /isMdlzPage\(\) && \(await flagMode\(\)\) === MODE\.ON/,
+            'it must answer on the first pass too, before v2 has claimed the page');
     });
 
-    test('the planner is gated on ownership', () => {
-        assert.match(src, /if \(pageOwner\(\) === 'mdlz-v2'\) \{[\s\S]{0,200}engine: 'planner'/);
+    test('the needs engine and the planner both gate on that one answer', () => {
+        assert.match(src, /if \(_v2Owns\) \{[\s\S]{0,200}engine: 'needs'/);
+        assert.match(src, /if \(_v2Owns\) \{[\s\S]{0,200}engine: 'planner'/);
     });
 
-    test('and the stuck report names v2\'s gaps rather than auditing the page again', () => {
-        assert.match(src, /const v2Gaps = pageOwner\(\) === 'mdlz-v2'/);
-        assert.match(src, /const blockers = v2Gaps\.length \? \[\] : auditRequiredBlockers\(\)/);
+    test('the stuck detector never falls back to auditing a page v2 owns', () => {
+        // The old gate was `v2Gaps.length ? [] : auditRequiredBlockers()` — a
+        // COUNT, so an owned page with nothing recorded audited the DOM anyway,
+        // and the gaps were being dropped in transit, so it always did.
+        assert.ok(!/v2Gaps\.length \?/.test(src), 'a gate still decides on how many gaps there are');
+        assert.match(src, /const blockers = _v2Owns \? \[\] : auditRequiredBlockers\(\)/);
     });
 
     test('the ownership check is imported, not re-implemented', () => {
@@ -344,5 +357,76 @@ describe('mdlz-v2 observes without acting', () => {
         assert.equal(c.COMMIT_SIGNAL.dateSection, 'aria-valuenow');
         assert.ok(c.INTERACTION_ONLY.has(c.RESULT.BLOCKED_BY_POPUP));
         assert.ok(!c.INTERACTION_ONLY.has(c.RESULT.OPTION_NOT_FOUND));
+    });
+});
+
+// ── The verdict has to SURVIVE the trip, and that is a behavior, not a line ──
+//
+// Four fixes were shipped as `if` statements and four tests asserted the `if`
+// statements existed. None of them proved a gap reached the loop, and none of
+// them would have failed while Country's OPTION_NOT_FOUND was being dropped in
+// transit. These call the transport and read what comes out the other end.
+describe('routeAfterV2 carries the whole verdict', () => {
+    let route;
+    before(async () => { route = await import('../src/content-agent/recipe-router.js'); });
+
+    const v2With = (over = {}) => ({
+        took: true, pageIsV2Owned: true,
+        report: { matched: true, filled: 2, v2: true },
+        gaps: [], ledger: { tasks: [] }, ...over,
+    });
+
+    test('semantic gaps reach the caller', () => {
+        const r = route.routeAfterV2(v2With({ gaps: [{ label: 'Salary', why: 'needs the candidate' }] }));
+        assert.equal(r.useV1, false);
+        assert.equal(r.result.blockers.length, 1);
+        assert.equal(r.result.blockers[0].label, 'Salary');
+    });
+
+    test('a field that failed its own transaction is a blocker too', () => {
+        // The measured case: Country came back OPTION_NOT_FOUND, lived in the
+        // ledger, and never reached the loop that decides whether to advance.
+        const r = route.routeAfterV2(v2With({
+            ledger: { tasks: [{ id: 'formField-country', result: 'OPTION_NOT_FOUND', reason: 'Vietnam not offered' }] },
+        }));
+        const labels = r.result.blockers.map((b) => b.label);
+        assert.ok(labels.includes('formField-country'), `country missing from ${JSON.stringify(labels)}`);
+    });
+
+    test('an interaction failure is NOT a blocker', () => {
+        // A blocked popup is a retry. Treating it as a blocker is what sent a
+        // blocked Degree to the model nine seconds at a time.
+        for (const result of ['BLOCKED_BY_POPUP', 'OPEN_TIMEOUT', 'WAITING_HYDRATION']) {
+            const r = route.routeAfterV2(v2With({ ledger: { tasks: [{ id: 'formField-degree', result }] } }));
+            assert.equal(r.result.blockers.length, 0, `${result} must not block`);
+        }
+    });
+
+    test('gaps and ledger failures arrive together, and the report survives', () => {
+        const r = route.routeAfterV2(v2With({
+            gaps: [{ field: 'Expected salary', why: 'not in profile' }],
+            ledger: { tasks: [{ id: 'formField-country', result: 'COMMIT_FAILED' }] },
+        }));
+        assert.equal(r.result.blockers.length, 2);
+        assert.equal(r.result.filled, 2, 'the original report must not be lost');
+        assert.equal(r.result.v2, true);
+    });
+
+    test('a page v2 owns is never handed to v1, even on error', () => {
+        const r = route.routeAfterV2({ took: false, pageIsV2Owned: true }, new Error('boom'));
+        assert.equal(r.useV1, false);
+    });
+});
+
+// ── The outer loop must not keep a second opinion about a page it does not own ──
+describe('ownership, not list length, gates the outer loop', () => {
+    test('the stuck detector and the needs/planner gates all read one answer', async () => {
+        const { readFileSync } = await import('node:fs');
+        const src = readFileSync(new URL('../src/content-agent/index.js', import.meta.url), 'utf8');
+        // Behavioural in intent, textual by necessity: the loop cannot be run
+        // headless. What is pinned is that no gate decides on a COUNT.
+        assert.ok(!/v2Gaps\.length \?/.test(src), 'a gate still decides on how many gaps there are');
+        assert.match(src, /const blockers = _v2Owns \? \[\] : auditRequiredBlockers\(\)/);
+        assert.equal((src.match(/if \(_v2Owns\)/g) || []).length >= 2, true, 'needs and planner must both gate on ownership');
     });
 });

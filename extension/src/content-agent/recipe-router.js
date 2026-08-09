@@ -63,9 +63,56 @@ try {
  * half-written widget puts two owners on it, each verifying against state the
  * other left behind, which is the exact disorder the split exists to end.
  */
+/**
+ * Outcomes that mean a HUMAN is needed, as opposed to a widget that was in the
+ * way. An interaction failure (popup blocked, page still hydrating, list slow
+ * to open) is not a blocker — it is a retry, and treating it as one is what
+ * sent a blocked Degree to the model nine seconds at a time.
+ */
+const TERMINAL_TASK_RESULTS = new Set(['OPTION_NOT_FOUND', 'AMBIGUOUS', 'COMMIT_FAILED', 'USER_REQUIRED']);
+
+/**
+ * Everything on this page that stops it being finished, from BOTH places v2
+ * records them.
+ *
+ * The bug this exists for: a page's semantic gaps rode on `v2.gaps` while a
+ * field that failed its own transaction sat in `v2.ledger.tasks`, and the
+ * caller read only the first — so Country coming back OPTION_NOT_FOUND was
+ * invisible to the loop that had to decide whether the step could advance.
+ * One list, both sources, one shape.
+ */
+export function blockersFrom(v2) {
+    const out = [];
+    for (const g of v2?.gaps || []) {
+        out.push({
+            label: g.label || g.field || g.key || g.id || '?',
+            why: g.why || g.reason || 'needs the candidate',
+            source: 'gap',
+        });
+    }
+    for (const t of v2?.ledger?.tasks || []) {
+        const r = t.result || t.status;
+        if (!TERMINAL_TASK_RESULTS.has(r)) continue;
+        out.push({
+            label: t.id || t.field || '?',
+            why: t.reason ? `${r}: ${t.reason}` : r,
+            source: 'task',
+        });
+    }
+    return out;
+}
+
 export function routeAfterV2(v2, error = null) {
     const owned = !!v2?.pageIsV2Owned;
-    if (v2?.took && !error) return { useV1: false, result: v2.report };
+    if (v2?.took && !error) {
+        // The verdict travels WHOLE. Handing on `v2.report` alone dropped the
+        // gaps and the ledger on the floor — three shapes between controller
+        // and loop, each losing a piece.
+        return {
+            useV1: false,
+            result: { ...v2.report, gaps: v2.gaps || [], ledger: v2.ledger || null, blockers: blockersFrom(v2) },
+        };
+    }
     if (error) {
         if (owned) {
             return {

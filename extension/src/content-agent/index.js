@@ -36,6 +36,8 @@ import { requestStop, setRunMode, stopRequested } from './run-state.js';
 import { applyRecipeFields, atFinalStep, clickRecipeGateway, FIELD_FAIL_BUDGET, fillResolvedDate, inferFillDynamicField, loadRecipes, recipeBlockingFields, recipeForUrl, recipeOwnedWrappers, recipeReleased, resetFieldStatus, recipeFieldStatus, LOCKED_TENANT } from './recipe-router.js';
 import { checkClick, logDenial } from './policy.js';
 import { buildManifest, summarizeGaps, VERDICT } from './needs.js';
+import { MODE, flagMode } from './mdlz-v2/index.js';
+import { isMdlzPage } from './mdlz-v2/config.js';
 import { tenantRefFor } from '../ats/tenant.js';
 // The review READER. It cannot click — that is its whole design — and it runs
 // here because the loop returns at the final step BEFORE it ever reaches the
@@ -465,6 +467,15 @@ async function _runAgentLoop(rawProfile) {
             // moved on). Stop DRIVING, don't report — a result from an
             // abandoned run would be refused as 'stale tab' anyway, and the
             // orphan loop it replaces used to keep clicking for 11 minutes.
+            // ── WHO OWNS THIS PAGE — asked ONCE, before anything acts ──
+            // pageOwner() only answers after v2 has claimed the page, and v2
+            // claims it inside applyRecipeFields — which runs AFTER the needs
+            // engine. So on the first pass of every new page the needs engine
+            // ran on a page v2 was about to own, which is one of the three
+            // opinions this split exists to remove. The flag plus the host
+            // answers the same question before anyone has acted.
+            const _v2Owns = pageOwner() === 'mdlz-v2'
+                || (isMdlzPage() && (await flagMode()) === MODE.ON);
             const stopped = stopRequested();
             if (stopped) {
                 trace('loop.stopped', { why: stopped.why, iter: i + 1 });
@@ -895,7 +906,7 @@ async function _runAgentLoop(rawProfile) {
             // saying one required field unfilled, and the stuck detector naming a
             // third field — and none of them agreed about what was wrong. A
             // specialized controller cannot have three opinions.
-            if (pageOwner() === 'mdlz-v2') {
+            if (_v2Owns) {
                 trace('mdlz.outer.skipped', { engine: 'needs', why: 'v2 owns this page' });
             } else {
                 const manifest = buildManifest(state.formFields, { profile, cv: cvStructured });
@@ -1127,7 +1138,7 @@ async function _runAgentLoop(rawProfile) {
                 const rf = await _phase('recipe', () => applyRecipeFields(recipe, profile, cvData, cvStructured));
                 // v2's own account of what it could not answer — the only
                 // blocker list that matters on a page it owns.
-                if (rf?.v2) _lastV2Gaps = rf.gaps || rf.fieldGaps || [];
+                if (rf?.v2) _lastV2Gaps = rf.blockers || rf.gaps || rf.fieldGaps || [];
                 if (rf?.filled) _progress();
                 if (_openIter && rf?.step) _openIter.step = rf.step;
                 for (const a of rf.answers || []) {
@@ -1469,10 +1480,16 @@ async function _runAgentLoop(rawProfile) {
                     // names what its own plan could not answer; auditing the DOM
                     // separately produced a third opinion that disagreed with
                     // both of the other two.
-                    const v2Gaps = pageOwner() === 'mdlz-v2' ? (_lastV2Gaps || []) : [];
-                    const blockers = v2Gaps.length ? [] : auditRequiredBlockers();
-                    const miss = v2Gaps.length
-                        ? v2Gaps.slice(0, 6).map(g => `${g.id || g.field || g.section} (${g.why})`).join(', ')
+                    // OWNERSHIP decides, not the length of a list. Gating on
+                    // `v2Gaps.length` meant an owned page with nothing recorded
+                    // fell through to the DOM audit — the third opinion again,
+                    // and it fired every time, because the gaps were being
+                    // dropped in transit anyway.
+                    const v2Gaps = _v2Owns ? (_lastV2Gaps || []) : [];
+                    const blockers = _v2Owns ? [] : auditRequiredBlockers();
+                    const miss = _v2Owns
+                        ? (v2Gaps.slice(0, 6).map(g => `${g.label || g.id || g.field || g.section} (${g.why})`).join(', ')
+                            || 'v2 owns this page and recorded nothing — see the mdlz trace')
                         : blockers.slice(0, 6).map(b => b.kind === 'error' ? b.label : `${b.label} (${b.kind})`).join(', ');
                     console.warn('[Copo Apply] STUCK — required blockers:', blockers.length ? blockers : '(none detected — likely a captcha / login / unknown widget)');
                     removeProgress();
@@ -1645,7 +1662,7 @@ async function _runAgentLoop(rawProfile) {
             // The planner may not act on a page v2 owns, so asking it costs ~25s
             // and produces instructions the click choke point would refuse. Wait
             // for v2's next pass instead.
-            if (pageOwner() === 'mdlz-v2') {
+            if (_v2Owns) {
                 trace('mdlz.outer.skipped', { engine: 'planner', why: 'v2 owns this page' });
                 await sleep(1200);
                 continue;
