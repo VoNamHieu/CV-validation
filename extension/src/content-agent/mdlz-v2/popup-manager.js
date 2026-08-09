@@ -253,9 +253,22 @@ export async function openList(trigger, {
         return { ok: false, result: RESULT.OPEN_TIMEOUT, label, reason: `activate threw: ${e?.message || e}` };
     }
 
-    const ownId = trigger.getAttribute?.('aria-controls') || trigger.getAttribute?.('aria-owns') || null;
+    // RE-READ, never captured once.
+    //
+    // MEASURED on the language prompt (R-174102, 2026-08-09): the button has NO
+    // aria-controls while it is collapsed, and carries `aria-controls="qmfkn"`
+    // once the list is open. Read a single time immediately after the click —
+    // as this was — React has not committed the attribute yet, so `ownId` was
+    // null for the whole open, every button prompt on the page reported
+    // `owned:false`, and the strongest ownership signal Workday offers was
+    // never once used. (That `owned:false` is also NOT a failure, and reading it
+    // as one sent a previous session hunting the wrong bug: the fallback below
+    // resolved the list correctly — 0 lists before the click, 1 after, 85
+    // options in it.)
+    const ownId = () => trigger.getAttribute?.('aria-controls') || trigger.getAttribute?.('aria-owns') || null;
     const mine = () => {
-        const owned = ownId ? document.getElementById(ownId) : null;
+        const id = ownId();
+        const owned = id ? document.getElementById(id) : null;
         if (owned && vis(owned) && visibleOptions(owned).length) return [owned];
         return visibleLists().filter((l) => !before.has(l));
     };
@@ -309,7 +322,7 @@ export async function openList(trigger, {
             return { clear: s.clear, swept: true, rungs: s.rungs };
         },
     };
-    trace('mdlz.popup.open', { field: label, options: lease.options().length, owned: !!ownId });
+    trace('mdlz.popup.open', { field: label, options: lease.options().length, owned: !!ownId() });
     return { ok: true, result: RESULT.COMMITTED, lease, label };
 }
 
