@@ -250,6 +250,18 @@ export const INTERACTION_ONLY = new Set([
     RESULT.OPEN_TIMEOUT,
 ]);
 
+/**
+ * Outcomes that mean "the answer is not on this page", not "try again".
+ *
+ * The catalogue does not hold it, or holds too many of it, or only a person can
+ * say — none of which the next pass changes.
+ */
+export const SEMANTIC = new Set([
+    RESULT.OPTION_NOT_FOUND,
+    RESULT.AMBIGUOUS,
+    RESULT.USER_REQUIRED,
+]);
+
 // ── Ownership of the page ────────────────────────────────────────────────
 /**
  * The lock that decides who may touch this document — and it is v1's own key,

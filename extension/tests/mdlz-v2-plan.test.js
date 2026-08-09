@@ -437,6 +437,53 @@ describe('v2 takes a step it can finish, and hands back one it cannot', () => {
         assert.match(r.reason, /nothing planned/);
     });
 
+    test('an optional field the catalogue cannot answer does not hold the page', async () => {
+        // MEASURED (R-174102, 2026-08-09): this tenant's Skills catalogue
+        // answers "No Items." to every term — "Sales" included, typed on a real
+        // keyboard — and Workday renders the field "Type to Add Skills" with no
+        // required marker. An application must not sit forever on a field the
+        // employer did not ask for and the catalogue cannot satisfy.
+        const ledger = {
+            tasks: [
+                { id: 'work[x].formField-jobTitle', result: RESULT.COMMITTED },
+                { id: 'skills', optional: true, result: RESULT.OPTION_NOT_FOUND },
+            ],
+        };
+        assert.equal(v2.pageComplete(ledger, []).complete, true);
+
+        // But only for a SEMANTIC refusal. Optional and merely blocked may well
+        // succeed next pass, and leaving on that is leaving early.
+        const blocked = { tasks: [{ id: 'skills', optional: true, result: RESULT.BLOCKED_BY_POPUP }] };
+        assert.equal(v2.pageComplete(blocked, []).complete, false);
+        // And a REQUIRED field refused the same way still stops everything.
+        const required = { tasks: [{ id: 'degree', optional: false, result: RESULT.OPTION_NOT_FOUND }] };
+        assert.equal(v2.pageComplete(required, []).complete, false);
+    });
+
+    test('a page finished except for an unanswerable optional field still leaves', async () => {
+        // MEASURED (R-174102, 2026-08-09): every field correct, no errors on
+        // the form, and the run sat on the page for twelve identical
+        // iterations. Skills was the only task not SATISFIED — optional, and
+        // unsatisfiable on any pass because the catalogue answers "No Items."
+        // to everything. The gate that decides whether to TRY advancing was
+        // stricter than the check that decides whether the page is DONE, so the
+        // page was never offered to the one that would have passed it.
+        page.addWorkRow({ title: 'Product Owner', company: 'Acme' });
+        page.addWorkRow({ title: 'Business Analyst', company: 'Globex' });
+        page.addEducationRow({});
+        page.addLanguageRow({});
+        await settle();
+        const before = page.nav.clicks;
+
+        // A last pass on a page that is now entirely satisfied except Skills,
+        // which this tenant's catalogue cannot answer.
+        const r = await v2.runMdlzV2({ cv: CV, sleep, addMs: 500 });
+        const skills = r.ledger?.tasks.find((t) => t.id === 'skills');
+        assert.ok(skills, 'skills is planned');
+        assert.equal(skills.optional, true, 'and it is optional — the employer did not ask for it');
+        assert.ok(page.nav.clicks > before || r.navigation, 'the page must be offered to the advance check');
+    });
+
     test('the report it hands back is the shape v1\'s caller reads', async () => {
         page.addWorkRow({});
         page.addEducationRow({});

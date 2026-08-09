@@ -18,7 +18,7 @@
  * exist yet.
  */
 
-import { ADD_VIA_KEY, FLAG_KEY, RESULT, SEL, STEP, isMdlzPage } from './config.js';
+import { ADD_VIA_KEY, FLAG_KEY, RESULT, SEL, SEMANTIC, STEP, isMdlzPage } from './config.js';
 import { openPopups, orphanOptionCount, pageFingerprint, waitPageReady } from './page-observer.js';
 import { census } from './popup-manager.js';
 import { addRow, answerFromLadder, runField } from './executors.js';
@@ -140,6 +140,7 @@ function runnable(task, ctx) {
     }
     return {
         id: task.id,
+        optional: !!task.optional,
         run: async () => {
             // Resolved HERE, not at planning time: the row may have been
             // re-rendered, and for a row an Add produced it did not exist then.
@@ -348,7 +349,22 @@ export async function runMdlzV2(ctx = {}) {
     // strength of what the page says. It costs one cheap pass — a satisfied
     // field spends no click — and it is the same check the second-pass gate
     // makes.
-    const quiet = ledger.tasks.length > 0 && ledger.tasks.every((t) => t.result === RESULT.SATISFIED);
+    // "Nothing left to do here" — which is NOT the same as "everything
+    // succeeded", and reading it as the latter is what kept a finished page.
+    //
+    // MEASURED (R-174102, 2026-08-09): every field on My Experience was
+    // correct, the form showed no errors, and the run still ended on the page
+    // after twelve identical iterations. Skills was the only task not
+    // SATISFIED — an OPTIONAL field whose catalogue answers "No Items." to
+    // everything, so it can never be satisfied, on any pass, ever. This gate
+    // and `pageComplete` were applying different rules to the same ledger; the
+    // one that decides whether to even TRY advancing was the stricter of the
+    // two, so the page was never offered to the check that would have passed it.
+    //
+    // A COMMITTED task still holds the page: leaving is done on the strength of
+    // what the page SAYS next pass, never on what we just wrote.
+    const settled = (t) => t.result === RESULT.SATISFIED || (t.optional && SEMANTIC.has(t.result));
+    const quiet = ledger.tasks.length > 0 && ledger.tasks.every(settled);
     let navigation = null;
     // `advance: false` is for a caller that wants the fill and not the move —
     // the Review controller is read-only by definition, and a pass being
@@ -385,7 +401,15 @@ export async function runMdlzV2(ctx = {}) {
  */
 export function pageComplete(ledger, gaps = []) {
     const unfinished = (ledger?.tasks || [])
-        .filter((t) => ![RESULT.SATISFIED, RESULT.COMMITTED].includes(t.result));
+        .filter((t) => ![RESULT.SATISFIED, RESULT.COMMITTED].includes(t.result))
+        // AN OPTIONAL FIELD THE CATALOGUE CANNOT ANSWER IS NOT AN UNFINISHED
+        // PAGE. Measured on Skills (R-174102): the employer does not require it
+        // and its catalogue answers "No Items." to everything, so holding the
+        // application here would mean never advancing over a field nobody asked
+        // for. Only SEMANTIC outcomes are forgiven — an optional field that was
+        // merely blocked or still hydrating may well succeed next pass, and
+        // leaving on that would be leaving early.
+        .filter((t) => !(t.optional && SEMANTIC.has(t.result)));
     if (unfinished.length) {
         return { complete: false, reason: `${unfinished[0].id} ended ${unfinished[0].result}`, unfinished };
     }

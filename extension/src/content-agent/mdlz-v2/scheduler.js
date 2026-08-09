@@ -105,7 +105,10 @@ export async function runSequential(tasks, {
     try {
         for (const task of list) {
             const id = task.id || task.label || `task#${ledger.tasks.length + 1}`;
-            const row = { id, result: null, attempts: 0, interaction: 0, leaked: 0, ms: 0, notes: [] };
+            // `optional` rides along because only the PLAN knows whether the
+            // employer asked for this field, and only the LEDGER is read when
+            // deciding whether the page is finished.
+            const row = { id, optional: !!task.optional, result: null, attempts: 0, interaction: 0, leaked: 0, ms: 0, notes: [] };
             const t0 = Date.now();
 
             for (;;) {

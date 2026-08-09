@@ -22,7 +22,7 @@
  * never claimed onto a real application is worse than leaving a field empty.
  */
 
-import { MONTHS, MONTH_LABEL, RESULT, SEL } from './config.js';
+import { MONTHS, MONTH_LABEL, RESULT, SEL, SEMANTIC } from './config.js';
 import { WIDGET, triggerOf } from './fingerprint.js';
 import { errorsIn, rowsOf } from './row.js';
 import { visibleMonthCells, visibleOptions, visiblePanels } from './page-observer.js';
@@ -657,8 +657,6 @@ export const forgetRefusals = () => { try { win()[REFUSED] = {}; } catch { /* no
 
 const win = () => (typeof window !== 'undefined' ? window : globalThis);
 
-/** Outcomes that mean "the answer is not on this page", not "try again". */
-const SEMANTIC = new Set([RESULT.OPTION_NOT_FOUND, RESULT.AMBIGUOUS, RESULT.USER_REQUIRED]);
 
 /** Widgets whose current value can be read without opening anything. */
 const HOLDS_A_VALUE = new Set([

@@ -427,9 +427,18 @@ export function planStep(cv, { root = null, maxRows = 8, addVia = 'any' } = {}) 
 
     // Skills is one field with many values — no rows, no adds, and the chips
     // already on the page are the candidate's own.
+    //
+    // OPTIONAL, and measured twice over: Workday renders it "Type to Add Skills"
+    // with no required marker, and this tenant's catalogue answers "No Items."
+    // to every term — including plain ones like "Sales", typed on a real
+    // keyboard (R-174102, 2026-08-09). A field the employer did not ask for and
+    // whose catalogue cannot answer must not be what holds an application on the
+    // page: it is reported as a gap and the step still finishes. A tenant that
+    // DOES require it still stops us, through the row error Workday shows —
+    // which `pageComplete` reads independently of this flag.
     const skills = normaliseSkills(cv?.skills);
     if (skills.length) {
-        tasks.push({ kind: 'field', section: 'skills', id: 'skills', field: 'formField-skills', want: skills });
+        tasks.push({ kind: 'field', section: 'skills', id: 'skills', field: 'formField-skills', want: skills, optional: true });
     }
 
     return { tasks, gaps };
