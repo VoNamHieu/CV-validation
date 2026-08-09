@@ -244,6 +244,19 @@ describe('the plan is derived from the page, every time it is asked', () => {
         assert.ok(!gaps.some((g) => g.field === 'formField-degree'));
     });
 
+    test('a comma inside brackets does not split a skill', () => {
+        // MEASURED on R-174102, 2026-08-09: the CV's "unit economics (CPI, CAC,
+        // LTV)" reached the form as three searches — `unit economics (CPI`,
+        // `CAC`, `LTV)`. v1 carries the same rule and the reason: one such
+        // fragment WAS found in a taxonomy and got added, so a piece of a phrase
+        // became a claim on a real application.
+        assert.deepEqual(
+            planner.normaliseSkills(['unit economics (CPI, CAC, LTV)', 'Figma']),
+            ['unit economics (CPI, CAC, LTV)', 'Figma']);
+        // Separators OUTSIDE brackets still separate.
+        assert.deepEqual(planner.normaliseSkills('SQL, Figma; Python'), ['SQL', 'Figma', 'Python']);
+    });
+
     test('a current role plans the tick and no To at all', () => {
         page.addWorkRow({});
         page.addWorkRow({});

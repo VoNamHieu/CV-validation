@@ -29,8 +29,12 @@
 import { RESULT } from './config.js';
 import { openPopups, orphanOptionCount, vis, visibleLists, visibleOptions, visiblePanels } from './page-observer.js';
 import { trace } from '../trace.js';
+import { sleep as domSleep } from '../dom.js';
 
-const napper = (sleep) => sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
+// The fallback is dom.js's `sleep`, not a bare setTimeout: a hidden tab's own
+// timers are throttled to ~1/minute, and every wait in this file would inherit
+// that. `sleep` borrows the background worker's clock, which is exempt.
+const napper = (sleep) => sleep || domSleep;
 
 /** What is open right now, and how much of it is nobody's. */
 export function census() {

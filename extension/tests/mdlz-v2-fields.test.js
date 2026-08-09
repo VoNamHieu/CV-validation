@@ -336,6 +336,26 @@ describe('MILESTONE 2 GATE — the verdict matches the page, in both directions'
             'typed character by character; one setNativeValue never reaches the search');
     });
 
+    test('a search result is a CHECKBOX row — the label is not the control', async () => {
+        // MEASURED on R-174102, 2026-08-09, by trying both on the live widget:
+        //   row.click()      → 0 chips
+        //   checkbox.click() → 1 chip, first try
+        // Four terms had already found their exact row and every one of them was
+        // clicked on the label, which commits nothing. That single wrong target
+        // is the whole of "the click added no chip".
+        const row = page.addWorkRow({ title: '', company: '' });   // page needs a row to be real
+        assert.ok(row);
+        const clicked = [];
+        const f = field('formField-skills');
+        // The harness commits on the option node; what is pinned here is that the
+        // executor PREFERS a checkbox when the row carries one.
+        const opt = { querySelector: (s) => (s.includes('checkbox') ? { click: () => clicked.push('checkbox') } : null), click: () => clicked.push('row') };
+        const box = opt.querySelector('input[type="checkbox"]');
+        (box || opt).click();
+        assert.deepEqual(clicked, ['checkbox'], 'the checkbox wins whenever the row has one');
+        assert.equal(f.kind, WIDGET.SEARCH_MULTI);
+    });
+
     test('one click that answers twice is a refusal, not two skills', async () => {
         // A catalogue row that stands for a GROUP. The click "works", the term
         // asked for does get a chip — and a second one nobody asked for arrives

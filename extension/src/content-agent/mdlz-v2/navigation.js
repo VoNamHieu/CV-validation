@@ -35,6 +35,7 @@
 
 import { RESULT, SEL, STEP } from './config.js';
 import { observeStep } from './page-observer.js';
+import { sleep as domSleep } from '../dom.js';
 import { READY, observePageState, readiness, releasePage } from './pages.js';
 import { ensureClear } from './popup-manager.js';
 import { trace } from '../trace.js';
@@ -50,7 +51,10 @@ export const NAV = {
     TIMEOUT: 'TIMEOUT',
 };
 
-const napper = (sleep) => sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
+// The fallback is dom.js's `sleep`, not a bare setTimeout: a hidden tab's own
+// timers are throttled to ~1/minute, and every wait in this file would inherit
+// that. `sleep` borrows the background worker's clock, which is exempt.
+const napper = (sleep) => sleep || domSleep;
 const win = () => (typeof window !== 'undefined' ? window : globalThis);
 
 /**

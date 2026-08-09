@@ -462,8 +462,39 @@ export function planStep(cv, { root = null, maxRows = 8, addVia = 'any' } = {}) 
 
 /** A CV may hold skills as a list or as one comma-separated line. */
 export function normaliseSkills(raw) {
-    const list = Array.isArray(raw) ? raw : String(raw || '').split(/[,;\n]/);
+    const list = Array.isArray(raw) ? raw.flatMap(splitSkills) : splitSkills(raw);
     return [...new Set(list.map((s) => String(s || '').trim()).filter(Boolean))];
+}
+
+/**
+ * Split a skills string WITHOUT cutting a skill in half.
+ *
+ * MEASURED on R-174102, 2026-08-09: the CV's "unit economics (CPI, CAC, LTV)"
+ * went to the form as three separate searches — `unit economics (CPI`, `CAC`,
+ * `LTV)`. A plain split on commas does not know that the ones inside brackets
+ * are listing examples, not separating skills.
+ *
+ * v1 carries the same rule and the reason it was written: one of those
+ * fragments — "CAC" — WAS found in an employer's taxonomy and got added. A
+ * piece of a phrase became a claim on a real application, which is worse than
+ * skipping the skill. Here it came back AMBIGUOUS and nothing was added, but
+ * that was luck, not the design.
+ *
+ * So a separator inside brackets does not separate. Everything else does.
+ */
+export function splitSkills(value) {
+    const text = String(value ?? '');
+    const out = [];
+    let buf = '';
+    let depth = 0;
+    for (const ch of text) {
+        if ('([{'.includes(ch)) depth++;
+        else if (')]}'.includes(ch)) depth = Math.max(0, depth - 1);
+        if (depth === 0 && (ch === ',' || ch === ';' || ch === '\n')) { out.push(buf); buf = ''; continue; }
+        buf += ch;
+    }
+    out.push(buf);
+    return out.map((v) => v.trim()).filter(Boolean);
 }
 
 /**

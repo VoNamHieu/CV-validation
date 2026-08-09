@@ -20,7 +20,31 @@ export function sleep(ms) {
     // Waiting is the biggest line item in a slow run, so it is measured
     // (no-op unless span tracking is on).
     try { spanBucket('sleepMs', ms); } catch { /* never break a sleep */ }
-    return new Promise(r => setTimeout(r, ms));
+
+    // The local timer ALWAYS stays armed: late is recoverable, hung is not.
+    const local = new Promise(r => setTimeout(r, ms));
+
+    // RECONNECTED 2026-08-09. The comment above described borrowing the
+    // worker's clock and background.js has answered AGENT_SLEEP all along —
+    // "see sleep() in dom.js", its own comment says — but this function was a
+    // bare setTimeout, so nothing ever asked. MEASURED the cost on a hidden
+    // tab that day: `setTimeout(…, 30)` returned after 989ms, and later a
+    // 50ms sleep did not return within 45 SECONDS (Chrome drops a deeply
+    // backgrounded tab to roughly one fire per minute). Typing one skill cost
+    // 11 seconds; the Skills field cost 208.
+    let hidden = false;
+    try { hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden'; } catch { /* no document */ }
+    if (!hidden || ms < 50) return local;   // visible tabs, and waits too short to matter
+
+    const borrowed = new Promise(r => {
+        try {
+            chrome.runtime.sendMessage({ type: 'AGENT_SLEEP', ms }, () => {
+                void chrome.runtime.lastError;   // an orphaned context is not an error here
+                r();
+            });
+        } catch { /* no extension context — `local` still resolves, just late */ }
+    });
+    return Promise.race([borrowed, local]);
 }
 
 /**

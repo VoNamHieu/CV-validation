@@ -24,12 +24,16 @@
 
 import { MONTHS, MONTH_LABEL, RESULT, SEL, SEMANTIC } from './config.js';
 import { WIDGET, triggerOf } from './fingerprint.js';
+import { sleep as domSleep } from '../dom.js';
 import { errorsIn, rowsOf } from './row.js';
 import { visibleMonthCells, visibleOptions, visiblePanels } from './page-observer.js';
 import { withList } from './popup-manager.js';
 import { trace } from '../trace.js';
 
-const napper = (sleep) => sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
+// The fallback is dom.js's `sleep`, not a bare setTimeout: a hidden tab's own
+// timers are throttled to ~1/minute, and every wait in this file would inherit
+// that. `sleep` borrows the background worker's clock, which is exempt.
+const napper = (sleep) => sleep || domSleep;
 const txt = (el) => (el?.textContent || '').trim();
 const fold = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
 const isPlaceholder = (s) => /^select one$/i.test(String(s || '').trim());
@@ -148,6 +152,172 @@ const rowClean = (ctx) => !ctx?.row || errorsIn(ctx.row).length === 0;
  * keyCode 13, because a widget that listens for the legacy code hears nothing
  * from `{ key: 'Enter' }` alone.
  */
+/**
+ * The element that scrolls a result list.
+ *
+ * Ported from v1, including the reason for the second half: a lazy list can
+ * read `scrollHeight === clientHeight` until it has been scrolled once, and
+ * returning null there froze the walk at window one — measured on Mondelez's
+ * Language prompt, where "Vietnamese" sat past the fold and every pass reported
+ * option-not-found on a list that contained it.
+ */
+function optionScroller(opt) {
+    let styled = null;
+    for (let p = opt?.parentElement; p && p !== document.body; p = p.parentElement) {
+        if (p.scrollHeight > p.clientHeight + 20) return p;
+        if (!styled) {
+            try {
+                const oy = getComputedStyle(p).overflowY;
+                if (oy === 'auto' || oy === 'scroll') styled = p;
+            } catch { /* no layout engine here */ }
+        }
+    }
+    return styled;
+}
+
+/**
+ * The list's OWN item array, read from the widget's React internals.
+ *
+ * MEASURED on R-174102, 2026-08-09, and it is the difference between right and
+ * wrong: the header said "Search Results (16)", the rendered window held 8, and
+ * scrolling the DOM to collect the rest still only reached 12 — the virtualiser
+ * renders nothing for a beat after a jump, so a scroll-and-read walk silently
+ * loses rows. The exact match, "Agile/Scrum", was the 16th and was missed by
+ * every DOM-based attempt. Read from the fiber it is simply there.
+ *
+ * Ported from v1, which needed it for the same reason. Best effort by design: if
+ * React's internals move, `pickAcrossList` still has the scroll walk behind it.
+ */
+function readVirtualItems(sc) {
+    try {
+        const key = Object.keys(sc).find((k) => /^__reactFiber\$|^__reactInternalInstance\$/.test(k));
+        if (!key) return null;
+        const looksLikeItems = (v) => Array.isArray(v) && v.length > 3 && v[0]
+            && typeof v[0] === 'object' && 'label' in v[0];
+        let f = sc[key];
+        for (let d = 0; f && d < 30; d++, f = f.return) {
+            for (const node of [f, f.alternate]) {
+                if (!node) continue;
+                for (const bag of [node.memoizedProps, node.memoizedState]) {
+                    if (!bag || typeof bag !== 'object') continue;
+                    for (const v of Object.values(bag)) if (looksLikeItems(v)) return v;
+                }
+            }
+        }
+    } catch { /* internals moved — the scroll walk still works */ }
+    return null;
+}
+
+/** Uniform row height, from the absolute offsets the virtualiser writes. */
+function virtualRowHeight(sc) {
+    const inner = sc?.firstElementChild;
+    if (!inner) return 0;
+    const tops = [...inner.children]
+        .map((c) => parseInt(c.style?.top || '', 10))
+        .filter((n) => Number.isFinite(n))
+        .sort((a, b) => a - b);
+    for (let i = 1; i < tops.length; i++) if (tops[i] > tops[i - 1]) return tops[i] - tops[i - 1];
+    return 0;
+}
+
+/** Exact wins; a single distinct near-match counts; several do not. */
+function pickLabel(labels, want) {
+    const w = fold(want);
+    if (!w) return null;
+    const exact = labels.filter((l) => fold(l) === w);
+    if (exact.length) return exact[0];
+    const near = labels.filter((l) => fold(l).includes(w));
+    if (!near.length) return null;
+    return new Set(near.map(fold)).size === 1 ? near[0] : null;
+}
+
+/**
+ * Choose from the WHOLE result list, not the window that happens to be drawn.
+ *
+ * MEASURED on R-174102, 2026-08-09: the header read "Search Results (16)", the
+ * rendered window held 8, and the row that matched the term EXACTLY —
+ * "Agile/Scrum" — was the last one, below the fold. Judging from the drawn rows
+ * alone, the term looked absent and the taxonomy looked like it spelled things
+ * differently. It did not; we were reading a third of the answer.
+ *
+ * v1 records the same rule: "Match on the WHOLE result set, not the rendered
+ * window. These results scroll: the exact row can sit below the fold, and
+ * judging ambiguity from a partial view is worse than missing it."
+ *
+ * Three phases, and they are separate on purpose. The list is VIRTUALISED — it
+ * recycles row nodes — so a node captured while scanning may be a different
+ * option by the time it is clicked. So: collect the labels, decide on the text,
+ * then go find that text again and click the node that is live at that moment.
+ */
+async function pickAcrossList(lease, want, { sleep, maxWindows = 24 } = {}) {
+    const nap = napper(sleep);
+    const labelsOf = () => lease.options().map(txt).filter((t) => t && !NOT_A_CHOICE.test(t));
+    const seen = new Set(labelsOf());
+    const sc = optionScroller(lease.options()[0]);
+
+    // THE WIDGET'S OWN ARRAY FIRST. Scrolling the DOM to collect the rest
+    // reached 12 of 16 and lost the exact match; the fiber has all of them.
+    const items = sc ? readVirtualItems(sc) : null;
+    if (items) {
+        for (const it of items) {
+            const l = String(it?.label ?? it?.ariaLabel ?? '').trim();
+            if (l && !NOT_A_CHOICE.test(l)) seen.add(l);
+        }
+    }
+
+    if (sc && !items) {
+        try { sc.scrollTop = 0; } catch { /* no layout */ }
+        await nap(80);
+        labelsOf().forEach((l) => seen.add(l));
+        for (let i = 0; i < maxWindows; i++) {
+            const before = sc.scrollTop;
+            try { sc.scrollTop = Math.min(sc.scrollHeight, before + Math.max(60, sc.clientHeight - 40)); } catch { break; }
+            await nap(100);
+            labelsOf().forEach((l) => seen.add(l));
+            if (sc.scrollTop === before) break;              // the list stopped moving
+        }
+    }
+
+    const all = [...seen];
+    const target = pickLabel(all, want);
+    const evidence = { want: String(want ?? ''), shown: all.length, sample: all.slice(0, 4) };
+    if (!target) {
+        const near = all.filter((l) => fold(l).includes(fold(want)));
+        return near.length > 1
+            ? { option: null, why: RESULT.AMBIGUOUS, ...evidence, saw: [...new Set(near)].slice(0, 4) }
+            : { option: null, why: RESULT.OPTION_NOT_FOUND, ...evidence };
+    }
+
+    // Bring the chosen TEXT back into view and hand back whatever node is
+    // showing it now — never the one seen while scanning.
+    const live = () => lease.options().find((o) => fold(txt(o)) === fold(target)) || null;
+    if (live()) return { option: live(), matched: target };
+    // Known index + known row height = one scroll, not a walk.
+    if (sc && items) {
+        const at = items.findIndex((it) => fold(String(it?.label ?? it?.ariaLabel ?? '')) === fold(target));
+        const h = virtualRowHeight(sc);
+        if (at >= 0 && h) {
+            try { sc.scrollTop = Math.max(0, (at * h) - Math.round(sc.clientHeight / 2) + h); } catch { /* no layout */ }
+            await nap(200);
+            if (live()) return { option: live(), matched: target };
+        }
+    }
+    if (sc) {
+        try { sc.scrollTop = 0; } catch { /* no layout */ }
+        await nap(80);
+        for (let i = 0; i < maxWindows; i++) {
+            if (live()) return { option: live(), matched: target };
+            const before = sc.scrollTop;
+            try { sc.scrollTop = Math.min(sc.scrollHeight, before + Math.max(60, sc.clientHeight - 40)); } catch { break; }
+            await nap(100);
+            if (sc.scrollTop === before) break;
+        }
+    }
+    return live()
+        ? { option: live(), matched: target }
+        : { option: null, why: RESULT.OPEN_TIMEOUT, ...evidence, reason: `"${target}" would not come back into view` };
+}
+
 /**
  * Type a term the way a keyboard does — WITHOUT paying a throttled timer per
  * character.
@@ -448,6 +618,7 @@ const searchMulti = {
         }
         const missing = [...want].filter((w) => this.holding(f, w).length === 0);
         const added = [];
+        const missed = [];
         for (const term of missing) {
             // What the list showed BEFORE this term's search — the thing the
             // answer has to differ from. Read per term, because the previous
@@ -466,12 +637,9 @@ const searchMulti = {
             // written after it filters what is inside. Enter is not part of it:
             // pressed on a real keyboard it committed nothing.
             //
-            // Also measured, and the reason a refusal here is not a defect: this
-            // tenant's Skills catalogue answers "No Items." to every term tried,
-            // including plain ones like "Sales", typed on a REAL keyboard. So
-            // the honest outcome is OPTION_NOT_FOUND — semantic, remembered
-            // once, never retried — rather than an interaction failure the
-            // scheduler pays for again on every pass.
+            // RETRACTED 2026-08-09: this comment used to say the catalogue was
+            // empty because every term answered "No Items.". It is not empty —
+            // the query had never been submitted. See pressEnter.
             //
             // The Enter stays, and is deliberately last. It is what opens a
             // search prompt that answers to typing alone (v1 measured that shape
@@ -504,13 +672,15 @@ const searchMulti = {
                 }
                 if (!answered) return { result: RESULT.OPEN_TIMEOUT, term, reason: 'the search never answered' };
 
-                const choice = chooseOption(lease.options(), term);
-                if (!choice.option) return { result: choice.why, term, saw: choice.saw };
-                // Re-read by LABEL and click that, never the node found a moment
-                // ago: the virtualiser recycles row nodes, and the measured cost
-                // was chips for "Agentforce" and "Agile Systems" nobody asked for.
-                const again = chooseOption(lease.options(), choice.matched);
-                if (!again.option) return { result: RESULT.OPEN_TIMEOUT, term, reason: 'the row moved under us' };
+                const choice = await pickAcrossList(lease, term, { sleep: ctx.sleep });
+                if (!choice.option) {
+                    return { result: choice.why, term, saw: choice.saw, shown: choice.shown, sample: choice.sample };
+                }
+                // Re-read by LABEL and click THAT, never a node held from a
+                // moment ago: the virtualiser recycles rows, and the measured
+                // cost was chips for "Agentforce" and "Agile Systems" nobody
+                // asked for.
+                const again = { option: lease.options().find((o) => fold(txt(o)) === fold(choice.matched)) || choice.option };
 
                 // WHAT THE PAGE GAINED IS THE VERDICT — not what we meant to
                 // click. Re-reading by label narrows the window in which the
@@ -520,7 +690,19 @@ const searchMulti = {
                 // asked whether the wanted terms had chips — never whether
                 // anything else had arrived with them.
                 const before = this.chipsNow(f);
-                again.option.click();
+                // CLICK THE CHECKBOX, NOT THE ROW.
+                //
+                // MEASURED on R-174102, 2026-08-09, by trying both on the live
+                // widget: `row.click()` on the menuItem[role=option] added
+                // NOTHING; the `input[type=checkbox]` inside it added the chip
+                // on the first try. This search result is a checkbox list, and
+                // the row is only its label.
+                //
+                // That one line is the whole of "the click added no chip" —
+                // four terms found their exact row and every one of them was
+                // clicked somewhere that does not commit.
+                const box = again.option.querySelector('input[type="checkbox"]');
+                (box || again.option).click();
                 await until(() => this.chipsNow(f).length !== before.length,
                     { sleep: ctx.sleep, budgetMs: ctx.commitMs || 1200 });
                 const fresh = freshOnes(before, this.chipsNow(f));
@@ -545,10 +727,28 @@ const searchMulti = {
                 added.push(fresh[0]);
                 return { result: RESULT.COMMITTED, term };
             }, { sleep: ctx.sleep, label: `${f.name}:${term}`, activate });
-            if (!r.ok) return { result: r.result || RESULT.COMMIT_FAILED, reason: r.reason, term };
-            if (r.value?.result !== RESULT.COMMITTED) return { ...r.value };
+
+            // ONE TERM THAT MISSES MUST NOT TAKE THE OTHER SEVEN WITH IT.
+            //
+            // This used to `return` on the first term the catalogue could not
+            // answer, so "Agile/Scrum" missing meant the remaining skills were
+            // never even typed. A multi-value field is a list of independent
+            // little transactions; one of them failing is a gap, not the end.
+            const outcome = r.ok ? (r.value || {}) : { result: r.result || RESULT.COMMIT_FAILED, reason: r.reason };
+            if (outcome.result !== RESULT.COMMITTED) {
+                missed.push({ term, ...outcome });
+                trace('mdlz.skill.miss', { term, why: outcome.result, reason: outcome.reason || '', sample: (outcome.sample || outcome.saw || []).join(' | ') || '(none)' });
+                continue;
+            }
         }
-        return { result: RESULT.COMMITTED, added };
+        const names = missed.map((m) => m.term);
+        if (added.length) return { result: RESULT.COMMITTED, added, missed: names };
+        if (!missed.length) return { result: RESULT.COMMITTED, added };
+        // NOTHING LANDED — report the FIRST REAL REASON, not a generic one.
+        // Flattening every per-term outcome into OPTION_NOT_FOUND threw away
+        // the two verdicts that actually say something went wrong with a pick
+        // ("one click added 2 chips", "clicked X but got Y").
+        return { ...missed[0], added, missed: names };
     },
     async verify(f, want, ctx = {}) {
         const ok = await until(() => this.satisfied(f, want), { sleep: ctx.sleep, budgetMs: ctx.commitMs || 1500 });
