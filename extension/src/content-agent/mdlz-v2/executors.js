@@ -74,14 +74,49 @@ export function setNativeValue(el, value) {
 export function chooseOption(options, want) {
     const rows = options.map((o) => ({ node: o, text: txt(o) })).filter((r) => r.text);
     const w = fold(want);
-    if (!w) return { option: null, why: RESULT.OPTION_NOT_FOUND };
+    // EVERY refusal carries its evidence. A live run came back
+    // `OPTION_NOT_FOUND, reason: ""` about a list of 249 countries, and there
+    // was no way to tell from it what had been wanted, what was on the list, or
+    // why 249 rows held no match — so the cause had to be guessed at. v1 logs
+    // tried/shown/sample for exactly this; this returns the same.
+    const evidence = { want: String(want ?? ''), shown: rows.length, sample: rows.slice(0, 4).map((r) => r.text) };
+    if (!w) return { option: null, why: RESULT.OPTION_NOT_FOUND, ...evidence };
     const exact = rows.filter((r) => fold(r.text) === w);
     if (exact.length) return { option: exact[0].node, matched: exact[0].text };
     const partial = rows.filter((r) => fold(r.text).includes(w));
     const distinct = [...new Set(partial.map((r) => fold(r.text)))];
     if (distinct.length === 1) return { option: partial[0].node, matched: partial[0].text };
-    if (distinct.length > 1) return { option: null, why: RESULT.AMBIGUOUS, saw: distinct.slice(0, 4) };
-    return { option: null, why: RESULT.OPTION_NOT_FOUND };
+    if (distinct.length > 1) return { option: null, why: RESULT.AMBIGUOUS, ...evidence, saw: distinct.slice(0, 4) };
+    return { option: null, why: RESULT.OPTION_NOT_FOUND, ...evidence };
+}
+
+/**
+ * Walk a ladder of candidate answers against the options a page really offers.
+ *
+ * The rungs are measured, in order, and the ANCHOR matters: a rung written
+ * '=Other' matches exactly or by prefix only, because "other" lives inside
+ * "another" and a substring hit on "Another job board" is a wrong claim about
+ * how somebody found the job, not a fallback.
+ *
+ * Nothing is invented: a ladder that ends without a hit returns nothing, and the
+ * field is left for the person whose answer it is.
+ */
+export function chooseFromLadder(options, ladder) {
+    const rows = options.map((o) => ({ node: o, text: txt(o) })).filter((r) => r.text);
+    for (const raw of ladder) {
+        const anchored = raw.startsWith('=');
+        const cand = fold(anchored ? raw.slice(1) : raw);
+        const hit = rows.find((r) => fold(r.text) === cand)
+            || rows.find((r) => (anchored ? fold(r.text).startsWith(cand) : fold(r.text).includes(cand)));
+        if (hit) return { option: hit.node, matched: hit.text, rung: raw };
+    }
+    return {
+        option: null,
+        why: RESULT.OPTION_NOT_FOUND,
+        want: ladder.slice(0, 3).join(' → '),
+        shown: rows.length,
+        sample: rows.slice(0, 4).map((r) => r.text),
+    };
 }
 
 /** The row a field sits in, if the caller gave us one — errors live there. */
@@ -186,7 +221,9 @@ const listbox = {
         let picked = null;
         const r = await withList(trigger, async (lease) => {
             const choice = chooseOption(lease.options(), want);
-            if (!choice.option) return { result: choice.why, saw: choice.saw };
+            if (!choice.option) {
+                return { result: choice.why, saw: choice.saw, want: choice.want, shown: choice.shown, sample: choice.sample };
+            }
             picked = choice.matched;
             choice.option.click();
             return { result: RESULT.COMMITTED };
@@ -432,7 +469,9 @@ const searchSingle = {
         let picked = null;
         const r = await withList(trigger, async (lease) => {
             const choice = chooseOption(lease.options(), want);
-            if (!choice.option) return { result: choice.why, saw: choice.saw };
+            if (!choice.option) {
+                return { result: choice.why, saw: choice.saw, want: choice.want, shown: choice.shown, sample: choice.sample };
+            }
             picked = choice.matched;
             choice.option.click();
             return { result: RESULT.COMMITTED };
@@ -497,6 +536,59 @@ export async function addRow(button, { sleep, anchor, root = null, budgetMs } = 
         : { result: RESULT.OPEN_TIMEOUT, reason: `the section still has ${before} row(s)` };
 }
 
+/**
+ * Semantic failures this document has already had, so they happen ONCE.
+ *
+ * Measured on a live run: Country came back OPTION_NOT_FOUND on a 249-row list,
+ * three passes in a row, identically — the same list opened, the same 249 rows
+ * read, the same verdict, three times. Nothing about the page or the answer had
+ * changed between them, so the second and third attempts could not have gone
+ * differently; they were pure cost and pure noise, and they kept a popup opening
+ * over a page that was otherwise clean.
+ *
+ * An INTERACTION failure is worth retrying — the page was busy, a list was in
+ * the way. A SEMANTIC one is not: the catalogue does not hold the answer, and it
+ * will not hold it next pass either. So it is recorded and reported as a gap
+ * until the WANT changes or the page does.
+ *
+ * On `window`, like every other claim here: two copies of the content script
+ * must not each learn this the expensive way.
+ */
+const REFUSED = '__copoV2Refused';
+const refusalKey = (f, want) => `${f.name}::${describeWant(want)}`;
+
+const refusedBefore = (f, want) => {
+    try { return !!(win()[REFUSED] || {})[refusalKey(f, want)]; } catch { return false; }
+};
+
+const rememberRefusal = (f, want, why) => {
+    try {
+        const all = win()[REFUSED] || (win()[REFUSED] = {});
+        all[refusalKey(f, want)] = { why, at: Date.now() };
+    } catch { /* nothing to remember with */ }
+};
+
+/** A page change clears them: a new catalogue is a new question. */
+export const forgetRefusals = () => { try { win()[REFUSED] = {}; } catch { /* noop */ } };
+
+const win = () => (typeof window !== 'undefined' ? window : globalThis);
+
+/** Outcomes that mean "the answer is not on this page", not "try again". */
+const SEMANTIC = new Set([RESULT.OPTION_NOT_FOUND, RESULT.AMBIGUOUS, RESULT.USER_REQUIRED]);
+
+/** Widgets whose current value can be read without opening anything. */
+const HOLDS_A_VALUE = new Set([
+    WIDGET.LISTBOX, WIDGET.SEARCH_SINGLE, WIDGET.SEARCH_MULTI, WIDGET.TEXT, WIDGET.TEXTAREA, WIDGET.DATE,
+]);
+
+/** A want, in one short readable string, whatever shape it arrived in. */
+const describeWant = (want) => {
+    if (want === null || want === undefined) return '—';
+    if (Array.isArray(want)) return want.join(' | ').slice(0, 60);
+    if (typeof want === 'object') return `${want.month}/${want.year}`;
+    return String(want).slice(0, 60);
+};
+
 /** What each verify actually reads, spelled out for the trace. */
 const SIGNAL = {
     [WIDGET.DATE]: 'aria-valuenow',
@@ -530,9 +622,46 @@ export async function runField(f, want, ctx = {}) {
         return { result: RESULT.SATISFIED };
     }
 
+    // ASKED AND ANSWERED. The same want, the same field, already refused on this
+    // page — re-opening the list cannot produce a different catalogue.
+    if (refusedBefore(f, want)) {
+        trace('mdlz.field.refusedBefore', { field: f.name, want: describeWant(want) });
+        return { result: RESULT.USER_REQUIRED, reason: 'already refused on this page', repeat: true };
+    }
+
+    // A DEFAULT NEVER OVERWRITES A VALUE THAT IS ALREADY THERE.
+    //
+    // Measured on a live run: Country read "Vietnam" on the page while the want
+    // was the profile's NATIONALITY ("Vietnamese"), so `satisfied` said no and
+    // the field was re-opened — 249 options, OPTION_NOT_FOUND, every pass, on a
+    // field that was already correct and required no work at all.
+    //
+    // The rule generalises past that bug. When our value is an agent default
+    // rather than something the candidate stated, a committed field on the page
+    // is better evidence than our guess: it is either what the ATS pre-filled or
+    // what the candidate chose, and both outrank a default.
+    if (ctx.isDefault && HOLDS_A_VALUE.has(f.kind)) {
+        const shown = readNow(f);
+        const empty = !shown || /^\((select one|no chips|empty)\)$/i.test(shown) || shown === '—/—';
+        if (!empty) {
+            trace('mdlz.field.keep', { field: f.name, kind: f.kind, keeping: shown, ratherThan: describeWant(want) });
+            return { result: RESULT.SATISFIED, detail: { picked: shown, kept: true } };
+        }
+    }
+
     const wrote = await cap.commit(f, want, ctx);
     if (wrote.result !== RESULT.COMMITTED) {
-        trace('mdlz.field.commit', { field: f.name, kind: f.kind, result: wrote.result, reason: wrote.reason || '' });
+        if (SEMANTIC.has(wrote.result)) rememberRefusal(f, want, wrote.result);
+        trace('mdlz.field.commit', {
+            field: f.name,
+            kind: f.kind,
+            result: wrote.result,
+            reason: wrote.reason || '',
+            // The three columns whose absence made a live failure unreadable.
+            want: wrote.want ?? describeWant(want),
+            shown: wrote.shown ?? '(n/a)',
+            sample: (wrote.sample || wrote.saw || []).join(' | ') || '(none)',
+        });
         return wrote;
     }
 

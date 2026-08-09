@@ -140,6 +140,40 @@ describe('the widgets, each recognised by its shape', () => {
     });
 });
 
+describe('How Did You Hear About Us — the field that made a live run stick', () => {
+    test('it is answered from the measured ladder', async () => {
+        await run();
+        // The catalogue here has no "Company Website"… it does, and that rung
+        // comes before the anchored fallback.
+        assert.equal(page.source.textContent, 'Company Website');
+    });
+
+    test('and when the ladder misses, "Other" is taken by an ANCHORED match', async () => {
+        // '=Other' matches exactly or by prefix only: a substring tier would
+        // resolve it to "Another job board" through the letters inside
+        // "another", which is a claim about how somebody found the job.
+        page = buildMyInfoPage(dom.document, { sources: ['Employee Referral', 'Another job board', 'Other'] });
+        dom.document.body.children[0].remove();
+
+        await run();
+        assert.equal(page.source.textContent, 'Other');
+    });
+
+    test('and a catalogue with no honest rung leaves the field, and holds the page', async () => {
+        page = buildMyInfoPage(dom.document, { sources: ['Employee Referral', 'Recruiter', 'Another job board'] });
+        dom.document.body.children[0].remove();
+
+        await run();
+        const r = await p2.runMyInfoPage({ sleep, profile: PROFILE, cv: CV, commitMs: 900 });
+        // "Employee referral" routes the application differently and implies a
+        // person who does not exist. Nothing here is a truthful answer, so
+        // nothing is picked.
+        assert.equal(page.source.textContent, 'Select One');
+        assert.equal(r.advanced, false);
+        assert.equal(page.nav.clicks, 0);
+    });
+});
+
 describe('what it will not do', () => {
     test('it never writes to the email box', async () => {
         await run();

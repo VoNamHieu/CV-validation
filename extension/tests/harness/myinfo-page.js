@@ -22,10 +22,14 @@ export const COUNTRIES = ['Vietnam', 'Thailand', 'Singapore', 'United States'];
 export const PROVINCES = ['Hà Nội', 'Hồ Chí Minh', 'Đà Nẵng', 'Hải Phòng'];
 export const PHONE_TYPES = ['Mobile - Personal', 'Mobile - Work', 'Telephone - Office', 'Telephone - Personal'];
 export const PHONE_CODES = ['Vietnam (+84)', 'Thailand (+66)', 'Singapore (+65)'];
+/** Measured shape of a source catalogue: no "Company Website" row on every
+ *  tenant, which is why the ladder ends at an anchored "Other". */
+export const SOURCES = ['Employee Referral', 'Job Board', 'Company Website', 'University', 'Other'];
 
 export function buildMyInfoPage(doc, opts = {}) {
     const cfg = {
         provinceAs: 'search',     // 'search' (Mondelez) | 'button' (3M)
+        sources: SOURCES,
         localNames: false,        // dual-script tenants render a second pair
         commitMs: 15,
         rerenderMs: 60,      // the replacement lands after the pick, not with it
@@ -161,6 +165,10 @@ export function buildMyInfoPage(doc, opts = {}) {
         ? buttonPrompt('formField-countryRegion', PROVINCES)
         : searchPrompt('formField-countryRegion', PROVINCES);
 
+    // REQUIRED on this page, measured. Two widgets behind one id; this is the
+    // button shape.
+    const source = buttonPrompt('formField-source', cfg.sources);
+
     const country = buttonPrompt('formField-country', COUNTRIES, () => {
         // MEASURED: picking a country re-renders the region and postal fields.
         // Every node below is replaced — anything holding one is holding a
@@ -185,6 +193,7 @@ export function buildMyInfoPage(doc, opts = {}) {
     return {
         cfg, page, nav, state,
         radios,
+        source,
         firstName, lastName, firstLocal, lastLocal,
         email,
         country,

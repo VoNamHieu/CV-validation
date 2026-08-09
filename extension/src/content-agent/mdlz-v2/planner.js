@@ -90,6 +90,11 @@ export const SECTIONS = [
         fields: (e) => [
             { id: 'formField-schoolName', want: e.institution || e.school },
             { id: 'formField-degree', want: e.degree, optional: true },
+            // REQUIRED where it renders, and it does not render on every tenant
+            // (measured: absent on mdlz, present and required on others). Planned
+            // only when the row actually has it — a plan full of fields nobody
+            // renders wastes a pass and hides what is really missing.
+            { id: 'formField-fieldOfStudy', want: e.field_of_study || e.degree, optional: true, whenPresent: true },
         ],
     },
     {
@@ -291,6 +296,9 @@ export function planStep(cv, { root = null, maxRows = 8, addVia = 'any' } = {}) 
             taken.add(row);
             for (const f of spec.fields(entry)) {
                 if (f.when && !f.when()) continue;
+                // A field this tenant does not render is not a gap and not a
+                // task; it is simply not there.
+                if (f.whenPresent && f.id && !fieldIn(row, f.id)) continue;
                 if (f.want === null || f.want === undefined || f.want === '') {
                     if (!f.optional) gaps.push({ section: spec.name, field: f.id || f.name, why: 'the CV does not say' });
                     continue;

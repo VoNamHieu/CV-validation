@@ -142,6 +142,13 @@ export function releasePage() {
 }
 
 /**
+ * The page we last observed, so a change can clear what was learned on the old
+ * one. A refusal ("this catalogue does not hold Vietnam") is true of a page, not
+ * of the flow.
+ */
+let _lastPage = null;
+
+/**
  * Who owns the page ON SCREEN right now.
  *
  * A claim that names a different page than the one rendered is not a claim any
@@ -193,6 +200,10 @@ export function ownershipNote() {
  */
 export async function observePageState(ctx = {}) {
     const r = await readiness(ctx);
+    if (_lastPage && _lastPage !== r.page) {
+        _lastPage = r.page;
+        try { (await import('./executors.js')).forgetRefusals(); } catch { /* noop */ }
+    } else { _lastPage = r.page; }
     const ours = owns(r.page);
     if (ours) claimPage(r.page); else releasePage();
     const state = { ...r, owner: ours ? 'mdlz-v2' : 'v1' };

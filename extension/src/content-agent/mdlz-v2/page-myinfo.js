@@ -41,15 +41,53 @@
 
 import { RESULT } from './config.js';
 import { repairProfileNames, splitLegalName } from '../dom.js';
-import { runField } from './executors.js';
-import { fingerprintOf } from './fingerprint.js';
+import { CAPABILITY, chooseFromLadder, readNow, runField } from './executors.js';
+import { fingerprintOf, triggerOf } from './fingerprint.js';
 import { NAV, advance } from './navigation.js';
+import { withList } from './popup-manager.js';
 import { errorsIn } from './row.js';
 import { runSequential } from './scheduler.js';
 import { trace } from '../trace.js';
 
+/**
+ * "How Did You Hear About Us?" — required, and the answer is a FACT the employer
+ * acts on: "Employee referral" or "Recruiter" routes the application differently
+ * and implies a person who does not exist. It carried `pickAny` once, which
+ * takes the first option in the list when nothing matches — a coin flip between
+ * claims about how the candidate found the job.
+ *
+ * So it walks this ladder, measured, in this order, and the last two rungs are
+ * ANCHORED: "Other" is a truthful neutral claim and a better outcome than a
+ * stranded required field, but a substring tier would resolve it to "Another job
+ * board" through the letters inside "another".
+ *
+ * v1 has one more rung than this — it asks a model to pick from the options that
+ * are really there. v2 has no model, so a ladder that misses leaves the field
+ * and reports it. That is a smaller answer, not a wrong one.
+ */
+export const SOURCE_LADDER = [
+    'Company Website', 'Company Careers Website', 'Employer Website', 'Careers Website',
+    'Career Site', 'Careers Page', 'Career Page', 'Company Webpage', 'Website', 'Webpage',
+    '=Other', '=Khác',
+];
+
 /** Vietnam's generic postal code, five digits — see the 2018 note above. */
 export const VN_POSTAL = '10000';
+
+/**
+ * The COUNTRY, from a profile that only records a nationality.
+ *
+ * A nationality is an adjective and a country is a noun; the picker holds
+ * nouns. Only the market actually served is translated — inventing a mapping
+ * for every nationality would be guessing at what 249 catalogue rows are
+ * called, and the field falls back to the measured default either way.
+ */
+export function countryName(profile) {
+    const n = String(profile?.country || profile?.nationality || '').trim();
+    if (!n) return 'Vietnam';
+    if (/^(vietnamese|việt nam|viet nam|vietnam|vn)$/i.test(n)) return 'Vietnam';
+    return n;
+}
 
 /**
  * The fields, in the order they must be done.
@@ -70,7 +108,11 @@ export function myInfoPlan(profile, cv) {
     const city = p.addressProvince || contact.address_city || p.city || '';
 
     return [
-        { id: 'formField-candidateIsPreviousWorker', want: 'No', why: 'agent default' },
+        { id: 'formField-candidateIsPreviousWorker', want: 'No', why: 'agent default', isDefault: true },
+        // Required. Two widgets behind one automation id — a button listbox on
+        // 3M, a searchable input on Mondelez — so the capability is resolved
+        // from the shape, and the answer from the ladder above.
+        { id: 'formField-source', ladder: SOURCE_LADDER, required: true, isDefault: true },
         { id: 'formField-legalName--firstName', want: first, required: true },
         { id: 'formField-legalName--lastName', want: last, required: true },
         { id: 'formField-legalName--firstNameLocal', want: first, optional: true },
@@ -78,13 +120,19 @@ export function myInfoPlan(profile, cv) {
         // MEASURED: picking Country re-renders the region and postal fields. It
         // goes first for that reason, and what it replaces is named here so the
         // fields after it are not filled into nodes about to be thrown away.
-        { id: 'formField-country', want: p.nationality || 'Vietnam', required: true, rerenders: ['formField-countryRegion', 'formField-postalCode'] },
+        //
+        // The VALUE is a country name, which is not what the profile holds. The
+        // profile carries `nationality` — taken from the CV, so "Vietnamese" —
+        // and a live run fed that straight into a 249-country picker: no exact
+        // match, no substring ("vietnam" does not contain "vietnamese"), and the
+        // field re-opened every pass while already reading "Vietnam".
+        { id: 'formField-country', want: countryName(p), required: true, isDefault: true, rerenders: ['formField-countryRegion', 'formField-postalCode'] },
         { id: 'formField-addressLine1', want: p.addressStreet || contact.address_street || city, required: true },
         { id: 'formField-city', want: p.addressDistrict || contact.address_district || city, required: true },
         { id: 'formField-countryRegion', want: p.addressProvince || city, optional: !city },
-        { id: 'formField-postalCode', want: p.postalCode || VN_POSTAL, required: true },
-        { id: 'formField-phoneType', want: 'Mobile - Personal', why: 'agent default' },
-        { id: 'formField-countryPhoneCode', want: [p.phoneCountry || 'Vietnam'], required: true },
+        { id: 'formField-postalCode', want: p.postalCode || VN_POSTAL, required: true, isDefault: !p.postalCode },
+        { id: 'formField-phoneType', want: 'Mobile - Personal', why: 'agent default', isDefault: true },
+        { id: 'formField-countryPhoneCode', want: [p.phoneCountry || 'Vietnam'], required: true, isDefault: !p.phoneCountry },
         { id: 'formField-phoneNumber', want: p.phone || contact.phone || '', required: true },
     ];
 }
@@ -119,12 +167,19 @@ function taskFor(entry, ctx) {
             // gone by the time its turn comes.
             const find = () => document.querySelector(`[data-automation-id="${entry.id}"]`);
             if (!find()) {
-                return entry.optional
-                    ? { result: RESULT.SKIPPED_OPTIONAL, reason: 'not on this tenant' }
-                    : { result: RESULT.WAITING_HYDRATION, reason: 'the field is not on the page' };
+                // ABSENT, not pending. This runs only after the page reported
+                // settled, and a field that is not rendered cannot be required by
+                // the form that did not render it — "required" here is the
+                // recipe's claim across tenants, not this page's. Returning
+                // WAITING_HYDRATION instead would retry forever and park the
+                // page, which is the same failure the missing source field
+                // caused.
+                return { result: RESULT.SKIPPED_OPTIONAL, reason: 'not rendered on this tenant' };
             }
             const f = fingerprintOf(find, { name: entry.id });
-            const r = await runField(f, entry.want, ctx);
+            const r = entry.ladder
+                ? await answerFromLadder(f, entry.ladder, { ...ctx, isDefault: true })
+                : await runField(f, entry.want, { ...ctx, isDefault: !!entry.isDefault });
             // A field that replaces others is not finished when its own value
             // lands: the replacement is still coming, and whatever is written
             // in between is written into a node about to be discarded.
@@ -132,6 +187,37 @@ function taskFor(entry, ctx) {
             return r;
         },
     };
+}
+
+/**
+ * A prompt answered by walking a ladder against the options it really offers.
+ *
+ * ONE lease: the options cannot be read without opening the list, and the rung
+ * cannot be chosen without the options.
+ */
+async function answerFromLadder(f, ladder, ctx) {
+    const shown = readNow(f);
+    if (shown && !/^\((select one|no chips|empty)\)$/i.test(shown)) {
+        // Already answered — by us, or by the candidate. Their claim about how
+        // they found the job is not ours to replace.
+        return { result: RESULT.SATISFIED, detail: { picked: shown } };
+    }
+    const trigger = triggerOf(f);
+    if (!trigger) return { result: RESULT.WAITING_HYDRATION, reason: 'no trigger yet' };
+
+    let rung = null;
+    const opened = await withList(trigger, async (lease) => {
+        const choice = chooseFromLadder(lease.options(), ladder);
+        if (!choice.option) return { result: choice.why, want: choice.want, shown: choice.shown, sample: choice.sample };
+        rung = choice.rung;
+        choice.option.click();
+        return { result: RESULT.COMMITTED, picked: choice.matched };
+    }, { sleep: ctx.sleep, label: f.name });
+
+    if (!opened.ok) return { result: opened.result || RESULT.COMMIT_FAILED, reason: opened.reason };
+    if (opened.value?.result !== RESULT.COMMITTED) return { ...opened.value };
+    const proof = await CAPABILITY[f.kind].verify(f, opened.value.picked, ctx);
+    return { ...proof, picked: opened.value.picked, rung };
 }
 
 /** Is the page finished — asked the way the navigation transaction needs it. */
@@ -152,8 +238,9 @@ export async function runMyInfoPage(ctx = {}) {
     const gaps = [];
     const tasks = [];
     for (const e of entries) {
-        const empty = e.want === null || e.want === undefined || e.want === ''
-            || (Array.isArray(e.want) && !e.want.filter(Boolean).length);
+        // A ladder IS the answer for its field — it just is not a single value.
+        const empty = !e.ladder && (e.want === null || e.want === undefined || e.want === ''
+            || (Array.isArray(e.want) && !e.want.filter(Boolean).length));
         if (empty) {
             // Required and unanswerable is a gap to report; optional and absent
             // costs nothing to skip.
