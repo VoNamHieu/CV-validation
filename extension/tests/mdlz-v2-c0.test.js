@@ -144,8 +144,11 @@ describe('one owner per page, enforced rather than requested', () => {
     });
 
     test('a page outside the set is left alone entirely', async () => {
-        // Not ported yet — and until it is, v1 owns it whole.
-        renderPage('applyFlowPrimaryQuestionsPage');
+        // A page nothing recognises, deliberately: naming a real step here makes
+        // the test expire the day that step is ported, which has now happened
+        // twice. What is being asserted is the RULE — a page that is not v2's is
+        // v1's, whole.
+        renderPage('someStepNobodyHasMeasured');
         const state = await pages.observePageState({ sleep });
 
         assert.equal(state.owner, 'v1');

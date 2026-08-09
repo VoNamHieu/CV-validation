@@ -41,6 +41,7 @@ export const V2_OWNED_STEPS = new Set([
     PAGE.AUTOFILL,
     PAGE.MY_INFORMATION,
     PAGE.MY_EXPERIENCE,
+    PAGE.APPLICATION_QUESTIONS,
 ]);
 
 export const owns = (page) => V2_OWNED_STEPS.has(page);

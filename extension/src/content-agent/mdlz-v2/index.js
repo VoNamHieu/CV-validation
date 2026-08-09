@@ -27,6 +27,7 @@ import { SECTIONS, addButtonFor, planStep, resolveRow, resolveTarget } from './p
 import { NAV, advance } from './navigation.js';
 import { runAutofillPage } from './page-autofill.js';
 import { runMyInfoPage } from './page-myinfo.js';
+import { runQuestionsPage } from './page-questions.js';
 import { READY, observePageState, owns, releasePage } from './pages.js';
 import { preflightReport, resumeEvidence } from './preflight.js';
 import { rowsOf } from './row.js';
@@ -203,6 +204,7 @@ export async function runMdlzV2(ctx = {}) {
     const CONTROLLERS = {
         [STEP.AUTOFILL]: runAutofillPage,
         [STEP.MY_INFORMATION]: runMyInfoPage,
+        [STEP.APPLICATION_QUESTIONS]: runQuestionsPage,
     };
     const controller = CONTROLLERS[where.page];
     if (controller) {
