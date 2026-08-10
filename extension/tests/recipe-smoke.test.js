@@ -477,6 +477,19 @@ describe('ownership, not list length, gates the outer loop', () => {
         assert.match(src, /const blockers = _v2Owns \? \[\] : auditRequiredBlockers\(\)/);
         assert.equal((src.match(/if \(_v2Owns\)/g) || []).length >= 2, true, 'needs and planner must both gate on ownership');
     });
+
+    test('the recipe advance defers to v2 instead of clicking into a refusal', async () => {
+        const { readFileSync } = await import('node:fs');
+        const src = readFileSync(new URL('../src/content-agent/index.js', import.meta.url), 'utf8');
+        // Measured three times on 2026-08-10 (R-170139, R-174262, R-173186):
+        // v2's nav advances the wizard mid-iteration, the recipe shell then aims
+        // its own Next at the NEXT page, the choke point refuses it, and the
+        // refusal handler reads that as the Review terminal — run over, one page
+        // in, nothing filled. The advance branch must re-check ownership LIVE and
+        // defer, and a page v2 advanced must count as progress.
+        assert.match(src, /advance\.deferredToV2/, 'the advance branch must defer to v2 on a page it holds');
+        assert.match(src, /rf\?\.filled \|\| rf\?\.advancedTo\) _progress\(\)/, 'a v2-advanced page is progress, not an idle iteration');
+    });
 });
 
 // ── A page is owned only when every widget on it can be finished ──

@@ -1152,7 +1152,11 @@ async function _runAgentLoop(rawProfile) {
                 // v2's own account of what it could not answer — the only
                 // blocker list that matters on a page it owns.
                 if (rf?.v2) _lastV2Gaps = rf.blockers || rf.gaps || rf.fieldGaps || [];
-                if (rf?.filled) _progress();
+                // A page that ADVANCED is progress even when it filled nothing:
+                // an all-satisfied page moving forward is the run working, and
+                // counting it idle is how three healthy passes read as
+                // "no progress in 2" on a draft that was simply already filled.
+                if (rf?.filled || rf?.advancedTo) _progress();
                 if (_openIter && rf?.step) _openIter.step = rf.step;
                 for (const a of rf.answers || []) {
                     reviewAnswers.set(`${rf.step || '?'}::${a.field}`, { ...a, step: rf.step });
@@ -1326,6 +1330,27 @@ async function _runAgentLoop(rawProfile) {
                     const stepNow = _stepNow;
                     const adv = _adv;
                     if (adv && adv.offsetParent !== null) {
+                        // ── v2 ADVANCES ITS OWN PAGES — this click is not ours to make ──
+                        // Re-checked LIVE, not from the iteration-start snapshot: v2's
+                        // navigation transaction advances the wizard MID-iteration, so
+                        // the page under this button is already the NEXT one by the
+                        // time we get here. Reaching the click anyway meant sweeping
+                        // manifest values onto a page v2 owns, aiming a Next click the
+                        // choke point rightly refuses — and the refusal handler below
+                        // reading that refusal as the Review terminal ("awaiting user
+                        // submit"), ending the run one page into the flow with nothing
+                        // filled. Measured three times on 2026-08-10: R-170139,
+                        // R-174262, R-173186 — identical tails, `mdlz.nav.advanced`
+                        // followed 500ms later by run.end. Defer instead: the next
+                        // iteration hands whatever page is on screen to v2's own
+                        // controller, which fills it and advances it itself.
+                        const _v2HoldsNow = pageOwner() === 'mdlz-v2'
+                            || (isMdlzPage() && (await flagMode()) === MODE.ON && owns(observeStep()));
+                        if (_v2HoldsNow) {
+                            trace('advance.deferredToV2', { page: observeStep(), step: stepNow?.name || null });
+                            await sleep(900);
+                            continue;
+                        }
                         // Only a real open listbox, and never when the modal is the
                         // topmost layer — Escape would dismiss the step instead.
                         if (closeOpenDropdown()) await sleep(250);
