@@ -308,15 +308,29 @@ async function pickAcrossList(lease, want, { sleep, maxWindows = 24 } = {}) {
     // shorter than that is a render still in flight, not an answer. Reading
     // it early is the measured cause of every pass-1 miss — the sample of
     // each one held only the first rendered window.
-    const declared = (() => {
+    // `declared` is re-read EVERY iteration, not captured once. MEASURED on
+    // R-170139 (2026-08-10, run 02:27): read once at entry it was 0 — the
+    // header renders WITH the results, after this function starts — so the
+    // loop accepted the first non-empty item array it saw. That array was the
+    // list mid-render: the miss's sample was items[0..3] exactly, and the
+    // create row (last) was not in it. Every free-text term died on that.
+    // When the header cannot be read at all, the array must instead hold the
+    // SAME length across two consecutive reads before it counts as an answer.
+    const readDeclared = () => {
         try { return Number((document.body.textContent.match(/Search Results\s*\((\d+)\)/) || [])[1]) || 0; }
         catch { return 0; }
-    })();
+    };
+    let declared = 0;
     let items = sc ? readVirtualItems(sc) : null;
     if (sc) {
-        const by = Date.now() + 3500;
+        const by = Date.now() + 4000;
+        let prevLen = -1;
         while (Date.now() < by) {
-            if (items && items.length && (!declared || items.length >= declared)) break;
+            declared = readDeclared();
+            const len = items ? items.length : 0;
+            if (len && declared && len >= declared) break;
+            if (len && !declared && len === prevLen) break;   // stable twice, header unreadable
+            prevLen = len;
             await nap(200);
             items = readVirtualItems(sc);
         }
@@ -331,6 +345,7 @@ async function pickAcrossList(lease, want, { sleep, maxWindows = 24 } = {}) {
                 option: null, why: RESULT.OPTION_NOT_FOUND,
                 want: String(want ?? ''), shown: choice.shown ?? items.length,
                 sample: choice.sample ?? [],
+                via: 'items', itemsLen: items.length, declared,
             };
         }
         // Bring the chosen INDEX into view and click the row at that offset —
@@ -854,7 +869,11 @@ const searchMulti = {
             const outcome = r.ok ? (r.value || {}) : { result: r.result || RESULT.COMMIT_FAILED, reason: r.reason };
             if (outcome.result !== RESULT.COMMITTED) {
                 missed.push({ term, ...outcome });
-                trace('mdlz.skill.miss', { term, why: outcome.result, reason: outcome.reason || '', sample: (outcome.sample || outcome.saw || []).join(' | ') || '(none)' });
+                trace('mdlz.skill.miss', {
+                    term, why: outcome.result, reason: outcome.reason || '',
+                    via: outcome.via || 'labels', itemsLen: outcome.itemsLen ?? null, declared: outcome.declared ?? null,
+                    sample: (outcome.sample || outcome.saw || []).join(' | ') || '(none)',
+                });
                 continue;
             }
         }

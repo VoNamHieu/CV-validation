@@ -160,6 +160,12 @@ export function traceDump(reason) {
  */
 export function traceClear() {
     if (!hasStore()) return;
+    // The buffer is ARCHIVED before it is dropped. Three times in one day the
+    // rows that explained a run's tail — the misses, the aggregate, run.end —
+    // were written and cleared between two reads of the buffer, and the
+    // diagnosis had to be re-earned with another live run each time. The last
+    // run's story is worth one sessionStorage slot.
+    try { const rows = sessionStorage.getItem(KEY); if (rows) sessionStorage.setItem(KEY + 'Last', rows); } catch { /* ignore */ }
     try { sessionStorage.removeItem(KEY); } catch { /* ignore */ }
 }
 
