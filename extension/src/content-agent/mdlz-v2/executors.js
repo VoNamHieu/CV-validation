@@ -298,7 +298,14 @@ async function pickAcrossList(lease, want, { sleep, maxWindows = 24 } = {}) {
     const nap = napper(sleep);
     const labelsOf = () => lease.options().map(txt).filter((t) => t && !NOT_A_CHOICE.test(t));
     const seen = new Set(labelsOf());
-    const sc = optionScroller(lease.options()[0]);
+    // `let`, and re-resolved INSIDE the wait loop below. MEASURED on R-170139
+    // (2026-08-10, run 02:38, the trace's own via/items columns): all five
+    // misses were `via=labels items=null` — the scroller was resolved ONCE,
+    // at entry, while the freshly-opened list was still too short to overflow,
+    // so sc was null and the entire item path was skipped for every one of
+    // them. The three terms that committed were exactly the three whose
+    // catalog row sits in the first rendered window.
+    let sc = optionScroller(lease.options()[0]);
 
     // THE WIDGET'S OWN ARRAY FIRST. Scrolling the DOM to collect the rest
     // reached 12 of 16 and lost the exact match; the fiber has all of them.
@@ -322,17 +329,18 @@ async function pickAcrossList(lease, want, { sleep, maxWindows = 24 } = {}) {
     };
     let declared = 0;
     let items = sc ? readVirtualItems(sc) : null;
-    if (sc) {
+    {
         const by = Date.now() + 4000;
         let prevLen = -1;
         while (Date.now() < by) {
+            if (!sc) sc = optionScroller(lease.options()[0]);
             declared = readDeclared();
+            items = sc ? readVirtualItems(sc) : null;
             const len = items ? items.length : 0;
             if (len && declared && len >= declared) break;
             if (len && !declared && len === prevLen) break;   // stable twice, header unreadable
             prevLen = len;
             await nap(200);
-            items = readVirtualItems(sc);
         }
     }
 
