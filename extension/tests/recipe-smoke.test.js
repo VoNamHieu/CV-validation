@@ -481,15 +481,17 @@ describe('ownership, not list length, gates the outer loop', () => {
 
 // ── A page is owned only when every widget on it can be finished ──
 describe('v2 owns the pages it can actually finish', () => {
-    test('My Information belongs to v1 until the cascade ladder is ported', async () => {
-        // Measured 2026-08-09 (R-172088 → My Information): with the page owned
-        // by v2, "How Did You Hear About Us" got its prompt opened and nothing
-        // else. It is a two-level cascade; reaching a leaf needs drill →
-        // re-resolve → search-pick → keyboard, which lives in v1 today.
+    test('My Information is v2\'s now the cascade ladder is ported and measured', async () => {
+        // Withdrawn 2026-08-09 when v2's single-select executor stopped at an open
+        // prompt on "How Did You Hear About Us" — a two-level cascade. Returned
+        // 2026-08-10: answerFromLadder now walks it (match category → drill → match
+        // leaf → click its radio, options read page-wide because a drill portals a
+        // new list), measured live on R-170139 — input-open, container swap, radio
+        // leaf.
         const { V2_OWNED_STEPS, owns } = await import('../src/content-agent/mdlz-v2/pages.js');
         const { STEP } = await import('../src/content-agent/mdlz-v2/config.js');
-        assert.equal(owns(STEP.MY_INFORMATION), false,
-            'putting MY_INFORMATION back is the act of porting it — after the ladder exists AND is measured on that field');
+        assert.equal(owns(STEP.MY_INFORMATION), true,
+            'the cascade ladder exists in v2 and was measured on this field (R-170139)');
         // My Experience is v2's, and stays v2's. It was withdrawn earlier on
         // 2026-08-09; the live re-measurement that followed found the page had
         // never actually run — v2 declined it every pass for a résumé it would

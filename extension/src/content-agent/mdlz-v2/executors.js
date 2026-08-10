@@ -1156,17 +1156,26 @@ const isBackControl = (el) => {
  * Nothing is assumed from the click returning. The commit signal is the FIELD's
  * own value changing — a chip appears, a button relabels — read through readNow;
  * a drill is the option set changing while the value does not.
+ *
+ * Options are read PAGE-WIDE, not through the lease's node. Measured 2026-08-10
+ * (R-170139): a drill does not re-render in place — Workday REMOVES the old
+ * option container and portals a NEW one, so the node the lease captured at open
+ * is detached the moment we drill, and `lease.options()` scoped to it reads
+ * empty. v1 read `visibleOptions()` page-wide for exactly this reason (it is the
+ * v1-works / v2-slips difference, recorded and then forgotten once). The lease
+ * still owns the page — the sweep cleared it before the open — so the only list
+ * on it is ours, whichever container is currently holding the level.
  */
 async function walkCascadeLadder(lease, f, ladder, ctx = {}) {
     const before = readNow(f);
     const committedNow = () => { const now = readNow(f); return now && now !== before ? now : null; };
-    const levelKey = () => lease.options().map(txt).join('|');
+    const levelKey = () => visibleOptions().map(txt).join('|');
 
     for (let level = 0; level < 4; level++) {
         const already = committedNow();
         if (already) return { result: RESULT.COMMITTED, picked: null, onPage: already, levels: level };
 
-        const opts = lease.options().filter((o) => !isBackControl(o));
+        const opts = visibleOptions().filter((o) => !isBackControl(o));
         if (!opts.length) return { result: RESULT.OPTION_NOT_FOUND, reason: 'the list emptied mid-cascade', level };
 
         const choice = chooseFromLadder(opts, ladder);
@@ -1190,7 +1199,7 @@ async function walkCascadeLadder(lease, f, ladder, ctx = {}) {
             hit.click();
             const now = await until(() => committedNow(), { sleep: ctx.sleep, budgetMs: ctx.commitMs || 2000 });
             if (now) return { result: RESULT.COMMITTED, picked: choice.matched, rung: choice.rung, onPage: now, levels: level + 1 };
-            drilled = await until(() => levelKey() !== keyBefore && lease.options().length > 0,
+            drilled = await until(() => levelKey() !== keyBefore && visibleOptions().length > 0,
                 { sleep: ctx.sleep, budgetMs: ctx.drillMs || 1200 });
             if (drilled) break;
         }

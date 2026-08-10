@@ -192,14 +192,24 @@ export function buildMyInfoPage(doc, opts = {}) {
         let list = null;
         let opening = false;
 
-        const closeList = () => { if (list) { list.remove(); list = null; input.removeAttribute('aria-expanded'); } };
+        const closeList = () => { if (list) { list.remove(); list = null; } input.removeAttribute('aria-expanded'); };
         const commit = (label) => {
             while (chips.firstChild) chips.removeChild(chips.firstChild);
             const chip = el('div', { 'data-automation-id': 'selectedItem', role: 'option' }, chips);
             chip.textContent = label;
             closeList();
         };
-        const clearRows = () => { while (list.firstChild) list.removeChild(list.firstChild); };
+        // A FRESH container per level. Measured (R-170139, 2026-08-10): a drill
+        // does NOT re-render in place — Workday removes the old option list and
+        // portals a new one, so the node a lease captured at open is detached the
+        // moment we drill. Modelling the swap is the point; an in-place re-render
+        // would let a node-scoped read pass a test the live page fails.
+        const freshList = () => {
+            if (list) list.remove();
+            list = el('div', { 'data-automation-id': 'activeListContainer', role: 'listbox' }, doc.body);
+            list.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeList(); });
+            input.setAttribute('aria-expanded', 'true');
+        };
         const addRow = (label, leaf, onClick) => {
             const item = el('div', { 'data-automation-id': 'menuItem', role: 'option' }, list);
             const leafEl = el('div', { 'data-automation-id': 'promptLeafNode' }, item);
@@ -214,9 +224,9 @@ export function buildMyInfoPage(doc, opts = {}) {
                 leafEl.addEventListener('click', () => setTimeout(onClick, cfg.openMs));
             }
         };
-        const renderLevel0 = () => { clearRows(); for (const c of cats) addRow(c, false, () => renderLevel1(c)); };
+        const renderLevel0 = () => { freshList(); for (const c of cats) addRow(c, false, () => renderLevel1(c)); };
         const renderLevel1 = (cat) => {
-            clearRows();
+            freshList();
             // The back breadcrumb: role=presentation, which SEL.option deliberately
             // does not match — the walk must never mistake it for a way in.
             const back = el('div', { 'data-automation-id': 'menuItem', role: 'presentation' }, list);
@@ -224,18 +234,12 @@ export function buildMyInfoPage(doc, opts = {}) {
             back.addEventListener('click', () => setTimeout(renderLevel0, cfg.openMs));
             for (const leaf of tree[cat]) addRow(leaf, true, () => commit(leaf));
         };
+        input.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeList(); });
         input.addEventListener('click', () => {
-            if (list || opening) return;
+            if (list) { closeList(); return; }   // a second click toggles it shut
+            if (opening) return;
             opening = true;
-            setTimeout(() => {
-                opening = false;
-                list = el('div', { 'data-automation-id': 'activeListContainer', role: 'listbox' }, doc.body);
-                const onKey = (e) => { if (e.key === 'Escape') closeList(); };
-                list.addEventListener('keydown', onKey);
-                input.addEventListener('keydown', onKey);
-                input.setAttribute('aria-expanded', 'true');
-                renderLevel0();
-            }, cfg.openMs);
+            setTimeout(() => { opening = false; renderLevel0(); }, cfg.openMs);
         });
         return { wrap, input, chips, chipTexts: () => [...chips.children].map((c) => c.textContent) };
     }
