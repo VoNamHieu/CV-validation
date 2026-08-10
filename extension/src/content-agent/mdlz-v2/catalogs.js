@@ -19,14 +19,14 @@
  * "fixes" it stops matching. Do not tidy these strings.
  *
  * Search-backed catalogs (Skills, Field of Study) deliberately do NOT belong
- * here: probing them with a nonsense term still returns fuzzy matches, so they
- * have no enumerable bottom. They are handled by term ladders + the gap
- * resolver instead.
+ * here: they are handled by term ladders + the gap resolver instead. (Degree is
+ * the small deterministic closed set that DOES belong here — ~18 fixed labels,
+ * exact-picked.)
  */
 
 export const CATALOGS = {
     tenant: 'mdlz',
-    scannedAt: '2026-08-09',
+    scannedAt: '2026-08-10',
 
     /** formField-degree — button listbox, 18 options after "Select One". */
     degree: [
@@ -60,10 +60,50 @@ export const CATALOGS = {
         '3 - Fluent',
     ],
 
+    /**
+     * "How Did You Hear About Us?" — a CASCADE, measured 2026-08-10 (R-170139).
+     *
+     * The widget is chip-styled ("1 item selected") but behaves SINGLE-select:
+     * a new pick replaces the chip. The top level is this closed set of 8
+     * categories, each a `menuItem[role=option]` with a chevron and NO control.
+     * Clicking one DRILLS: the level below shows a back breadcrumb plus the real
+     * leaf, a `promptLeafNode` carrying a RADIO. Only the radio commits.
+     *
+     * Leaves are fetched on drill (not in local state), so they are not fully
+     * enumerable from one open — but the top level is fixed and that is what the
+     * registry guards. Known leaf paths measured so far are in `sourceLeaves`.
+     *
+     * NB the search box: typing does nothing until ENTER, and Enter then commits
+     * Workday's TOP-RANKED match, leaf-level ("Referral" committed "Industry
+     * Referral"). Drill-and-pick-the-radio is the exact path; search+Enter needs
+     * a post-verify that the committed chip equals the intended leaf.
+     */
+    sourceCategories: [
+        'Company Website',
+        'Contacted by Recruiter',
+        'Job Board',
+        'Job Fair',
+        'Other',
+        'Referral',
+        'Social Media',
+        'Student / Campus Event',
+    ],
+    /** Category → the leaf(s) measured under it. Partial: leaves load on drill. */
+    sourceLeaves: {
+        'Company Website': ['Company Website'],
+        'Referral': ['Industry Referral'],
+    },
+
+    /** formField-phoneType — button listbox, 4 options after "Select One". */
+    phoneType: [
+        'Mobile - Personal',
+        'Mobile - Work',
+        'Telephone - Office',
+        'Telephone - Personal',
+    ],
+
     // Still to scan (step 2 of the v1-retirement plan):
-    //   · "How Did You Hear About Us" — top level is a closed set of ~8
-    //     categories; leaves live one drill deeper. Scan during the cascade
-    //     measurement trip.
-    //   · Phone Device Type, Gender, Race/Ethnicity — closed sets already
-    //     driven by ladders; snapshot them when next on the page.
+    //   · Gender, Race/Ethnicity (Voluntary Disclosures) — closed sets already
+    //     driven by ladders; snapshot them on a run that reaches Disclosures.
+    //     (Not reachable this trip without save-advancing through My Experience.)
 };
