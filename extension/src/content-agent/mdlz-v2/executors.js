@@ -296,7 +296,19 @@ function pickLabel(labels, want) {
  */
 async function pickAcrossList(lease, want, { sleep, maxWindows = 24 } = {}) {
     const nap = napper(sleep);
-    const labelsOf = () => lease.options().map(txt).filter((t) => t && !NOT_A_CHOICE.test(t));
+    // GLOBAL reads, not lease-scoped — the structural difference between v1
+    // (works) and v2 (failed), found by correlation on 2026-08-10: every
+    // hand probe of this widget read visibleOptions() page-wide and found the
+    // scroller and all 16 items, every time; every agent miss read through
+    // lease.options() — scoped to the node captured at open — and got
+    // sc=null items=null, every time. Workday does not keep this widget's
+    // results inside the node the open produced.
+    //
+    // Attribution is not lost: the page is swept CLEAR of options before the
+    // list is opened (that is the lease's own precondition), so everything
+    // visible now was produced by our click. The scope was a second belt on
+    // top of that sweep, and it was strangling the read.
+    const labelsOf = () => visibleOptions().map(txt).filter((t) => t && !NOT_A_CHOICE.test(t));
     const seen = new Set(labelsOf());
     // `let`, and re-resolved INSIDE the wait loop below. MEASURED on R-170139
     // (2026-08-10, run 02:38, the trace's own via/items columns): all five
@@ -305,7 +317,7 @@ async function pickAcrossList(lease, want, { sleep, maxWindows = 24 } = {}) {
     // so sc was null and the entire item path was skipped for every one of
     // them. The three terms that committed were exactly the three whose
     // catalog row sits in the first rendered window.
-    let sc = optionScroller(lease.options()[0]);
+    let sc = optionScroller(visibleOptions()[0]);
 
     // THE WIDGET'S OWN ARRAY FIRST. Scrolling the DOM to collect the rest
     // reached 12 of 16 and lost the exact match; the fiber has all of them.
@@ -333,7 +345,7 @@ async function pickAcrossList(lease, want, { sleep, maxWindows = 24 } = {}) {
         const by = Date.now() + 4000;
         let prevLen = -1;
         while (Date.now() < by) {
-            if (!sc) sc = optionScroller(lease.options()[0]);
+            if (!sc) sc = optionScroller(visibleOptions()[0]);
             declared = readDeclared();
             items = sc ? readVirtualItems(sc) : null;
             const len = items ? items.length : 0;
@@ -407,7 +419,7 @@ async function pickAcrossList(lease, want, { sleep, maxWindows = 24 } = {}) {
 
     // Bring the chosen TEXT back into view and hand back whatever node is
     // showing it now — never the one seen while scanning.
-    const live = () => lease.options().find((o) => fold(txt(o)) === fold(target)) || null;
+    const live = () => visibleOptions().find((o) => fold(txt(o)) === fold(target)) || null;
     if (live()) return { option: live(), matched: target };
     // Known index + known row height = one scroll, not a walk.
     if (sc && items) {
@@ -809,7 +821,7 @@ const searchMulti = {
                 // moment ago: the virtualiser recycles rows, and the measured
                 // cost was chips for "Agentforce" and "Agile Systems" nobody
                 // asked for.
-                const again = { option: lease.options().find((o) => fold(txt(o)) === fold(choice.matched)) || choice.option };
+                const again = { option: visibleOptions().find((o) => fold(txt(o)) === fold(choice.matched)) || choice.option };
 
                 // WHAT THE PAGE GAINED IS THE VERDICT — not what we meant to
                 // click. Re-reading by label narrows the window in which the
