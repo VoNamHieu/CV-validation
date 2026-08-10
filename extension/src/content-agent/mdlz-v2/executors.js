@@ -1120,6 +1120,87 @@ const searchSingle = {
  * either what the ATS parsed out of the résumé or what the candidate chose, and
  * both outrank anything we would pick for them.
  */
+/** The control that commits a row — a real one, not a nested leaf wrapper. */
+const commitControl = (el) => el.querySelector('input[type="radio"], input[type="checkbox"]');
+/** The clickable leaf inside a menu row, when the row itself is only a label. */
+const leafNode = (el) => el.querySelector('[data-automation-id="promptLeafNode"]');
+const hasCommitControl = (el) => !!commitControl(el);
+
+/**
+ * A row that walks OUT of a submenu, not into it — the "‹ Company Website"
+ * breadcrumb. `visibleOptions` already drops it on this tenant (it renders as
+ * role=presentation, which SEL.option does not match), but a tenant that gives
+ * the breadcrumb a role=option would ping-pong the walk without this.
+ */
+const isBackControl = (el) => {
+    if ((el.getAttribute('role') || '') === 'presentation') return true;
+    const label = (el.getAttribute('aria-label') || '').toLowerCase();
+    if (/^back\b|go back|previous/.test(label)) return true;
+    return !!el.closest('[data-automation-id="menuHeader"], header');
+};
+
+/**
+ * Walk a ladder DOWN a cascade, one drill per level, and commit at the leaf.
+ *
+ * Measured 2026-08-10 (Mondelez "How Did You Hear About Us?"): the top level is
+ * eight CATEGORY rows — a chevron and NO control — and clicking one DRILLS to a
+ * level carrying a back breadcrumb plus the real leaf, a row with a RADIO that is
+ * the only thing that commits. The SAME ladder answers both levels, because
+ * "Company Website" names a category and the leaf inside it; so the walk matches
+ * the category, drills, matches the leaf, and clicks its radio.
+ *
+ * A FLAT listbox (Degree) is the degenerate case: its first match already
+ * carries the commit, so the click commits and the loop returns on pass zero
+ * without ever drilling. That is why one function serves both fields.
+ *
+ * Nothing is assumed from the click returning. The commit signal is the FIELD's
+ * own value changing — a chip appears, a button relabels — read through readNow;
+ * a drill is the option set changing while the value does not.
+ */
+async function walkCascadeLadder(lease, f, ladder, ctx = {}) {
+    const before = readNow(f);
+    const committedNow = () => { const now = readNow(f); return now && now !== before ? now : null; };
+    const levelKey = () => lease.options().map(txt).join('|');
+
+    for (let level = 0; level < 4; level++) {
+        const already = committedNow();
+        if (already) return { result: RESULT.COMMITTED, picked: null, onPage: already, levels: level };
+
+        const opts = lease.options().filter((o) => !isBackControl(o));
+        if (!opts.length) return { result: RESULT.OPTION_NOT_FOUND, reason: 'the list emptied mid-cascade', level };
+
+        const choice = chooseFromLadder(opts, ladder);
+        if (!choice.option) {
+            return { result: choice.why, want: choice.want, shown: choice.shown, sample: choice.sample, level };
+        }
+
+        // Every row carrying this rung's text, a real leaf (radio/checkbox) first.
+        // At a drilled level a category twin can sit beside the leaf, and clicking
+        // it walks back out; try up to three, the way v1 does, in case box-sort
+        // put a dead twin first.
+        const twins = opts.filter((o) => fold(txt(o)) === fold(choice.matched));
+        const leaves = twins.filter(hasCommitControl);
+        const cands = (leaves.length ? leaves : (twins.length ? twins : [choice.option])).slice(0, 3);
+
+        const keyBefore = levelKey();
+        let drilled = false;
+        for (const cand of cands) {
+            const hit = commitControl(cand) || leafNode(cand) || cand;
+            try { cand.scrollIntoView?.({ block: 'center' }); } catch { /* no layout in a test DOM */ }
+            hit.click();
+            const now = await until(() => committedNow(), { sleep: ctx.sleep, budgetMs: ctx.commitMs || 2000 });
+            if (now) return { result: RESULT.COMMITTED, picked: choice.matched, rung: choice.rung, onPage: now, levels: level + 1 };
+            drilled = await until(() => levelKey() !== keyBefore && lease.options().length > 0,
+                { sleep: ctx.sleep, budgetMs: ctx.drillMs || 1200 });
+            if (drilled) break;
+        }
+        if (!drilled) {
+            return { result: RESULT.COMMIT_FAILED, reason: `"${choice.matched}" neither committed nor drilled`, picked: choice.matched, level };
+        }
+    }
+    return { result: RESULT.OPTION_NOT_FOUND, reason: 'the cascade did not reach a leaf in four levels' };
+}
+
 export async function answerFromLadder(f, ladder, ctx = {}) {
     const shown = readNow(f);
     if (shown && !/^\((select one|no chips|empty)\)$/i.test(shown)) {
@@ -1130,17 +1211,21 @@ export async function answerFromLadder(f, ladder, ctx = {}) {
 
     let rung = null;
     const opened = await withList(trigger, async (lease) => {
-        const choice = chooseFromLadder(lease.options(), ladder);
-        if (!choice.option) return { result: choice.why, want: choice.want, shown: choice.shown, sample: choice.sample };
-        rung = choice.rung;
-        choice.option.click();
-        return { result: RESULT.COMMITTED, picked: choice.matched };
+        const walk = await walkCascadeLadder(lease, f, ladder, ctx);
+        if (walk.rung) rung = walk.rung;
+        return walk;
     }, { sleep: ctx.sleep, label: f.name });
 
     if (!opened.ok) return { result: opened.result || RESULT.COMMIT_FAILED, reason: opened.reason };
     if (opened.value?.result !== RESULT.COMMITTED) return { ...opened.value };
-    const proof = await CAPABILITY[f.kind].verify(f, opened.value.picked, ctx);
-    return { ...proof, picked: opened.value.picked, rung };
+    const picked = opened.value.picked;
+    // A chip search verifies against a LIST of terms — its `satisfied` spreads
+    // `want`, and a bare string would spread into characters. A button listbox
+    // verifies against the string itself. The ladder commits one value either
+    // way; only the shape the verifier expects differs.
+    const wantForVerify = f.kind === WIDGET.SEARCH_MULTI ? [picked] : picked;
+    const proof = await CAPABILITY[f.kind].verify(f, wantForVerify, ctx);
+    return { ...proof, picked, rung };
 }
 
 export const CAPABILITY = {

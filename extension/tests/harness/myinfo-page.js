@@ -26,10 +26,27 @@ export const PHONE_CODES = ['Vietnam (+84)', 'Thailand (+66)', 'Singapore (+65)'
  *  tenant, which is why the ladder ends at an anchored "Other". */
 export const SOURCES = ['Employee Referral', 'Job Board', 'Company Website', 'University', 'Other'];
 
+/**
+ * The measured Mondelez shape of the SAME field: a CASCADE. Eight top-level
+ * categories, each drilling one level to its leaf; the leaf is what commits, and
+ * a category label is not the same string as the leaf under it ("Referral" opens
+ * onto "Industry Referral"). Kept small here — the walk is the same at three
+ * leaves as at three hundred.
+ */
+export const SOURCE_TREE = {
+    'Company Website': ['Company Website'],
+    'Contacted by Recruiter': ['Contacted by Recruiter'],
+    'Referral': ['Industry Referral', 'Employee Referral'],
+    'Social Media': ['LinkedIn', 'Facebook'],
+    'Other': ['Other'],
+};
+
 export function buildMyInfoPage(doc, opts = {}) {
     const cfg = {
         provinceAs: 'search',     // 'search' (Mondelez) | 'button' (3M)
+        sourceAs: 'button',       // 'button' (flat listbox) | 'cascade' (Mondelez)
         sources: SOURCES,
+        sourceTree: SOURCE_TREE,
         localNames: false,        // dual-script tenants render a second pair
         commitMs: 15,
         rerenderMs: 60,      // the replacement lands after the pick, not with it
@@ -157,6 +174,72 @@ export function buildMyInfoPage(doc, opts = {}) {
         return { input, chips };
     }
 
+    /**
+     * A cascading multi-select, the measured Mondelez "How Did You Hear" shape.
+     *
+     * The one thing that matters for the walk: a drill re-renders IN PLACE, in
+     * the very container the lease is holding — categories out, breadcrumb + leaf
+     * rows in — so `lease.options()` reads the new level off the same node. The
+     * top level carries no control; only a leaf's radio commits, as a chip, and a
+     * new pick replaces the old (single-select behind chip styling).
+     */
+    function cascadePrompt(id, tree) {
+        const wrap = field(id);
+        el('div', { 'data-automation-id': 'multiSelectContainer' }, wrap);
+        const chips = el('div', { 'data-automation-id': 'selectedItemList' }, wrap);
+        const input = el('input', { type: 'text', placeholder: 'Search' }, wrap);
+        const cats = Object.keys(tree);
+        let list = null;
+        let opening = false;
+
+        const closeList = () => { if (list) { list.remove(); list = null; input.removeAttribute('aria-expanded'); } };
+        const commit = (label) => {
+            while (chips.firstChild) chips.removeChild(chips.firstChild);
+            const chip = el('div', { 'data-automation-id': 'selectedItem', role: 'option' }, chips);
+            chip.textContent = label;
+            closeList();
+        };
+        const clearRows = () => { while (list.firstChild) list.removeChild(list.firstChild); };
+        const addRow = (label, leaf, onClick) => {
+            const item = el('div', { 'data-automation-id': 'menuItem', role: 'option' }, list);
+            const leafEl = el('div', { 'data-automation-id': 'promptLeafNode' }, item);
+            const opt = el('div', leaf
+                ? { 'data-automation-id': 'promptOption', role: 'option' }
+                : { 'data-automation-id': 'promptOption' }, leafEl);
+            opt.textContent = label;
+            if (leaf) {
+                const radio = el('input', { type: 'radio' }, leafEl);
+                radio.addEventListener('click', () => setTimeout(onClick, cfg.commitMs));
+            } else {
+                leafEl.addEventListener('click', () => setTimeout(onClick, cfg.openMs));
+            }
+        };
+        const renderLevel0 = () => { clearRows(); for (const c of cats) addRow(c, false, () => renderLevel1(c)); };
+        const renderLevel1 = (cat) => {
+            clearRows();
+            // The back breadcrumb: role=presentation, which SEL.option deliberately
+            // does not match — the walk must never mistake it for a way in.
+            const back = el('div', { 'data-automation-id': 'menuItem', role: 'presentation' }, list);
+            back.textContent = cat;
+            back.addEventListener('click', () => setTimeout(renderLevel0, cfg.openMs));
+            for (const leaf of tree[cat]) addRow(leaf, true, () => commit(leaf));
+        };
+        input.addEventListener('click', () => {
+            if (list || opening) return;
+            opening = true;
+            setTimeout(() => {
+                opening = false;
+                list = el('div', { 'data-automation-id': 'activeListContainer', role: 'listbox' }, doc.body);
+                const onKey = (e) => { if (e.key === 'Escape') closeList(); };
+                list.addEventListener('keydown', onKey);
+                input.addEventListener('keydown', onKey);
+                input.setAttribute('aria-expanded', 'true');
+                renderLevel0();
+            }, cfg.openMs);
+        });
+        return { wrap, input, chips, chipTexts: () => [...chips.children].map((c) => c.textContent) };
+    }
+
     // ── the address block, which Country replaces ─────────────────────
     let addressLine1 = textField('formField-addressLine1');
     let city = textField('formField-city');
@@ -165,9 +248,11 @@ export function buildMyInfoPage(doc, opts = {}) {
         ? buttonPrompt('formField-countryRegion', PROVINCES)
         : searchPrompt('formField-countryRegion', PROVINCES);
 
-    // REQUIRED on this page, measured. Two widgets behind one id; this is the
-    // button shape.
-    const source = buttonPrompt('formField-source', cfg.sources);
+    // REQUIRED on this page, measured. Two widgets behind one id: a flat button
+    // listbox on 3M, a cascading multi-select on Mondelez.
+    const source = cfg.sourceAs === 'cascade'
+        ? cascadePrompt('formField-source', cfg.sourceTree)
+        : buttonPrompt('formField-source', cfg.sources);
 
     const country = buttonPrompt('formField-country', COUNTRIES, () => {
         // MEASURED: picking a country re-renders the region and postal fields.
@@ -194,6 +279,8 @@ export function buildMyInfoPage(doc, opts = {}) {
         cfg, page, nav, state,
         radios,
         source,
+        /** The committed source, whichever shape it took: chip text or button text. */
+        sourceChips: () => (cfg.sourceAs === 'cascade' ? source.chipTexts() : [source.textContent]),
         firstName, lastName, firstLocal, lastLocal,
         email,
         country,

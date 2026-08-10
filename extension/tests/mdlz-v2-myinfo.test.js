@@ -148,6 +148,23 @@ describe('How Did You Hear About Us — the field that made a live run stick', (
         assert.equal(page.source.textContent, 'Company Website');
     });
 
+    test('and the Mondelez CASCADE is drilled — the category, then the leaf that commits', async () => {
+        // The measured shape: "Company Website" is a top-level CATEGORY with no
+        // control; clicking it only DRILLS, to a level whose leaf carries the
+        // radio that actually commits, as a chip. A single click on the category
+        // — which is all the flat path did — walks in and reports success while
+        // the field stays empty. That is the failure this field made a live run
+        // stick on, and the walk has to reach the leaf.
+        page = buildMyInfoPage(dom.document, { sourceAs: 'cascade' });
+        dom.document.body.children[0].remove();
+
+        const r = await run();
+        const task = r.ledger.tasks.find((t) => t.id === 'formField-source');
+        assert.equal(task.result, RESULT.COMMITTED, JSON.stringify(task?.notes || task));
+        // The commit is a CHIP, and the leaf's text, not the category's.
+        assert.deepEqual(page.sourceChips(), ['Company Website']);
+    });
+
     test('and when the ladder misses, "Other" is taken by an ANCHORED match', async () => {
         // '=Other' matches exactly or by prefix only: a substring tier would
         // resolve it to "Another job board" through the letters inside
