@@ -399,6 +399,48 @@ describe('MILESTONE 2 GATE — the verdict matches the page, in both directions'
         assert.equal(page.chipsOn('skills').length, 2, 'no third chip');
     });
 
+    test('the item chooser: catalog beats create, create beats refusal', () => {
+        // MEASURED (R-170139, 2026-08-10): every skills search ends with a
+        // CREATE row whose id EQUALS its label — the typed text verbatim —
+        // while catalog rows carry REMOTE_SKILL ids that later appear on the
+        // committed chip. The chooser works on the widget's own items, where
+        // that discriminator lives.
+        const items = (labels) => labels.map(([label, id], index) => ({ label, id, index }));
+
+        // 1. Catalog exact beats the create row carrying the SAME label.
+        const both = items([["Agile/Scrum", "REMOTE_SKILL-1-9"], ["Agile/Scrum", "Agile/Scrum"]]);
+        assert.deepEqual(exec.chooseSkillTarget(both, 'Agile/Scrum'),
+            { kind: 'catalog', label: 'Agile/Scrum', id: 'REMOTE_SKILL-1-9', index: 0 });
+
+        // 2. No catalog match at all → the CV's own words, via the create row.
+        const none = items([["Talent Optimization", "REMOTE_SKILL-1-1"], ["Retention Strategies", "REMOTE_SKILL-1-2"], ["retention optimization", "retention optimization"]]);
+        assert.equal(exec.chooseSkillTarget(none, 'retention optimization').kind, 'free');
+
+        // 3. Several DIFFERENT catalog near-matches no longer refuse the term —
+        //    the refusal existed to avoid picking a WRONG catalog row, and the
+        //    create row is not a guess: it is exactly what the candidate wrote.
+        const decoy = items([["Structured Query Language (SQL)", "REMOTE_SKILL-1-3"], ["U-SQL", "REMOTE_SKILL-1-4"], ["SQL", "SQL"]]);
+        const d = exec.chooseSkillTarget(decoy, 'SQL');
+        assert.equal(d.kind, 'free');
+        assert.equal(d.label, 'SQL');
+
+        // 4. A single distinct catalog near-match still wins over free text.
+        const single = items([["Backlog Prioritization", "REMOTE_SKILL-1-5"], ["backlog prioritization", "backlog prioritization"]]);
+        assert.equal(exec.chooseSkillTarget(single, 'backlog prioritization').kind, 'catalog');
+
+        // 5. Nothing at all → none, with evidence.
+        assert.equal(exec.chooseSkillTarget(items([["No Items.", "No Items."]]), 'x').kind, 'none');
+    });
+
+    test('a skill the catalogue does not hold goes on as the CV wrote it', async () => {
+        // The user's decision (2026-08-10): free-text skills are wanted — the
+        // candidate's own words, verbatim, never a catalog approximation.
+        const r = await exec.runField(field('formField-skills'), ['Quantum Basket Weaving'], ctx());
+        assert.equal(r.result, RESULT.COMMITTED);
+        assert.deepEqual(page.chipsOn('skills'), ['Quantum Basket Weaving'],
+            'the chip is the CV text itself — created through the search\'s own create row');
+    });
+
     test('a widget with no handler asks for a human instead of improvising', async () => {
         const wrap = dom.document.createElement('div');
         wrap.setAttribute('data-automation-id', 'formField-somethingNew');

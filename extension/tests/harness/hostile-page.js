@@ -316,15 +316,53 @@ export function buildHostilePage(doc, opts = {}) {
 
     const closeEveryList = () => [...openLists.keys()].forEach((f) => closeList(f, { after: 0 }));
 
+    /** The option rows of a list, rebuilt for one result set. */
+    function fillList(f, list, shown) {
+        [...(list.children || [])].forEach((c) => c.remove());
+        for (const label of shown) {
+            const o = el('div', { role: 'option', 'data-automation-id': OPT_ID }, list);
+            o.textContent = label;
+            o.addEventListener('click', () => commit(f, label));
+        }
+        // The placeholder is a real option that answers nothing.
+        const ph = el('div', { role: 'option', 'data-automation-id': OPT_ID, id: 'select-one' }, list);
+        ph.textContent = 'Select One';
+    }
+
     function openFor(f, { filter = null } = {}) {
-        if (openLists.has(f) || opening.has(f)) return;
+        // An Enter that lands while the click's open is still in flight is a
+        // search all the same — the live widget queues it, so the harness does.
+        if (opening.has(f)) {
+            if (filter !== null && String(filter).trim()) setTimeout(() => openFor(f, { filter }), cfg.openMs + 2);
+            return;
+        }
+        // ENTER RE-RUNS THE SEARCH, IN PLACE — measured on the live form: the
+        // click opens the list, typing filters nothing by itself, and Enter
+        // replaces the list's contents with the new results. The old guard
+        // swallowed that second call entirely, so a harness field opened by a
+        // click could never receive search results at all — which hid the whole
+        // free-text path from every test.
+        if (openLists.has(f)) {
+            if (filter === null || !String(filter).trim()) return;
+            let shown = f.catalogue.filter((s) => s.toLowerCase().includes(String(filter).toLowerCase()));
+            if (f.multi) shown = [...shown, String(filter)];
+            const list = openLists.get(f);
+            setTimeout(() => fillList(f, list, shown), cfg.openMs);
+            return;
+        }
         if (!cfg.sticky) closeEveryList();
         // A search prompt answers a TERM. Typing nothing shows nothing, which is
         // what makes the employer's taxonomy searchable rather than browsable.
-        const shown = filter === null
+        let shown = filter === null
             ? f.catalogue
             : f.catalogue.filter((s) => s.toLowerCase().includes(String(filter).toLowerCase()));
         if (filter !== null && !String(filter).trim()) return;
+        // A MULTI-SELECT SEARCH ENDS WITH A CREATE ROW — measured on the live
+        // form (R-170139, 2026-08-10): the last item of every result list is
+        // the typed text verbatim, and picking it commits the candidate's own
+        // words as a free-text skill. The harness mirrors it so the free-text
+        // path is testable; single-selects (Degree, Language) have no such row.
+        if (f.multi && filter !== null && String(filter).trim()) shown = [...shown, String(filter)];
         opening.add(f);
         setTimeout(() => {
             opening.delete(f);
@@ -335,14 +373,7 @@ export function buildHostilePage(doc, opts = {}) {
             });
             // Portalled: the body, never the field's own wrapper.
             doc.body.appendChild(list);
-            for (const label of shown) {
-                const o = el('div', { role: 'option', 'data-automation-id': OPT_ID }, list);
-                o.textContent = label;
-                o.addEventListener('click', () => commit(f, label));
-            }
-            // The placeholder is a real option that answers nothing.
-            const ph = el('div', { role: 'option', 'data-automation-id': OPT_ID, id: 'select-one' }, list);
-            ph.textContent = 'Select One';
+            fillList(f, list, shown);
 
             if (f.stamps) {
                 f.trigger.setAttribute('aria-expanded', 'true');

@@ -220,6 +220,51 @@ function virtualRowHeight(sc) {
     return 0;
 }
 
+/**
+ * Which ITEM of a skills search answers the term — catalog first, then the
+ * candidate's own words.
+ *
+ * MEASURED on R-170139 (2026-08-10), read out of the widget's own item array:
+ * every search ends with a CREATE row — `label` is the typed text verbatim and
+ * `id` EQUALS the label ("id":"zzcopoprobe skill" for a nonsense probe) — while
+ * catalog entries carry ids like REMOTE_SKILL-1-132345, the same string that
+ * later appears on the committed chip as `pill-REMOTE_SKILL-1-132345`. A chip
+ * created through the create row reads `pill-<the text>` instead: that is the
+ * free-text skill, and it is how "retention optimization" reached the page in
+ * the candidate's own casing.
+ *
+ * Order of preference, per the user's decision (2026-08-10):
+ *   1. an EXACT catalog match — structured data beats free text, and when the
+ *      catalog and the create row carry the same label the catalog row wins;
+ *   2. a SINGLE distinct catalog row containing the term — what search is for;
+ *   3. the CREATE row — the CV's own words go on the application, verbatim.
+ *      Several different catalog near-matches no longer refuse the term: the
+ *      old refusal existed to avoid picking a WRONG catalog row, and the
+ *      create row is not a guess — it is exactly what the candidate wrote.
+ */
+export function chooseSkillTarget(items, want) {
+    const w = fold(want);
+    const rows = (items || []).map((it, i) => ({
+        label: String(it?.label ?? it?.ariaLabel ?? '').trim(),
+        id: String(it?.id ?? ''),
+        index: Number.isFinite(it?.index) ? it.index : i,
+    })).filter((r) => r.label && !NOT_A_CHOICE.test(r.label));
+    if (!w || !rows.length) return { kind: 'none' };
+
+    const isCreate = (r) => r.id === r.label && !/^REMOTE_SKILL/i.test(r.id);
+    const catalog = rows.filter((r) => !isCreate(r));
+
+    const exact = catalog.filter((r) => fold(r.label) === w);
+    if (exact.length) return { kind: 'catalog', ...exact[0] };
+    const near = catalog.filter((r) => fold(r.label).includes(w));
+    if (near.length && new Set(near.map((r) => fold(r.label))).size === 1) {
+        return { kind: 'catalog', ...near[0] };
+    }
+    const create = rows.find((r) => isCreate(r) && fold(r.label) === w);
+    if (create) return { kind: 'free', ...create };
+    return { kind: 'none', sample: rows.slice(0, 4).map((r) => r.label), shown: rows.length };
+}
+
 /** Exact wins; a single distinct near-match counts; several do not. */
 function pickLabel(labels, want) {
     const w = fold(want);
@@ -257,12 +302,61 @@ async function pickAcrossList(lease, want, { sleep, maxWindows = 24 } = {}) {
 
     // THE WIDGET'S OWN ARRAY FIRST. Scrolling the DOM to collect the rest
     // reached 12 of 16 and lost the exact match; the fiber has all of them.
-    const items = sc ? readVirtualItems(sc) : null;
-    if (items) {
-        for (const it of items) {
-            const l = String(it?.label ?? it?.ariaLabel ?? '').trim();
-            if (l && !NOT_A_CHOICE.test(l)) seen.add(l);
+    //
+    // And the array is WAITED FOR, against the count the widget itself
+    // announces: "Search Results (16)" is on the page, so an item array
+    // shorter than that is a render still in flight, not an answer. Reading
+    // it early is the measured cause of every pass-1 miss — the sample of
+    // each one held only the first rendered window.
+    const declared = (() => {
+        try { return Number((document.body.textContent.match(/Search Results\s*\((\d+)\)/) || [])[1]) || 0; }
+        catch { return 0; }
+    })();
+    let items = sc ? readVirtualItems(sc) : null;
+    if (sc) {
+        const by = Date.now() + 3500;
+        while (Date.now() < by) {
+            if (items && items.length && (!declared || items.length >= declared)) break;
+            await nap(200);
+            items = readVirtualItems(sc);
         }
+    }
+
+    // The widget's own items carry the discriminator (catalog id vs the typed
+    // text), so when they are readable the decision is made on them directly.
+    if (items && items.length) {
+        const choice = chooseSkillTarget(items, want);
+        if (choice.kind === 'none') {
+            return {
+                option: null, why: RESULT.OPTION_NOT_FOUND,
+                want: String(want ?? ''), shown: choice.shown ?? items.length,
+                sample: choice.sample ?? [],
+            };
+        }
+        // Bring the chosen INDEX into view and click the row at that offset —
+        // by position, not by label, because the create row and a catalog row
+        // can share the exact same label and only the index tells them apart.
+        const h = virtualRowHeight(sc);
+        const rowAt = (index) => {
+            const inner = sc?.firstElementChild;
+            if (!inner || !h) return null;
+            const wrapper = [...inner.children].find((c) => parseInt(c.style?.top || '', 10) === index * h);
+            if (!wrapper) return null;
+            const opt = wrapper.matches?.('[role="option"], [data-automation-id="menuItem"]')
+                ? wrapper
+                : wrapper.querySelector?.('[role="option"], [data-automation-id="menuItem"], [data-automation-id="promptOption"]');
+            return opt || wrapper;
+        };
+        let node = rowAt(choice.index);
+        if (!node && sc && h) {
+            try { sc.scrollTop = Math.max(0, (choice.index * h) - Math.round(sc.clientHeight / 2) + h); } catch { /* no layout */ }
+            await nap(250);
+            node = rowAt(choice.index);
+        }
+        if (node) return { option: node, matched: choice.label, free: choice.kind === 'free' };
+        // The indexed row would not render — fall through to the label walk
+        // below rather than giving up; a label hit is worse than an indexed
+        // one (collision risk) but far better than a miss.
     }
 
     if (sc && !items) {
@@ -380,11 +474,23 @@ export function resultsKey() {
 export async function waitForResults(before, { sleep, budgetMs = 6000 } = {}) {
     const nap = napper(sleep);
     const by = Date.now() + budgetMs;
+    let candidate = null;
     for (;;) {
         const now = resultsKey();
-        if (now && now !== before) return now;
-        if (Date.now() >= by) return null;
-        await nap(120);
+        // SETTLED, not merely CHANGED. Returning at the first key change is
+        // returning at the earliest possible moment — mid-render, before the
+        // tail of the list exists. MEASURED on R-170139 (2026-08-10): the same
+        // term flipped between passes in BOTH directions ("retention
+        // optimization" miss→commit, "unit economics" four rows→none), and
+        // every miss's sample held only the first rendered window while an
+        // idle read of the same search showed all 16 rows. So an answer only
+        // counts once the SAME non-empty key has been read twice in a row.
+        if (now && now !== before) {
+            if (now === candidate) return now;
+            candidate = now;
+        }
+        if (Date.now() >= by) return candidate;   // one sighting beats none
+        await nap(150);
     }
 }
 
@@ -725,6 +831,17 @@ const searchMulti = {
                     return { result: RESULT.AMBIGUOUS, term, reason: `clicked "${choice.matched}" but got "${fresh[0]}"`, saw: fresh };
                 }
                 added.push(fresh[0]);
+                // WHICH KIND of chip landed, read off the chip itself: a
+                // catalog pick carries pill-REMOTE_SKILL-…, the candidate's
+                // own words carry pill-<the text>. The review step is where a
+                // human checks this, so the trace must say which is which.
+                const pill = f.controls().chips.map((c) => ({ t: txt(c), id: c.id || '' }))
+                    .find((c) => c.t === fresh[0]);
+                trace('mdlz.skill.add', {
+                    term,
+                    chip: fresh[0],
+                    free: pill ? !/REMOTE_SKILL/i.test(pill.id) : (choice.free ?? null),
+                });
                 return { result: RESULT.COMMITTED, term };
             }, { sleep: ctx.sleep, label: `${f.name}:${term}`, activate });
 
