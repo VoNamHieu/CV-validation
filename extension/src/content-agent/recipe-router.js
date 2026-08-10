@@ -48,8 +48,11 @@ try {
  *
  * It is offered, not given: `runMdlzV2` returns took:false for every step it
  * does not own, for a résumé v1 has yet to upload, and for any section it cannot
- * finish — and then v1 runs exactly as it always has. Behind a storage flag that
- * is off by default, so shipping this changes nothing until it is turned on.
+ * finish — and then v1 runs exactly as it always has. The flag now DEFAULTS ON
+ * for mdlz (2026-08-10) and v2 owns the WHOLE deterministic flow, so on this
+ * tenant v1's fill path no longer runs at all: what remains of v1 here is the
+ * recipe config — its gateways — read as data, plus the one escape hatch,
+ * `chrome.storage.local.set({ copoMdlzV2: false })`.
  *
  * The try/catch is the point of the wrapper: a fault in v2 must cost this pass
  * and nothing else. A page that v2 breaks would be a page v1 never got to try.

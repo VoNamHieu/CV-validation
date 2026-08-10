@@ -502,4 +502,19 @@ describe('v2 owns the pages it can actually finish', () => {
             'My Experience stays with v2 — and owning it is what obliges v2 to attach the résumé');
         assert.equal(owns(STEP.UNKNOWN), false, 'a job posting is nobody\'s page');
     });
+
+    test('the whole mdlz apply flow is v2\'s — which is what makes v1 config-data only', async () => {
+        // The flip of the migration, as an invariant. routeAfterV2 hands a page
+        // to v1 only when v2 does NOT own it; with every page of the deterministic
+        // flow owned, v1's applyRecipeFields is unreachable on mdlz and only the
+        // recipe config (its gateways) is still read — v1 as data, not as a fill
+        // engine. If a page ever falls out of this set, that is the flip
+        // regressing, and this is where it gets caught.
+        const { owns } = await import('../src/content-agent/mdlz-v2/pages.js');
+        const { STEP } = await import('../src/content-agent/mdlz-v2/config.js');
+        for (const step of [STEP.AUTOFILL, STEP.MY_INFORMATION, STEP.MY_EXPERIENCE,
+            STEP.APPLICATION_QUESTIONS, STEP.VOLUNTARY_DISCLOSURES, STEP.REVIEW]) {
+            assert.equal(owns(step), true, `${step} must stay v2's for v1 to remain data-only on mdlz`);
+        }
+    });
 });
