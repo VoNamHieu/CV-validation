@@ -31,7 +31,7 @@ import {
 } from '@/lib/types';
 import { promptInstallExtension, promptGrantPermission, isPermissionError } from '@/lib/extension-install';
 import { cvToExtensionProfile } from '@/lib/extension-profile';
-import { internBlockReason, isStudentOrNewGrad } from '@/lib/intern-context';
+import { internApplyGaps, isInternJob, isStudentOrNewGrad } from '@/lib/intern-context';
 import { resolveCvFieldsOfStudy } from '@/lib/field-of-study';
 import { syncProfileToExtension, syncCvFileToExtension, syncCvDataToExtension } from '@/lib/extension-sync';
 import { renderCvHtml, getTemplate, DEFAULT_TEMPLATE_ID } from '@/lib/cv-templates';
@@ -683,15 +683,34 @@ export default function StepEditCv() {
        error the CV is synced with at least the deterministic resolution, and
        the apply proceeds either way (an unresolved major is no worse than the
        extension's own search + the review gap that exist today). */
-    const pushResolvedCvToExtension = useCallback(async () => {
-        if (!cvData) return;
+    /* Resolve a CV's field(s) of study (deterministic + LLM long tail) before an
+       apply, so the apply-time intern gate sees exactly what will be sent.
+       Fail-SAFE, not fail-open: on any resolver error the raw CV comes back, and
+       the catalogue gate that follows (internApplyGaps) then blocks a required
+       intern Field of Study that did not land on a real catalogue row — instead
+       of dispatching a value the closed dropdown can't match, which gaps My
+       Experience mid-run. `source` defaults to the base CV (education is shared
+       across a batch's jobs). */
+    const resolveCvForApply = useCallback(async (source?: CVData | null): Promise<CVData | null> => {
+        const base = source ?? cvData;
+        if (!base) return null;
         try {
-            const resolved = await resolveCvFieldsOfStudy(cvData);
-            await syncProfileToExtension(cvToExtensionProfile(resolved), resolved);
+            return await resolveCvFieldsOfStudy(base);
         } catch (err) {
-            console.warn('[Copo] Field-of-study resolve/sync before apply failed:', err);
+            console.warn('[Copo] Field-of-study resolve before apply failed:', err);
+            return base;
         }
     }, [cvData]);
+
+    /* Push a (already field-of-study-resolved) CV to the extension so jobfitCv
+       carries a catalogue-valid Field of Study before the agent opens the tab. */
+    const syncResolvedCv = useCallback(async (cv: CVData) => {
+        try {
+            await syncProfileToExtension(cvToExtensionProfile(cv), cv);
+        } catch (err) {
+            console.warn('[Copo] Field-of-study sync before apply failed:', err);
+        }
+    }, []);
 
     /* ─── Single Auto Apply (legacy) ─── */
     const triggerAutoApply = async () => {
@@ -706,13 +725,16 @@ export default function StepEditCv() {
             setAutoApplyMessage('Thiếu dữ liệu CV hoặc URL công việc.');
             return;
         }
-        // Same intern preflight as the batch paths, on the merged cv so a GPA
-        // just typed in the info form counts — an intern posting the agent would
-        // stall on mid-run must not be sent from here either.
-        const internReason = internBlockReason(currentEntry, mergeProfile(cv));
-        if (internReason) {
+        // Intern preflight on the RESOLVED cv (deterministic + LLM field-of-study
+        // long tail) so the gate sees exactly what will be sent: an intern
+        // posting whose required Field of Study does not land on the closed
+        // catalogue — or that is missing a GPA — must not be dispatched to stall
+        // mid-run. resolvedCv is reused for the pre-dispatch sync below.
+        const resolvedCv = await resolveCvForApply(mergeProfile(cv));
+        const internGaps = isInternJob(currentEntry) && resolvedCv ? internApplyGaps(resolvedCv) : [];
+        if (internGaps.length) {
             setAutoApplyStatus('error');
-            setAutoApplyMessage(`Vị trí thực tập còn thiếu ${internReason} — điền ở "Thông tin cá nhân" rồi chạy lại.`);
+            setAutoApplyMessage(`Vị trí thực tập chưa đủ điều kiện (${internGaps.join(', ')}) — điền GPA ở "Thông tin cá nhân", chọn Ngành học trong danh mục, rồi chạy lại.`);
             return;
         }
 
@@ -738,10 +760,10 @@ export default function StepEditCv() {
             setAutoApplyStatus('sending');
             setAutoApplyMessage('Đang gửi lệnh tự động ứng tuyển...');
 
-            // Resolve the education's field of study (deterministic + LLM long
-            // tail) and push it before the agent opens the tab, so an intern
-            // form's closed Field-of-Study catalogue gets a value that matches.
-            await pushResolvedCvToExtension();
+            // Push the already-resolved CV (see the gate above) so jobfitCv
+            // carries a catalogue-valid Field of Study before the agent opens
+            // the tab.
+            if (resolvedCv) await syncResolvedCv(resolvedCv);
 
             const responsePromise = new Promise<{ success?: boolean; error?: string; detail?: string }>((resolve, reject) => {
                 const handler = (event: MessageEvent) => {
@@ -851,10 +873,18 @@ export default function StepEditCv() {
         // worse than not sending it: the opportunity cannot be re-spent.
         const internBlocked: string[] = [];
 
+        // Resolve the shared field of study ONCE (education is the same across a
+        // batch's jobs) so the intern catalogue gate sees what will actually be
+        // sent; reused for the single pre-dispatch sync below.
+        const resolvedBase = await resolveCvForApply();
+        const internGaps = resolvedBase ? internApplyGaps(resolvedBase) : [];
+
         for (const entry of candidates) {
-            const internReason = entry.optimizedCv ? internBlockReason(entry, mergeProfile(entry.optimizedCv)) : null;
-            if (internReason) {
-                internBlocked.push(`${entry.jobTitle || entry.company || entry.label || 'Job'} (${internReason})`);
+            // Only intern postings are gated. GPA + a Field of Study that lands on
+            // the closed catalogue are required; a degree is not a major and an
+            // unresolved value gaps My Experience mid-run, so it is left OUT.
+            if (isInternJob(entry) && internGaps.length) {
+                internBlocked.push(`${entry.jobTitle || entry.company || entry.label || 'Job'} (${internGaps.join(', ')})`);
                 continue;
             }
             const pdf = await ensureEntryPdf(entry);
@@ -877,7 +907,7 @@ export default function StepEditCv() {
 
         const internNote = internBlocked.length
             ? `${internBlocked.length} vị trí thực tập còn thiếu thông tin bắt buộc (${internBlocked.slice(0, 2).join('; ')}${internBlocked.length > 2 ? '…' : ''}). `
-                + 'Điền GPA + ngành học ở "Thông tin cá nhân" rồi chạy lại.'
+                + 'Điền GPA + chọn Ngành học trong danh mục rồi chạy lại.'
             : '';
         if (jobs.length === 0) {
             setAutoApplyMessage(internNote || 'Không tạo được file CV cho công việc nào — hãy bấm tối ưu lại rồi thử lại.');
@@ -900,9 +930,9 @@ export default function StepEditCv() {
         // headless-render pool and timed out (failing open) on SPA boards.
         setBatchStarting(true);
 
-        // Push the field-of-study-resolved CV once before the batch — education
-        // is shared across jobs, so one deterministic+LLM pass covers every tab.
-        await pushResolvedCvToExtension();
+        // Push the already-resolved CV once before the batch (education is shared
+        // across jobs) so jobfitCv carries a catalogue-valid Field of Study.
+        if (resolvedBase) await syncResolvedCv(resolvedBase);
 
         // Send batch command to extension.
         window.postMessage({
@@ -910,7 +940,7 @@ export default function StepEditCv() {
             jobs,
         }, '*');
     }, [sortedEntries, buildProfile, mergeProfile, ensureEntryPdf, ensureAgentConsent, ensureApplyCredentials,
-        loginTenants, cvEmail, pushResolvedCvToExtension]);
+        loginTenants, cvEmail, resolveCvForApply, syncResolvedCv]);
 
     /* ═══════════════════════════════════════════════════════════════
        FULLY AUTONOMOUS APPLY ALL — Generate PDFs + sync + launch batch
@@ -958,12 +988,18 @@ export default function StepEditCv() {
         // GPA / field of study, so an executive batch is untouched.
         const internBlocked: string[] = [];
 
+        // Resolve the shared field of study once (education is the same across a
+        // batch's jobs), so the intern catalogue gate sees what will be sent.
+        const resolvedBase = await resolveCvForApply();
+        const internGaps = resolvedBase ? internApplyGaps(resolvedBase) : [];
+
         for (let i = 0; i < candidates.length; i++) {
             const entry = candidates[i];
             const cv = entry.optimizedCv!;
-            const internReason = internBlockReason(entry, mergeProfile(cv));
-            if (internReason) {
-                internBlocked.push(`${entry.jobTitle || entry.company || 'Job'} (${internReason})`);
+            // Only intern postings are gated; GPA + a Field of Study that lands on
+            // the closed catalogue are required (a degree is not a major).
+            if (isInternJob(entry) && internGaps.length) {
+                internBlocked.push(`${entry.jobTitle || entry.company || 'Job'} (${internGaps.join(', ')})`);
                 setFullAutoProgress({ done: i + 1, total: candidates.length });
                 continue;
             }
@@ -1003,8 +1039,8 @@ export default function StepEditCv() {
         }
 
         const internNote = internBlocked.length
-            ? `${internBlocked.length} vị trí thực tập còn thiếu GPA/ngành học `
-                + `(${internBlocked.slice(0, 2).join('; ')}${internBlocked.length > 2 ? '…' : ''}) — điền ở "Thông tin cá nhân" rồi chạy lại.`
+            ? `${internBlocked.length} vị trí thực tập còn thiếu GPA / Ngành học chưa khớp danh mục `
+                + `(${internBlocked.slice(0, 2).join('; ')}${internBlocked.length > 2 ? '…' : ''}) — điền GPA + chọn Ngành học trong danh mục rồi chạy lại.`
             : '';
         // 2. Hand off to the extension's existing batch path with embedded CV files.
         if (jobs.length === 0) {
@@ -1025,15 +1061,15 @@ export default function StepEditCv() {
         }
         setFullAutoStatus('launching');
         setBatchStarting(true);
-        // One field-of-study-resolved CV push before the batch (education is
-        // shared across jobs — deterministic first, LLM only for the long tail).
-        await pushResolvedCvToExtension();
+        // Push the already-resolved CV once (education shared across jobs) so
+        // jobfitCv carries a catalogue-valid Field of Study.
+        if (resolvedBase) await syncResolvedCv(resolvedBase);
         window.postMessage({ type: 'JOBFIT_AUTO_APPLY_ALL', jobs }, '*');
 
         // Reset status after handoff — batch progress UI takes over from here.
         setTimeout(() => setFullAutoStatus('idle'), 1500);
     }, [sortedEntries, buildProfile, mergeProfile, userAvatarBase64, ensureAgentConsent,
-        ensureApplyCredentials, loginTenants, cvEmail, pushResolvedCvToExtension]);
+        ensureApplyCredentials, loginTenants, cvEmail, resolveCvForApply, syncResolvedCv]);
 
     const cancelBatchApply = useCallback(() => {
         window.postMessage({ type: 'JOBFIT_AUTO_APPLY_CANCEL' }, '*');

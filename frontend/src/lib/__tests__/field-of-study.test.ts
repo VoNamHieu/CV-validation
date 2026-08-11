@@ -8,7 +8,7 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { CVData } from "../types";
 import { FIELD_OF_STUDY_CATALOG } from "../field-of-study-catalog";
-import { foldMajor, isResolvableMajor, resolveCvFieldsOfStudy, resolveFieldOfStudy } from "../field-of-study";
+import { foldMajor, isCatalogueFieldOfStudy, isResolvableMajor, resolveCvFieldsOfStudy, resolveFieldOfStudy } from "../field-of-study";
 
 const CATALOG = new Set(FIELD_OF_STUDY_CATALOG);
 
@@ -61,6 +61,27 @@ describe("isResolvableMajor", () => {
         expect(isResolvableMajor("Marketing")).toBe(true);
         expect(isResolvableMajor("Underwater Basket Weaving")).toBe(false);
         expect(isResolvableMajor("")).toBe(false);
+    });
+});
+
+describe("isCatalogueFieldOfStudy — is this ALREADY a catalogue row (post-resolution)", () => {
+    test("true only for an actual catalogue major, any case/accent", () => {
+        expect(isCatalogueFieldOfStudy("Marketing")).toBe(true);
+        expect(isCatalogueFieldOfStudy("INTERNATIONAL BUSINESS")).toBe(true);
+    });
+    test("a still-raw VN major is NOT a catalogue row (it must be resolved first)", () => {
+        // isResolvableMajor is true (the dict can place it), but until it is
+        // actually resolved it is not a value the closed dropdown accepts.
+        expect(isCatalogueFieldOfStudy("Kinh doanh quốc tế")).toBe(false);
+    });
+    test("a degree/qualification is never a catalogue major", () => {
+        expect(isCatalogueFieldOfStudy("B.B.A.")).toBe(false);
+        expect(isCatalogueFieldOfStudy("Bachelor of Arts")).toBe(false);
+    });
+    test("empty / unknown → false", () => {
+        expect(isCatalogueFieldOfStudy("")).toBe(false);
+        expect(isCatalogueFieldOfStudy(null)).toBe(false);
+        expect(isCatalogueFieldOfStudy("Underwater Basket Weaving")).toBe(false);
     });
 });
 

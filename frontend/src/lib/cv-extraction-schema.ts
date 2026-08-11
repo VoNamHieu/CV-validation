@@ -17,7 +17,7 @@ Return ONLY valid JSON matching this exact schema:
   "desired_job_title": "string (the single job title this candidate is most likely searching for next)",
   "skills": ["string"],
   "experience": [{"title": "string", "company": "string", "start_date": "string", "end_date": "string", "duration_months": number, "description": "string"}],
-  "education": [{"degree": "string", "institution": "string", "year": "string"}],
+  "education": [{"degree": "string", "field_of_study": "string", "institution": "string", "year": "string"}],
   "projects": [{"name": "string", "description": "string"}],
   "certifications": [{"name": "string", "issuer": "string", "year": "string"}],
   "languages": [{"language": "string", "level": "string (e.g., IELTS 7.0, TOEIC 800, Native, Fluent, Intermediate)"}],
@@ -69,6 +69,7 @@ Rules:
 - Compute experience[].duration_months from start_date/end_date when both are known (treat "Hiện tại" as today); otherwise use a duration stated explicitly in the CV; otherwise 0.
 - Compute employment.years_of_experience by summing experience[].duration_months / 12 and rounding to the nearest integer.
 - Set employment.highest_degree from the highest-ranked education entry (PhD > Master > Bachelor > Diploma > High School). Use the value verbatim from the CV.
+- education[].degree and education[].field_of_study are DIFFERENT things and go in different fields: degree is the qualification / credential ("Bachelor of Arts", "Cử nhân", "B.B.A.", "MSc"); field_of_study is the MAJOR / subject ("Marketing", "Kinh doanh quốc tế", "Computer Science"). They are usually written together on one line ("Cử nhân Marketing", "Bachelor of Science in Finance", "Kỹ sư CNTT") — SPLIT them: put the qualification in degree and the subject in field_of_study, in the CV's own words. If the CV states only a qualification with no subject, leave field_of_study "". NEVER put the degree/qualification into field_of_study, and never invent a major.
 - Only fill date_of_birth, gender, nationality, marital_status, current_level, current_industry, current_fields, current_salary, desired_locations, desired_salary if they appear explicitly in the CV. Otherwise leave them as empty strings.
 - NEVER invent or guess values. Empty string is always preferable to a hallucinated value.
 - For arrays where no data exists, return [].`;
@@ -204,7 +205,7 @@ export const CV_EXTRACTION_RESPONSE_SCHEMA: Record<string, unknown> = {
             title: STR, company: STR, start_date: STR, end_date: STR,
             duration_months: NUM, description: STR,
         }),
-        education: objArray({ degree: STR, institution: STR, year: STR }),
+        education: objArray({ degree: STR, field_of_study: STR, institution: STR, year: STR }),
         projects: objArray({ name: STR, description: STR }),
         certifications: objArray({ name: STR, issuer: STR, year: STR }),
         languages: objArray({ language: STR, level: STR }),

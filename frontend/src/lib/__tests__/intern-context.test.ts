@@ -8,7 +8,7 @@
 
 import { describe, expect, test } from "vitest";
 import type { CVData } from "../types";
-import { internBlockReason, internCvGaps, isInternJob, isStudentOrNewGrad } from "../intern-context";
+import { internApplyGaps, internBlockReason, internCvGaps, isInternJob, isStudentOrNewGrad } from "../intern-context";
 
 const cv = (over: Partial<CVData>): CVData =>
     ({ education: [], experience: [], employment: { years_of_experience: 10 } } as unknown as CVData);
@@ -43,34 +43,56 @@ describe("isStudentOrNewGrad", () => {
     });
 });
 
-describe("internCvGaps", () => {
-    test("names each missing field, and nothing when both are present", () => {
-        expect(internCvGaps(withEdu({ degree: "Marketing", gpa: "3.6" }))).toEqual([]);
-        expect(internCvGaps(withEdu({ degree: "Marketing", gpa: "" }))).toEqual(["Điểm TB (GPA)"]);
-        expect(internCvGaps(withEdu({ degree: "", gpa: "3.6" }))).toEqual(["Ngành học"]);
-        expect(internCvGaps(withEdu({ degree: "", gpa: "" })).length).toBe(2);
+describe("internCvGaps — sync presence check (degree is NOT a major)", () => {
+    test("needs a field_of_study of its own, and a GPA", () => {
+        expect(internCvGaps(withEdu({ field_of_study: "Marketing", gpa: "3.6" }))).toEqual([]);
+        expect(internCvGaps(withEdu({ field_of_study: "Marketing", gpa: "" }))).toEqual(["Điểm TB (GPA)"]);
+        expect(internCvGaps(withEdu({ field_of_study: "", gpa: "3.6" }))).toEqual(["Ngành học"]);
+        expect(internCvGaps(withEdu({ field_of_study: "", gpa: "" })).length).toBe(2);
     });
-    test("field of study is satisfied by field_of_study, mirroring how the apply layer fills it", () => {
-        // A real major satisfies it even with no degree string…
-        expect(internCvGaps(withEdu({ field_of_study: "Business Administration", degree: "", gpa: "3.6" }))).toEqual([]);
-        // …and degree is only the fallback, so it still counts when present.
-        expect(internCvGaps(withEdu({ degree: "B.B.A.", gpa: "3.6" }))).toEqual([]);
-        // Neither → a gap.
-        expect(internCvGaps(withEdu({ field_of_study: "", degree: "", gpa: "3.6" }))).toEqual(["Ngành học"]);
+    test("a degree no longer MASKS a missing major (the P1c fix)", () => {
+        // The exact repro: a qualification is present, the major is not. A
+        // degree cannot fill Field of Study, so this must read as a gap — the old
+        // `field_of_study || degree` wrongly returned [].
+        expect(internCvGaps(withEdu({ degree: "B.B.A.", field_of_study: "", gpa: "3.6" }))).toEqual(["Ngành học"]);
+    });
+});
+
+describe("internApplyGaps — apply-time gate on the RESOLVED cv (must be a catalogue major)", () => {
+    test("a real catalogue major with a GPA passes", () => {
+        expect(internApplyGaps(withEdu({ field_of_study: "International Business", gpa: "3.6" }))).toEqual([]);
+        expect(internApplyGaps(withEdu({ field_of_study: "Marketing", gpa: "3.6" }))).toEqual([]);
+    });
+    test("a value that did NOT resolve to a catalogue row is a gap — no fail-open", () => {
+        // A still-raw Vietnamese major (resolution failed) is not a catalogue row.
+        expect(internApplyGaps(withEdu({ field_of_study: "Ngành siêu lạ XYZ", gpa: "3.6" }))).toEqual(["Ngành học"]);
+        // An empty major.
+        expect(internApplyGaps(withEdu({ field_of_study: "", gpa: "3.6" }))).toEqual(["Ngành học"]);
+    });
+    test("a degree in the field_of_study slot is rejected (the downstream-gap repro)", () => {
+        // "B.B.A." is a qualification, not a major, and is not on the catalogue —
+        // exactly the value that used to slip through and gap My Experience.
+        expect(internApplyGaps(withEdu({ degree: "B.B.A.", field_of_study: "B.B.A.", gpa: "3.6" }))).toEqual(["Ngành học"]);
+        expect(internApplyGaps(withEdu({ degree: "B.B.A.", field_of_study: "", gpa: "3.6" }))).toEqual(["Ngành học"]);
+    });
+    test("a missing GPA is still named alongside", () => {
+        expect(internApplyGaps(withEdu({ field_of_study: "Marketing", gpa: "" }))).toEqual(["Điểm TB (GPA)"]);
+        expect(internApplyGaps(withEdu({ field_of_study: "Ngành lạ", gpa: "" })).sort())
+            .toEqual(["Điểm TB (GPA)", "Ngành học"].sort());
     });
 });
 
 describe("internBlockReason — only intern jobs are ever blocked", () => {
     test("an intern job missing GPA is blocked, named by what it needs", () => {
-        expect(internBlockReason({ jobTitle: "Marketing Intern" }, withEdu({ degree: "Marketing", gpa: "" })))
+        expect(internBlockReason({ jobTitle: "Marketing Intern" }, withEdu({ field_of_study: "Marketing", gpa: "" })))
             .toBe("Điểm TB (GPA)");
     });
     test("an intern job with everything is not blocked", () => {
-        expect(internBlockReason({ jobTitle: "Marketing Intern" }, withEdu({ degree: "Marketing", gpa: "3.6" })))
+        expect(internBlockReason({ jobTitle: "Marketing Intern" }, withEdu({ field_of_study: "Marketing", gpa: "3.6" })))
             .toBeNull();
     });
     test("an EXECUTIVE job missing GPA is never blocked", () => {
-        expect(internBlockReason({ jobTitle: "Bill To Cash Manager" }, withEdu({ degree: "", gpa: "" })))
+        expect(internBlockReason({ jobTitle: "Bill To Cash Manager" }, withEdu({ field_of_study: "", gpa: "" })))
             .toBeNull();
     });
 });

@@ -16,6 +16,7 @@
  */
 
 import type { CVData } from './types';
+import { isCatalogueFieldOfStudy } from './field-of-study';
 
 /** A job title/label that reads as an internship or campus / early-career hire. */
 const INTERN_RE = /\b(intern|internship|thực\s*tập|thuc\s*tap|campus|fresher|graduate\s+trainee|management\s+trainee|apprentice)\b/i;
@@ -45,21 +46,43 @@ export function isStudentOrNewGrad(cv: CVData | null | undefined): boolean {
 }
 
 /**
- * The fields an INTERN application needs from the CV and a résumé parse cannot
- * give — empty array means ready, read off the first education entry.
+ * The fields an INTERN application needs before it can even be dispatched, read
+ * off the first education entry — a fast, synchronous PRESENCE check for the
+ * profile form / early feedback. Empty array means "nothing obviously missing".
  *
- * Field of study is checked the way the apply layer FILLS it — `field_of_study`
- * first, `degree` only as the fallback it already uses — so the gate agrees with
- * what will actually be sent. A missing GPA is the common gap; a candidate whose
- * extraction produced neither a major nor a qualification is the rare other.
+ * Field of study is required in its OWN right: a degree is NOT a major and cannot
+ * fill Workday's Field of Study, so — unlike before — a present degree no longer
+ * masks a missing major here. Whether the major actually lands on the closed
+ * catalogue is a separate, resolution-aware check (see internApplyGaps), because
+ * that needs the async resolver; this one only asks "did the candidate give a
+ * major at all".
  */
 export function internCvGaps(cv: CVData | null | undefined): string[] {
     const edu = cv?.education?.[0];
     const gaps: string[] = [];
     if (!String(edu?.gpa ?? '').trim()) gaps.push('Điểm TB (GPA)');
-    if (!String(edu?.field_of_study ?? '').trim() && !String(edu?.degree ?? '').trim()) {
-        gaps.push('Ngành học');
-    }
+    if (!String(edu?.field_of_study ?? '').trim()) gaps.push('Ngành học');
+    return gaps;
+}
+
+/**
+ * The apply-time gate, run on a CV whose field of study has ALREADY been through
+ * resolveCvFieldsOfStudy. Pure and synchronous so it is trivially testable; the
+ * async resolution happens in the caller.
+ *
+ * The difference from internCvGaps that closes the mid-run gap: Field of Study is
+ * a REQUIRED CLOSED catalogue on the intern form, so presence is not enough — the
+ * value must be an actual catalogue row, or the search finds nothing and My
+ * Experience gaps mid-run (the page that cannot be re-done once submitted). A
+ * value that did not resolve — LLM/network error, or a genuinely unmappable major
+ * — is not a catalogue row, so it is BLOCKED here rather than dispatched. No
+ * fail-open for the required closed-enum.
+ */
+export function internApplyGaps(resolvedCv: CVData | null | undefined): string[] {
+    const edu = resolvedCv?.education?.[0];
+    const gaps: string[] = [];
+    if (!String(edu?.gpa ?? '').trim()) gaps.push('Điểm TB (GPA)');
+    if (!isCatalogueFieldOfStudy(edu?.field_of_study)) gaps.push('Ngành học');
     return gaps;
 }
 

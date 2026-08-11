@@ -9,6 +9,7 @@ class ExperienceDetail(BaseModel):
 
 class EducationDetail(BaseModel):
     degree: str
+    field_of_study: str = Field(default="", description="The major / subject (e.g. 'Marketing') — distinct from the degree/qualification. Required + closed-catalogue on some ATS (Workday intern Field of Study); a résumé parse splits it out of the degree line.")
     institution: str
     year: str = Field(description="Graduation year or date range")
 

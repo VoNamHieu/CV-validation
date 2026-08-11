@@ -118,6 +118,21 @@ export function isResolvableMajor(raw: string | null | undefined): boolean {
     return CATALOG_BY_FOLD.has(folded) || folded in VN_MAJOR;
 }
 
+/**
+ * True when this value IS a catalogue major (case/accent-insensitive) — i.e. a
+ * value Workday's closed Field-of-Study will accept. Distinct from
+ * isResolvableMajor: this checks the RESULT, so it is what an apply gate calls
+ * AFTER resolveCvFieldsOfStudy to decide whether a REQUIRED intern field will
+ * actually fill. A still-raw Vietnamese major, an unmapped one, or a degree
+ * ("B.B.A." — a qualification, not a major) all return false. There is no
+ * fail-open here: an unresolved value is not a catalogue row, so the caller
+ * blocks rather than dispatches a value the closed dropdown cannot match.
+ */
+export function isCatalogueFieldOfStudy(value: string | null | undefined): boolean {
+    const v = String(value ?? '').trim();
+    return !!v && CATALOG_BY_FOLD.has(foldMajor(v));
+}
+
 // ── LLM long-tail: majors the deterministic layer cannot place ──────────────
 //
 // The deterministic layer knows the common majors; an unusual one ("Kinh tế
