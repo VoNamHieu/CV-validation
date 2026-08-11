@@ -36,7 +36,7 @@ jobs:
       - run: npm run build
 
   backend:
-    name: Backend — ATS account tests
+    name: Backend — ATS + schema tests
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -47,13 +47,14 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt pytest
-      # Scoped to the suites that hold third-party credentials and the tenant
-      # state machine — the places where being wrong locks a user out of a real
-      # candidate account.
-      - run: pytest tests/test_ats_crypto.py tests/test_ats_accounts_repo.py tests/test_ats_accounts_routes.py -q
+      # The suites that hold third-party credentials and the tenant state machine
+      # (being wrong locks a user out of a real candidate account), plus the CV
+      # schema — field_of_study now rides in EducationDetail and feeds the intern
+      # Field-of-Study gate, so a schema drift must fail here.
+      - run: pytest tests/test_ats_crypto.py tests/test_ats_accounts_repo.py tests/test_ats_accounts_routes.py tests/test_schemas.py -q
 
   frontend:
-    name: Frontend — typecheck
+    name: Frontend — typecheck + tests
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -67,3 +68,8 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
       - run: npx tsc --noEmit
+      # The Vitest suite — the field-of-study resolver + catalogue gate, the
+      # intern apply gate, gender/ethnicity mapping, profile mapping. tsc proves
+      # it compiles; these prove the apply-agent gates actually behave. A rule
+      # that is not run on every push is a rule that decays quietly.
+      - run: npx vitest run

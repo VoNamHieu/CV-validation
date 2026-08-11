@@ -80,6 +80,25 @@ describe("internApplyGaps — apply-time gate on the RESOLVED cv (must be a cata
         expect(internApplyGaps(withEdu({ field_of_study: "Ngành lạ", gpa: "" })).sort())
             .toEqual(["Điểm TB (GPA)", "Ngành học"].sort());
     });
+    test("EVERY education entry is checked — a valid first row can't vouch for a broken second", () => {
+        // The smoke case: the planner fills a Field of Study + GPA for BOTH rows,
+        // so a broken second entry must block even when the first is perfect.
+        const twoRows = (a: object, b: object): CVData =>
+            ({ education: [a, b], experience: [{}], employment: { years_of_experience: 10 } } as unknown as CVData);
+        expect(internApplyGaps(twoRows(
+            { field_of_study: "Marketing", gpa: "3.6" },
+            { field_of_study: "Unknown Major", gpa: "" },
+        )).sort()).toEqual(["Điểm TB (GPA)", "Ngành học"].sort());
+        // Both rows valid → clears.
+        expect(internApplyGaps(twoRows(
+            { field_of_study: "Marketing", gpa: "3.6" },
+            { field_of_study: "International Business", gpa: "3.8" },
+        ))).toEqual([]);
+    });
+    test("no education at all is a gap", () => {
+        expect(internApplyGaps({ education: [] } as unknown as CVData).sort())
+            .toEqual(["Điểm TB (GPA)", "Ngành học"].sort());
+    });
 });
 
 describe("internBlockReason — only intern jobs are ever blocked", () => {

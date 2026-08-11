@@ -79,10 +79,16 @@ export function internCvGaps(cv: CVData | null | undefined): string[] {
  * fail-open for the required closed-enum.
  */
 export function internApplyGaps(resolvedCv: CVData | null | undefined): string[] {
-    const edu = resolvedCv?.education?.[0];
+    // EVERY education entry, not just the first: the planner builds a GPA +
+    // Field of Study task for each cv.education row it fills, so a valid first
+    // entry cannot vouch for a broken second one — a "Marketing/3.6" followed by
+    // an "Unknown Major/(no GPA)" would gap the second row that this gate never
+    // checked. An empty education list is itself a gap.
+    const entries: Array<CVData['education'][number] | undefined> =
+        resolvedCv?.education?.length ? resolvedCv.education : [undefined];
     const gaps: string[] = [];
-    if (!String(edu?.gpa ?? '').trim()) gaps.push('Điểm TB (GPA)');
-    if (!isCatalogueFieldOfStudy(edu?.field_of_study)) gaps.push('Ngành học');
+    if (entries.some((e) => !String(e?.gpa ?? '').trim())) gaps.push('Điểm TB (GPA)');
+    if (entries.some((e) => !isCatalogueFieldOfStudy(e?.field_of_study))) gaps.push('Ngành học');
     return gaps;
 }
 

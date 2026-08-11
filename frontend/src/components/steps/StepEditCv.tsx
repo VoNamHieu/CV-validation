@@ -33,7 +33,7 @@ import { promptInstallExtension, promptGrantPermission, isPermissionError } from
 import { cvToExtensionProfile } from '@/lib/extension-profile';
 import { internApplyGaps, isInternJob, isStudentOrNewGrad } from '@/lib/intern-context';
 import { resolveCvFieldsOfStudy } from '@/lib/field-of-study';
-import { syncProfileToExtension, syncCvFileToExtension, syncCvDataToExtension } from '@/lib/extension-sync';
+import { syncProfileToExtension, syncCvFileToExtension, syncCvDataToExtension, type SyncResult } from '@/lib/extension-sync';
 import { renderCvHtml, getTemplate, DEFAULT_TEMPLATE_ID } from '@/lib/cv-templates';
 import type { CvTemplateId } from '@/lib/cv-templates';
 import { resizeAvatarToDataUrl } from '@/lib/avatar';
@@ -703,12 +703,17 @@ export default function StepEditCv() {
     }, [cvData]);
 
     /* Push a (already field-of-study-resolved) CV to the extension so jobfitCv
-       carries a catalogue-valid Field of Study before the agent opens the tab. */
-    const syncResolvedCv = useCallback(async (cv: CVData) => {
+       carries a catalogue-valid Field of Study before the agent opens the tab.
+       Returns the SyncResult — syncProfileToExtension resolves { ok:false } on a
+       timeout instead of throwing, and the caller MUST NOT dispatch an intern
+       apply on top of an unconfirmed sync (the agent would read a stale jobfitCv
+       and gap on the required Field of Study). */
+    const syncResolvedCv = useCallback(async (cv: CVData): Promise<SyncResult> => {
         try {
-            await syncProfileToExtension(cvToExtensionProfile(cv), cv);
+            return await syncProfileToExtension(cvToExtensionProfile(cv), cv);
         } catch (err) {
             console.warn('[Copo] Field-of-study sync before apply failed:', err);
+            return { ok: false, error: err instanceof Error ? err.message : 'sync failed' };
         }
     }, []);
 
@@ -761,9 +766,18 @@ export default function StepEditCv() {
             setAutoApplyMessage('Đang gửi lệnh tự động ứng tuyển...');
 
             // Push the already-resolved CV (see the gate above) so jobfitCv
-            // carries a catalogue-valid Field of Study before the agent opens
-            // the tab.
-            if (resolvedCv) await syncResolvedCv(resolvedCv);
+            // carries a catalogue-valid Field of Study before the agent opens the
+            // tab. If the push does not ACK, the agent may read a STALE jobfitCv —
+            // for an intern posting that risks a mid-run gap, so block rather than
+            // dispatch on an unconfirmed sync.
+            if (resolvedCv) {
+                const sync = await syncResolvedCv(resolvedCv);
+                if (!sync.ok && isInternJob(currentEntry)) {
+                    setAutoApplyStatus('error');
+                    setAutoApplyMessage(`Chưa đồng bộ được CV với Extension (${sync.error || 'không phản hồi'}) — tải lại trang (F5) rồi thử lại.`);
+                    return;
+                }
+            }
 
             const responsePromise = new Promise<{ success?: boolean; error?: string; detail?: string }>((resolve, reject) => {
                 const handler = (event: MessageEvent) => {
@@ -878,6 +892,9 @@ export default function StepEditCv() {
         // sent; reused for the single pre-dispatch sync below.
         const resolvedBase = await resolveCvForApply();
         const internGaps = resolvedBase ? internApplyGaps(resolvedBase) : [];
+        // Whether any job that survives into the dispatch is an intern posting —
+        // decides whether a failed pre-dispatch sync must block (below).
+        let dispatchingIntern = false;
 
         for (const entry of candidates) {
             // Only intern postings are gated. GPA + a Field of Study that lands on
@@ -903,6 +920,7 @@ export default function StepEditCv() {
                 cvFileBase64: pdf.base64,
                 cvFileName: pdf.fileName,
             });
+            if (isInternJob(entry)) dispatchingIntern = true;
         }
 
         const internNote = internBlocked.length
@@ -931,8 +949,17 @@ export default function StepEditCv() {
         setBatchStarting(true);
 
         // Push the already-resolved CV once before the batch (education is shared
-        // across jobs) so jobfitCv carries a catalogue-valid Field of Study.
-        if (resolvedBase) await syncResolvedCv(resolvedBase);
+        // across jobs) so jobfitCv carries a catalogue-valid Field of Study. If
+        // the push does not ACK and an intern job is in the batch, do NOT dispatch
+        // on a stale jobfitCv — it would gap the required Field of Study mid-run.
+        if (resolvedBase) {
+            const sync = await syncResolvedCv(resolvedBase);
+            if (!sync.ok && dispatchingIntern) {
+                setBatchStarting(false);
+                setAutoApplyMessage(`Chưa đồng bộ được CV với Extension (${sync.error || 'không phản hồi'}) — tải lại trang (F5) rồi thử lại.`);
+                return;
+            }
+        }
 
         // Send batch command to extension.
         window.postMessage({
@@ -992,6 +1019,8 @@ export default function StepEditCv() {
         // batch's jobs), so the intern catalogue gate sees what will be sent.
         const resolvedBase = await resolveCvForApply();
         const internGaps = resolvedBase ? internApplyGaps(resolvedBase) : [];
+        // Whether any dispatched job is an intern posting — see the sync gate below.
+        let dispatchingIntern = false;
 
         for (let i = 0; i < candidates.length; i++) {
             const entry = candidates[i];
@@ -1026,6 +1055,7 @@ export default function StepEditCv() {
                     cvFileBase64: base64,
                     cvFileName: outFilename,
                 });
+                if (isInternJob(entry)) dispatchingIntern = true;
             } catch (err) {
                 // Per-job render failure: LEAVE THE JOB OUT. It used to be queued
                 // without a CV file "so the agent can still try to fill text
@@ -1062,8 +1092,19 @@ export default function StepEditCv() {
         setFullAutoStatus('launching');
         setBatchStarting(true);
         // Push the already-resolved CV once (education shared across jobs) so
-        // jobfitCv carries a catalogue-valid Field of Study.
-        if (resolvedBase) await syncResolvedCv(resolvedBase);
+        // jobfitCv carries a catalogue-valid Field of Study. Block on an
+        // unconfirmed sync when an intern job is in the batch (a stale jobfitCv
+        // would gap the required Field of Study mid-run).
+        if (resolvedBase) {
+            const sync = await syncResolvedCv(resolvedBase);
+            if (!sync.ok && dispatchingIntern) {
+                setBatchStarting(false);
+                setFullAutoStatus('idle');
+                setFullAutoError(`Chưa đồng bộ được CV với Extension (${sync.error || 'không phản hồi'}) — tải lại trang (F5) rồi thử lại.`);
+                setTimeout(() => setFullAutoError(null), 8000);
+                return;
+            }
+        }
         window.postMessage({ type: 'JOBFIT_AUTO_APPLY_ALL', jobs }, '*');
 
         // Reset status after handoff — batch progress UI takes over from here.

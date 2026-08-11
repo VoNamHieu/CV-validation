@@ -95,7 +95,14 @@ export const SECTIONS = [
             // (measured: absent on mdlz, present and required on others). Planned
             // only when the row actually has it — a plan full of fields nobody
             // renders wastes a pass and hides what is really missing.
-            { id: 'formField-fieldOfStudy', want: e.field_of_study || e.degree, optional: true, whenPresent: true },
+            // want is the MAJOR only — never `|| e.degree`. A degree ("B.B.A.")
+            // is a qualification, not a major, and is not on Workday's closed
+            // Field-of-Study catalogue, so falling back to it types a value the
+            // search cannot match and gaps the page. The FE resolves + gates the
+            // major (catalogue-valid or the intern apply is blocked before it is
+            // dispatched), so an empty want here means "leave it for the review",
+            // not "substitute the degree".
+            { id: 'formField-fieldOfStudy', want: e.field_of_study, optional: true, whenPresent: true },
             // "Overall Result (GPA)" — REQUIRED on the intern postings (measured
             // R-172558 Marketing Intern, 2026-08-11) and absent on the executive
             // ones the flow was built against, which is exactly why it is gated on

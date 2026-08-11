@@ -93,12 +93,17 @@ export function genderVariants(stated) {
 export function disclosureAnswer(kind, offered, profile) {
     const own = profile?.[kind];
     if (own && String(own).trim()) {
-        const hit = offered.find((o) => fold(o) === fold(own))
-            || offered.find((o) => fold(o).includes(fold(own)));
+        // GENDER MATCHES EXACT-ONLY. "male" is a substring of "female" and "man"
+        // of "woman", so an includes() match misgenders a stated "Male"/"Man" on
+        // a list that carries only the opposite. Ethnicity keeps the substring
+        // pass on purpose — the profile's "Kinh" must find "Kinh (Vietnam)".
+        const hit = kind === 'gender'
+            ? offered.find((o) => fold(o) === fold(own))
+            : offered.find((o) => fold(o) === fold(own)) || offered.find((o) => fold(o).includes(fold(own)));
         if (hit) return { value: hit, source: 'PROFILE' };
         // Gender only: the SAME stated gender in the tenant's language, so a
         // candidate who wrote "Nam" registers as this list's "Male" (or "Nam"
-        // on a VN list). EXACT match, so "man" can never substring-hit "woman";
+        // on a VN list). EXACT match here too, so "man" can never hit "woman";
         // the value returned is the tenant's own label. This states nothing the
         // candidate did not — it is their gender, translated — so it is tagged
         // PROFILE and the SUBSTANTIVE belt admits it. Ethnicity gets no ladder.

@@ -163,6 +163,36 @@ describe('a stated Vietnamese gender is spoken in the tenant\'s own words', () =
     });
 });
 
+describe('a stated ENGLISH gender never substring-collides', () => {
+    // "male" is a substring of "female" and "man" of "woman". An includes()
+    // match on the profile value misgenders a stated English gender, which the
+    // Vietnamese-only tests missed. The direct match for gender is exact-only.
+    test('Male picks Male, never Female', () => {
+        assert.deepEqual(p5.disclosureAnswer('gender', ['Female', 'Male', 'Not Specified'], { gender: 'Male' }),
+            { value: 'Male', source: 'PROFILE' });
+    });
+
+    test('Male on a Female-only list does NOT become Female — it declines', () => {
+        const r = p5.disclosureAnswer('gender', ['Female', 'Not Specified'], { gender: 'Male' });
+        assert.equal(r.value, 'Not Specified');
+    });
+
+    test('Man picks Man, never Woman', () => {
+        assert.deepEqual(p5.disclosureAnswer('gender', ['Man', 'Woman', 'Not Specified'], { gender: 'Man' }),
+            { value: 'Man', source: 'PROFILE' });
+    });
+
+    test('Man on a Woman-only list does NOT become Woman — it declines', () => {
+        const r = p5.disclosureAnswer('gender', ['Woman', 'Not Specified'], { gender: 'Man' });
+        assert.equal(r.value, 'Not Specified');
+    });
+
+    test('ethnicity KEEPS its substring pass — "Kinh" still finds "Kinh (Vietnam)"', () => {
+        assert.deepEqual(p5.disclosureAnswer('ethnicity', ['Kinh (Vietnam)', 'Tày (Vietnam)'], { ethnicity: 'Kinh' }),
+            { value: 'Kinh (Vietnam)', source: 'PROFILE' });
+    });
+});
+
 describe('the consent boundary', () => {
     test('the terms box is ticked and the marketing box is not', async () => {
         await run({});
