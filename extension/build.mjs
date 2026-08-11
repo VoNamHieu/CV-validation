@@ -15,9 +15,16 @@ import { resolve } from 'node:path';
 // "run against a stale dist/" stops being an invisible failure. Never throws:
 // outside a git checkout the build still has to succeed.
 function gitMeta() {
-    const git = (cmd) => execSync(`git ${cmd}`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-    try { return { sha: git('rev-parse --short HEAD'), dirty: git('status --porcelain').length > 0 }; }
-    catch { return { sha: 'unknown', dirty: true }; }
+    try {
+        const sha = execSync('git rev-parse --short HEAD', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+        // Dirty = TRACKED code differs from HEAD (staged or not). `git status`
+        // would count untracked scratch files — a PDF, a HAR, a dev/ folder —
+        // that never enter the bundle, and flag every build dirty for nothing.
+        // What matters is whether the source that produced this dist/ is HEAD.
+        let dirty = false;
+        try { execSync('git diff --quiet HEAD', { stdio: 'ignore' }); } catch { dirty = true; }
+        return { sha, dirty };
+    } catch { return { sha: 'unknown', dirty: true }; }
 }
 const BUILD = gitMeta();
 
