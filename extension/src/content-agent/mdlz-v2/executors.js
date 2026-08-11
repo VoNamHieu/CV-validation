@@ -849,21 +849,6 @@ const searchMulti = {
                 }
                 if (!answered) return { result: RESULT.OPEN_TIMEOUT, term, reason: 'the search never answered' };
 
-                // ENTER MAY HAVE COMMITTED THE MATCH OUTRIGHT — and then picking
-                // it again would UNDO that. Measured on the Field of Study widget
-                // (R-172558, 2026-08-13): a query with exactly ONE result commits
-                // the chip on Enter alone, no row-click; a query with several
-                // results filters but commits nothing. So a term that already
-                // holds its chip after the search answered is DONE — clicking the
-                // now-selected option would deselect it (this field is
-                // single-select). Only a multi-result query falls through to pick
-                // the exact row below. (On the Skills widget Enter is inert, so
-                // nothing commits here and this is a no-op — the pick still runs.)
-                if (this.holding(f, term).length > 0) {
-                    trace('mdlz.search.enter-commit', { field: f.name, term });
-                    return { result: RESULT.COMMITTED, term };
-                }
-
                 const choice = await pickAcrossList(lease, term, { sleep: ctx.sleep });
                 if (!choice.option) {
                     // Forward the WHOLE verdict, not a hand-picked five. pickAcrossList
@@ -968,6 +953,102 @@ const searchMulti = {
             return { result: RESULT.COMMIT_FAILED, reason: `chips read ${have.join(' | ') || '(none)'}` };
         }
         return { result: RESULT.COMMITTED };
+    },
+};
+
+/**
+ * A SINGLE-select behind the same chip-search shape as searchMulti — a widget
+ * the DOM cannot tell apart from a multi-select (probed side by side, Field of
+ * Study R-172558 vs Skills R-173186, 2026-08-13: identical uxi-widget-types,
+ * container, chip list, placeholder). Only the PLAN can say which one a field
+ * is, so this capability is chosen by declared contract, never by fingerprint.
+ *
+ * MEASURED behavior (Field of Study, R-172558, 2026-08-13) — every rule below
+ * is one of those measurements:
+ *   · typing filters NOTHING; ENTER runs the search;
+ *   · a query with exactly ONE result commits its chip on Enter alone;
+ *   · a multi-result query filters but commits nothing — the exact row must be
+ *     clicked;
+ *   · a new commit REPLACES the existing chip (single-select), so a stale chip
+ *     is never removed first;
+ *   · the taxonomy is CLOSED (327 rows, catalogs.js) — no create row, so a term
+ *     the search cannot find exactly is OPTION_NOT_FOUND, never a free chip.
+ *
+ * `want` is ONE string. This is the other reason this engine exists: searchMulti
+ * spreads `want` as a list, and a bare string spread into characters — Field of
+ * Study was live-searched "M", "a", "r"… one letter at a time (R-173704).
+ */
+const searchSelect = {
+    /** Exactly ONE chip, and it is the answer — the single-exact-chip invariant. */
+    satisfied(f, want) {
+        const chips = f.controls().chips.map((c) => fold(txt(c)));
+        return chips.length === 1 && chips[0] === fold(String(want ?? '').trim());
+    },
+    chipsNow: (f) => f.controls().chips.map((c) => txt(c)),
+    async commit(f, want, ctx = {}) {
+        const term = String(want ?? '').trim();
+        // The planner gaps an empty want before it ever becomes a task; an empty
+        // term here means the plan is being bypassed, and guessing is worse.
+        if (!term) return { result: RESULT.USER_REQUIRED, reason: 'nothing to search for' };
+        const baseline = resultsKey();
+        const trigger = triggerOf(f);
+        if (!trigger) return { result: RESULT.WAITING_HYDRATION, reason: 'no search box yet' };
+        // Same activation as the multi — click opens, typing writes the WHOLE
+        // term, Enter (last, once) runs the search.
+        const activate = (t) => {
+            t.focus?.();
+            t.click?.();
+            typeInto(t, term);
+            pressEnter(t);
+        };
+        const r = await withList(trigger, async () => {
+            let answered = await waitForResults(baseline, { sleep: ctx.sleep, budgetMs: ctx.searchMs || 6000 });
+            if (!answered) {
+                pressEnter(trigger);
+                answered = await waitForResults(baseline, { sleep: ctx.sleep, budgetMs: 4000 });
+            }
+            if (!answered) return { result: RESULT.OPEN_TIMEOUT, reason: 'the search never answered' };
+
+            // ONE result → Enter already committed it. Clicking the now-selected
+            // row again would DESELECT it, so proving the chip is the whole job.
+            if (await until(() => this.satisfied(f, term), { sleep: ctx.sleep, budgetMs: ctx.commitMs || 1200 })) {
+                trace('mdlz.select.enter-commit', { field: f.name, term });
+                return { result: RESULT.COMMITTED };
+            }
+
+            // Several results → filtered, nothing committed. Only the EXACT row
+            // is an answer on a closed taxonomy; near-matches are how a wrong
+            // major got onto a real application once already.
+            const exact = visibleOptions().filter((o) => fold(txt(o)) === fold(term));
+            if (!exact.length) {
+                const sample = visibleOptions().map(txt).filter(Boolean).slice(0, 4);
+                return { result: RESULT.OPTION_NOT_FOUND, reason: 'no exact row', sample };
+            }
+            const before = this.chipsNow(f);
+            const box = exact[0].querySelector('input[type="checkbox"]');
+            (box || exact[0]).click();
+            await until(() => this.chipsNow(f).join('|') !== before.join('|'),
+                { sleep: ctx.sleep, budgetMs: ctx.commitMs || 1200 });
+            if (this.satisfied(f, term)) return { result: RESULT.COMMITTED };
+            const now = this.chipsNow(f);
+            return now.length
+                ? { result: RESULT.AMBIGUOUS, reason: `clicked "${term}" but the field holds`, saw: now.slice(0, 4) }
+                : { result: RESULT.COMMIT_FAILED, reason: 'the click added no chip' };
+        }, { sleep: ctx.sleep, label: `${f.name}:${term}`, activate });
+        if (!r.ok) return { result: r.result || RESULT.COMMIT_FAILED, reason: r.reason };
+        return r.value || { result: RESULT.COMMIT_FAILED, reason: 'no verdict from the list' };
+    },
+    /** The single-exact-chip proof: one chip, fold-equal to the want. */
+    async verify(f, want, ctx = {}) {
+        const ok = await until(() => this.satisfied(f, want), { sleep: ctx.sleep, budgetMs: ctx.commitMs || 1500 });
+        if (ok) return { result: RESULT.COMMITTED };
+        const have = this.chipsNow(f);
+        return {
+            result: RESULT.COMMIT_FAILED,
+            reason: have.length > 1
+                ? `a single-select holds ${have.length} chips: ${have.join(' | ')}`
+                : `chips read ${have.join(' | ') || '(none)'}`,
+        };
     },
 };
 
@@ -1304,6 +1385,47 @@ export const CAPABILITY = {
 };
 
 /**
+ * Which engine may drive a CHIP-SEARCH field — decided by the PLAN's declared
+ * contract, never inferred.
+ *
+ * The shape cannot decide: Field of Study (single) and Skills (multi) render
+ * byte-identical chip-search DOM (probed side by side, 2026-08-13), and every
+ * "signal" that seemed to separate them — aria-required, a searchBox automation
+ * id, the type of `want` — is an unmeasured render detail one tenant version
+ * away from flipping. So the plan must SAY what the field is:
+ *
+ *   capability 'searchSelect' + cardinality 'one'  → searchSelect
+ *   capability 'searchMulti'  + cardinality 'many' → searchMulti
+ *   capability 'searchMulti'  + cardinality 'one'  → searchMulti, ONLY with a
+ *     documented `contractException` (countryPhoneCode: measured working, its
+ *     migration gated on a measurement not yet made)
+ *   anything else, or nothing                      → CONTRACT_ERROR
+ *
+ * No default. A developer who forgets the declaration gets a loud, dev-facing
+ * result — never a field silently driven by the wrong state machine, which is
+ * how a single-select was fed through the multi engine and searched one
+ * character at a time. A CI test walks every spec so this fires there first.
+ *
+ * Ladder-driven fields (Degree, the HDYHAU cascade) do not pass through here —
+ * answerFromLadder is its own path with its own measured walk.
+ */
+export function resolveCapability(f, decl) {
+    if (f.kind !== WIDGET.SEARCH_MULTI) return { cap: CAPABILITY[f.kind] || null };
+    const { capability, cardinality, contractException } = decl || {};
+    if (capability === 'searchSelect' && cardinality === 'one') return { cap: searchSelect };
+    if (capability === 'searchMulti' && cardinality === 'many') return { cap: searchMulti };
+    if (capability === 'searchMulti' && cardinality === 'one' && contractException) {
+        return { cap: searchMulti, exception: contractException };
+    }
+    return {
+        contractError: {
+            capability: capability ?? '(missing)',
+            cardinality: cardinality ?? '(missing)',
+        },
+    };
+}
+
+/**
  * Add a row to a section, and prove one arrived.
  *
  * The commit signal is the row COUNT, read through the same finder the planner
@@ -1397,7 +1519,20 @@ const SIGNAL = {
  * is only ever reported by the widget's own signal.
  */
 export async function runField(f, want, ctx = {}) {
-    const cap = CAPABILITY[f.kind];
+    const routed = resolveCapability(f, ctx.decl);
+    if (routed.contractError) {
+        // The PLAN is wrong, not the candidate — a chip-search field reached the
+        // executor without a declared capability/cardinality. Loud, dev-facing,
+        // non-retryable; the CI contract test exists so this never actually fires.
+        trace('mdlz.plan.contractError', {
+            field: f.name, shape: f.kind, ...routed.contractError,
+        });
+        return {
+            result: RESULT.CONTRACT_ERROR,
+            reason: 'internal field contract missing — the plan must declare capability/cardinality for this chip-search field',
+        };
+    }
+    const cap = routed.cap;
     if (!cap) {
         // No handler is not a licence to improvise on a real application.
         trace('mdlz.field.unknown', { field: f.name, label: f.label });

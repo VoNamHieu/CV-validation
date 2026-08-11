@@ -241,6 +241,11 @@ export const RESULT = {
     COMMIT_FAILED: 'COMMIT_FAILED',
     USER_REQUIRED: 'USER_REQUIRED',
     SKIPPED_OPTIONAL: 'SKIPPED_OPTIONAL',
+    // The PLAN is wrong, not the page and not the candidate: a chip-search field
+    // reached the executor without a declared capability/cardinality contract.
+    // Developer-actionable only — the report must never tell the candidate to
+    // fix it — and a CI test catches it before it can ever fire at runtime.
+    CONTRACT_ERROR: 'CONTRACT_ERROR',
 };
 
 /** Outcomes that must NOT spend a semantic retry, and must NOT reach the model. */
@@ -260,6 +265,10 @@ export const SEMANTIC = new Set([
     RESULT.OPTION_NOT_FOUND,
     RESULT.AMBIGUOUS,
     RESULT.USER_REQUIRED,
+    // A missing plan contract is semantic in the scheduler's sense — no retry
+    // and no model can change what the spec failed to declare — but it is the
+    // DEVELOPER'S gap, and every surface that words it must say so.
+    RESULT.CONTRACT_ERROR,
 ]);
 
 // ── Ownership of the page ────────────────────────────────────────────────

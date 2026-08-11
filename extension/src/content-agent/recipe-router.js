@@ -72,7 +72,10 @@ try {
  * to open) is not a blocker — it is a retry, and treating it as one is what
  * sent a blocked Degree to the model nine seconds at a time.
  */
-const TERMINAL_TASK_RESULTS = new Set(['OPTION_NOT_FOUND', 'AMBIGUOUS', 'COMMIT_FAILED', 'USER_REQUIRED']);
+// CONTRACT_ERROR is terminal too — but it is the DEVELOPER'S blocker (a
+// chip-search field whose plan declared no capability/cardinality), so its
+// reason string names the internal contract, never the candidate's data.
+const TERMINAL_TASK_RESULTS = new Set(['OPTION_NOT_FOUND', 'AMBIGUOUS', 'COMMIT_FAILED', 'USER_REQUIRED', 'CONTRACT_ERROR']);
 
 /**
  * Everything on this page that stops it being finished, from BOTH places v2

@@ -131,7 +131,18 @@ export function myInfoPlan(profile, cv) {
         { id: 'formField-countryRegion', want: p.addressProvince || city, optional: !city },
         { id: 'formField-postalCode', want: p.postalCode || VN_POSTAL, required: true, isDefault: !p.postalCode },
         { id: 'formField-phoneType', want: 'Mobile - Personal', why: 'agent default', isDefault: true },
-        { id: 'formField-countryPhoneCode', want: [p.phoneCountry || 'Vietnam'], required: true, isDefault: !p.phoneCountry },
+        // DOCUMENTED EXCEPTION to the chip-search contract, not a precedent: a
+        // semantically-ONE field still driven by searchMulti, because that is
+        // the measured-working state (live runs: the parsed "Vietnam (+84)" chip
+        // satisfies) and migrating it to searchSelect is gated on a measurement
+        // NOT yet made — with the field EMPTY, does picking "Vietnam" commit on
+        // Enter, and does the widget replace or accumulate a second chip? Until
+        // that is measured, keeping the old behavior is the correct move; the
+        // exception string is what lets CI tell this apart from a forgotten
+        // declaration. NB the searchMulti verifier proves the term HAS a chip,
+        // not that the chip count is one — the residual risk this TODO names.
+        { id: 'formField-countryPhoneCode', want: [p.phoneCountry || 'Vietnam'], required: true, isDefault: !p.phoneCountry,
+            capability: 'searchMulti', cardinality: 'one', contractException: 'measured-one-term-token-widget' },
         { id: 'formField-phoneNumber', want: p.phone || contact.phone || '', required: true },
     ];
 }
@@ -178,7 +189,14 @@ function taskFor(entry, ctx) {
             const f = fingerprintOf(find, { name: entry.id });
             const r = entry.ladder
                 ? await answerFromLadder(f, entry.ladder, { ...ctx, isDefault: true })
-                : await runField(f, entry.want, { ...ctx, isDefault: !!entry.isDefault });
+                : await runField(f, entry.want, {
+                    ...ctx, isDefault: !!entry.isDefault,
+                    decl: {
+                        capability: entry.capability,
+                        cardinality: entry.cardinality,
+                        contractException: entry.contractException,
+                    },
+                });
             // A field that replaces others is not finished when its own value
             // lands: the replacement is still coming, and whatever is written
             // in between is written into a node about to be discarded.

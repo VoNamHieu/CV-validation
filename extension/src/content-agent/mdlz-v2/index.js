@@ -153,7 +153,16 @@ function runnable(task, ctx) {
             // list is open. Degree is the measured case.
             return task.ladder?.length
                 ? answerFromLadder(f, task.ladder, inRow)
-                : runField(f, task.want, inRow);
+                : runField(f, task.want, {
+                    ...inRow,
+                    // The plan's chip-search contract rides with the task; the
+                    // router refuses a chip-search field that arrives without one.
+                    decl: {
+                        capability: task.capability,
+                        cardinality: task.cardinality,
+                        contractException: task.contractException,
+                    },
+                });
         },
     };
 }

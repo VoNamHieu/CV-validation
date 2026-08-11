@@ -26,6 +26,7 @@
 
 import { COPY, MONTHS, SEL } from './config.js';
 import { fieldByLabel, fieldIn, isEmptyRow, rowsOf, valueIn } from './row.js';
+import { trace } from '../trace.js';
 
 const fold = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
 
@@ -107,7 +108,16 @@ export const SECTIONS = [
             // search, no gap — so the agent "did nothing" on a field the form
             // still demanded. whenPresent keeps it off the executive pages that
             // never render it, so this does not touch the executive flow.
-            { id: 'formField-fieldOfStudy', want: e.field_of_study, whenPresent: true },
+            //
+            // SINGLE-select behind the multi-select's exact DOM (probed side by
+            // side vs Skills, 2026-08-13), so the contract below — not the
+            // fingerprint — is what routes it to searchSelect: one term, typed
+            // whole, Enter-committed on a unique result, chip REPLACED. Without
+            // this declaration the router refuses the field (CONTRACT_ERROR)
+            // rather than let the multi engine spread the string into
+            // one-character searches again (measured, R-173704).
+            { id: 'formField-fieldOfStudy', want: e.field_of_study, whenPresent: true,
+                capability: 'searchSelect', cardinality: 'one' },
             // "Overall Result (GPA)" — REQUIRED on the intern postings (measured
             // R-172558 Marketing Intern, 2026-08-11) and absent on the executive
             // ones the flow was built against, which is exactly why it is gated on
@@ -445,8 +455,16 @@ export function planStep(cv, { root = null, maxRows = 8, addVia = 'any' } = {}) 
             for (const f of spec.fields(entry)) {
                 if (f.when && !f.when()) continue;
                 // A field this tenant does not render is not a gap and not a
-                // task; it is simply not there.
-                if (f.whenPresent && f.id && !fieldIn(row, f.id)) continue;
+                // task; it is simply not there. The absence is TRUSTED because
+                // planning only runs behind waitPageReady (a settled, stable
+                // fingerprint — a late-hydrating field changes the field count
+                // and drops the page out of ready) and the lookup is inside a
+                // row whose anchor already rendered. Traced so an absence is
+                // auditable rather than silent.
+                if (f.whenPresent && f.id && !fieldIn(row, f.id)) {
+                    trace('mdlz.plan.whenPresentSkip', { section: spec.name, field: f.id, row: spec.keyOfEntry(entry) });
+                    continue;
+                }
                 // A LADDER IS AN ANSWER, it just is not a single value — the
                 // rung can only be chosen against options that are not on the
                 // page until the list is open.
@@ -468,6 +486,11 @@ export function planStep(cv, { root = null, maxRows = 8, addVia = 'any' } = {}) 
                     name: f.name || null,
                     want: f.want,
                     optional: !!f.optional,
+                    // The chip-search contract, verbatim from the spec — the
+                    // router refuses a chip-search field that carries none.
+                    capability: f.capability || null,
+                    cardinality: f.cardinality || null,
+                    contractException: f.contractException || null,
                 });
             }
         }
@@ -502,7 +525,13 @@ export function planStep(cv, { root = null, maxRows = 8, addVia = 'any' } = {}) 
         ? (root || document).querySelector('[data-automation-id="formField-skills"]')
         : null;
     if (skills.length && skillsField) {
-        tasks.push({ kind: 'field', section: 'skills', id: 'skills', field: 'formField-skills', want: skills, optional: true });
+        tasks.push({
+            kind: 'field', section: 'skills', id: 'skills', field: 'formField-skills',
+            want: skills, optional: true,
+            // The TRUE multi-select: many terms, Enter inert, checkbox commits,
+            // chips accumulate (measured; five sat side by side on R-173186).
+            capability: 'searchMulti', cardinality: 'many',
+        });
     }
 
     return { tasks, gaps };

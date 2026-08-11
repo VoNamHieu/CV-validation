@@ -32,6 +32,10 @@ let PAGE_LOCK;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, Math.min(ms, 12)));
 const ctx = () => ({ sleep, commitMs: 900, stableMs: 120 });
+// The chip-search contract the planner now sends with every Skills task: the
+// router refuses a chip-search field that arrives undeclared (CONTRACT_ERROR),
+// so a test driving Skills must declare what the plan declares.
+const skillsCtx = () => ({ ...ctx(), decl: { capability: 'searchMulti', cardinality: 'many' } });
 
 const field = (automationId) => fp.fingerprintOf(
     () => dom.document.querySelector(`[data-automation-id="${automationId}"]`),
@@ -293,17 +297,17 @@ describe('MILESTONE 2 GATE — the verdict matches the page, in both directions'
 
     test('skills adds what is missing, keeps what was already there', async () => {
         page.seedChip('skills', 'Photoshop');            // the candidate's own, from another form
-        const r = await exec.runField(field('formField-skills'), ['Figma', 'SQL'], ctx());
+        const r = await exec.runField(field('formField-skills'), ['Figma', 'SQL'], skillsCtx());
 
         assert.equal(r.result, RESULT.COMMITTED, r.reason);
         assert.deepEqual(page.chipsOn('skills'), ['Photoshop', 'Figma', 'SQL']);
     });
 
     test('a second pass over the same skills costs nothing', async () => {
-        await exec.runField(field('formField-skills'), ['Figma'], ctx());
+        await exec.runField(field('formField-skills'), ['Figma'], skillsCtx());
         const before = page.fields.skills.trigger.clickCount;
 
-        const again = await exec.runField(field('formField-skills'), ['Figma'], ctx());
+        const again = await exec.runField(field('formField-skills'), ['Figma'], skillsCtx());
         assert.equal(again.result, RESULT.SATISFIED);
         assert.equal(page.fields.skills.trigger.clickCount, before,
             're-typing eight terms to re-learn "already there" cost 39-44s a pass');
@@ -328,7 +332,7 @@ describe('MILESTONE 2 GATE — the verdict matches the page, in both directions'
         // Escape belongs to the lease closing itself afterwards, not to the typing.
         inp.addEventListener('keyup', (e) => { if (!['Enter', 'Escape'].includes(e.key)) typedChars.push(e.key); });
 
-        await exec.runField(field('formField-skills'), ['Figma'], ctx());
+        await exec.runField(field('formField-skills'), ['Figma'], skillsCtx());
 
         assert.deepEqual(seen, ['keydown:13', 'keypress:13', 'keyup:13'],
             'Enter must be a real keystroke — this is what runs the search');
@@ -361,13 +365,13 @@ describe('MILESTONE 2 GATE — the verdict matches the page, in both directions'
         // asked for does get a chip — and a second one nobody asked for arrives
         // with it. Judging the click by what we MEANT to pick can never see it.
         page.misbehave('skills', { alsoAdds: ['Agile Systems'] });
-        const r = await exec.runField(field('formField-skills'), ['Figma'], ctx());
+        const r = await exec.runField(field('formField-skills'), ['Figma'], skillsCtx());
 
         assert.equal(r.result, RESULT.AMBIGUOUS);
         assert.match(r.reason, /added 2 chips/);
         // And the next pass adds nothing. Without this the count climbs by one
         // every pass — the row-growth bug, in chips.
-        const second = await exec.runField(field('formField-skills'), ['Figma'], ctx());
+        const second = await exec.runField(field('formField-skills'), ['Figma'], skillsCtx());
         assert.equal(second.result, RESULT.SATISFIED, 'the term it asked for does have its chip');
         assert.equal(page.chipsOn('skills').length, 2, 'nothing was added on the second pass');
     });
@@ -378,7 +382,7 @@ describe('MILESTONE 2 GATE — the verdict matches the page, in both directions'
         // asked for. Re-reading by label narrows that window; it does not close
         // it, so the chip that ARRIVES is what gets judged.
         page.misbehave('skills', { instead: 'Agentforce' });
-        const r = await exec.runField(field('formField-skills'), ['Figma'], ctx());
+        const r = await exec.runField(field('formField-skills'), ['Figma'], skillsCtx());
 
         assert.equal(r.result, RESULT.AMBIGUOUS);
         assert.match(r.reason, /but got "Agentforce"/);
@@ -393,7 +397,7 @@ describe('MILESTONE 2 GATE — the verdict matches the page, in both directions'
         // time. An exact chip would have settled it; these do not.
         page.seedChip('skills', 'Figma Design');
         page.seedChip('skills', 'Figma Prototyping');
-        const r = await exec.runField(field('formField-skills'), ['Figma'], ctx());
+        const r = await exec.runField(field('formField-skills'), ['Figma'], skillsCtx());
 
         assert.equal(r.result, RESULT.AMBIGUOUS);
         assert.equal(page.chipsOn('skills').length, 2, 'no third chip');
@@ -435,7 +439,7 @@ describe('MILESTONE 2 GATE — the verdict matches the page, in both directions'
     test('a skill the catalogue does not hold goes on as the CV wrote it', async () => {
         // The user's decision (2026-08-10): free-text skills are wanted — the
         // candidate's own words, verbatim, never a catalog approximation.
-        const r = await exec.runField(field('formField-skills'), ['Quantum Basket Weaving'], ctx());
+        const r = await exec.runField(field('formField-skills'), ['Quantum Basket Weaving'], skillsCtx());
         assert.equal(r.result, RESULT.COMMITTED);
         assert.deepEqual(page.chipsOn('skills'), ['Quantum Basket Weaving'],
             'the chip is the CV text itself — created through the search\'s own create row');
