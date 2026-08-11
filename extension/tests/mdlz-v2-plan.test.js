@@ -235,6 +235,30 @@ describe('the plan is derived from the page, every time it is asked', () => {
         assert.equal(planner.proficiencyLadder(''), null);
     });
 
+    test('the fluent tick keys off the same tiers as Overall, and only those', () => {
+        // "I am fluent in this language." shipped as "No" beside an Overall of
+        // "3 - Fluent" on every application until 2026-08-10 (user-caught on
+        // R-172396's review): the box was never planned, by v1 or v2. It is
+        // planned from the SAME tiers that put Overall at Fluent, so one row
+        // cannot carry two answers about the same fluency.
+        page.addLanguageRow({});
+        const { tasks } = planner.planStep(CV);
+        const tick = tasks.find((t) => t.field === 'formField-native');
+        assert.ok(tick, 'a fluent-tier level must plan the tick');
+        assert.equal(tick.want, true);
+
+        // Below the fluent tier nothing is planned — unticked is then the
+        // truth, and a tick already on the page is never removed.
+        const mid = planner.planStep({ languages: [{ language: 'French', level: 'Intermediate' }] });
+        assert.ok(!mid.tasks.some((t) => t.field === 'formField-native'));
+
+        assert.equal(planner.speaksFluently('Native'), true);
+        assert.equal(planner.speaksFluently('tiếng mẹ đẻ'), true);
+        assert.equal(planner.speaksFluently('C1'), true);
+        assert.equal(planner.speaksFluently('B2'), false);
+        assert.equal(planner.speaksFluently(''), false);
+    });
+
     test('the degree task carries a ladder, and is not mistaken for a gap', () => {
         page.addEducationRow({});
         const { tasks, gaps } = planner.planStep(CV);

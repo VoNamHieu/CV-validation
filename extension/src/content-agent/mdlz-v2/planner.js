@@ -111,6 +111,12 @@ export const SECTIONS = [
             // reached by its label INSIDE the row — never page-wide. And it is
             // asked for as a LADDER, for the same reason Degree is.
             { byLabel: /overall/i, ladder: proficiencyLadder(e.level), optional: !e.level, name: 'Overall' },
+            // "I am fluent in this language." — see speaksFluently for why this
+            // exists and why it keys off the same tiers as Overall. A level
+            // below fluent plans nothing (want stays undefined), so a tick
+            // already on the page — the ATS's parse or the candidate's own —
+            // is never removed.
+            { id: 'formField-native', want: speaksFluently(e.level) ? true : undefined, optional: true, whenPresent: true },
         ],
     },
 ];
@@ -200,17 +206,36 @@ const BACHELOR = ['Bachelor of Arts', 'Bachelor of Science', 'Bachelor'];
  * A level the CV does not state returns nothing, and the field stays the
  * candidate's to answer.
  */
+const NATIVE_TIER = /native|mother tongue|first language|bản ngữ|tiếng mẹ đẻ/;
+const FLUENT_TIER = /fluent|advanced|proficient|thành thạo|lưu loát|\bc[12]\b/;
+
 export function proficiencyLadder(level) {
     const own = String(level || '').trim();
     const s = fold(own);
     if (!s) return null;
-    if (/native|mother tongue|first language|bản ngữ|tiếng mẹ đẻ/.test(s)) return [own, 'Native', 'Fluent', 'Advanced', 'Proficient'];
-    if (/fluent|advanced|proficient|thành thạo|lưu loát|\bc[12]\b/.test(s)) return [own, 'Fluent', 'Advanced', 'Proficient'];
+    if (NATIVE_TIER.test(s)) return [own, 'Native', 'Fluent', 'Advanced', 'Proficient'];
+    if (FLUENT_TIER.test(s)) return [own, 'Fluent', 'Advanced', 'Proficient'];
     if (/intermediate|conversational|trung cấp|\bb[12]\b/.test(s)) return [own, 'Intermediate', 'Conversational'];
     if (/beginner|basic|elementary|novice|cơ bản|sơ cấp|\ba[12]\b/.test(s)) return [own, 'Beginner', 'Basic', 'Elementary'];
     // A word we have no scale for is still the candidate's own — try it, and
     // let the catalogue refuse it rather than inventing a level for them.
     return [own];
+}
+
+/**
+ * May the "I am fluent in this language." box carry a tick for this level?
+ *
+ * The box renders as formField-native and was never planned — by v1 or v2 — so
+ * every application shipped "I am fluent: No" directly above an Overall reading
+ * "3 - Fluent", one row contradicting itself (user-caught on R-172396's review,
+ * 2026-08-10). The tick derives from the SAME two top tiers the proficiency
+ * ladder trusts, so the two answers cannot disagree by construction: a level
+ * that puts Overall at Fluent ticks the box, anything softer plans nothing —
+ * and unticked is then the truth, not a miss.
+ */
+export function speaksFluently(level) {
+    const s = fold(String(level || '').trim());
+    return !!s && (NATIVE_TIER.test(s) || FLUENT_TIER.test(s));
 }
 
 /**
