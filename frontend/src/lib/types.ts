@@ -19,6 +19,13 @@ export interface EducationDetail {
      *  Result (GPA)"), and no résumé parse can supply it — only the candidate
      *  knows. Optional so CVs saved before this existed still type-check. */
     gpa?: string;
+    /** The MAJOR (e.g. "Business Administration"), distinct from the degree/
+     *  qualification (e.g. "B.B.A."). Workday's intern forms ask for both as
+     *  separate required fields; the extractor already produces this at runtime,
+     *  and the apply layer falls back to `degree` only when it is absent — which
+     *  puts a qualification into a field-of-study box, so prefer this. Optional
+     *  for back-compat with CVs saved before it was named. */
+    field_of_study?: string;
 }
 
 export interface ProjectDetail {

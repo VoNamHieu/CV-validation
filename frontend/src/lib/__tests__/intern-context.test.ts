@@ -47,8 +47,16 @@ describe("internCvGaps", () => {
     test("names each missing field, and nothing when both are present", () => {
         expect(internCvGaps(withEdu({ degree: "Marketing", gpa: "3.6" }))).toEqual([]);
         expect(internCvGaps(withEdu({ degree: "Marketing", gpa: "" }))).toEqual(["Điểm TB (GPA)"]);
-        expect(internCvGaps(withEdu({ degree: "", gpa: "3.6" }))).toEqual(["Ngành học / Bằng cấp"]);
+        expect(internCvGaps(withEdu({ degree: "", gpa: "3.6" }))).toEqual(["Ngành học"]);
         expect(internCvGaps(withEdu({ degree: "", gpa: "" })).length).toBe(2);
+    });
+    test("field of study is satisfied by field_of_study, mirroring how the apply layer fills it", () => {
+        // A real major satisfies it even with no degree string…
+        expect(internCvGaps(withEdu({ field_of_study: "Business Administration", degree: "", gpa: "3.6" }))).toEqual([]);
+        // …and degree is only the fallback, so it still counts when present.
+        expect(internCvGaps(withEdu({ degree: "B.B.A.", gpa: "3.6" }))).toEqual([]);
+        // Neither → a gap.
+        expect(internCvGaps(withEdu({ field_of_study: "", degree: "", gpa: "3.6" }))).toEqual(["Ngành học"]);
     });
 });
 

@@ -46,15 +46,20 @@ export function isStudentOrNewGrad(cv: CVData | null | undefined): boolean {
 
 /**
  * The fields an INTERN application needs from the CV and a résumé parse cannot
- * give — empty array means ready. GPA is the first education entry's; "Field of
- * Study" is answered from that same entry's degree (the ATS asks both, the CV
- * carries the one).
+ * give — empty array means ready, read off the first education entry.
+ *
+ * Field of study is checked the way the apply layer FILLS it — `field_of_study`
+ * first, `degree` only as the fallback it already uses — so the gate agrees with
+ * what will actually be sent. A missing GPA is the common gap; a candidate whose
+ * extraction produced neither a major nor a qualification is the rare other.
  */
 export function internCvGaps(cv: CVData | null | undefined): string[] {
     const edu = cv?.education?.[0];
     const gaps: string[] = [];
     if (!String(edu?.gpa ?? '').trim()) gaps.push('Điểm TB (GPA)');
-    if (!String(edu?.degree ?? '').trim()) gaps.push('Ngành học / Bằng cấp');
+    if (!String(edu?.field_of_study ?? '').trim() && !String(edu?.degree ?? '').trim()) {
+        gaps.push('Ngành học');
+    }
     return gaps;
 }
 

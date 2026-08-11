@@ -509,6 +509,13 @@ export default function StepEditCv() {
             personal: cvData.personal ?? cv.personal,
             employment: cvData.employment ?? cv.employment,
             preferences: cvData.preferences ?? cv.preferences,
+            // Education carries the facts the info form owns — GPA and field of
+            // study — that the per-job optimize snapshot predates. Without this
+            // the GPA a user types after optimizing never reaches the profile
+            // sent to the extension, nor the intern gate that reads the same cv,
+            // so "điền GPA rồi chạy lại" did nothing. Base wins here exactly as it
+            // does for the other user-owned sub-objects above.
+            education: cvData.education ?? cv.education,
         } : cv
     ), [cvData]);
 
@@ -679,6 +686,15 @@ export default function StepEditCv() {
             setAutoApplyMessage('Thiếu dữ liệu CV hoặc URL công việc.');
             return;
         }
+        // Same intern preflight as the batch paths, on the merged cv so a GPA
+        // just typed in the info form counts — an intern posting the agent would
+        // stall on mid-run must not be sent from here either.
+        const internReason = internBlockReason(currentEntry, mergeProfile(cv));
+        if (internReason) {
+            setAutoApplyStatus('error');
+            setAutoApplyMessage(`Vị trí thực tập còn thiếu ${internReason} — điền ở "Thông tin cá nhân" rồi chạy lại.`);
+            return;
+        }
 
         setAutoApplyStatus('checking');
         setAutoApplyMessage('Đang kiểm tra Extension...');
@@ -811,7 +827,7 @@ export default function StepEditCv() {
         const internBlocked: string[] = [];
 
         for (const entry of candidates) {
-            const internReason = internBlockReason(entry, entry.optimizedCv);
+            const internReason = entry.optimizedCv ? internBlockReason(entry, mergeProfile(entry.optimizedCv)) : null;
             if (internReason) {
                 internBlocked.push(`${entry.jobTitle || entry.company || entry.label || 'Job'} (${internReason})`);
                 continue;
@@ -864,7 +880,7 @@ export default function StepEditCv() {
             type: 'JOBFIT_AUTO_APPLY_ALL',
             jobs,
         }, '*');
-    }, [sortedEntries, buildProfile, ensureEntryPdf, ensureAgentConsent, ensureApplyCredentials,
+    }, [sortedEntries, buildProfile, mergeProfile, ensureEntryPdf, ensureAgentConsent, ensureApplyCredentials,
         loginTenants, cvEmail]);
 
     /* ═══════════════════════════════════════════════════════════════
@@ -916,7 +932,7 @@ export default function StepEditCv() {
         for (let i = 0; i < candidates.length; i++) {
             const entry = candidates[i];
             const cv = entry.optimizedCv!;
-            const internReason = internBlockReason(entry, cv);
+            const internReason = internBlockReason(entry, mergeProfile(cv));
             if (internReason) {
                 internBlocked.push(`${entry.jobTitle || entry.company || 'Job'} (${internReason})`);
                 setFullAutoProgress({ done: i + 1, total: candidates.length });
