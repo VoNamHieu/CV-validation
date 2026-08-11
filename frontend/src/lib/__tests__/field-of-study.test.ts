@@ -5,9 +5,10 @@
 // not carry never matches and the intern form gaps. These are pure functions,
 // FE-only — the extension is never asked to translate.
 
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import type { CVData } from "../types";
 import { FIELD_OF_STUDY_CATALOG } from "../field-of-study-catalog";
-import { foldMajor, isResolvableMajor, resolveFieldOfStudy } from "../field-of-study";
+import { foldMajor, isResolvableMajor, resolveCvFieldsOfStudy, resolveFieldOfStudy } from "../field-of-study";
 
 const CATALOG = new Set(FIELD_OF_STUDY_CATALOG);
 
@@ -60,5 +61,56 @@ describe("isResolvableMajor", () => {
         expect(isResolvableMajor("Marketing")).toBe(true);
         expect(isResolvableMajor("Underwater Basket Weaving")).toBe(false);
         expect(isResolvableMajor("")).toBe(false);
+    });
+});
+
+// A CVData is a big interface; the resolver only ever touches `.education`, so a
+// cast keeps the fixtures readable without inventing the other twenty fields.
+const cvWith = (education: Array<Partial<CVData["education"][number]>>): CVData =>
+    ({ education } as unknown as CVData);
+
+describe("resolveCvFieldsOfStudy (deterministic + LLM long tail)", () => {
+    afterEach(() => vi.unstubAllGlobals());
+
+    test("a deterministic-resolvable major never reaches the LLM", async () => {
+        const fetchSpy = vi.fn();
+        vi.stubGlobal("fetch", fetchSpy);
+        const out = await resolveCvFieldsOfStudy(cvWith([{ field_of_study: "Kinh doanh quốc tế" }]));
+        expect(out.education[0].field_of_study).toBe("International Business");
+        expect(fetchSpy).not.toHaveBeenCalled();   // rules placed it — no network
+    });
+
+    test("an unknown major is resolved via the LLM route and validated", async () => {
+        // "Marketing" is a known catalogue row (see resolveFieldOfStudy tests);
+        // the raw is an unusual major the rules cannot place, so it reaches here.
+        const fetchSpy = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({ map: { "Ngành lạ đặc biệt XYZ": "Marketing" } }),
+        });
+        vi.stubGlobal("fetch", fetchSpy);
+        const out = await resolveCvFieldsOfStudy(cvWith([{ field_of_study: "Ngành lạ đặc biệt XYZ" }]));
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+        expect(out.education[0].field_of_study).toBe("Marketing");
+        expect(FIELD_OF_STUDY_CATALOG.includes(out.education[0].field_of_study!)).toBe(true);
+    });
+
+    test("a hallucinated LLM label is rejected — the raw value stays", async () => {
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({ map: { "Ngành bịa": "Totally Made Up Major" } }),
+        }));
+        const out = await resolveCvFieldsOfStudy(cvWith([{ field_of_study: "Ngành bịa" }]));
+        expect(out.education[0].field_of_study).toBe("Ngành bịa");
+    });
+
+    test("an LLM/network failure never throws — the value stays raw", async () => {
+        vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network down")));
+        const out = await resolveCvFieldsOfStudy(cvWith([{ field_of_study: "Ngành gì đó rất lạ" }]));
+        expect(out.education[0].field_of_study).toBe("Ngành gì đó rất lạ");
+    });
+
+    test("no education is returned untouched", async () => {
+        const cv = cvWith([]);
+        expect(await resolveCvFieldsOfStudy(cv)).toBe(cv);
     });
 });

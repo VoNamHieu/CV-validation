@@ -32,6 +32,7 @@ import {
 import { promptInstallExtension, promptGrantPermission, isPermissionError } from '@/lib/extension-install';
 import { cvToExtensionProfile } from '@/lib/extension-profile';
 import { internBlockReason, isStudentOrNewGrad } from '@/lib/intern-context';
+import { resolveCvFieldsOfStudy } from '@/lib/field-of-study';
 import { syncProfileToExtension, syncCvFileToExtension, syncCvDataToExtension } from '@/lib/extension-sync';
 import { renderCvHtml, getTemplate, DEFAULT_TEMPLATE_ID } from '@/lib/cv-templates';
 import type { CvTemplateId } from '@/lib/cv-templates';
@@ -673,6 +674,25 @@ export default function StepEditCv() {
         return () => clearTimeout(handle);
     }, [cvData]);
 
+    /* ─── Apply-time field-of-study resolution ───
+       The debounced auto-sync above only runs the CHEAP deterministic
+       field-of-study layer (it can't await an LLM on every keystroke). Right
+       before an apply is dispatched, resolve the long tail too — deterministic
+       first, LLM only for a major the rules can't place — and push that CV so
+       the value the intern agent fills is catalogue-valid. Fail-safe: on any
+       error the CV is synced with at least the deterministic resolution, and
+       the apply proceeds either way (an unresolved major is no worse than the
+       extension's own search + the review gap that exist today). */
+    const pushResolvedCvToExtension = useCallback(async () => {
+        if (!cvData) return;
+        try {
+            const resolved = await resolveCvFieldsOfStudy(cvData);
+            await syncProfileToExtension(cvToExtensionProfile(resolved), resolved);
+        } catch (err) {
+            console.warn('[Copo] Field-of-study resolve/sync before apply failed:', err);
+        }
+    }, [cvData]);
+
     /* ─── Single Auto Apply (legacy) ─── */
     const triggerAutoApply = async () => {
         // Layer-2 consent: first time the auto-apply agent runs.
@@ -717,6 +737,11 @@ export default function StepEditCv() {
 
             setAutoApplyStatus('sending');
             setAutoApplyMessage('Đang gửi lệnh tự động ứng tuyển...');
+
+            // Resolve the education's field of study (deterministic + LLM long
+            // tail) and push it before the agent opens the tab, so an intern
+            // form's closed Field-of-Study catalogue gets a value that matches.
+            await pushResolvedCvToExtension();
 
             const responsePromise = new Promise<{ success?: boolean; error?: string; detail?: string }>((resolve, reject) => {
                 const handler = (event: MessageEvent) => {
@@ -875,13 +900,17 @@ export default function StepEditCv() {
         // headless-render pool and timed out (failing open) on SPA boards.
         setBatchStarting(true);
 
+        // Push the field-of-study-resolved CV once before the batch — education
+        // is shared across jobs, so one deterministic+LLM pass covers every tab.
+        await pushResolvedCvToExtension();
+
         // Send batch command to extension.
         window.postMessage({
             type: 'JOBFIT_AUTO_APPLY_ALL',
             jobs,
         }, '*');
     }, [sortedEntries, buildProfile, mergeProfile, ensureEntryPdf, ensureAgentConsent, ensureApplyCredentials,
-        loginTenants, cvEmail]);
+        loginTenants, cvEmail, pushResolvedCvToExtension]);
 
     /* ═══════════════════════════════════════════════════════════════
        FULLY AUTONOMOUS APPLY ALL — Generate PDFs + sync + launch batch
@@ -996,12 +1025,15 @@ export default function StepEditCv() {
         }
         setFullAutoStatus('launching');
         setBatchStarting(true);
+        // One field-of-study-resolved CV push before the batch (education is
+        // shared across jobs — deterministic first, LLM only for the long tail).
+        await pushResolvedCvToExtension();
         window.postMessage({ type: 'JOBFIT_AUTO_APPLY_ALL', jobs }, '*');
 
         // Reset status after handoff — batch progress UI takes over from here.
         setTimeout(() => setFullAutoStatus('idle'), 1500);
     }, [sortedEntries, buildProfile, mergeProfile, userAvatarBase64, ensureAgentConsent,
-        ensureApplyCredentials, loginTenants, cvEmail]);
+        ensureApplyCredentials, loginTenants, cvEmail, pushResolvedCvToExtension]);
 
     const cancelBatchApply = useCallback(() => {
         window.postMessage({ type: 'JOBFIT_AUTO_APPLY_CANCEL' }, '*');

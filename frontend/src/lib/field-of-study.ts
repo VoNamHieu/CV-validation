@@ -12,6 +12,7 @@
 // than today (the extension's own search / the review gap still apply), and the
 // long tail is left for an LLM layer to resolve later.
 
+import type { CVData } from './types';
 import { FIELD_OF_STUDY_CATALOG } from './field-of-study-catalog';
 
 /** Accent-fold + lowercase + collapse spaces, so "Kinh tế Quốc tế", "kinh te
@@ -115,4 +116,71 @@ export function isResolvableMajor(raw: string | null | undefined): boolean {
     if (!value) return false;
     const folded = foldMajor(value);
     return CATALOG_BY_FOLD.has(folded) || folded in VN_MAJOR;
+}
+
+// ── LLM long-tail: majors the deterministic layer cannot place ──────────────
+//
+// The deterministic layer knows the common majors; an unusual one ("Kinh tế
+// đầu tư", "Công nghệ sinh học thực phẩm") would still gap the intern form. This
+// asks the model ONCE per unknown major to pick the nearest catalogue row — at
+// APPLY time, never on a keystroke — validated server-side against the catalogue
+// so it can only return a real row. Fail-safe throughout: any error leaves the
+// value raw, exactly as today, and never blocks the apply.
+
+const CATALOG = new Set<string>(FIELD_OF_STUDY_CATALOG);
+const llmCache = new Map<string, string>();   // foldMajor(raw) → catalogue label
+
+async function askLlmForMajors(rawMajors: string[]): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    const ask: string[] = [];
+    for (const raw of rawMajors) {
+        const value = String(raw ?? '').trim();
+        if (!value || isResolvableMajor(value)) continue;      // deterministic owns these
+        const key = foldMajor(value);
+        const cached = llmCache.get(key);
+        if (cached) { out.set(value, cached); continue; }
+        ask.push(value);
+    }
+    const unique = [...new Set(ask)];
+    if (unique.length === 0) return out;
+    try {
+        const res = await fetch('/api/ai/field-of-study', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ majors: unique }),
+        });
+        const data: { map?: Record<string, string> } = res.ok ? await res.json() : {};
+        for (const raw of unique) {
+            const label = data.map?.[raw];
+            if (label && CATALOG.has(label)) {
+                llmCache.set(foldMajor(raw), label);
+                out.set(raw, label);
+            }
+        }
+    } catch { /* fail-safe: unresolved majors stay raw */ }
+    return out;
+}
+
+/**
+ * Resolve every education entry's field of study on a COPY of the CV — the
+ * deterministic layer, then the LLM for whatever it could not place. Call this
+ * at APPLY time so the value the extension fills is catalogue-valid before the
+ * agent runs. The FE state is untouched (the editor keeps the candidate's own
+ * words); only the returned copy is normalised. Never throws.
+ */
+export async function resolveCvFieldsOfStudy(cv: CVData): Promise<CVData> {
+    if (!cv?.education?.length) return cv;
+    const afterRules = cv.education.map((e) =>
+        e?.field_of_study ? { ...e, field_of_study: resolveFieldOfStudy(e.field_of_study) } : e);
+    const stillUnknown = afterRules
+        .map((e) => e?.field_of_study)
+        .filter((v): v is string => !!v && !isResolvableMajor(v));
+    if (stillUnknown.length === 0) return { ...cv, education: afterRules };
+    const llm = await askLlmForMajors(stillUnknown);
+    if (llm.size === 0) return { ...cv, education: afterRules };
+    const education = afterRules.map((e) => {
+        const mapped = e?.field_of_study ? llm.get(e.field_of_study) : undefined;
+        return mapped ? { ...e, field_of_study: mapped } : e;
+    });
+    return { ...cv, education };
 }
