@@ -24,13 +24,14 @@ import { recipeWantsApplyMessage } from '@/lib/applyRecipes';
 import { detectJdLang } from '@/lib/jd-lang';
 import type {
     CVData, JDData, MatchResult, CategoryScore, RequirementStatus,
-    ContactInfo, PersonalInfo, EmploymentInfo, JobPreferences,
+    ContactInfo, PersonalInfo, EmploymentInfo, JobPreferences, EducationDetail,
 } from '@/lib/types';
 import {
     EMPTY_CONTACT, EMPTY_PERSONAL, EMPTY_EMPLOYMENT, EMPTY_PREFERENCES, COVER_LETTER_LANGUAGES,
 } from '@/lib/types';
 import { promptInstallExtension, promptGrantPermission, isPermissionError } from '@/lib/extension-install';
 import { cvToExtensionProfile } from '@/lib/extension-profile';
+import { internBlockReason, isStudentOrNewGrad } from '@/lib/intern-context';
 import { syncProfileToExtension, syncCvFileToExtension, syncCvDataToExtension } from '@/lib/extension-sync';
 import { renderCvHtml, getTemplate, DEFAULT_TEMPLATE_ID } from '@/lib/cv-templates';
 import type { CvTemplateId } from '@/lib/cv-templates';
@@ -803,8 +804,18 @@ export default function StepEditCv() {
             cvFileName: string;
         }> = [];
         const missingCv: string[] = [];
+        // Only intern postings are gated, and only for what they actually need
+        // (GPA / field of study) — a manager role missing a GPA is never blocked.
+        // Sending an intern application that the agent will stall on mid-run is
+        // worse than not sending it: the opportunity cannot be re-spent.
+        const internBlocked: string[] = [];
 
         for (const entry of candidates) {
+            const internReason = internBlockReason(entry, entry.optimizedCv);
+            if (internReason) {
+                internBlocked.push(`${entry.jobTitle || entry.company || entry.label || 'Job'} (${internReason})`);
+                continue;
+            }
             const pdf = await ensureEntryPdf(entry);
             if (!pdf) {
                 missingCv.push(entry.jobTitle || entry.company || entry.label || 'Job');
@@ -823,15 +834,22 @@ export default function StepEditCv() {
             });
         }
 
+        const internNote = internBlocked.length
+            ? `${internBlocked.length} vị trí thực tập còn thiếu thông tin bắt buộc (${internBlocked.slice(0, 2).join('; ')}${internBlocked.length > 2 ? '…' : ''}). `
+                + 'Điền GPA + ngành học ở "Thông tin cá nhân" rồi chạy lại.'
+            : '';
         if (jobs.length === 0) {
-            setAutoApplyMessage('Không tạo được file CV cho công việc nào — hãy bấm tối ưu lại rồi thử lại.');
+            setAutoApplyMessage(internNote || 'Không tạo được file CV cho công việc nào — hãy bấm tối ưu lại rồi thử lại.');
             return;
         }
         if (missingCv.length) {
             setAutoApplyMessage(
                 `Bỏ qua ${missingCv.length} công việc chưa tạo được file CV (${missingCv.slice(0, 3).join(', ')}${missingCv.length > 3 ? '…' : ''}). `
-                + 'Hãy bấm tối ưu lại cho những vị trí này rồi chạy lại.',
+                + 'Hãy bấm tối ưu lại cho những vị trí này rồi chạy lại.'
+                + (internNote ? ` ${internNote}` : ''),
             );
+        } else if (internNote) {
+            setAutoApplyMessage(internNote);
         }
 
         // No pre-flight liveness gate: every job here was already crawled +
@@ -891,10 +909,19 @@ export default function StepEditCv() {
             cvFileName: string;
         }> = [];
         const renderFailed: string[] = [];
+        // Same intern gate as triggerAutoApply — only intern postings, only for
+        // GPA / field of study, so an executive batch is untouched.
+        const internBlocked: string[] = [];
 
         for (let i = 0; i < candidates.length; i++) {
             const entry = candidates[i];
             const cv = entry.optimizedCv!;
+            const internReason = internBlockReason(entry, cv);
+            if (internReason) {
+                internBlocked.push(`${entry.jobTitle || entry.company || 'Job'} (${internReason})`);
+                setFullAutoProgress({ done: i + 1, total: candidates.length });
+                continue;
+            }
             try {
                 // Use the PDF cached at Optimize time if available; only render on miss.
                 let base64 = entry.optimizedCvPdfBase64;
@@ -930,19 +957,26 @@ export default function StepEditCv() {
             setFullAutoProgress({ done: i + 1, total: candidates.length });
         }
 
+        const internNote = internBlocked.length
+            ? `${internBlocked.length} vị trí thực tập còn thiếu GPA/ngành học `
+                + `(${internBlocked.slice(0, 2).join('; ')}${internBlocked.length > 2 ? '…' : ''}) — điền ở "Thông tin cá nhân" rồi chạy lại.`
+            : '';
         // 2. Hand off to the extension's existing batch path with embedded CV files.
         if (jobs.length === 0) {
             setFullAutoStatus('idle');
-            setFullAutoError('Không tạo được file CV cho công việc nào — hãy thử lại.');
-            setTimeout(() => setFullAutoError(null), 5000);
+            setFullAutoError(internNote || 'Không tạo được file CV cho công việc nào — hãy thử lại.');
+            setTimeout(() => setFullAutoError(null), internNote ? 8000 : 5000);
             return;
         }
-        if (renderFailed.length) {
+        if (renderFailed.length || internNote) {
             setFullAutoError(
-                `Bỏ qua ${renderFailed.length} công việc chưa tạo được file CV `
-                + `(${renderFailed.slice(0, 3).join(', ')}${renderFailed.length > 3 ? '…' : ''}).`,
+                (renderFailed.length
+                    ? `Bỏ qua ${renderFailed.length} công việc chưa tạo được file CV `
+                        + `(${renderFailed.slice(0, 3).join(', ')}${renderFailed.length > 3 ? '…' : ''}). `
+                    : '')
+                + internNote,
             );
-            setTimeout(() => setFullAutoError(null), 6000);
+            setTimeout(() => setFullAutoError(null), 8000);
         }
         setFullAutoStatus('launching');
         setBatchStarting(true);
@@ -2604,6 +2638,19 @@ export function PersonalInfoSection({
         onChange({ ...cv, employment: { ...employment, ...patch } });
     const patchPreferences = (patch: Partial<JobPreferences>) =>
         onChange({ ...cv, preferences: { ...preferences, ...patch } });
+    // GPA lives on the FIRST education entry, not a profile sub-object — the ATS
+    // reads "Overall Result (GPA)" from there. Edit it in place without
+    // disturbing the rest of the education array.
+    const patchEducation0 = (patch: Partial<EducationDetail>) => {
+        const edu = cv.education ?? [];
+        const base: EducationDetail = edu[0] ?? { degree: '', institution: '', year: '' };
+        const first: EducationDetail = { ...base, ...patch };
+        onChange({ ...cv, education: edu.length ? [first, ...edu.slice(1)] : [first] });
+    };
+    // Intern postings require the GPA that executive ones never ask for. Flag it
+    // required only when the CV reads as a student / new grad, so an experienced
+    // candidate is not nagged for a number their target forms do not want.
+    const internRelevant = isStudentOrNewGrad(cv);
 
     const fillCount = [
         contact.email, contact.phone, contact.address_province,
@@ -2694,6 +2741,9 @@ export function PersonalInfoSection({
                         onChange={(v) => patchEmployment({ years_of_experience: parseInt(v, 10) || 0 })} />
                     <ProfileInput label="Bằng cấp cao nhất" value={employment.highest_degree}
                         onChange={(v) => patchEmployment({ highest_degree: v })} />
+                    <ProfileInput label="Điểm TB (GPA)" value={cv.education?.[0]?.gpa ?? ''}
+                        onChange={(v) => patchEducation0({ gpa: v })} required={internRelevant}
+                        placeholder="VD: 3.6 / 8.5 — form thực tập bắt buộc" />
 
                     {/* ── Preferences ── */}
                     <ProfileInput label="Địa điểm mong muốn" value={preferences.desired_locations}
