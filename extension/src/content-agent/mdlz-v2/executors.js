@@ -849,6 +849,21 @@ const searchMulti = {
                 }
                 if (!answered) return { result: RESULT.OPEN_TIMEOUT, term, reason: 'the search never answered' };
 
+                // ENTER MAY HAVE COMMITTED THE MATCH OUTRIGHT — and then picking
+                // it again would UNDO that. Measured on the Field of Study widget
+                // (R-172558, 2026-08-13): a query with exactly ONE result commits
+                // the chip on Enter alone, no row-click; a query with several
+                // results filters but commits nothing. So a term that already
+                // holds its chip after the search answered is DONE — clicking the
+                // now-selected option would deselect it (this field is
+                // single-select). Only a multi-result query falls through to pick
+                // the exact row below. (On the Skills widget Enter is inert, so
+                // nothing commits here and this is a no-op — the pick still runs.)
+                if (this.holding(f, term).length > 0) {
+                    trace('mdlz.search.enter-commit', { field: f.name, term });
+                    return { result: RESULT.COMMITTED, term };
+                }
+
                 const choice = await pickAcrossList(lease, term, { sleep: ctx.sleep });
                 if (!choice.option) {
                     // Forward the WHOLE verdict, not a hand-picked five. pickAcrossList
