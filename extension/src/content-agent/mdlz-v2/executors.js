@@ -254,23 +254,33 @@ export function chooseSkillTarget(items, want) {
     const isCreate = (r) => r.id === r.label && !/^REMOTE_SKILL/i.test(r.id);
     const catalog = rows.filter((r) => !isCreate(r));
 
+    // `match` is carried so a caller reading a PARTIAL list can tell the one
+    // safe answer (exact) from the two that a longer list could overturn (a
+    // near-match the exact row would beat, a create row the catalog would).
     const exact = catalog.filter((r) => fold(r.label) === w);
-    if (exact.length) return { kind: 'catalog', ...exact[0] };
+    if (exact.length) return { kind: 'catalog', match: 'exact', ...exact[0] };
     const near = catalog.filter((r) => fold(r.label).includes(w));
     if (near.length && new Set(near.map((r) => fold(r.label))).size === 1) {
-        return { kind: 'catalog', ...near[0] };
+        return { kind: 'catalog', match: 'near', ...near[0] };
     }
     const create = rows.find((r) => isCreate(r) && fold(r.label) === w);
-    if (create) return { kind: 'free', ...create };
+    if (create) return { kind: 'free', match: 'create', ...create };
     return { kind: 'none', sample: rows.slice(0, 4).map((r) => r.label), shown: rows.length };
 }
 
-/** Exact wins; a single distinct near-match counts; several do not. */
-function pickLabel(labels, want) {
+/**
+ * Exact wins; a single distinct near-match counts; several do not.
+ *
+ * `exactOnly` is set when the list read is known to be PARTIAL: a near-match on
+ * a short list can be shadowed by the exact row still below the fold, so only an
+ * exact hit may be trusted until the whole list is in.
+ */
+function pickLabel(labels, want, { exactOnly = false } = {}) {
     const w = fold(want);
     if (!w) return null;
     const exact = labels.filter((l) => fold(l) === w);
     if (exact.length) return exact[0];
+    if (exactOnly) return null;
     const near = labels.filter((l) => fold(l).includes(w));
     if (!near.length) return null;
     return new Set(near.map(fold)).size === 1 ? near[0] : null;
@@ -356,10 +366,27 @@ async function pickAcrossList(lease, want, { sleep, maxWindows = 24 } = {}) {
         }
     }
 
+    // A read is only COMPLETE once the item array is at least as long as the
+    // count the header declared. Below that the answer may simply not be in the
+    // window yet — and the create row is LAST, so free-text terms miss here
+    // first. On a short list only an EXACT catalog hit is safe; anything else is
+    // an INTERACTION failure (OPEN_TIMEOUT, retried next pass), never a semantic
+    // OPTION_NOT_FOUND — which is cached against the whole field and would freeze
+    // Skills for the page over a slow network. Measured: itemsLen 4 / declared
+    // 16 returned OPTION_NOT_FOUND with the create row not yet in the array.
+    const readComplete = (n) => !declared || n >= declared;
+
     // The widget's own items carry the discriminator (catalog id vs the typed
     // text), so when they are readable the decision is made on them directly.
     if (items && items.length) {
         const choice = chooseSkillTarget(items, want);
+        if (!readComplete(items.length) && choice.match !== 'exact') {
+            return {
+                option: null, why: RESULT.OPEN_TIMEOUT,
+                want: String(want ?? ''), reason: `read ${items.length}/${declared} — list still filling`,
+                via: 'items', itemsLen: items.length, declared,
+            };
+        }
         if (choice.kind === 'none') {
             return {
                 option: null, why: RESULT.OPTION_NOT_FOUND,
@@ -408,9 +435,18 @@ async function pickAcrossList(lease, want, { sleep, maxWindows = 24 } = {}) {
     }
 
     const all = [...seen];
-    const target = pickLabel(all, want);
-    const evidence = { want: String(want ?? ''), shown: all.length, sample: all.slice(0, 4) };
+    // Same rule as the item path: the scroll-walk reaches only what it drew, and
+    // it was measured reaching 12 of 16. On a short read only an exact label is
+    // trusted, and a miss is an interaction failure to retry, not a refusal to
+    // cache — a near-match or a "not found" here can both be the tail we never
+    // scrolled to.
+    const complete = readComplete(all.length);
+    const target = pickLabel(all, want, { exactOnly: !complete });
+    const evidence = { want: String(want ?? ''), shown: all.length, sample: all.slice(0, 4), via: 'labels', declared };
     if (!target) {
+        if (!complete) {
+            return { option: null, why: RESULT.OPEN_TIMEOUT, ...evidence, reason: `read ${all.length}/${declared} — list still filling` };
+        }
         const near = all.filter((l) => fold(l).includes(fold(want)));
         return near.length > 1
             ? { option: null, why: RESULT.AMBIGUOUS, ...evidence, saw: [...new Set(near)].slice(0, 4) }
@@ -815,7 +851,11 @@ const searchMulti = {
 
                 const choice = await pickAcrossList(lease, term, { sleep: ctx.sleep });
                 if (!choice.option) {
-                    return { result: choice.why, term, saw: choice.saw, shown: choice.shown, sample: choice.sample };
+                    // Forward the WHOLE verdict, not a hand-picked five. pickAcrossList
+                    // measures via/itemsLen/declared/reason precisely so mdlz.skill.miss
+                    // can name a partial read apart from a real absence; stripping them
+                    // here is what left the diagnostic columns null on every miss.
+                    return { ...choice, result: choice.why, term };
                 }
                 // Re-read by LABEL and click THAT, never a node held from a
                 // moment ago: the virtualiser recycles rows, and the measured

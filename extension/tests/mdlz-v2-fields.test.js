@@ -410,7 +410,7 @@ describe('MILESTONE 2 GATE — the verdict matches the page, in both directions'
         // 1. Catalog exact beats the create row carrying the SAME label.
         const both = items([["Agile/Scrum", "REMOTE_SKILL-1-9"], ["Agile/Scrum", "Agile/Scrum"]]);
         assert.deepEqual(exec.chooseSkillTarget(both, 'Agile/Scrum'),
-            { kind: 'catalog', label: 'Agile/Scrum', id: 'REMOTE_SKILL-1-9', index: 0 });
+            { kind: 'catalog', match: 'exact', label: 'Agile/Scrum', id: 'REMOTE_SKILL-1-9', index: 0 });
 
         // 2. No catalog match at all → the CV's own words, via the create row.
         const none = items([["Talent Optimization", "REMOTE_SKILL-1-1"], ["Retention Strategies", "REMOTE_SKILL-1-2"], ["retention optimization", "retention optimization"]]);

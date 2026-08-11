@@ -14,6 +14,7 @@
  *   - Simulate keyboard typing for stubborn frameworks
  */
 
+import { BUILD_DIRTY, BUILD_SHA } from './build-meta.js';
 import { AGENT_MAX_RUNTIME_MS, APPLY_SESSION_TTL_MS, FILL_RETRY_THRESHOLD, POST_ACTION_WAIT_MS, TENANT_REVIEW_FLAGS } from './constants.js';
 import { closeOpenDropdown, isLegalNameLabel, repairProfileNames, safeActivate, setNativeValue, sleep } from './dom.js';
 import { removeProgress, showConfirmation, showProgress, showToast } from './ui.js';
@@ -1982,7 +1983,7 @@ function reportResult(success, detail, outcome, extra = {}) {
     // usually several navigations back — where the console for it no longer
     // exists. Print the whole trace here so a failure is one paste, not an
     // archaeology exercise.
-    trace('run.end', { success, outcome: o, detail, ...extra });
+    trace('run.end', { build: `${BUILD_SHA}${BUILD_DIRTY ? '-dirty' : ''}`, success, outcome: o, detail, ...extra });
     // Where the time went — printed before the buffer is cleared.
     try { _iterClose(); traceReport(); } catch { /* a report must never break a result */ }
     if (!success) traceDump(`${o} — ${detail}`);

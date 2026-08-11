@@ -14,6 +14,8 @@
  * scroll through a console that no longer exists.
  */
 
+import { BUILD_DIRTY, BUILD_SHA } from './build-meta.js';
+
 const KEY = 'copoAgentTrace';
 const RUN_KEY = 'copoTraceRun';
 const MAX = 120;          // a long run, still one screenful when printed
@@ -281,6 +283,11 @@ export function traceReport() {
     for (const it of s.iters) for (const [p, ms] of Object.entries(it.phases || {})) phaseTotals[p] = (phaseTotals[p] || 0) + ms;
     const secs = (ms) => `${((ms || 0) / 1000).toFixed(1)}s`;
     const report = {
+        // First field, so a pasted report says which code produced it before
+        // anything else is read — a dirty or stale SHA explains a symptom that
+        // no longer exists in HEAD, and catches a run against an un-reloaded
+        // dist/ that would otherwise look like a real failure.
+        build: { sha: BUILD_SHA, dirty: BUILD_DIRTY },
         runMs: totalMs,
         slowestFields: byTime,
         mostTouched: byTouch,
@@ -291,6 +298,7 @@ export function traceReport() {
     };
     try {
         console.warn('%c[Copo Report] where the time went', 'color:#7c3aed;font-weight:700');
+        console.warn(`  build ${report.build.sha}${report.build.dirty ? ' (dirty)' : ''}`);
         console.warn(`  total ${report.time.total} · waiting ${report.time.waiting} · LLM ${report.time.llm}`);
         console.warn(`  phases: ${Object.entries(report.time.phases).map(([k, v]) => `${k} ${v}`).join(' · ') || '(none)'}`);
         console.warn(`  iterations: ${report.iterations.total}, no progress in ${report.iterations.noProgress}${report.iterations.idleAt.length ? ` (#${report.iterations.idleAt.join(',')})` : ''}`);

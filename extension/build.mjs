@@ -6,7 +6,20 @@
 // dist/ unpacked. Ship: `npm run zip`.
 import esbuild from 'esbuild';
 import { cpSync, existsSync, mkdirSync, rmSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 import { resolve } from 'node:path';
+
+// Stamp the bundle with the commit it was built from, and whether the tree was
+// dirty at build time. Folded in through `define` (below) so build-meta.js
+// carries them as literals — a trace can then prove which code produced it, and
+// "run against a stale dist/" stops being an invisible failure. Never throws:
+// outside a git checkout the build still has to succeed.
+function gitMeta() {
+    const git = (cmd) => execSync(`git ${cmd}`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    try { return { sha: git('rev-parse --short HEAD'), dirty: git('status --porcelain').length > 0 }; }
+    catch { return { sha: 'unknown', dirty: true }; }
+}
+const BUILD = gitMeta();
 
 const OUT = 'dist';
 const watch = process.argv.includes('--watch');
@@ -47,6 +60,10 @@ const options = {
     format: 'iife',
     target: ['chrome110'],
     logLevel: 'info',
+    define: {
+        __COPO_BUILD_SHA__: JSON.stringify(BUILD.sha),
+        __COPO_BUILD_DIRTY__: JSON.stringify(BUILD.dirty),
+    },
     minify: false,      // keep readable — we debug these live in the browser
     sourcemap: false,
     // Point the fixture import at an empty stub unless this is a fixture build.
@@ -88,5 +105,6 @@ if (watch) {
     console.log('[build] watching src/ → dist/ (re-run `npm run build` after editing manifest/static)');
 } else {
     await esbuild.build(options);
-    console.log(`[build] done → dist/${fixture ? '  ⚠️  FIXTURE BUILD — seeds fake candidate data' : localCreds ? '  ⚠️  LOCAL-CREDS BUILD — reads jobfitApplyCredentials, no seeding' : ''}`);
+    console.log(`[build] done → dist/  @ ${BUILD.sha}${BUILD.dirty ? ' (dirty)' : ''}`
+        + `${fixture ? '  ⚠️  FIXTURE BUILD — seeds fake candidate data' : localCreds ? '  ⚠️  LOCAL-CREDS BUILD — reads jobfitApplyCredentials, no seeding' : ''}`);
 }
