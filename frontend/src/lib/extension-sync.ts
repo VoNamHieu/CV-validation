@@ -6,6 +6,24 @@
 import type { CVData } from "@/lib/types";
 import type { ExtensionProfile } from "@/lib/extension-profile";
 import { getAccessToken } from "@/lib/auth-headers";
+import { resolveFieldOfStudy } from "@/lib/field-of-study";
+
+/**
+ * Resolve each education entry's field of study to a value Workday's closed
+ * catalogue accepts, on a COPY — the FE state (and what the editor shows) keeps
+ * the candidate's own words; only the payload the extension reads is normalised.
+ * This is the whole FE-only field-of-study adapter: the deterministic apply
+ * engine is never asked to translate.
+ */
+function resolveCvForExtension(cvData?: CVData): CVData | undefined {
+    if (!cvData?.education?.length) return cvData;
+    return {
+        ...cvData,
+        education: cvData.education.map((e) =>
+            e?.field_of_study ? { ...e, field_of_study: resolveFieldOfStudy(e.field_of_study) } : e,
+        ),
+    };
+}
 
 export interface SyncResult {
     ok: boolean;
@@ -64,7 +82,7 @@ export async function syncProfileToExtension(
         {
             type: "JOBFIT_EXPORT_PROFILE",
             profile,
-            cvData,
+            cvData: resolveCvForExtension(cvData),
             // Hand the extension the current JWT so its credit-metered auto-apply
             // / tailor calls can be attributed + charged to this user. Piggybacks
             // on profile sync (runs on upload + edits) so the token stays fresh
