@@ -501,7 +501,7 @@ export function buildHostilePage(doc, opts = {}) {
     const langRows = [];
     let guidSeq = 0;
 
-    function addEducationRow({ school = '', degree = null } = {}) {
+    function addEducationRow({ school = '', degree = null, withGpa = false } = {}) {
         const row = el('div', {}, eduSection);
         const schoolInput = textControl(el('div', { 'data-automation-id': 'formField-schoolName' }, row));
         schoolInput.value = school;
@@ -511,6 +511,13 @@ export function buildHostilePage(doc, opts = {}) {
         });
         if (degree) { degreeField.trigger.textContent = degree; degreeField.guid.value = fakeGuid(degree); }
         const model = { row, schoolInput, degree: degreeField };
+        // "Overall Result (GPA)" renders on the intern postings and not the
+        // executive ones — opt-in here so a test can exercise both.
+        if (withGpa) {
+            const w = el('div', { 'data-automation-id': 'formField-gradeAverage' }, row);
+            el('label', {}, w).textContent = 'Overall Result (GPA)';
+            model.gpa = textControl(w);
+        }
         eduRows.push(model);
         return model;
     }

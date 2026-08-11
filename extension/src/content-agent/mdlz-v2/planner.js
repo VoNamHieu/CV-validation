@@ -96,6 +96,17 @@ export const SECTIONS = [
             // only when the row actually has it — a plan full of fields nobody
             // renders wastes a pass and hides what is really missing.
             { id: 'formField-fieldOfStudy', want: e.field_of_study || e.degree, optional: true, whenPresent: true },
+            // "Overall Result (GPA)" — REQUIRED on the intern postings (measured
+            // R-172558 Marketing Intern, 2026-08-11) and absent on the executive
+            // ones the flow was built against, which is exactly why it is gated on
+            // `whenPresent`: it plans nothing on a page that does not render it, so
+            // adding it cannot touch the executive My Experience that already
+            // works. Not optional — when it IS on the page it is required, so an
+            // empty gpa is a gap the candidate fills, never a field skipped over
+            // (which is how v2, blind to this field, tried to Save an invalid page
+            // and stalled the whole intern run). The value comes from the CV, and
+            // ONLY the CV: a plausible GPA is a fabricated academic record.
+            { id: 'formField-gradeAverage', want: e.gpa, whenPresent: true },
         ],
     },
     {

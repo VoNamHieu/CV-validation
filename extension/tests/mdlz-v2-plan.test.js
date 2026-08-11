@@ -268,6 +268,39 @@ describe('the plan is derived from the page, every time it is asked', () => {
         assert.ok(!gaps.some((g) => g.field === 'formField-degree'));
     });
 
+    test('GPA is planned only where the intern page renders it, from the CV alone', () => {
+        // Measured R-172558 (Marketing Intern, 2026-08-11): "Overall Result
+        // (GPA)" is required on the intern Education block and absent on the
+        // executive one the flow was built against. v2 was blind to it, reported
+        // 0 gaps, and tried to Save an invalid page — the whole intern run
+        // stalled there. `whenPresent` is the isolation: nothing plans on a page
+        // that does not render the field.
+
+        // Executive shape — no GPA field on the row → no task, no gap, even with
+        // a gpa in the CV. This is the proof the addition cannot touch it.
+        page.addEducationRow({});
+        const exec = planner.planStep({ education: [{ institution: 'RMIT', gpa: '3.6' }] });
+        assert.ok(!exec.tasks.some((t) => t.field === 'formField-gradeAverage'));
+        assert.ok(!exec.gaps.some((g) => g.field === 'formField-gradeAverage' || /gpa|overall result/i.test(g.field || '')));
+
+        // Intern shape — the field renders, and the CV's gpa fills it.
+        page = buildHostilePage(dom.document);
+        page.addEducationRow({ school: 'RMIT', withGpa: true });
+        const intern = planner.planStep({ education: [{ institution: 'RMIT', gpa: '3.6' }] });
+        const gpa = intern.tasks.find((t) => t.field === 'formField-gradeAverage');
+        assert.ok(gpa, 'GPA must be planned where the page renders it');
+        assert.equal(gpa.want, '3.6');
+
+        // Rendered but the CV has no gpa → a gap the candidate fills, never a
+        // silent skip (never an invented number).
+        page = buildHostilePage(dom.document);
+        page.addEducationRow({ school: 'RMIT', withGpa: true });
+        const noGpa = planner.planStep({ education: [{ institution: 'RMIT' }] });
+        assert.ok(!noGpa.tasks.some((t) => t.field === 'formField-gradeAverage'));
+        assert.ok(noGpa.gaps.some((g) => g.field === 'formField-gradeAverage'),
+            'a required GPA with nothing in the CV is a gap, not a skipped field');
+    });
+
     test('a comma inside brackets does not split a skill', () => {
         // MEASURED on R-174102, 2026-08-09: the CV's "unit economics (CPI, CAC,
         // LTV)" reached the form as three searches — `unit economics (CPI`,
