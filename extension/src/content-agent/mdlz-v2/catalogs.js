@@ -6,13 +6,19 @@
  * search-backed. We scanned Degree twice on two different drafts (R-174102,
  * R-170139, 2026-08-09/10): identical 18 rows, identical order, both times.
  *
- * What this is for: "nối trước" — pre-resolving a CV value to the EXACT label
- * ahead of fill time (FE-side, rules first, LLM once for unusual VN wording),
- * so the runtime does an exact pick instead of fuzzy matching. The runtime's
- * job then shrinks to a DRIFT GUARD: before picking, compare the live options
- * against this snapshot; a mismatch means the tenant changed the catalog — do
- * NOT trust the pre-map, fall back to the runtime ladder, and flag this file
- * stale.
+ * NOT YET WIRED — this is INTENT, not current behavior. Nothing imports
+ * `CATALOGS` today; it is inert seed/reference data. The runtime still
+ * fuzzy-matches live options at fill time (executors.chooseOption), and the
+ * "nối trước" pre-resolution that exists (field of study) lives FE-side against
+ * its own catalogue, not this file. The design below is what a future consumer
+ * would do; until one exists, treat these arrays as measured ground truth only.
+ *
+ * The intent: "nối trước" — pre-resolve a CV value to the EXACT label ahead of
+ * fill time (FE-side, rules first, LLM once for unusual VN wording), so the
+ * runtime does an exact pick instead of fuzzy matching, and its job shrinks to a
+ * DRIFT GUARD: before picking, compare the live options against this snapshot; a
+ * mismatch means the tenant changed the catalog — do not trust the pre-map, fall
+ * back to the runtime ladder, and flag this file stale.
  *
  * VERBATIM matters. "A.A. - Associate of Arts  or equivalent" carries a DOUBLE
  * space before "or" — that is what the form renders, and an exact-pick that
@@ -106,8 +112,9 @@ export const CATALOGS = {
      * formField-gender — button listbox, 4 options after "Select One". Measured
      * live on the intern flow (R-172558, 2026-08-11). The decline row is "Not
      * Specified". This is the exact set the gender translator resolves against:
-     * a stated "Nam" → "Male", "Nữ" → "Female" (see page-disclosures.js
-     * genderVariants / disclosureAnswer). Reference-only — nothing imports this.
+     * a stated "Nam" → "Male", "Nữ" → "Female" (see semantic.js genderLadder,
+     * applied in page-disclosures.js disclosureAnswer). Reference-only — nothing
+     * imports this.
      */
     gender: [
         'Female',

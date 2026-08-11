@@ -5,12 +5,14 @@
 // Field of Study on Workday is a SINGLE-select closed list of 327 English majors
 // (measured, R-172558/R-173704). A Vietnamese major ("Kinh doanh quốc tế") or an
 // English one the list does not carry ("International Economics") never matches,
-// and the intern form gaps mid-run. This maps the common cases deterministically
-// — the exact catalogue label first, then a Vietnamese-major dictionary whose
-// every target is asserted (by test) to be in the catalogue — and returns the
-// input UNCHANGED when it recognises nothing. So an unmatched value is no worse
-// than today (the extension's own search / the review gap still apply), and the
-// long tail is left for an LLM layer to resolve later.
+// and the intern form gaps mid-run. Two layers resolve it: the deterministic one
+// here — the exact catalogue label first, then a Vietnamese-major dictionary
+// whose every target is asserted (by test) to be in the catalogue — and, for
+// anything it cannot place, the LLM long tail (resolveCvFieldsOfStudy →
+// /api/ai/field-of-study, below). A value neither layer can place is returned
+// UNCHANGED; for an INTERN posting the apply-time gate (intern-context's
+// internApplyGaps) then BLOCKS rather than dispatch a non-catalogue value — no
+// longer "no worse than today", but "does not gap".
 
 import type { CVData } from './types';
 import { FIELD_OF_STUDY_CATALOG } from './field-of-study-catalog';

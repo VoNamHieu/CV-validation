@@ -21,10 +21,11 @@ export interface EducationDetail {
     gpa?: string;
     /** The MAJOR (e.g. "Business Administration"), distinct from the degree/
      *  qualification (e.g. "B.B.A."). Workday's intern forms ask for both as
-     *  separate required fields; the extractor already produces this at runtime,
-     *  and the apply layer falls back to `degree` only when it is absent — which
-     *  puts a qualification into a field-of-study box, so prefer this. Optional
-     *  for back-compat with CVs saved before it was named. */
+     *  SEPARATE required fields, so a degree can never fill this: the CV
+     *  extractor splits the major out of the degree line, and neither the apply
+     *  planner nor the intern gate falls back to `degree` any more (a
+     *  qualification is not a major and gaps the closed Field-of-Study search).
+     *  Optional for back-compat with CVs saved before it was named. */
     field_of_study?: string;
 }
 

@@ -20,6 +20,7 @@ import { trace, traceOnce } from './trace.js';
 import { callAgentPlan, callApplyMessage } from './llm.js';
 import { isPickerShape, probeFieldShape } from './probe.js';
 import { hiddenMult, pauseGate, stopRequested } from './run-state.js';
+import { genderLadder } from './semantic.js';
 
 // Keep in sync with frontend/src/lib/applyRecipes.ts (WORKDAY). Fields verified
 // against real 3M Workday captures (My Information, 2026-07-15 / -22). The
@@ -2243,15 +2244,10 @@ function prefixLadder(gender) {
     return [];
 }
 
-/** The gender option itself, when the profile states one — tenants ask it as
- *  an administrative fact (PwC: required in My Information). The candidate's
- *  own stated value outranks declining; declines remain the fallback rungs. */
-function genderLadder(gender) {
-    const g = String(gender || '').trim().toLowerCase();
-    if (/^(m|male|nam)$/.test(g)) return ['Male', 'Nam', 'Man'];
-    if (/^(f|female|nữ|nu)$/.test(g)) return ['Female', 'Nữ', 'Woman'];
-    return [];
-}
+// genderLadder (the profile's own stated gender → the labels a tenant's list
+// might carry) now lives in ./semantic.js, shared with the v2 engine — imported
+// at the top. It used to be duplicated here, in recipe-mdlz-v1.js, and in
+// mdlz-v2/page-disclosures.js; the three copies drifted, so there is now one.
 
 /**
  * Generic phrasings of the candidate's own degree LEVEL, derived from the

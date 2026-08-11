@@ -8,7 +8,10 @@
  * THE RULE THAT GOVERNS EVERYTHING HERE: v2 never chooses a demographic value.
  * Declining is the only answer that states nothing about a person, and the only
  * substantive answer allowed is one the CANDIDATE has already given in their own
- * profile. Where neither exists the field is left, and the review lists it. The
+ * profile — INCLUDING that stated value translated into the tenant's own label
+ * ("Nam" → this list's "Male", via semantic.js genderLadder). Translating the
+ * candidate's own answer into the list's language is still their answer, not a
+ * choice v2 made. Where neither exists the field is left, and the review lists it. The
  * measured deny patterns are kept as a structural belt: whatever the ladder
  * produces, a substantive pick that did not come from the profile is refused, so
  * the worst outcome of a rung that misses is an empty field — which is what a
@@ -42,6 +45,7 @@ import { NAV, advance } from './navigation.js';
 import { withList } from './popup-manager.js';
 import { runSequential } from './scheduler.js';
 import { trace } from '../trace.js';
+import { genderLadder } from '../semantic.js';
 
 const txt = (el) => (el?.textContent || '').trim().replace(/\s+/g, ' ');
 const fold = (s) => String(s || '').trim().toLowerCase();
@@ -67,24 +71,6 @@ export const DECLINE = [
 ];
 
 /**
- * The candidate's stated gender, spoken in whatever language the tenant's list
- * uses. A VN candidate writes "Nam"/"Nữ"; a US-styled list renders Male/Female
- * while a VN list renders Nam/Nữ — so the same stated value must be tried in
- * each, and the label finally picked is always the tenant's OWN rendered option.
- *
- * This is a mirror of recipe.js's genderLadder — the same Nam→male vocabulary,
- * kept local ON PURPOSE: the v2 engine does not import the v1 recipe module it
- * is replacing. Empty for anything that is not a plain male/female, so an
- * "Other"/"Khác"/unrecognised value is left to the decline path, never guessed.
- */
-export function genderVariants(stated) {
-    const g = String(stated || '').trim().toLowerCase();
-    if (/^(m|male|nam)$/.test(g)) return ['Male', 'Nam', 'Man'];
-    if (/^(f|female|nữ|nu)$/.test(g)) return ['Female', 'Nữ', 'Woman'];
-    return [];
-}
-
-/**
  * What to say, and whose answer it is.
  *
  * Profile first — that is the candidate speaking. Then the decline ladder among
@@ -108,7 +94,7 @@ export function disclosureAnswer(kind, offered, profile) {
         // candidate did not — it is their gender, translated — so it is tagged
         // PROFILE and the SUBSTANTIVE belt admits it. Ethnicity gets no ladder.
         if (kind === 'gender') {
-            for (const variant of genderVariants(own)) {
+            for (const variant of genderLadder(own)) {
                 const g = offered.find((o) => fold(o) === fold(variant));
                 if (g) return { value: g, source: 'PROFILE' };
             }

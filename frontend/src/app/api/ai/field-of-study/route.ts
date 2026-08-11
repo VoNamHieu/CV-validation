@@ -14,8 +14,10 @@ import { FIELD_OF_STUDY_CATALOG } from '@/lib/field-of-study-catalog';
  *
  * Input:  { majors: string[] }  — raw majors the deterministic layer could not place
  * Output: { map: { [rawMajor]: catalogueLabel } }  — only entries the model
- *         resolved to a REAL catalogue row; anything it could not place is omitted
- *         (the caller keeps the raw value, no worse than today).
+ *         resolved to a REAL catalogue row; anything it could not place is
+ *         omitted, so the caller keeps the raw value. For an intern posting the
+ *         caller's apply-time gate (internApplyGaps) then BLOCKS that raw value
+ *         rather than dispatch it into the closed dropdown.
  *
  * The model NEVER invents: the output is validated against the catalogue, so a
  * hallucinated major is dropped rather than sent to a real application.
