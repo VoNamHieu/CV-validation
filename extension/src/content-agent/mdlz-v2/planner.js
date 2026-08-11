@@ -98,11 +98,16 @@ export const SECTIONS = [
             // want is the MAJOR only — never `|| e.degree`. A degree ("B.B.A.")
             // is a qualification, not a major, and is not on Workday's closed
             // Field-of-Study catalogue, so falling back to it types a value the
-            // search cannot match and gaps the page. The FE resolves + gates the
-            // major (catalogue-valid or the intern apply is blocked before it is
-            // dispatched), so an empty want here means "leave it for the review",
-            // not "substitute the degree".
-            { id: 'formField-fieldOfStudy', want: e.field_of_study, optional: true, whenPresent: true },
+            // search cannot match and gaps the page.
+            //
+            // NOT optional, for the same reason GPA is not: where this field
+            // RENDERS it is REQUIRED (measured on the intern form), so an empty
+            // major must surface as a GAP the candidate fills. `optional: true`
+            // used to make an empty field_of_study produce NO task — no type, no
+            // search, no gap — so the agent "did nothing" on a field the form
+            // still demanded. whenPresent keeps it off the executive pages that
+            // never render it, so this does not touch the executive flow.
+            { id: 'formField-fieldOfStudy', want: e.field_of_study, whenPresent: true },
             // "Overall Result (GPA)" — REQUIRED on the intern postings (measured
             // R-172558 Marketing Intern, 2026-08-11) and absent on the executive
             // ones the flow was built against, which is exactly why it is gated on
