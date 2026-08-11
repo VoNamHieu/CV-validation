@@ -102,8 +102,46 @@ export const CATALOGS = {
         'Telephone - Personal',
     ],
 
-    // Still to scan (step 2 of the v1-retirement plan):
-    //   · Gender, Race/Ethnicity (Voluntary Disclosures) — closed sets already
-    //     driven by ladders; snapshot them on a run that reaches Disclosures.
-    //     (Not reachable this trip without save-advancing through My Experience.)
+    /**
+     * formField-gender — button listbox, 4 options after "Select One". Measured
+     * live on the intern flow (R-172558, 2026-08-11). The decline row is "Not
+     * Specified". This is the exact set the gender translator resolves against:
+     * a stated "Nam" → "Male", "Nữ" → "Female" (see page-disclosures.js
+     * genderVariants / disclosureAnswer). Reference-only — nothing imports this.
+     */
+    gender: [
+        'Female',
+        'Male',
+        'Not Specified',
+        'Other',
+    ],
+
+    /**
+     * formField-ethnicity ("Race/Ethnicity") — button listbox of Vietnam's 54
+     * ethnic groups, each suffixed " (Vietnam)", plus "Others (Vietnam)".
+     * Measured live (R-172558, 2026-08-11): 55 options after "Select One", and
+     * NO decline row — which is why a silent profile correctly LEAVES this
+     * optional field blank rather than declining. The profile value "Kinh"
+     * substring-matches "Kinh (Vietnam)", so it is filled from PROFILE with no
+     * translation (this change does not touch the ethnicity matcher).
+     *
+     * VERBATIM: the diacritics, the curly apostrophes (H’Mông / M’Nông /
+     * X’Tiêng), and the " (Vietnam)" suffix are what the form renders.
+     */
+    raceEthnicity: [
+        'Ba Na (Vietnam)', 'Bố Y (Vietnam)', 'Brâu (Vietnam)', 'Bru - Vân Kiều (Vietnam)',
+        'Chăm (Vietnam)', 'Chơ Ro (Vietnam)', 'Chu Ru (Vietnam)', 'Chứt (Vietnam)',
+        'Co (Vietnam)', 'Cơ Ho (Vietnam)', 'Cờ Lao (Vietnam)', 'Cống (Vietnam)',
+        'Cơ Tu (Vietnam)', 'Dao (Vietnam)', 'Ê Đê (Vietnam)', 'Gia Rai (Vietnam)',
+        'Giáy (Vietnam)', 'Giẻ Triêng (Vietnam)', 'Hà Nhì (Vietnam)', 'Hoa (Vietnam)',
+        'Hrê (Vietnam)', 'H’Mông (Vietnam)', 'Kháng (Vietnam)', 'Khơ Me (Vietnam)',
+        'Khơ Mú (Vietnam)', 'Kinh (Vietnam)', 'La Chí (Vietnam)', 'La Ha (Vietnam)',
+        'La Hủ (Vietnam)', 'Lào (Vietnam)', 'Lô Lô (Vietnam)', 'Lự (Vietnam)',
+        'Mạ (Vietnam)', 'Mảng (Vietnam)', 'Mường (Vietnam)', 'M’Nông (Vietnam)',
+        'Ngái (Vietnam)', 'Nùng (Vietnam)', 'Others (Vietnam)', 'Ơ Đu (Vietnam)',
+        'Pà Thẻn (Vietnam)', 'Phù Lá (Vietnam)', 'Pu Péo (Vietnam)', 'Ra Glai (Vietnam)',
+        'Rơ Măm (Vietnam)', 'Sán Chay (Vietnam)', 'Sán Dìu (Vietnam)', 'Si La (Vietnam)',
+        'Tà Ôi (Vietnam)', 'Tày (Vietnam)', 'Thái (Vietnam)', 'Thổ (Vietnam)',
+        'Xinh Mun (Vietnam)', 'Xơ Đăng (Vietnam)', 'X’Tiêng (Vietnam)',
+    ],
 };

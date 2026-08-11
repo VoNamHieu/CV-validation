@@ -67,6 +67,24 @@ export const DECLINE = [
 ];
 
 /**
+ * The candidate's stated gender, spoken in whatever language the tenant's list
+ * uses. A VN candidate writes "Nam"/"Nữ"; a US-styled list renders Male/Female
+ * while a VN list renders Nam/Nữ — so the same stated value must be tried in
+ * each, and the label finally picked is always the tenant's OWN rendered option.
+ *
+ * This is a mirror of recipe.js's genderLadder — the same Nam→male vocabulary,
+ * kept local ON PURPOSE: the v2 engine does not import the v1 recipe module it
+ * is replacing. Empty for anything that is not a plain male/female, so an
+ * "Other"/"Khác"/unrecognised value is left to the decline path, never guessed.
+ */
+export function genderVariants(stated) {
+    const g = String(stated || '').trim().toLowerCase();
+    if (/^(m|male|nam)$/.test(g)) return ['Male', 'Nam', 'Man'];
+    if (/^(f|female|nữ|nu)$/.test(g)) return ['Female', 'Nữ', 'Woman'];
+    return [];
+}
+
+/**
  * What to say, and whose answer it is.
  *
  * Profile first — that is the candidate speaking. Then the decline ladder among
@@ -78,6 +96,18 @@ export function disclosureAnswer(kind, offered, profile) {
         const hit = offered.find((o) => fold(o) === fold(own))
             || offered.find((o) => fold(o).includes(fold(own)));
         if (hit) return { value: hit, source: 'PROFILE' };
+        // Gender only: the SAME stated gender in the tenant's language, so a
+        // candidate who wrote "Nam" registers as this list's "Male" (or "Nam"
+        // on a VN list). EXACT match, so "man" can never substring-hit "woman";
+        // the value returned is the tenant's own label. This states nothing the
+        // candidate did not — it is their gender, translated — so it is tagged
+        // PROFILE and the SUBSTANTIVE belt admits it. Ethnicity gets no ladder.
+        if (kind === 'gender') {
+            for (const variant of genderVariants(own)) {
+                const g = offered.find((o) => fold(o) === fold(variant));
+                if (g) return { value: g, source: 'PROFILE' };
+            }
+        }
     }
     for (const rung of DECLINE) {
         const hit = offered.find((o) => fold(o) === fold(rung))

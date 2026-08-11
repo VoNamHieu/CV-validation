@@ -104,6 +104,65 @@ describe('the candidate\'s own statement is the only substantive answer', () => 
     });
 });
 
+describe('a stated Vietnamese gender is spoken in the tenant\'s own words', () => {
+    // The gap this closes: a VN candidate writes "Nam"/"Nữ", but a US-styled
+    // list renders Male/Female — so their OWN answer used to fall through to a
+    // decline. The value picked is always the tenant's rendered label, and it
+    // stays PROFILE (their statement, translated), so the substantive belt
+    // admits it. disclosureAnswer is pure, so these assert it directly.
+    const MDLZ = ['Female', 'Male', 'Not Specified', 'Other'];
+    const VN = ['Nam', 'Nữ', 'Không muốn trả lời'];
+
+    test('Nam registers as this list\'s Male', () => {
+        assert.deepEqual(p5.disclosureAnswer('gender', MDLZ, { gender: 'Nam' }),
+            { value: 'Male', source: 'PROFILE' });
+    });
+
+    test('Nữ registers as Female', () => {
+        assert.deepEqual(p5.disclosureAnswer('gender', MDLZ, { gender: 'Nữ' }),
+            { value: 'Female', source: 'PROFILE' });
+    });
+
+    test('but on a VN list the tenant\'s own "Nam" is picked, not "Male"', () => {
+        assert.deepEqual(p5.disclosureAnswer('gender', VN, { gender: 'Nam' }),
+            { value: 'Nam', source: 'PROFILE' });
+    });
+
+    test('a male on a Man/Woman list picks Man — exact match, never Woman', () => {
+        assert.deepEqual(p5.disclosureAnswer('gender', ['Man', 'Woman', 'Not Specified'], { gender: 'Nam' }),
+            { value: 'Man', source: 'PROFILE' });
+        assert.deepEqual(p5.disclosureAnswer('gender', ['Man', 'Woman', 'Not Specified'], { gender: 'Nữ' }),
+            { value: 'Woman', source: 'PROFILE' });
+    });
+
+    test('the substring hazard is closed: a male on a Woman-only list declines', () => {
+        // "woman".includes("man") — an includes() match would misgender. Exact
+        // match means Nam finds nothing here and declines, never picks Woman.
+        const r = p5.disclosureAnswer('gender', ['Woman', 'Not Specified'], { gender: 'Nam' });
+        assert.equal(r.value, 'Not Specified');
+    });
+
+    test('an unrecognised value is never guessed — it declines', () => {
+        // "Khác" is not a plain male/female; the ladder is empty, so it falls to
+        // the decline rung rather than being mapped to Male/Female/Other.
+        const r = p5.disclosureAnswer('gender', MDLZ, { gender: 'Khác' });
+        assert.equal(r.value, 'Not Specified');
+        assert.equal(r.source, 'AGENT_DEFAULT');
+    });
+
+    test('an empty gender does not translate — it declines', () => {
+        assert.equal(p5.disclosureAnswer('gender', MDLZ, { gender: '' }).source, 'AGENT_DEFAULT');
+    });
+
+    test('ethnicity gets no ladder: Kinh matches Kinh, and nothing else is mapped', () => {
+        assert.deepEqual(p5.disclosureAnswer('ethnicity', ['Kinh', 'Hoa', 'Tày'], { ethnicity: 'Kinh' }),
+            { value: 'Kinh', source: 'PROFILE' });
+        // A race-category list has no equivalent for Kinh and no decline row —
+        // the field is left, exactly as before this change.
+        assert.equal(p5.disclosureAnswer('ethnicity', ['Asian', 'White', 'Black'], { ethnicity: 'Kinh' }), null);
+    });
+});
+
 describe('the consent boundary', () => {
     test('the terms box is ticked and the marketing box is not', async () => {
         await run({});
