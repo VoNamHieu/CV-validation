@@ -739,7 +739,7 @@ export default function StepEditCv() {
         const internGaps = isInternJob(currentEntry) && resolvedCv ? internApplyGaps(resolvedCv) : [];
         if (internGaps.length) {
             setAutoApplyStatus('error');
-            setAutoApplyMessage(`Vị trí thực tập chưa đủ điều kiện (${internGaps.join(', ')}) — điền GPA ở "Thông tin cá nhân", chọn Ngành học trong danh mục, rồi chạy lại.`);
+            setAutoApplyMessage(`Vị trí thực tập chưa đủ điều kiện (${internGaps.join(', ')}) — điền GPA + Ngành học ở "Thông tin cá nhân" rồi chạy lại.`);
             return;
         }
 
@@ -925,7 +925,7 @@ export default function StepEditCv() {
 
         const internNote = internBlocked.length
             ? `${internBlocked.length} vị trí thực tập còn thiếu thông tin bắt buộc (${internBlocked.slice(0, 2).join('; ')}${internBlocked.length > 2 ? '…' : ''}). `
-                + 'Điền GPA + chọn Ngành học trong danh mục rồi chạy lại.'
+                + 'Điền GPA + Ngành học ở "Thông tin cá nhân" rồi chạy lại.'
             : '';
         if (jobs.length === 0) {
             setAutoApplyMessage(internNote || 'Không tạo được file CV cho công việc nào — hãy bấm tối ưu lại rồi thử lại.');
@@ -1069,8 +1069,8 @@ export default function StepEditCv() {
         }
 
         const internNote = internBlocked.length
-            ? `${internBlocked.length} vị trí thực tập còn thiếu GPA / Ngành học chưa khớp danh mục `
-                + `(${internBlocked.slice(0, 2).join('; ')}${internBlocked.length > 2 ? '…' : ''}) — điền GPA + chọn Ngành học trong danh mục rồi chạy lại.`
+            ? `${internBlocked.length} vị trí thực tập còn thiếu GPA / Ngành học `
+                + `(${internBlocked.slice(0, 2).join('; ')}${internBlocked.length > 2 ? '…' : ''}) — điền GPA + Ngành học ở "Thông tin cá nhân" rồi chạy lại.`
             : '';
         // 2. Hand off to the extension's existing batch path with embedded CV files.
         if (jobs.length === 0) {
@@ -2869,6 +2869,9 @@ export function PersonalInfoSection({
                     <ProfileInput label="Điểm TB (GPA)" value={cv.education?.[0]?.gpa ?? ''}
                         onChange={(v) => patchEducation0({ gpa: v })} required={internRelevant}
                         placeholder="VD: 3.6 / 8.5 — form thực tập bắt buộc" />
+                    <ProfileInput label="Ngành học" value={cv.education?.[0]?.field_of_study ?? ''}
+                        onChange={(v) => patchEducation0({ field_of_study: v })} required={internRelevant}
+                        placeholder="VD: Marketing — ngành (khác bằng cấp), form thực tập bắt buộc" />
 
                     {/* ── Preferences ── */}
                     <ProfileInput label="Địa điểm mong muốn" value={preferences.desired_locations}
