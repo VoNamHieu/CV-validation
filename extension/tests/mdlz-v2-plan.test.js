@@ -28,6 +28,7 @@ let PAGE_LOCK;
 let isForgiven;
 let isPageBlockingTask;
 let DEVELOPER_FATAL;
+let watchdog;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, Math.min(ms, 12)));
 const WORK = '[data-automation-id="formField-jobTitle"]';
@@ -70,6 +71,7 @@ before(async () => {
     rowlib = await import('../src/content-agent/mdlz-v2/row.js');
     v2 = await import('../src/content-agent/mdlz-v2/index.js');
     ({ RESULT, PAGE_LOCK, isForgiven, isPageBlockingTask, DEVELOPER_FATAL } = await import('../src/content-agent/mdlz-v2/config.js'));
+    watchdog = await import('../src/content-agent/mdlz-v2/interaction-watchdog.js');
     // The flag is off by default and read from chrome.storage; this is a page
     // where it has been turned on.
     globalThis.chrome = { storage: { local: { get: (_k, cb) => cb({ copoMdlzV2: true }) } } };
@@ -82,6 +84,7 @@ beforeEach(() => {
     dom.document.body.children = [];
     dom.document.activeElement = dom.document.body;
     globalThis.window[PAGE_LOCK] = null;
+    watchdog.forgetInteractionStuck();   // the interaction stuck-counts live on window; no bleed between tests
     page = buildHostilePage(dom.document);
 });
 
@@ -635,11 +638,11 @@ describe('the multi-pass interaction watchdog — a stuck widget is resolved, no
     test('an OPTIONAL widget stuck in interaction 3 passes RUNNING is skipped — not before', () => {
         const store = {};
         const mk = () => ledgerOf([{ id: 'skills', optional: true, result: RESULT.OPEN_TIMEOUT }]);
-        const l1 = mk(); v2.interactionWatchdog(l1, 'MY_EXPERIENCE', store);
+        const l1 = mk(); watchdog.interactionWatchdog(l1, 'MY_EXPERIENCE', store);
         assert.equal(l1.tasks[0].result, RESULT.OPEN_TIMEOUT, 'pass 1: left to retry (may work next pass)');
-        const l2 = mk(); v2.interactionWatchdog(l2, 'MY_EXPERIENCE', store);
+        const l2 = mk(); watchdog.interactionWatchdog(l2, 'MY_EXPERIENCE', store);
         assert.equal(l2.tasks[0].result, RESULT.OPEN_TIMEOUT, 'pass 2: still retrying');
-        const l3 = mk(); const skipped = v2.interactionWatchdog(l3, 'MY_EXPERIENCE', store);
+        const l3 = mk(); const skipped = watchdog.interactionWatchdog(l3, 'MY_EXPERIENCE', store);
         assert.equal(l3.tasks[0].result, RESULT.SKIPPED_OPTIONAL, 'pass 3: resolved');
         assert.deepEqual(skipped, ['skills']);
         // and now the page can complete OVER it, instead of looping to the cap
@@ -650,18 +653,18 @@ describe('the multi-pass interaction watchdog — a stuck widget is resolved, no
         const store = {};
         for (let i = 0; i < 5; i++) {
             const l = ledgerOf([{ id: 'degree', optional: false, result: RESULT.OPEN_TIMEOUT }]);
-            v2.interactionWatchdog(l, 'MY_EXPERIENCE', store);
+            watchdog.interactionWatchdog(l, 'MY_EXPERIENCE', store);
             assert.equal(l.tasks[0].result, RESULT.OPEN_TIMEOUT, `pass ${i + 1}: required stays interaction`);
         }
     });
 
     test('a settled pass in between RESETS the count — only CONSECUTIVE stuck passes resolve', () => {
         const store = {};
-        v2.interactionWatchdog(ledgerOf([{ id: 'skills', optional: true, result: RESULT.OPEN_TIMEOUT }]), 'P', store);
-        v2.interactionWatchdog(ledgerOf([{ id: 'skills', optional: true, result: RESULT.OPEN_TIMEOUT }]), 'P', store);
-        v2.interactionWatchdog(ledgerOf([{ id: 'skills', optional: true, result: RESULT.SATISFIED }]), 'P', store);   // worked → reset
+        watchdog.interactionWatchdog(ledgerOf([{ id: 'skills', optional: true, result: RESULT.OPEN_TIMEOUT }]), 'P', store);
+        watchdog.interactionWatchdog(ledgerOf([{ id: 'skills', optional: true, result: RESULT.OPEN_TIMEOUT }]), 'P', store);
+        watchdog.interactionWatchdog(ledgerOf([{ id: 'skills', optional: true, result: RESULT.SATISFIED }]), 'P', store);   // worked → reset
         const l = ledgerOf([{ id: 'skills', optional: true, result: RESULT.OPEN_TIMEOUT }]);
-        v2.interactionWatchdog(l, 'P', store);
+        watchdog.interactionWatchdog(l, 'P', store);
         assert.equal(l.tasks[0].result, RESULT.OPEN_TIMEOUT, 'one stuck pass after a reset, not three');
     });
 
@@ -671,7 +674,7 @@ describe('the multi-pass interaction watchdog — a stuck widget is resolved, no
             let last;
             for (let i = 0; i < 3; i++) {
                 last = ledgerOf([{ id: 'x', optional: true, result: r }]);
-                v2.interactionWatchdog(last, 'P', store);
+                watchdog.interactionWatchdog(last, 'P', store);
             }
             assert.equal(last.tasks[0].result, RESULT.SKIPPED_OPTIONAL, `${r} resolves after 3 passes`);
         }
@@ -681,14 +684,56 @@ describe('the multi-pass interaction watchdog — a stuck widget is resolved, no
         const store = {};
         // one field stuck all three passes; another stuck only the last
         for (let i = 0; i < 3; i++) {
-            v2.interactionWatchdog(ledgerOf([{ id: 'skills', optional: true, result: RESULT.OPEN_TIMEOUT }]), 'P', store);
+            watchdog.interactionWatchdog(ledgerOf([{ id: 'skills', optional: true, result: RESULT.OPEN_TIMEOUT }]), 'P', store);
         }
         const l = ledgerOf([
             { id: 'skills', optional: true, result: RESULT.OPEN_TIMEOUT },
             { id: 'other', optional: true, result: RESULT.OPEN_TIMEOUT },
         ]);
-        v2.interactionWatchdog(l, 'P', store);
+        watchdog.interactionWatchdog(l, 'P', store);
         assert.equal(l.tasks[0].result, RESULT.SKIPPED_OPTIONAL, 'the long-stuck one resolves');
         assert.equal(l.tasks[1].result, RESULT.OPEN_TIMEOUT, 'the freshly-stuck one is still retrying');
+    });
+
+    test('a task ABSENT from a pass has its streak DROPPED — not carried across the gap', () => {
+        // The bug: reset only fired when the task reappeared SETTLED. A task that
+        // vanished from the plan for a pass (page did not render/plan it) kept its
+        // count, so "fail ×2, gone, fail ×1" wrongly counted as the third strike.
+        const store = {};
+        const stuck = () => ledgerOf([{ id: 'skills', optional: true, result: RESULT.OPEN_TIMEOUT }]);
+        watchdog.interactionWatchdog(stuck(), 'MY_EXPERIENCE', store);   // 1
+        watchdog.interactionWatchdog(stuck(), 'MY_EXPERIENCE', store);   // 2
+        // a pass where Skills was not even planned (absent from the ledger)
+        watchdog.interactionWatchdog(ledgerOf([{ id: 'jobTitle', result: RESULT.SATISFIED }]), 'MY_EXPERIENCE', store);
+        assert.equal(store['MY_EXPERIENCE::skills'], undefined, 'the absent task is dropped, not held at 2');
+        const back = stuck();
+        watchdog.interactionWatchdog(back, 'MY_EXPERIENCE', store);
+        assert.equal(back.tasks[0].result, RESULT.OPEN_TIMEOUT, 'one stuck pass after the gap — its FIRST, not its third');
+    });
+
+    test('leaving the page and returning starts the streak over', () => {
+        // forgetInteractionStuck() is what observePageState calls on a page-NAME
+        // change; without it a return to My Experience would resume a stale streak.
+        watchdog.forgetInteractionStuck();
+        const stuck = () => ledgerOf([{ id: 'skills', optional: true, result: RESULT.OPEN_TIMEOUT }]);
+        watchdog.interactionWatchdog(stuck(), 'MY_EXPERIENCE', watchdog.interactionStore());
+        watchdog.interactionWatchdog(stuck(), 'MY_EXPERIENCE', watchdog.interactionStore());   // count 2 — one away from skip
+        watchdog.forgetInteractionStuck();   // ← navigation away, then back
+        const back = stuck();
+        watchdog.interactionWatchdog(back, 'MY_EXPERIENCE', watchdog.interactionStore());
+        assert.equal(back.tasks[0].result, RESULT.OPEN_TIMEOUT, 'the return is a fresh streak, not resumed at 2');
+    });
+
+    test('a new application in the same tab does not inherit the old run\'s streak', () => {
+        // Same mechanism: the page name changes on the way to the new
+        // application's My Experience, clearing the window store.
+        watchdog.forgetInteractionStuck();
+        const stuck = () => ledgerOf([{ id: 'skills', optional: true, result: RESULT.OPEN_TIMEOUT }]);
+        watchdog.interactionWatchdog(stuck(), 'MY_EXPERIENCE', watchdog.interactionStore());
+        watchdog.interactionWatchdog(stuck(), 'MY_EXPERIENCE', watchdog.interactionStore());   // application A: count 2
+        watchdog.forgetInteractionStuck();   // ← A finished / navigated away
+        const appB = stuck();
+        watchdog.interactionWatchdog(appB, 'MY_EXPERIENCE', watchdog.interactionStore());
+        assert.equal(appB.tasks[0].result, RESULT.OPEN_TIMEOUT, 'application B starts from zero');
     });
 });

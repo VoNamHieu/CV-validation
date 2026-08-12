@@ -23,6 +23,7 @@
  */
 
 import { STEP } from './config.js';
+import { forgetInteractionStuck } from './interaction-watchdog.js';
 import { observeStep, pageFingerprint, vis } from './page-observer.js';
 import { trace } from '../trace.js';
 
@@ -212,7 +213,12 @@ export async function observePageState(ctx = {}) {
     const r = await readiness(ctx);
     if (_lastPage && _lastPage !== r.page) {
         _lastPage = r.page;
+        // A page change is a clean break for both kinds of page-scoped memory: a
+        // catalogue refusal, and the interaction stuck-counts (or a return to My
+        // Experience, or a new application in the same tab, would resume a stale
+        // streak and skip an optional field on its first failure).
         try { (await import('./executors.js')).forgetRefusals(); } catch { /* noop */ }
+        forgetInteractionStuck();
     } else { _lastPage = r.page; }
     const ours = owns(r.page);
     if (ours) claimPage(r.page); else releasePage();
