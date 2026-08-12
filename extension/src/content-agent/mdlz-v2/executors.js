@@ -363,7 +363,17 @@ async function pickAcrossList(lease, want, { sleep, maxWindows = 24 } = {}) {
         const by = Date.now() + 4000;
         let prevLen = -1;
         while (Date.now() < by) {
-            if (!sc) sc = optionScroller(visibleOptions()[0]);
+            // RE-RESOLVE when null OR DETACHED, not only when null. The list
+            // opens on its initial rows (measured: popup.open options:3), and
+            // when the search results land Workday PORTALS A NEW
+            // activeListContainer — the node captured at entry is detached. The
+            // old code re-resolved only `if (!sc)`, so a stale-but-non-null sc
+            // was read forever: readVirtualItems returned null every 200ms while
+            // the LIVE container held all 31 items on a fresh node (proved
+            // 2026-08-13 — optionScroller+readVirtualItems find 31 when run
+            // against the settled list, itemsLen:null only mid-search). That
+            // null is the whole "via:labels" fallback and the 11/16 misses.
+            if (!sc || sc.isConnected === false) sc = optionScroller(visibleOptions()[0]);
             declared = readDeclared();
             items = sc ? readVirtualItems(sc) : null;
             const len = items ? items.length : 0;
