@@ -359,21 +359,26 @@ async function pickAcrossList(lease, want, { sleep, maxWindows = 24 } = {}) {
     };
     let declared = 0;
     let items = sc ? readVirtualItems(sc) : null;
+    let sawScChange = false;   // the container was swapped mid-search (stale-sc)
+    let sawHidden = false;     // the search ran in a background tab (throttled render)
     {
         const by = Date.now() + 4000;
         let prevLen = -1;
         while (Date.now() < by) {
-            // RE-RESOLVE when null OR DETACHED, not only when null. The list
-            // opens on its initial rows (measured: popup.open options:3), and
-            // when the search results land Workday PORTALS A NEW
-            // activeListContainer — the node captured at entry is detached. The
-            // old code re-resolved only `if (!sc)`, so a stale-but-non-null sc
-            // was read forever: readVirtualItems returned null every 200ms while
-            // the LIVE container held all 31 items on a fresh node (proved
-            // 2026-08-13 — optionScroller+readVirtualItems find 31 when run
-            // against the settled list, itemsLen:null only mid-search). That
-            // null is the whole "via:labels" fallback and the 11/16 misses.
-            if (!sc || sc.isConnected === false) sc = optionScroller(visibleOptions()[0]);
+            // TRACK THE CURRENT ACTIVE LIST EVERY ITERATION — not the node
+            // captured at entry, and not merely "re-resolve when null/detached".
+            // The list opens on its initial rows (measured: popup.open options:3);
+            // when the results land Workday swaps the container, and the old node
+            // can stay isConnected:true through a transition while no longer being
+            // the active list — so a stale sc was read for the whole budget and
+            // readVirtualItems returned null while the LIVE list held every item.
+            // Re-resolving from the current visibleOptions each pass follows the
+            // list wherever it moves; update ONLY when one is found, so a momentary
+            // empty read never nulls a good sc.
+            const cur = optionScroller(visibleOptions()[0]);
+            if (cur && cur !== sc) sawScChange = true;
+            if (cur) sc = cur;
+            if (typeof document !== 'undefined' && document.hidden) sawHidden = true;
             declared = readDeclared();
             items = sc ? readVirtualItems(sc) : null;
             const len = items ? items.length : 0;
@@ -383,6 +388,28 @@ async function pickAcrossList(lease, want, { sleep, maxWindows = 24 } = {}) {
             await nap(200);
         }
     }
+
+    // ONE LAST FIBER READ on the CURRENT list before falling to the DOM scroll.
+    // The array can populate a beat after the budget expires — a slow render, or
+    // a BACKGROUND-THROTTLED one: measured (R-172396) the whole search ran while
+    // the tab was hidden (04:35:56 hidden → 04:36:22 search → 04:36:44 visible →
+    // 04:36:46 miss), so the wait ended with the fiber still empty and only then
+    // did the data arrive. Reading the current container once more here catches
+    // it, instead of scrolling the DOM slowly and lossily for nothing.
+    if (!items || (declared > 0 && items.length < declared)) {
+        const cur = optionScroller(visibleOptions()[0]);
+        if (cur) { if (cur !== sc) sawScChange = true; sc = cur; items = readVirtualItems(sc); }
+    }
+    // Tells the two failure modes apart on the next live run: scChanged → the
+    // container was swapped (stale-sc); hidden → a background-tab search. Either
+    // way `items` should now be the whole list.
+    trace('mdlz.skill.fiber', {
+        itemsLen: items?.length ?? null,
+        declared,
+        scChanged: sawScChange,
+        hidden: sawHidden,
+        scConnected: !!sc?.isConnected,
+    });
 
     // A read is only COMPLETE once the item array is at least as long as the
     // count the header declared. Below that the answer may simply not be in the
