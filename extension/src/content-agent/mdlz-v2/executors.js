@@ -1002,19 +1002,45 @@ const searchSelect = {
             pressEnter(t);
         };
         const r = await withList(trigger, async () => {
-            let answered = await waitForResults(baseline, { sleep: ctx.sleep, budgetMs: ctx.searchMs || 6000 });
-            if (!answered) {
-                pressEnter(trigger);
-                answered = await waitForResults(baseline, { sleep: ctx.sleep, budgetMs: 4000 });
-            }
-            if (!answered) return { result: RESULT.OPEN_TIMEOUT, reason: 'the search never answered' };
+            // Watch the CHIP and the results in the SAME wait. A one-result query
+            // commits on Enter and CLOSES the list before the results can ever
+            // settle — MEASURED LIVE (R-172558, 2026-08-13: on commit the search
+            // box clears and the option list closes) — so waiting only for the
+            // list to settle burned the whole search budget (~searchMs) on a field
+            // that had already succeeded. The chip is the truth; the results only
+            // matter when NO chip arrives (several rows → click the exact one).
+            // The settle rule (the same non-empty key read twice) is kept intact
+            // for that click path — a half-rendered list must not be clicked.
+            const nap = (ms) => (ctx.sleep ? ctx.sleep(ms) : new Promise((res) => setTimeout(res, ms)));
+            const raceCommitOrResults = async (budgetMs) => {
+                const by = Date.now() + budgetMs;
+                let candidate = null;
+                for (;;) {
+                    if (this.satisfied(f, term)) return { committed: true };
+                    const now = resultsKey();
+                    if (now && now !== baseline) {
+                        if (now === candidate) return { settled: now };
+                        candidate = now;
+                    }
+                    if (Date.now() >= by) return { settled: candidate };   // one sighting beats none
+                    await nap(150);
+                }
+            };
 
-            // ONE result → Enter already committed it. Clicking the now-selected
-            // row again would DESELECT it, so proving the chip is the whole job.
-            if (await until(() => this.satisfied(f, term), { sleep: ctx.sleep, budgetMs: ctx.commitMs || 1200 })) {
+            let outcome = await raceCommitOrResults(ctx.searchMs || 6000);
+            if (outcome.committed) {
                 trace('mdlz.select.enter-commit', { field: f.name, term });
                 return { result: RESULT.COMMITTED };
             }
+            if (!outcome.settled) {
+                pressEnter(trigger);
+                outcome = await raceCommitOrResults(4000);
+                if (outcome.committed) {
+                    trace('mdlz.select.enter-commit', { field: f.name, term });
+                    return { result: RESULT.COMMITTED };
+                }
+            }
+            if (!outcome.settled) return { result: RESULT.OPEN_TIMEOUT, reason: 'the search never answered' };
 
             // Several results → filtered, nothing committed. Only the EXACT row
             // is an answer on a closed taxonomy; near-matches are how a wrong
