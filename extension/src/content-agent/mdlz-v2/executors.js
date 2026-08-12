@@ -766,7 +766,14 @@ const text = {
         const nap = napper(ctx.sleep);
         const watchUntil = Date.now() + (ctx.stableMs || 250);
         while (Date.now() < watchUntil) {
-            await nap(40);
+            // 50, NOT 40: dom.js sleep() bypasses the AGENT_SLEEP worker clock for
+            // ms < 50 ("too short to matter") and hands back a bare setTimeout —
+            // which a HIDDEN tab throttles to ~one fire a MINUTE. Native commits
+            // dominate My Experience, so a 40ms poll here turned each into a ~60s
+            // stall (measured build 9d8925a: My Experience 187s of a 251s run). At
+            // 50 the wait borrows the worker clock and the poll stays ~50ms while
+            // hidden, keeping this a periodic wall-clock watch, not a single 60s one.
+            await nap(50);
             if (now() !== fold(want)) return { result: RESULT.COMMIT_FAILED, reason: 'value did not stick' };
         }
         // A row error is checked AFTER the field has been let go of, because
