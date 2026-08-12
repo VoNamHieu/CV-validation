@@ -448,7 +448,12 @@ async function pickAcrossList(lease, want, { sleep, maxWindows = 24 } = {}) {
     // deferred by visibility — so it is the one complete, visibility-independent
     // read. Fed into the SAME index-based click below (the tail row still has to
     // be scrolled into view to click, best-effort while hidden).
-    if (!items || (declared > 0 && items.length < declared)) {
+    // `sc` gates this: the API read is the FALLBACK for a scroller-based fiber
+    // read that came up short, so it only fires where a virtualised scroller
+    // exists. That is also what keeps it out of the harness (plain-div lists,
+    // no scroller → sc is null → the DOM label path handles it), where a live
+    // `fetch` to the tenant origin would otherwise run in the test.
+    if (sc && (!items || (declared > 0 && items.length < declared))) {
         const api = await fetchSkillOptions(want);
         if (api && api.length) { items = api; declared = api.length; sawApi = true; }
     }
