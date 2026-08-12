@@ -271,6 +271,61 @@ export const SEMANTIC = new Set([
     RESULT.CONTRACT_ERROR,
 ]);
 
+/**
+ * A developer's bug, not the candidate's data and not a busy page: a chip-search
+ * field reached the executor with no declared capability/cardinality. It is in
+ * SEMANTIC (no retry, no model can fix it) but — unlike every other SEMANTIC
+ * outcome — it is NEVER forgiven on an optional field. Forgiving it is exactly
+ * how a forgotten contract would advance the page in silence (Skills is both
+ * optional AND chip-search, so this is reachable, not hypothetical). Every
+ * surface that reports it must word it as an internal error, never a gap the
+ * candidate fills.
+ */
+export const DEVELOPER_FATAL = new Set([RESULT.CONTRACT_ERROR]);
+
+/**
+ * The outcomes that TERMINATE a task — no pass, no defer, no model moves them.
+ * Canonical here so every layer (the completion check, the blocker list, the
+ * outer loop's escalation budget) asks the SAME question. A private copy of this
+ * set in the router was the third opinion that let one layer advance a page
+ * while another called it blocked. Interaction states are absent on purpose: a
+ * blocked/hydrating field is retryable — unsettled, but not a terminal blocker.
+ */
+export const TERMINAL = new Set([
+    RESULT.OPTION_NOT_FOUND,
+    RESULT.AMBIGUOUS,
+    RESULT.COMMIT_FAILED,
+    RESULT.USER_REQUIRED,
+    RESULT.CONTRACT_ERROR,
+]);
+
+/**
+ * An OPTIONAL field's semantic miss the page may complete OVER — the catalogue
+ * did not hold its value and no one required it (measured on Skills, R-174102,
+ * whose list answers "No Items." to everything). A DEVELOPER_FATAL outcome is
+ * never forgiven, even here: a forgotten contract is a bug to fix, not a field
+ * to skip.
+ */
+export function isForgiven(task) {
+    return !!task?.optional
+        && SEMANTIC.has(task?.result)
+        && !DEVELOPER_FATAL.has(task?.result);
+}
+
+/**
+ * Does this task keep the page from finishing in a way only a HUMAN or a
+ * DEVELOPER can clear — the one question the completion check, the blocker list
+ * and the escalation budget must all answer alike. A developer-fatal contract
+ * error always blocks (even optional); an optional field's forgivable semantic
+ * miss never does; otherwise a terminal outcome blocks and a still-working one
+ * (satisfied, hydrating, retryable) does not.
+ */
+export function isPageBlockingTask(task) {
+    if (DEVELOPER_FATAL.has(task?.result)) return true;
+    if (isForgiven(task)) return false;
+    return TERMINAL.has(task?.result);
+}
+
 // ── Ownership of the page ────────────────────────────────────────────────
 /**
  * The lock that decides who may touch this document — and it is v1's own key,

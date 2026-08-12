@@ -223,3 +223,46 @@ describe('on a page v2 owns, v1 never runs', () => {
         assert.equal(route({ pageIsV2Owned: false }, new Error('boom')).useV1, true);
     });
 });
+
+describe('blockersFrom asks the SAME question every other layer asks', () => {
+    const blockers = (v2) => router.blockersFrom(v2);
+
+    test('an OPTIONAL field the catalogue cannot answer is NOT a blocker', () => {
+        // pageComplete forgives it, so the page advances OVER it — and the outer
+        // loop's escalation streak (which reads this list) must not treat it as a
+        // reason to stop. Before this, the two layers disagreed: pageComplete said
+        // complete, blockersFrom still listed Skills, and a flaky navigation could
+        // trip the streak on a field nobody required.
+        const out = blockers({ ledger: { tasks: [
+            { id: 'skills', optional: true, result: 'OPTION_NOT_FOUND' },
+            { id: 'work[x].jobTitle', result: 'SATISFIED' },
+        ] } });
+        assert.equal(out.length, 0);
+    });
+
+    test('a REQUIRED terminal failure IS a blocker, and is not flagged developer', () => {
+        const out = blockers({ ledger: { tasks: [
+            { id: 'education[x].formField-fieldOfStudy', optional: false, result: 'USER_REQUIRED', reason: 'already refused' },
+        ] } });
+        assert.equal(out.length, 1);
+        assert.equal(out[0].developer, false);
+        assert.equal(out[0].source, 'task');
+    });
+
+    test('a CONTRACT_ERROR blocks even when optional, and is flagged developer', () => {
+        const out = blockers({ ledger: { tasks: [
+            { id: 'skills', optional: true, result: 'CONTRACT_ERROR', reason: 'no capability declared' },
+        ] } });
+        assert.equal(out.length, 1);
+        assert.equal(out[0].developer, true, 'the handoff must name the internal contract, never the candidate');
+    });
+
+    test('semantic gaps still ride alongside task blockers', () => {
+        const out = blockers({
+            gaps: [{ label: 'Ngành học', why: 'CV không có' }],
+            ledger: { tasks: [{ id: 'skills', optional: true, result: 'OPTION_NOT_FOUND' }] },
+        });
+        assert.equal(out.length, 1);
+        assert.equal(out[0].source, 'gap');
+    });
+});

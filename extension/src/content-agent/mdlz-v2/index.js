@@ -18,7 +18,7 @@
  * exist yet.
  */
 
-import { ADD_VIA_KEY, FLAG_KEY, RESULT, SEL, SEMANTIC, STEP, isMdlzPage } from './config.js';
+import { ADD_VIA_KEY, FLAG_KEY, RESULT, SEL, STEP, isForgiven, isMdlzPage } from './config.js';
 import { openPopups, orphanOptionCount, pageFingerprint, waitPageReady } from './page-observer.js';
 import { census } from './popup-manager.js';
 import { addRow, answerFromLadder, runField } from './executors.js';
@@ -372,7 +372,7 @@ export async function runMdlzV2(ctx = {}) {
     //
     // A COMMITTED task still holds the page: leaving is done on the strength of
     // what the page SAYS next pass, never on what we just wrote.
-    const settled = (t) => t.result === RESULT.SATISFIED || (t.optional && SEMANTIC.has(t.result));
+    const settled = (t) => t.result === RESULT.SATISFIED || isForgiven(t);
     const quiet = ledger.tasks.length > 0 && ledger.tasks.every(settled);
     let navigation = null;
     // `advance: false` is for a caller that wants the fill and not the move —
@@ -415,10 +415,11 @@ export function pageComplete(ledger, gaps = []) {
         // PAGE. Measured on Skills (R-174102): the employer does not require it
         // and its catalogue answers "No Items." to everything, so holding the
         // application here would mean never advancing over a field nobody asked
-        // for. Only SEMANTIC outcomes are forgiven — an optional field that was
-        // merely blocked or still hydrating may well succeed next pass, and
-        // leaving on that would be leaving early.
-        .filter((t) => !(t.optional && SEMANTIC.has(t.result)));
+        // for. Only an optional field's forgivable semantic miss is waived — a
+        // field merely blocked or still hydrating may succeed next pass (leaving
+        // on that is leaving early), and a CONTRACT_ERROR is a developer bug that
+        // is NEVER waived, even on an optional field (isForgiven excludes it).
+        .filter((t) => !isForgiven(t));
     if (unfinished.length) {
         return { complete: false, reason: `${unfinished[0].id} ended ${unfinished[0].result}`, unfinished };
     }

@@ -1372,12 +1372,28 @@ async function _runAgentLoop(rawProfile) {
                             if ((_lastV2Gaps || []).length > 0) {
                                 _v2BlockedDeferStreak++;
                                 if (_v2BlockedDeferStreak >= V2_BLOCKED_DEFER_BUDGET) {
-                                    const miss = (_lastV2Gaps || []).slice(0, 6).map(gapLabelVi).join(', ');
-                                    trace('advance.v2BlockedEscalate', { streak: _v2BlockedDeferStreak, miss });
+                                    const gaps = _lastV2Gaps || [];
+                                    // A CONTRACT_ERROR is the DEVELOPER'S bug (a chip-search
+                                    // field the plan forgot to declare), not the candidate's
+                                    // data — it must never surface as "cần bạn bổ sung".
+                                    const devGaps = gaps.filter((g) => g.developer);
+                                    trace('advance.v2BlockedEscalate', {
+                                        streak: _v2BlockedDeferStreak,
+                                        developer: devGaps.length,
+                                        miss: gaps.slice(0, 6).map(gapLabelVi).join(', '),
+                                    });
                                     removeProgress();
-                                    showToast(`⚠️ Không qua được bước này — cần bạn bổ sung: ${miss}. Điền nốt rồi bấm tiếp.`, 10000);
-                                    reportResult(false, `Need human: v2 blocked — ${miss}`, 'blocked',
-                                        { blockedReason: 'manual', review: summarizeAnswers(reviewAnswers), fieldGaps: [...fieldGaps.values()] });
+                                    if (devGaps.length) {
+                                        const fields = devGaps.slice(0, 6).map((g) => g.label || g.id || '?').join(', ');
+                                        showToast(`⚠️ Lỗi nội bộ: extension thiếu contract cho field (${fields}). Vui lòng báo đội phát triển.`, 12000);
+                                        reportResult(false, `Developer: v2 field contract missing — ${fields}`, 'failed',
+                                            { review: summarizeAnswers(reviewAnswers), fieldGaps: [...fieldGaps.values()] });
+                                    } else {
+                                        const miss = gaps.slice(0, 6).map(gapLabelVi).join(', ');
+                                        showToast(`⚠️ Không qua được bước này — cần bạn bổ sung: ${miss}. Điền nốt rồi bấm tiếp.`, 10000);
+                                        reportResult(false, `Need human: v2 blocked — ${miss}`, 'blocked',
+                                            { blockedReason: 'manual', review: summarizeAnswers(reviewAnswers), fieldGaps: [...fieldGaps.values()] });
+                                    }
                                     return;
                                 }
                             } else {

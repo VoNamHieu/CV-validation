@@ -18,6 +18,7 @@ import * as generic from './recipe.js';
 import * as mdlzV1 from './recipe-mdlz-v1.js';
 import { rememberCv, runMdlzV2 } from './mdlz-v2/index.js';
 import { pageOwner } from './mdlz-v2/pages.js';
+import { DEVELOPER_FATAL, isPageBlockingTask } from './mdlz-v2/config.js';
 
 const LOCKED = [
     {
@@ -67,17 +68,6 @@ try {
  * other left behind, which is the exact disorder the split exists to end.
  */
 /**
- * Outcomes that mean a HUMAN is needed, as opposed to a widget that was in the
- * way. An interaction failure (popup blocked, page still hydrating, list slow
- * to open) is not a blocker — it is a retry, and treating it as one is what
- * sent a blocked Degree to the model nine seconds at a time.
- */
-// CONTRACT_ERROR is terminal too — but it is the DEVELOPER'S blocker (a
-// chip-search field whose plan declared no capability/cardinality), so its
-// reason string names the internal contract, never the candidate's data.
-const TERMINAL_TASK_RESULTS = new Set(['OPTION_NOT_FOUND', 'AMBIGUOUS', 'COMMIT_FAILED', 'USER_REQUIRED', 'CONTRACT_ERROR']);
-
-/**
  * Everything on this page that stops it being finished, from BOTH places v2
  * records them.
  *
@@ -98,11 +88,19 @@ export function blockersFrom(v2) {
     }
     for (const t of v2?.ledger?.tasks || []) {
         const r = t.result || t.status;
-        if (!TERMINAL_TASK_RESULTS.has(r)) continue;
+        // ONE canonical question — the same predicate pageComplete/quiet and the
+        // outer loop's escalation budget use, so no two layers can disagree about
+        // whether this task blocks the page. An OPTIONAL field's forgivable miss
+        // (Skills the catalogue cannot answer) is NOT a blocker — the page
+        // completes over it, so it must not bump the escalation streak either. A
+        // CONTRACT_ERROR always is, and it is the DEVELOPER'S: tag it so the
+        // handoff names the internal contract, never the candidate's data.
+        if (!isPageBlockingTask({ result: r, optional: t.optional })) continue;
         out.push({
             label: t.id || t.field || '?',
             why: t.reason ? `${r}: ${t.reason}` : r,
             source: 'task',
+            developer: DEVELOPER_FATAL.has(r),
         });
     }
     return out;

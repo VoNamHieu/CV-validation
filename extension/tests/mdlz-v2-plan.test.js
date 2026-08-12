@@ -25,6 +25,9 @@ let rowlib;
 let v2;
 let RESULT;
 let PAGE_LOCK;
+let isForgiven;
+let isPageBlockingTask;
+let DEVELOPER_FATAL;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, Math.min(ms, 12)));
 const WORK = '[data-automation-id="formField-jobTitle"]';
@@ -66,7 +69,7 @@ before(async () => {
     planner = await import('../src/content-agent/mdlz-v2/planner.js');
     rowlib = await import('../src/content-agent/mdlz-v2/row.js');
     v2 = await import('../src/content-agent/mdlz-v2/index.js');
-    ({ RESULT, PAGE_LOCK } = await import('../src/content-agent/mdlz-v2/config.js'));
+    ({ RESULT, PAGE_LOCK, isForgiven, isPageBlockingTask, DEVELOPER_FATAL } = await import('../src/content-agent/mdlz-v2/config.js'));
     // The flag is off by default and read from chrome.storage; this is a page
     // where it has been turned on.
     globalThis.chrome = { storage: { local: { get: (_k, cb) => cb({ copoMdlzV2: true }) } } };
@@ -530,6 +533,17 @@ describe('v2 takes a step it can finish, and hands back one it cannot', () => {
         assert.equal(v2.pageComplete(required, []).complete, false);
     });
 
+    test('a CONTRACT_ERROR is NEVER forgiven — not even on an optional field', () => {
+        // The one SEMANTIC outcome that is the DEVELOPER'S bug, not the
+        // candidate's data. Skills is optional AND chip-search, so if its plan
+        // ever loses its capability/cardinality declaration the executor returns
+        // CONTRACT_ERROR — and forgiving that (as "just an optional field") would
+        // advance the page in silence, the exact thing the guard exists to stop.
+        const optionalContract = { tasks: [{ id: 'skills', optional: true, result: RESULT.CONTRACT_ERROR }] };
+        assert.equal(v2.pageComplete(optionalContract, []).complete, false,
+            'an optional chip-search field with no contract must BLOCK, not advance');
+    });
+
     test('a page finished except for an unanswerable optional field still leaves', async () => {
         // MEASURED (R-174102, 2026-08-09): every field correct, no errors on
         // the form, and the run sat on the page for twelve identical
@@ -565,5 +579,31 @@ describe('v2 takes a step it can finish, and hands back one it cannot', () => {
         assert.equal(r.report.step, 'My Experience');
         assert.equal(typeof r.report.filled, 'number');
         assert.ok(Array.isArray(r.report.answers));
+    });
+});
+
+describe('the canonical task-status predicates — one question, one answer', () => {
+    test('isForgiven: optional semantic miss yes, developer-fatal and required no', () => {
+        assert.equal(isForgiven({ optional: true, result: RESULT.OPTION_NOT_FOUND }), true);
+        assert.equal(isForgiven({ optional: true, result: RESULT.CONTRACT_ERROR }), false,
+            'a contract bug is never an optional field to skip');
+        assert.equal(isForgiven({ optional: false, result: RESULT.OPTION_NOT_FOUND }), false);
+        assert.equal(isForgiven({ optional: true, result: RESULT.BLOCKED_BY_POPUP }), false,
+            'an interaction state is retryable, not forgiven');
+        assert.equal(isForgiven({ optional: true, result: RESULT.SATISFIED }), false);
+    });
+
+    test('isPageBlockingTask: the same verdict pageComplete, blockersFrom and the escalation share', () => {
+        // developer-fatal always blocks, even optional
+        assert.equal(isPageBlockingTask({ optional: true, result: RESULT.CONTRACT_ERROR }), true);
+        // an optional forgivable miss never blocks — must not bump the streak
+        assert.equal(isPageBlockingTask({ optional: true, result: RESULT.OPTION_NOT_FOUND }), false);
+        // a required terminal failure blocks
+        assert.equal(isPageBlockingTask({ optional: false, result: RESULT.USER_REQUIRED }), true);
+        // a still-working / satisfied / retryable task does not block
+        assert.equal(isPageBlockingTask({ result: RESULT.SATISFIED }), false);
+        assert.equal(isPageBlockingTask({ result: RESULT.COMMITTED }), false);
+        assert.equal(isPageBlockingTask({ result: RESULT.WAITING_HYDRATION }), false);
+        assert.ok(DEVELOPER_FATAL.has(RESULT.CONTRACT_ERROR));
     });
 });
