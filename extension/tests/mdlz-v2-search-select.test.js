@@ -97,8 +97,10 @@ describe('searchSelect drives the single-select chip-search end to end', () => {
 
     test('a term with no EXACT row is OPTION_NOT_FOUND — no free chip on a closed list', async () => {
         page.addFieldOfStudy(['Marketing Analytics', 'Digital Marketing', 'Data Science']);
-        // "Marketing" filters to two rows, neither of which IS "Marketing".
-        const r = await exec.runField(field('formField-fieldOfStudy'), 'Marketing', fosCtx());
+        // "Marketing" filters to two rows, neither of which IS "Marketing". A
+        // genuine miss re-searches once (the slow-server guard) and, finding
+        // nothing new, concludes — a short searchMs keeps that second wait brief.
+        const r = await exec.runField(field('formField-fieldOfStudy'), 'Marketing', { ...fosCtx(), searchMs: 400 });
         assert.equal(r.result, RESULT.OPTION_NOT_FOUND);
         assert.deepEqual(page.chipsOn('fieldOfStudy'), [], 'nothing was committed');
     });
@@ -128,5 +130,20 @@ describe('searchSelect drives the single-select chip-search end to end', () => {
         const r = await exec.runField(field('formField-fieldOfStudy'), 'Economics', fosCtx());
         assert.equal(r.result, RESULT.SATISFIED);
         assert.deepEqual(page.chipsOn('fieldOfStudy'), ['Economics'], 'untouched');
+    });
+
+    test('a SLOW server does not cache a false OPTION_NOT_FOUND off the initial list', async () => {
+        // The click opens an initial list (a decoy window that does NOT hold the
+        // term); the server's filtered rows — which DO hold it — land 200ms later,
+        // after the results have settled once. A reader that concluded
+        // OPTION_NOT_FOUND from that first settle would cache a refusal for a term
+        // the search was about to match. The commit must wait out the real result.
+        page.addFieldOfStudy(CATALOGUE, {
+            initialSet: ['Accounting', 'Biology', 'Chemistry'],   // decoy: no "Marketing"
+            searchDelayMs: 200,
+        });
+        const r = await exec.runField(field('formField-fieldOfStudy'), 'Marketing', fosCtx());
+        assert.equal(r.result, RESULT.COMMITTED, 'the slow filtered result is honoured, not the decoy');
+        assert.deepEqual(page.chipsOn('fieldOfStudy'), ['Marketing']);
     });
 });

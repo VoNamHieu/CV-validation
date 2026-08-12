@@ -1012,13 +1012,13 @@ const searchSelect = {
             // The settle rule (the same non-empty key read twice) is kept intact
             // for that click path — a half-rendered list must not be clicked.
             const nap = (ms) => (ctx.sleep ? ctx.sleep(ms) : new Promise((res) => setTimeout(res, ms)));
-            const raceCommitOrResults = async (budgetMs) => {
+            const raceCommitOrResults = async (budgetMs, base = baseline) => {
                 const by = Date.now() + budgetMs;
                 let candidate = null;
                 for (;;) {
                     if (this.satisfied(f, term)) return { committed: true };
                     const now = resultsKey();
-                    if (now && now !== baseline) {
+                    if (now && now !== base) {
                         if (now === candidate) return { settled: now };
                         candidate = now;
                     }
@@ -1045,7 +1045,26 @@ const searchSelect = {
             // Several results → filtered, nothing committed. Only the EXACT row
             // is an answer on a closed taxonomy; near-matches are how a wrong
             // major got onto a real application once already.
-            const exact = visibleOptions().filter((o) => fold(txt(o)) === fold(term));
+            //
+            // But the rows that just settled may be a PRE-SEARCH list — the one a
+            // click opened before the server's filtered rows arrived (measured
+            // concern, R-172558: a slow search lands after the initial list has
+            // settled). Concluding OPTION_NOT_FOUND from that would CACHE a
+            // refusal for a term the search was about to match. So on no exact
+            // row, re-search and wait for the rows to CHANGE from what just
+            // settled before deciding: the slow filtered result surfaces the exact
+            // row; a genuine miss re-settles to nothing new and concludes as
+            // before, one search later.
+            let exact = visibleOptions().filter((o) => fold(txt(o)) === fold(term));
+            if (!exact.length) {
+                pressEnter(trigger);
+                const again = await raceCommitOrResults(ctx.searchMs || 6000, outcome.settled);
+                if (again.committed) {
+                    trace('mdlz.select.enter-commit', { field: f.name, term });
+                    return { result: RESULT.COMMITTED };
+                }
+                exact = visibleOptions().filter((o) => fold(txt(o)) === fold(term));
+            }
             if (!exact.length) {
                 const sample = visibleOptions().map(txt).filter(Boolean).slice(0, 4);
                 return { result: RESULT.OPTION_NOT_FOUND, reason: 'no exact row', sample };

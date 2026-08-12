@@ -353,14 +353,17 @@ export function buildHostilePage(doc, opts = {}) {
                 // Enter alone (measured, Field of Study R-172558). Several rows
                 // filter but commit nothing — the exact row must be clicked.
                 if (f.singleChip && shown.length === 1) commit(f, shown[0]);
-            }, cfg.openMs);
+                // A slow server: the filtered rows land AFTER the list the click
+                // opened has been on the page a while — so a reader that settles
+                // on the initial list would mistake it for the search result.
+            }, cfg.openMs + (f.searchDelayMs || 0));
             return;
         }
         if (!cfg.sticky) closeEveryList();
         // A search prompt answers a TERM. Typing nothing shows nothing, which is
         // what makes the employer's taxonomy searchable rather than browsable.
         let shown = filter === null
-            ? f.catalogue
+            ? (f.initialSet || f.catalogue)   // a click can open an initial list (decoy/window) unlike the search
             : f.catalogue.filter((s) => s.toLowerCase().includes(String(filter).toLowerCase()));
         if (filter !== null && !String(filter).trim()) return;
         // A MULTI-SELECT SEARCH ENDS WITH A CREATE ROW — measured on the live
@@ -465,6 +468,7 @@ export function buildHostilePage(doc, opts = {}) {
     function makeField({
         automationId, tag, catalogue, stamps, label = null, parent = page,
         multi = false, singleChip = false, keepOpenOnCommit = false,
+        initialSet = null, searchDelayMs = 0,
         escapeCloses = true, outsideClickCloses = false,
     }) {
         const wrap = el('div', { 'data-automation-id': automationId }, parent);
@@ -503,6 +507,7 @@ export function buildHostilePage(doc, opts = {}) {
         const guid = tag === 'button' ? el('input', { type: 'text' }, wrap) : null;
         const f = {
             wrap, trigger, chips, catalogue, stamps, multi, singleChip, keepOpenOnCommit, guid,
+            initialSet, searchDelayMs,
             escapeCloses, outsideClickCloses, committed: [],
         };
         trigger.addEventListener('click', () => {
@@ -645,10 +650,11 @@ export function buildHostilePage(doc, opts = {}) {
          * list open after the pick so a test can prove the commit is read from the
          * chip, not from the list closing.
          */
-        addFieldOfStudy(catalogue, { keepOpenOnCommit = false } = {}) {
+        addFieldOfStudy(catalogue, { keepOpenOnCommit = false, initialSet = null, searchDelayMs = 0 } = {}) {
             return addField('fieldOfStudy', {
                 automationId: 'formField-fieldOfStudy', tag: 'input',
                 catalogue, stamps: false, singleChip: true, keepOpenOnCommit,
+                initialSet, searchDelayMs,
             });
         },
         /**
