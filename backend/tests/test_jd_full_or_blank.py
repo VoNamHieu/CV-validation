@@ -98,6 +98,30 @@ async def test_teaser_band_never_crawls_to_garbage(monkeypatch):
     assert await jd_resolver.resolve_full_jd(_URL, existing=teaser) == teaser
 
 
+# ── mondelez: full JD comes from the Workday CXS mirror of applyUrl ──────────
+
+def test_mondelez_cxs_url_derivation(monkeypatch):
+    from app.services.ats_adapters import mondelez
+    called = {}
+
+    def fake_get_json(url):
+        called["url"] = url
+        return {"jobPostingInfo": {"jobDescription": "<p>" + "j" * 300 + "</p>"}}
+    monkeypatch.setattr(mondelez, "_get_json", fake_get_json)
+    out = mondelez._cxs_jd(
+        "https://wd3.myworkdaysite.com/recruiting/mdlz/External/job/"
+        "Ho-Chi-Minh-Vietnam/Marketing-Intern_R-172558")
+    assert called["url"] == (
+        "https://wd3.myworkdaysite.com/wday/cxs/mdlz/External/job/"
+        "Ho-Chi-Minh-Vietnam/Marketing-Intern_R-172558")
+    assert out == "j" * 300
+
+
+def test_mondelez_cxs_non_workday_url_is_blank():
+    from app.services.ats_adapters import mondelez
+    assert mondelez._cxs_jd("https://careers.example.com/job/123") == ""
+
+
 # ── tripwire: no adapter may slice a description inline again ────────────────
 
 def test_no_inline_description_slices_in_adapters():
