@@ -971,8 +971,14 @@ const searchMulti = {
  *     clicked;
  *   · a new commit REPLACES the existing chip (single-select), so a stale chip
  *     is never removed first;
- *   · the taxonomy is CLOSED (327 rows, catalogs.js) — no create row, so a term
- *     the search cannot find exactly is OPTION_NOT_FOUND, never a free chip.
+ *   · the taxonomy is CLOSED (327 majors) — no create row, so a term the search
+ *     cannot find exactly is OPTION_NOT_FOUND, never a free chip. The
+ *     authoritative list lives FE-side (field-of-study-catalog.ts), where a CV
+ *     value is pre-resolved to an exact label before dispatch; it is deliberately
+ *     NOT in catalogs.js (that file is for small closed LISTBOXES like Degree — a
+ *     search-backed field renders only its filtered subset, so a full-list
+ *     snapshot there could not drift-guard anything). This engine matches the
+ *     LIVE rendered options, never a local copy.
  *
  * `want` is ONE string. This is the other reason this engine exists: searchMulti
  * spreads `want` as a list, and a bare string spread into characters — Field of
