@@ -347,7 +347,13 @@ export function buildHostilePage(doc, opts = {}) {
             let shown = f.catalogue.filter((s) => s.toLowerCase().includes(String(filter).toLowerCase()));
             if (f.multi) shown = [...shown, String(filter)];
             const list = openLists.get(f);
-            setTimeout(() => fillList(f, list, shown), cfg.openMs);
+            setTimeout(() => {
+                fillList(f, list, shown);
+                // SINGLE-select: a search that finds exactly one row commits it on
+                // Enter alone (measured, Field of Study R-172558). Several rows
+                // filter but commit nothing — the exact row must be clicked.
+                if (f.singleChip && shown.length === 1) commit(f, shown[0]);
+            }, cfg.openMs);
             return;
         }
         if (!cfg.sticky) closeEveryList();
@@ -374,6 +380,9 @@ export function buildHostilePage(doc, opts = {}) {
             // Portalled: the body, never the field's own wrapper.
             doc.body.appendChild(list);
             fillList(f, list, shown);
+            // Same one-result Enter-commit as the re-run branch, for the case the
+            // term's search opens the list fresh rather than re-running an open one.
+            if (f.singleChip && filter !== null && shown.length === 1) commit(f, shown[0]);
 
             if (f.stamps) {
                 f.trigger.setAttribute('aria-expanded', 'true');
@@ -412,6 +421,20 @@ export function buildHostilePage(doc, opts = {}) {
 
     function commit(f, label) {
         setTimeout(() => {
+            if (f.singleChip) {
+                // SINGLE-select chip-search: the new chip REPLACES the old one
+                // (never accumulates), and the list closes on the pick — the
+                // measured Field of Study behavior. `keepOpenOnCommit` holds it
+                // open so a test can prove the commit is read from the CHIP, not
+                // from the list having closed.
+                const listEl = chipListOf(f);
+                [...(listEl.children || [])].forEach((c) => c.remove());
+                const chip = el('div', { 'data-automation-id': 'selectedItem', role: 'option' }, listEl);
+                chip.textContent = label;
+                if (!f.keepOpenOnCommit) closeList(f, { after: 0 });
+                f.committed.push(label);
+                return;
+            }
             if (f.multi) {
                 // A chip that also answers the option selector — and the list
                 // stays open, as a multi-select does. The chip LIST arrives with
@@ -441,7 +464,8 @@ export function buildHostilePage(doc, opts = {}) {
     /** One prompt widget, wherever it lives: the page, or a row of a section. */
     function makeField({
         automationId, tag, catalogue, stamps, label = null, parent = page,
-        multi = false, escapeCloses = true, outsideClickCloses = false,
+        multi = false, singleChip = false, keepOpenOnCommit = false,
+        escapeCloses = true, outsideClickCloses = false,
     }) {
         const wrap = el('div', { 'data-automation-id': automationId }, parent);
         if (label) el('label', {}, wrap).textContent = label;
@@ -455,7 +479,11 @@ export function buildHostilePage(doc, opts = {}) {
         // selectedItemList at all; Workday creates the chip list with the first
         // chip. So the container is rendered here from the start and the chip
         // list is created on the first commit, exactly as the page does it.
-        if (multi) {
+        // A single-select chip-search (Field of Study) renders the SAME
+        // container as a multi-select — measured byte-identical, R-172558 vs
+        // R-173186 — which is the whole reason its capability is routed by the
+        // plan's contract and not by the fingerprint.
+        if (multi || singleChip) {
             el('div', {
                 'data-automation-id': 'multiSelectContainer',
                 'data-uxi-widget-type': 'multiselect',
@@ -474,7 +502,7 @@ export function buildHostilePage(doc, opts = {}) {
         // it looked correct here and grew a row per pass on the real form.
         const guid = tag === 'button' ? el('input', { type: 'text' }, wrap) : null;
         const f = {
-            wrap, trigger, chips, catalogue, stamps, multi, guid,
+            wrap, trigger, chips, catalogue, stamps, multi, singleChip, keepOpenOnCommit, guid,
             escapeCloses, outsideClickCloses, committed: [],
         };
         trigger.addEventListener('click', () => {
@@ -609,6 +637,20 @@ export function buildHostilePage(doc, opts = {}) {
         listFor: (name) => openLists.get(fields[name]) || null,
         openCount: () => openLists.size,
         chipsOn: (name) => [...(fields[name].chips?.children || [])].map((c) => c.textContent),
+        /**
+         * A single-select chip-search (Field of Study), added on demand. Same
+         * container/placeholder DOM as Skills — the fingerprint cannot tell them
+         * apart — but single-select: one result commits on Enter, several must be
+         * clicked, and a new chip REPLACES the old. `keepOpenOnCommit` leaves the
+         * list open after the pick so a test can prove the commit is read from the
+         * chip, not from the list closing.
+         */
+        addFieldOfStudy(catalogue, { keepOpenOnCommit = false } = {}) {
+            return addField('fieldOfStudy', {
+                automationId: 'formField-fieldOfStudy', tag: 'input',
+                catalogue, stamps: false, singleChip: true, keepOpenOnCommit,
+            });
+        },
         /**
          * Make a multi-select pick badly, on purpose.
          *
