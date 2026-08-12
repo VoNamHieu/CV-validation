@@ -18,7 +18,7 @@
  * exist yet.
  */
 
-import { ADD_VIA_KEY, FLAG_KEY, RESULT, SEL, STEP, isForgiven, isMdlzPage } from './config.js';
+import { ADD_VIA_KEY, FLAG_KEY, INTERACTION_ONLY, RESULT, SEL, STEP, isForgiven, isMdlzPage } from './config.js';
 import { openPopups, orphanOptionCount, pageFingerprint, waitPageReady } from './page-observer.js';
 import { census } from './popup-manager.js';
 import { addRow, answerFromLadder, runField } from './executors.js';
@@ -197,6 +197,47 @@ export async function decideTake(ctx = {}) {
     return { take: true, reason: '', seen, plan, pageIsV2Owned: true };
 }
 
+const win = () => (typeof window !== 'undefined' ? window : globalThis);
+/** Per-(page, task) count of consecutive passes a widget would not interact,
+ *  on `window` so both content-script copies share it. */
+const INTERACTION_STUCK = '__copoV2InteractionStuck';
+/** Passes running a widget must refuse to interact before it is resolved —
+ *  optional skipped, required escalated. Matched to the outer defer budget so
+ *  the two act on the same pass. */
+const INTERACTION_STUCK_PASSES = 3;
+
+/**
+ * Resolve a widget that will not INTERACT for `stuckPasses` passes running.
+ *
+ * A task ending in an interaction result (OPEN_TIMEOUT / WAITING_HYDRATION /
+ * BLOCKED_BY_POPUP) has already spent its per-pass retries. One such pass is
+ * left to retry — the outer loop re-runs, and "merely blocked may succeed next
+ * pass". But `stuckPasses` in a row is not going to, so an OPTIONAL field is
+ * downgraded to SKIPPED_OPTIONAL (the page completes over it); a REQUIRED one is
+ * LEFT as its interaction result, for the outer loop's escalation budget to turn
+ * into "the extension could not work this widget". Anything that settles or
+ * progresses resets that task's count. Mutates `ledger.tasks` and `store` in
+ * place; returns the ids newly skipped. Pure and exported so it is unit-tested
+ * directly, without forcing a live OPEN_TIMEOUT through the harness.
+ */
+export function interactionWatchdog(ledger, pageKey, store, stuckPasses = INTERACTION_STUCK_PASSES) {
+    const skipped = [];
+    for (const t of ledger?.tasks || []) {
+        const key = `${pageKey}::${t.id}`;
+        if (INTERACTION_ONLY.has(t.result)) {
+            store[key] = (store[key] || 0) + 1;
+            if (store[key] >= stuckPasses && t.optional) {
+                t.result = RESULT.SKIPPED_OPTIONAL;
+                t.stuckInteraction = true;
+                skipped.push(t.id);
+            }
+        } else {
+            delete store[key];
+        }
+    }
+    return skipped;
+}
+
 /**
  * The controller. Takes the page, or says why it did not.
  *
@@ -337,6 +378,31 @@ export async function runMdlzV2(ctx = {}) {
 
     const ledger = await runSequential(tasks.map((t) => runnable(t, { ...ctx, addVia })), { sleep: ctx.sleep });
     if (ledger.busy) return { took: false, reason: 'another pass owns this page', report: { matched: false, filled: 0, busy: true }, pageIsV2Owned: true };
+
+    // ── multi-pass interaction watchdog ──────────────────────────────────
+    //
+    // A task that ends in an INTERACTION result (OPEN_TIMEOUT / WAITING_HYDRATION
+    // / BLOCKED_BY_POPUP) has already spent its per-pass retries — the widget
+    // would not work THIS pass. ONE bad pass is not proof: the outer loop re-runs
+    // us, and "merely blocked may succeed next pass", so a single such result is
+    // left to retry, exactly as before. But a widget that will not interact for
+    // INTERACTION_STUCK_PASSES passes RUNNING is not going to — and leaving it
+    // unresolved was a loop straight to the 15-minute cap (an OPTIONAL Skills
+    // whose list never opened is neither "done" nor a "blocker", so nothing
+    // acted on it). Resolve it by the only thing separating the two cases —
+    // whether the employer asked for it:
+    //   · OPTIONAL → SKIPPED_OPTIONAL, so the page completes OVER it;
+    //   · REQUIRED → left as the interaction result, which the outer loop's
+    //     escalation budget turns into "the extension could not work this widget"
+    //     — never a model call, never "the candidate is missing data".
+    // The count is per (page, task) on `window` so two content-script copies
+    // share it; anything that settles or progresses resets that task's count.
+    {
+        const store = win()[INTERACTION_STUCK] || (win()[INTERACTION_STUCK] = {});
+        for (const id of interactionWatchdog(ledger, where.page, store)) {
+            trace('mdlz.interaction.skipped', { task: id, passes: store[`${where.page}::${id}`] });
+        }
+    }
 
     // v1's report shape, because v1's caller is what reads it: how many fields
     // moved, which step, and the answers that were actually committed.

@@ -621,4 +621,74 @@ describe('the canonical task-status predicates — one question, one answer', ()
         assert.equal(isPageBlockingTask({ result: RESULT.WAITING_HYDRATION }), false);
         assert.ok(DEVELOPER_FATAL.has(RESULT.CONTRACT_ERROR));
     });
+
+    test('SKIPPED_OPTIONAL is a considered skip — always done, never blocking', () => {
+        // the watchdog's downgrade for an optional widget that would never work
+        assert.equal(isForgiven({ result: RESULT.SKIPPED_OPTIONAL }), true);
+        assert.equal(isPageBlockingTask({ result: RESULT.SKIPPED_OPTIONAL }), false);
+    });
+});
+
+describe('the multi-pass interaction watchdog — a stuck widget is resolved, not looped', () => {
+    const ledgerOf = (tasks) => ({ tasks });
+
+    test('an OPTIONAL widget stuck in interaction 3 passes RUNNING is skipped — not before', () => {
+        const store = {};
+        const mk = () => ledgerOf([{ id: 'skills', optional: true, result: RESULT.OPEN_TIMEOUT }]);
+        const l1 = mk(); v2.interactionWatchdog(l1, 'MY_EXPERIENCE', store);
+        assert.equal(l1.tasks[0].result, RESULT.OPEN_TIMEOUT, 'pass 1: left to retry (may work next pass)');
+        const l2 = mk(); v2.interactionWatchdog(l2, 'MY_EXPERIENCE', store);
+        assert.equal(l2.tasks[0].result, RESULT.OPEN_TIMEOUT, 'pass 2: still retrying');
+        const l3 = mk(); const skipped = v2.interactionWatchdog(l3, 'MY_EXPERIENCE', store);
+        assert.equal(l3.tasks[0].result, RESULT.SKIPPED_OPTIONAL, 'pass 3: resolved');
+        assert.deepEqual(skipped, ['skills']);
+        // and now the page can complete OVER it, instead of looping to the cap
+        assert.equal(v2.pageComplete(l3, []).complete, true);
+    });
+
+    test('a REQUIRED widget stuck the same way is NEVER skipped — the outer loop escalates it', () => {
+        const store = {};
+        for (let i = 0; i < 5; i++) {
+            const l = ledgerOf([{ id: 'degree', optional: false, result: RESULT.OPEN_TIMEOUT }]);
+            v2.interactionWatchdog(l, 'MY_EXPERIENCE', store);
+            assert.equal(l.tasks[0].result, RESULT.OPEN_TIMEOUT, `pass ${i + 1}: required stays interaction`);
+        }
+    });
+
+    test('a settled pass in between RESETS the count — only CONSECUTIVE stuck passes resolve', () => {
+        const store = {};
+        v2.interactionWatchdog(ledgerOf([{ id: 'skills', optional: true, result: RESULT.OPEN_TIMEOUT }]), 'P', store);
+        v2.interactionWatchdog(ledgerOf([{ id: 'skills', optional: true, result: RESULT.OPEN_TIMEOUT }]), 'P', store);
+        v2.interactionWatchdog(ledgerOf([{ id: 'skills', optional: true, result: RESULT.SATISFIED }]), 'P', store);   // worked → reset
+        const l = ledgerOf([{ id: 'skills', optional: true, result: RESULT.OPEN_TIMEOUT }]);
+        v2.interactionWatchdog(l, 'P', store);
+        assert.equal(l.tasks[0].result, RESULT.OPEN_TIMEOUT, 'one stuck pass after a reset, not three');
+    });
+
+    test('every interaction state counts toward the budget', () => {
+        for (const r of [RESULT.OPEN_TIMEOUT, RESULT.WAITING_HYDRATION, RESULT.BLOCKED_BY_POPUP]) {
+            const store = {};
+            let last;
+            for (let i = 0; i < 3; i++) {
+                last = ledgerOf([{ id: 'x', optional: true, result: r }]);
+                v2.interactionWatchdog(last, 'P', store);
+            }
+            assert.equal(last.tasks[0].result, RESULT.SKIPPED_OPTIONAL, `${r} resolves after 3 passes`);
+        }
+    });
+
+    test('two fields are counted independently', () => {
+        const store = {};
+        // one field stuck all three passes; another stuck only the last
+        for (let i = 0; i < 3; i++) {
+            v2.interactionWatchdog(ledgerOf([{ id: 'skills', optional: true, result: RESULT.OPEN_TIMEOUT }]), 'P', store);
+        }
+        const l = ledgerOf([
+            { id: 'skills', optional: true, result: RESULT.OPEN_TIMEOUT },
+            { id: 'other', optional: true, result: RESULT.OPEN_TIMEOUT },
+        ]);
+        v2.interactionWatchdog(l, 'P', store);
+        assert.equal(l.tasks[0].result, RESULT.SKIPPED_OPTIONAL, 'the long-stuck one resolves');
+        assert.equal(l.tasks[1].result, RESULT.OPEN_TIMEOUT, 'the freshly-stuck one is still retrying');
+    });
 });

@@ -1369,35 +1369,48 @@ async function _runAgentLoop(rawProfile) {
                             // a slow list), then STOP and name the gap, the same
                             // handoff the stuck detector gives — which this defer
                             // used to `continue` past before it could fire.
-                            if ((_lastV2Gaps || []).length > 0) {
-                                _v2BlockedDeferStreak++;
-                                if (_v2BlockedDeferStreak >= V2_BLOCKED_DEFER_BUDGET) {
-                                    const gaps = _lastV2Gaps || [];
-                                    // A CONTRACT_ERROR is the DEVELOPER'S bug (a chip-search
-                                    // field the plan forgot to declare), not the candidate's
-                                    // data — it must never surface as "cần bạn bổ sung".
-                                    const devGaps = gaps.filter((g) => g.developer);
-                                    trace('advance.v2BlockedEscalate', {
-                                        streak: _v2BlockedDeferStreak,
-                                        developer: devGaps.length,
-                                        miss: gaps.slice(0, 6).map(gapLabelVi).join(', '),
-                                    });
-                                    removeProgress();
-                                    if (devGaps.length) {
-                                        const fields = devGaps.slice(0, 6).map((g) => g.label || g.id || '?').join(', ');
-                                        showToast(`⚠️ Lỗi nội bộ: extension thiếu contract cho field (${fields}). Vui lòng báo đội phát triển.`, 12000);
-                                        reportResult(false, `Developer: v2 field contract missing — ${fields}`, 'failed',
-                                            { review: summarizeAnswers(reviewAnswers), fieldGaps: [...fieldGaps.values()] });
-                                    } else {
-                                        const miss = gaps.slice(0, 6).map(gapLabelVi).join(', ');
-                                        showToast(`⚠️ Không qua được bước này — cần bạn bổ sung: ${miss}. Điền nốt rồi bấm tiếp.`, 10000);
-                                        reportResult(false, `Need human: v2 blocked — ${miss}`, 'blocked',
-                                            { blockedReason: 'manual', review: summarizeAnswers(reviewAnswers), fieldGaps: [...fieldGaps.values()] });
-                                    }
-                                    return;
+                            // Count EVERY no-progress defer, not only ones with a
+                            // recorded gap. A widget the extension cannot interact
+                            // with leaves NO gap and NO blocker — an exhausted
+                            // OPEN_TIMEOUT is neither "done" nor "blocking" — yet
+                            // the page is just as stuck, and gating the count on
+                            // gaps let that case loop to the runtime cap. Real
+                            // progress (fill/advance) resets the streak above.
+                            _v2BlockedDeferStreak++;
+                            if (_v2BlockedDeferStreak >= V2_BLOCKED_DEFER_BUDGET) {
+                                const gaps = _lastV2Gaps || [];
+                                // A CONTRACT_ERROR is the DEVELOPER'S bug (a chip-search
+                                // field the plan forgot to declare), not the candidate's
+                                // data — it must never surface as "cần bạn bổ sung".
+                                const devGaps = gaps.filter((g) => g.developer);
+                                trace('advance.v2BlockedEscalate', {
+                                    streak: _v2BlockedDeferStreak,
+                                    developer: devGaps.length,
+                                    gaps: gaps.length,
+                                    miss: gaps.slice(0, 6).map(gapLabelVi).join(', '),
+                                });
+                                removeProgress();
+                                if (devGaps.length) {
+                                    const fields = devGaps.slice(0, 6).map((g) => g.label || g.id || '?').join(', ');
+                                    showToast(`⚠️ Lỗi nội bộ: extension thiếu contract cho field (${fields}). Vui lòng báo đội phát triển.`, 12000);
+                                    reportResult(false, `Developer: v2 field contract missing — ${fields}`, 'failed',
+                                        { review: summarizeAnswers(reviewAnswers), fieldGaps: [...fieldGaps.values()] });
+                                } else if (gaps.length) {
+                                    const miss = gaps.slice(0, 6).map(gapLabelVi).join(', ');
+                                    showToast(`⚠️ Không qua được bước này — cần bạn bổ sung: ${miss}. Điền nốt rồi bấm tiếp.`, 10000);
+                                    reportResult(false, `Need human: v2 blocked — ${miss}`, 'blocked',
+                                        { blockedReason: 'manual', review: summarizeAnswers(reviewAnswers), fieldGaps: [...fieldGaps.values()] });
+                                } else {
+                                    // No gap of any kind, yet v2 still cannot move the page
+                                    // after the budget: a widget it could not interact with
+                                    // (a list that would not open, a popup that would not
+                                    // clear) that the scheduler already exhausted. Not the
+                                    // candidate's data, not a model's job.
+                                    showToast('⚠️ Extension không thao tác được với một ô trên trang này — vui lòng điền nốt thủ công rồi bấm tiếp.', 12000);
+                                    reportResult(false, 'Need human: v2 could not interact with a widget (no progress, no gap)', 'blocked',
+                                        { blockedReason: 'manual', review: summarizeAnswers(reviewAnswers), fieldGaps: [...fieldGaps.values()] });
                                 }
-                            } else {
-                                _v2BlockedDeferStreak = 0;   // v2 still has moves — a clean defer
+                                return;
                             }
                             trace('advance.deferredToV2', { page: observeStep(), step: stepNow?.name || null, blockedStreak: _v2BlockedDeferStreak });
                             await sleep(900);

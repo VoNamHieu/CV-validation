@@ -307,6 +307,14 @@ export const TERMINAL = new Set([
  * to skip.
  */
 export function isForgiven(task) {
+    // An explicit skip is always done: the multi-pass interaction watchdog
+    // (runMdlzV2) downgrades an OPTIONAL field whose widget it could never work —
+    // a list that would not open for INTERACTION_STUCK_PASSES passes running — to
+    // SKIPPED_OPTIONAL, and the page must be allowed to complete OVER it rather
+    // than loop to the runtime cap. A single-pass interaction failure is NOT
+    // forgiven here (it may succeed next pass); only the watchdog's considered
+    // skip is.
+    if (task?.result === RESULT.SKIPPED_OPTIONAL) return true;
     return !!task?.optional
         && SEMANTIC.has(task?.result)
         && !DEVELOPER_FATAL.has(task?.result);
