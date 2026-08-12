@@ -47,7 +47,10 @@ def _express247(career_url: str) -> list[dict]:
             "title": title[:200],
             "url": _DETAIL + slug,
             "location": ", ".join(cities)[:120],
-            "description": _strip_html(j.get("JobSummary") or j.get("JobDescription") or "")[:600],
+            # Measured 2026-08-11: JobDescription/JobRequirement/JobRight are
+            # null in the list API and JobSummary just repeats Name — the list
+            # carries no JD at all. Full-or-blank: "" and resolve on-demand.
+            "description": "",
         })
     logger.info(f"[ats] 247express → {len(out)} jobs")
     return out

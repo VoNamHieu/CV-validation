@@ -42,7 +42,9 @@ def _viettelai(career_url: str) -> list[dict]:
             "url": f"{_DETAIL}{jid}",
             "external_id": str(jid),
             "location": str(loc)[:120],
-            "description": _strip_html(it.get("short_description") or it.get("description") or "")[:600],
+            # Measured 2026-08-11: description == short_description on every
+            # row (the tenant mirrors them) — this IS the whole posting.
+            "description": _full_desc(it.get("description") or it.get("short_description")),
         })
         if len(out) >= _MAX_ATS_JOBS:
             break

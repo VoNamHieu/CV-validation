@@ -24,6 +24,11 @@ from app.services.ats_adapters import fetch_ats_jobs
 logger = logging.getLogger(__name__)
 
 _MIN_DESC = 100
+# Above the 600-char cap old list-adapters used for teaser descriptions.
+# Adapters are full-or-blank now, but rows ingested before that still hold
+# stored teasers (upsert COALESCEs description, so "" never washes them out) —
+# those must not count as "already substantial" in resolve_full_jd.
+_SUBSTANTIAL = 700
 _UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 _TIMEOUT = 12
 
@@ -195,6 +200,10 @@ def resolve_jd_via_ats(jd_url: str) -> str | None:
         return None
 
     desc = match.get("description", "") or ""
+    # Listing descriptions are full-or-blank by adapter contract
+    # (_shared._full_desc): teasers and over-cap text ship as "". So a match
+    # either carries the whole posting or fails this gate and the caller falls
+    # back to its real full-JD path (Playwright / extension DOM).
     if len(desc) < _MIN_DESC:
         return None
 
@@ -220,7 +229,7 @@ async def resolve_full_jd(source_url: str, existing: str = "") -> str:
     import asyncio
 
     existing = (existing or "").strip()
-    if len(existing) >= 200 or not source_url:
+    if len(existing) >= _SUBSTANTIAL or not source_url:
         return existing
 
     best = existing
@@ -237,6 +246,9 @@ async def resolve_full_jd(source_url: str, existing: str = "") -> str:
     except Exception as e:  # never break publish
         logger.info(f"[resolve_full_jd] ats miss {source_url}: {str(e)[:80]}")
 
+    # Generic crawl only for truly-thin descriptions: its cleaned page text
+    # mixes site chrome, so a 200–700-char teaser/short JD must not be
+    # "upgraded" to longer garbage — for those, ATS-verified text or nothing.
     if len(best) < 200:
         try:
             from app.services.crawler import crawl_url

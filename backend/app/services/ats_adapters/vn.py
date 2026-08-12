@@ -330,13 +330,13 @@ def _trustingsocial(career_url: str) -> list[dict]:
             if dr.status_code == 200:
                 op = (((dr.json() or {}).get("result") or {}).get("data") or {}) \
                     .get("recruiterboxOpening", {}) or {}
-                desc = _strip_html(op.get("description") or "")[:600]
+                desc = op.get("description") or ""
         except Exception:
             pass
         out.append({"title": title[:200],
                     "url": f"{base}/careers/openings/{slug}",
                     "location": loc_str[:120] or "Vietnam",
-                    "description": desc,
+                    "description": _full_desc(desc),  # per-opening detail = full JD
                     "employment_type": (n.get("position_type") or "").strip(),
                     "category": (n.get("team") or "").strip()})
         if len(out) >= _MAX_ATS_JOBS:
@@ -376,8 +376,8 @@ def _timo(career_url: str) -> list[dict]:
                 continue
             locs = [locmap.get(i, "") for i in (j.get("career-location") or [])]
             loc = ", ".join(x for x in locs if x) or "Vietnam"
-            desc = _strip_html((j.get("content") or {}).get("rendered", ""))[:600]
-            out.append({"title": title[:200], "url": link, "location": loc[:120], "description": desc})
+            out.append({"title": title[:200], "url": link, "location": loc[:120],
+                        "description": _full_desc((j.get("content") or {}).get("rendered", ""))})
     except Exception as e:
         logger.info(f"[ats] timo failed: {str(e)[:80]}")
     logger.info(f"[ats] timo → {len(out)} jobs")
@@ -538,7 +538,7 @@ def _garena(career_url: str) -> list[dict]:
         if not title or not jid or not _is_vn_loc(loc):
             continue
         out.append({"title": title[:200], "url": f"https://careers.garena.vn/vn/careers/{jid}",
-                    "location": loc[:120], "description": _strip_html(j.get("description") or "")[:600],
+                    "location": loc[:120], "description": _full_desc(j.get("description")),
                     "category": ", ".join(tags.get("job_category") or [])[:120]})
         if len(out) >= _MAX_ATS_JOBS:
             break
@@ -618,7 +618,7 @@ def _appota(career_url: str) -> list[dict]:
             continue
         wp = (c.get("workplace") or "").strip()
         out.append({"title": title[:200], "url": f"https://appota.com/careers/jobs/{jid}",
-                    "location": (wp or "Vietnam")[:120], "description": _strip_html(c.get("description") or "")[:600]})
+                    "location": (wp or "Vietnam")[:120], "description": _full_desc(c.get("description"))})
         if len(out) >= _MAX_ATS_JOBS:
             break
     logger.info(f"[ats] appota → {len(out)} jobs")
@@ -717,7 +717,7 @@ def _zalo(career_url: str) -> list[dict]:
                         "url": f"https://zalo.careers/job/{slug}",
                         "external_id": f"zalo:{stable}",
                         "location": (j.get("locationName") or "Vietnam")[:120],
-                        "description": _strip_html(j.get("desc") or "")[:600]})
+                        "description": _full_desc(j.get("desc"))})
         if len(out) >= _MAX_ATS_JOBS:
             break
     logger.info(f"[ats] zalo → {len(out)} jobs")

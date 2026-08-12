@@ -728,10 +728,11 @@ def _odoo_jobs(career_url: str, html: str | None) -> list[dict]:
                     m = loc_rx.search(text.replace("\n", " "))
                     loc = (m.group(1).strip() if m else "")[:120]
                     idx = text.find("Mô tả công việc")
-                    desc = _strip_html(text[idx:] if idx >= 0 else text)[:6000]
+                    desc = text[idx:] if idx >= 0 else text
             except Exception:
                 pass
-        out.append({"title": title[:200], "url": url, "location": loc, "description": desc})
+        out.append({"title": title[:200], "url": url, "location": loc,
+                    "description": _full_desc(desc)})
     logger.info(f"[ats] odoo → {len(out)} jobs ({origin})")
     return out
 
@@ -828,7 +829,8 @@ def _amazon(career_url: str) -> list[dict]:
             "title": title[:200],
             "url": "https://www.amazon.jobs" + path,
             "location": str(j.get("location") or j.get("normalized_location") or "")[:120],
-            "description": _strip_html(j.get("description_short") or "")[:600],
+            # description_short is a teaser — full-or-blank: JD on-demand.
+            "description": "",
         })
     logger.info(f"[ats] amazon -> {len(out)} VN jobs")
     return out
@@ -941,7 +943,7 @@ def _radancy(career_url: str) -> list[dict]:
             seen.add(url)
             out.append({"title": title[:200], "url": url, "external_id": str(req),
                         "location": str(loc)[:120],
-                        "description": _strip_html(d.get("description") or "")[:600]})
+                        "description": _full_desc(d.get("description"))})
         if len(jobs) < 10 or len(out) >= _MAX_ATS_JOBS:
             break
     logger.info(f"[ats] radancy → {len(out)} VN jobs ({origin})")

@@ -76,8 +76,10 @@ def _dhl(career_url: str) -> list[dict]:
             if url in seen:
                 continue
             seen.add(url)
+            # descriptionTeaser is never the full posting — full-or-blank
+            # policy: ship "" and let the JD resolve on-demand.
             out.append({"title": title[:200], "url": url, "location": str(loc)[:120],
-                        "description": _strip_html(j.get("descriptionTeaser") or "")[:600]})
+                        "description": ""})
         if start + _PER >= total or len(jobs) < _PER or len(out) >= _MAX_ATS_JOBS:
             break
     logger.info(f"[ats] dhl → {len(out)} VN jobs ({origin})")

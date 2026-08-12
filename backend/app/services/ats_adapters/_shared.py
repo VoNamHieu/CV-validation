@@ -53,6 +53,21 @@ def _strip_html(s: str) -> str:
     return s
 
 
+_FULL_JD_CAP = 12000  # sanity bound; matches db.promoted._MAX_SNAPSHOT_DESC
+
+
+def _full_desc(raw: str | None, cap: int = _FULL_JD_CAP) -> str:
+    """Full-or-blank listing description: strip HTML and keep the text only
+    when it plausibly IS the whole posting. Teaser-by-nature fields
+    (descriptionTeaser, description_short, JobSummary, …) must not come
+    through here — write description="" at the call site instead. Over-cap
+    text also stores "" rather than a cut stump: a half-JD in the store reads
+    as complete and short-circuits every full-JD fallback downstream
+    (jd_resolver → Playwright / extension DOM)."""
+    txt = _strip_html(raw or "")
+    return txt if len(txt) <= cap else ""
+
+
 _HTML_HEADERS = {"User-Agent": _HEADERS["User-Agent"], "Accept": "text/html,*/*"}
 
 _JSON_POST = {"User-Agent": "Mozilla/5.0 Chrome/120", "Accept": "application/json",
@@ -122,6 +137,7 @@ def _finalize(jobs: list[dict]) -> list[dict]:
 __all__ = [
     "logger", "_html", "os", "re", "requests", "urljoin", "urlparse", "parse_qsl",
     "_TIMEOUT", "_MAX_ATS_JOBS", "_HEADERS", "_get_json", "_strip_html",
+    "_FULL_JD_CAP", "_full_desc",
     "_HTML_HEADERS", "_JSON_POST", "_VN_MARKERS", "_WD_RX", "_is_vn_loc",
     "_BAD_TITLES", "_norm_title", "_finalize",
 ]

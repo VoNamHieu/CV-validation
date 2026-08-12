@@ -44,7 +44,7 @@ def _cake(career_url: str) -> list[dict]:
             "url": f"{_DETAIL}{key}",
             "external_id": str(jid),
             "location": str(loc)[:120],
-            "description": _strip_html(j.get("job_content") or "")[:600],
+            "description": _full_desc(j.get("job_content")),
         })
     logger.info(f"[ats] cake → {len(out)} jobs")
     return out
