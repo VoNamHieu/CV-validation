@@ -19,14 +19,22 @@ import { FIELD_OF_STUDY_CATALOG } from './field-of-study-catalog';
 
 /** Accent-fold + lowercase + collapse spaces, so "Kinh tế Quốc tế", "kinh te
  *  quoc te" and "  KINH  TE " all key the same. `đ`→`d` is explicit — NFD does
- *  not decompose it. */
+ *  not decompose it.
+ *
+ *  Also strips EDGE punctuation (a trailing "Computer Science," or a quoted
+ *  '"Marketing"') so a stray comma/period/quote a CV extraction left on the end
+ *  does not miss an otherwise-exact catalogue row. EDGE only — the inner commas
+ *  and slashes that real labels carry ("African Languages, Literatures, and
+ *  Linguistics", "Agricultural/Biological Engineering") must survive untouched,
+ *  and the same fold runs over the catalogue itself so both sides key alike. */
 export function foldMajor(s: string): string {
     return String(s ?? '')
         .normalize('NFD').replace(/[̀-ͯ]/g, '')
         .toLowerCase()
         .replace(/đ/g, 'd')
         .replace(/\s+/g, ' ')
-        .trim();
+        .trim()
+        .replace(/^[\s.,;:!?"'’“”()[\]]+|[\s.,;:!?"'’“”()[\]]+$/g, '');
 }
 
 const CATALOG_BY_FOLD = new Map(FIELD_OF_STUDY_CATALOG.map((label) => [foldMajor(label), label]));

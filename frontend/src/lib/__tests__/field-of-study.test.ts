@@ -18,6 +18,26 @@ describe("foldMajor strips Vietnamese diacritics and case", () => {
         expect(foldMajor("Kinh tế đối ngoại")).toBe("kinh te doi ngoai");
         expect(foldMajor("  INTERNATIONAL   Business ")).toBe("international business");
     });
+
+    test("EDGE punctuation is stripped, INNER punctuation survives", () => {
+        // a CV left a comma/period/quote on the end — must not miss the row
+        expect(foldMajor("Computer Science,")).toBe("computer science");
+        expect(foldMajor("Finance.")).toBe("finance");
+        expect(foldMajor('"Data Science"')).toBe("data science");
+        // real catalogue labels carry inner commas/slashes — those stay
+        expect(foldMajor("African Languages, Literatures, and Linguistics"))
+            .toBe("african languages, literatures, and linguistics");
+        expect(foldMajor("Agricultural/Biological Engineering"))
+            .toBe("agricultural/biological engineering");
+    });
+});
+
+describe("resolveFieldOfStudy tolerates a stray edge comma", () => {
+    test("a trailing comma no longer misses an exact catalogue row", () => {
+        // "Marketing," folded equal to "Marketing" → canonical, not raw
+        expect(resolveFieldOfStudy("Marketing,")).toBe("Marketing");
+        expect(resolveFieldOfStudy("Data Science.")).toBe("Data Science");
+    });
 });
 
 describe("resolveFieldOfStudy", () => {

@@ -454,6 +454,15 @@ async function _runAgentLoop(rawProfile) {
         /** v2's own account of what it could not answer, for the stuck report. */
 
         let _lastV2Gaps = [];
+        // A defer to v2 is progress only while v2 still has a move it CAN make.
+        // When v2 owns the page and has recorded a terminal blocker it cannot
+        // clear itself (a required field whose value is not on a closed
+        // catalogue — Field of Study "Computer Science", which is not a row),
+        // re-deferring just loops to the 15-minute cap (measured R-172558: 24+
+        // identical passes). Count those blocked defers and, past a small
+        // budget that rides out hydration, escalate by NAMING the gap instead.
+        let _v2BlockedDeferStreak = 0;
+        const V2_BLOCKED_DEFER_BUDGET = 3;
 
         let sameStateCount = 0;
         let emptyStreak = 0;   // consecutive empty/error observes → triggers a recovery reload
@@ -1158,6 +1167,9 @@ async function _runAgentLoop(rawProfile) {
                 // counting it idle is how three healthy passes read as
                 // "no progress in 2" on a draft that was simply already filled.
                 if (rf?.filled || rf?.advancedTo) _progress();
+                // Real progress clears the blocked-defer budget: a page that
+                // moved or filled is not the field that could not be answered.
+                if (rf?.filled || rf?.advancedTo) _v2BlockedDeferStreak = 0;
                 if (_openIter && rf?.step) _openIter.step = rf.step;
                 for (const a of rf.answers || []) {
                     reviewAnswers.set(`${rf.step || '?'}::${a.field}`, { ...a, step: rf.step });
@@ -1348,7 +1360,30 @@ async function _runAgentLoop(rawProfile) {
                         const _v2HoldsNow = pageOwner() === 'mdlz-v2'
                             || (isMdlzPage() && (await flagMode()) === MODE.ON && owns(observeStep()));
                         if (_v2HoldsNow) {
-                            trace('advance.deferredToV2', { page: observeStep(), step: stepNow?.name || null });
+                            // Deferring is only right while v2 has an unplayed
+                            // move. If v2 owns the page AND recorded a terminal
+                            // blocker it cannot clear itself, another defer is
+                            // not "let v2 finish" — it is the loop that ran 24
+                            // passes on a Field of Study the catalogue does not
+                            // hold. Budget it: ride out a few passes (hydration,
+                            // a slow list), then STOP and name the gap, the same
+                            // handoff the stuck detector gives — which this defer
+                            // used to `continue` past before it could fire.
+                            if ((_lastV2Gaps || []).length > 0) {
+                                _v2BlockedDeferStreak++;
+                                if (_v2BlockedDeferStreak >= V2_BLOCKED_DEFER_BUDGET) {
+                                    const miss = (_lastV2Gaps || []).slice(0, 6).map(gapLabelVi).join(', ');
+                                    trace('advance.v2BlockedEscalate', { streak: _v2BlockedDeferStreak, miss });
+                                    removeProgress();
+                                    showToast(`⚠️ Không qua được bước này — cần bạn bổ sung: ${miss}. Điền nốt rồi bấm tiếp.`, 10000);
+                                    reportResult(false, `Need human: v2 blocked — ${miss}`, 'blocked',
+                                        { blockedReason: 'manual', review: summarizeAnswers(reviewAnswers), fieldGaps: [...fieldGaps.values()] });
+                                    return;
+                                }
+                            } else {
+                                _v2BlockedDeferStreak = 0;   // v2 still has moves — a clean defer
+                            }
+                            trace('advance.deferredToV2', { page: observeStep(), step: stepNow?.name || null, blockedStreak: _v2BlockedDeferStreak });
                             await sleep(900);
                             continue;
                         }
@@ -1974,6 +2009,23 @@ function summarizeAnswers(reviewAnswers) {
  */
 function contextGone() {
     try { return !(chrome && chrome.runtime && chrome.runtime.id); } catch { return true; }
+}
+
+/** A v2 gap/blocker in words the candidate can act on. Its `label` is an
+ *  internal id ("education[…].formField-fieldOfStudy"); pull the formField
+ *  token and name it in Vietnamese, falling back to the raw id. */
+const V2_GAP_LABEL_VI = {
+    fieldOfStudy: 'Ngành học',
+    gradeAverage: 'Điểm trung bình (GPA)',
+    schoolName: 'Tên trường',
+    degree: 'Bằng cấp',
+    language: 'Ngôn ngữ',
+    countryPhoneCode: 'Mã vùng điện thoại',
+};
+function gapLabelVi(g) {
+    const raw = String(g?.label || g?.id || g?.field || g?.section || '').trim();
+    const key = raw.match(/formField-([A-Za-z]+)/)?.[1];
+    return (key && V2_GAP_LABEL_VI[key]) || raw || 'trường bắt buộc';
 }
 
 function reportResult(success, detail, outcome, extra = {}) {
