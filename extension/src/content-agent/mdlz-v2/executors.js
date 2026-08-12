@@ -188,12 +188,20 @@ function optionScroller(opt) {
  * Ported from v1, which needed it for the same reason. Best effort by design: if
  * React's internals move, `pickAcrossList` still has the scroll walk behind it.
  */
-function readVirtualItems(sc) {
+export function readVirtualItems(sc) {
     try {
         const key = Object.keys(sc).find((k) => /^__reactFiber\$|^__reactInternalInstance\$/.test(k));
         if (!key) return null;
+        // The rows expose their text as `ariaLabel`, not always `label`. This
+        // checked `label` ONLY — so on the live Skills widget (probed 2026-08-13:
+        // the item array sits at props.items, len 31, elements carry ariaLabel)
+        // it matched nothing, `readVirtualItems` returned null on EVERY search,
+        // and the whole fiber fast-path was dead: every term fell to the
+        // scroll-walk that reaches ~11/16 and OPEN_TIMEOUT-retried a below-fold
+        // exact for three passes. chooseSkillTarget already reads `label ??
+        // ariaLabel`; this now recognises the same shape.
         const looksLikeItems = (v) => Array.isArray(v) && v.length > 3 && v[0]
-            && typeof v[0] === 'object' && 'label' in v[0];
+            && typeof v[0] === 'object' && ('label' in v[0] || 'ariaLabel' in v[0]);
         let f = sc[key];
         for (let d = 0; f && d < 30; d++, f = f.return) {
             for (const node of [f, f.alternate]) {

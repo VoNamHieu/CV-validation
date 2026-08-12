@@ -16,7 +16,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { chooseSkillTarget } from '../src/content-agent/mdlz-v2/executors.js';
+import { chooseSkillTarget, readVirtualItems } from '../src/content-agent/mdlz-v2/executors.js';
 
 // A catalog row carries the tenant's own id; the create row's id IS its label.
 const cat = (label, n = 1) => ({ label, id: `REMOTE_SKILL-1-${n}`, index: n });
@@ -53,5 +53,39 @@ describe('chooseSkillTarget marks how far a partial list may be trusted', () => 
         const c = chooseSkillTarget([cat('Figma')], 'Rust');
         assert.equal(c.kind, 'none');
         assert.equal(c.match, undefined, 'a none carries no match — a short list retries rather than refusing');
+    });
+});
+
+// The reason the Skills fast-path was dead: readVirtualItems handed back null on
+// the live widget, so every term fell to the scroll-walk that reaches ~11/16 and
+// OPEN_TIMEOUT-retried a below-fold row for three passes. Probed 2026-08-13: the
+// item array sits at props.items (len 31) and its rows carry `ariaLabel`, not
+// `label` — which the matcher used to reject. These freeze that it reads both.
+const fiberEl = (items) => {
+    const el = {};
+    el['__reactFiber$xyz'] = { return: null, alternate: null, memoizedProps: { items }, memoizedState: null };
+    return el;
+};
+const rows = (key, n = 5) => Array.from({ length: n }, (_, i) => ({ [key]: `Skill ${i}`, id: `REMOTE_SKILL-${i}` }));
+
+describe('readVirtualItems finds the item array whether its rows carry label or ariaLabel', () => {
+    test('rows exposing their text as ariaLabel are found — the live Skills shape', () => {
+        const items = rows('ariaLabel');                 // no `label` key at all
+        const got = readVirtualItems(fiberEl(items));
+        assert.equal(got, items, 'the fiber read must not go null just because the rows use ariaLabel');
+    });
+
+    test('rows that carry label are still found', () => {
+        const items = rows('label');
+        assert.equal(readVirtualItems(fiberEl(items)), items);
+    });
+
+    test('an array of the wrong shape is not mistaken for the item list', () => {
+        const notItems = [{ x: 1 }, { x: 2 }, { x: 3 }, { x: 4 }, { x: 5 }];
+        assert.equal(readVirtualItems(fiberEl(notItems)), null);
+    });
+
+    test('no react fiber → null, and the scroll-walk takes over', () => {
+        assert.equal(readVirtualItems({}), null);
     });
 });
