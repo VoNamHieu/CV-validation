@@ -429,6 +429,24 @@ def _is_canon(career_url: str) -> bool:
     return (urlparse(career_url or "").netloc or "").lower().removeprefix("www.") == "cvn.canon"
 
 
+_CANON_MAX_JD = 150  # bound per-job detail GETs (board measured 114 jobs 2026-08-12)
+
+
+def _canon_jd(url: str) -> str:
+    """Full JD from the SSR detail page's `.lContainer` ("" on any miss)."""
+    from bs4 import BeautifulSoup
+    try:
+        r = requests.get(url, headers=_HTML_HEADERS, timeout=_TIMEOUT)
+        if r.status_code != 200:
+            return ""
+        soup = BeautifulSoup(r.content.decode("utf-8-sig", "ignore"), "html.parser")
+        el = soup.select_one("div.lContainer")
+        return _full_desc(el.get_text("\n", strip=True) if el else "")
+    except Exception as e:
+        logger.info(f"[ats] canon detail failed: {str(e)[:60]}")
+        return ""
+
+
 def _canon(career_url: str) -> list[dict]:
     from bs4 import BeautifulSoup
     try:
@@ -455,9 +473,10 @@ def _canon(career_url: str) -> list[dict]:
             continue
         slug = href.rsplit("/", 1)[-1].lower()
         plant = "Thang Long" if slug.startswith("tl_") else "Tien Son" if slug.startswith("ts_") else ""
-        out.append({"title": title[:200],
-                    "url": href if href.startswith("http") else "https://cvn.canon" + href,
-                    "location": (f"{plant}, Vietnam" if plant else "Vietnam"), "description": ""})
+        full_url = href if href.startswith("http") else "https://cvn.canon" + href
+        out.append({"title": title[:200], "url": full_url,
+                    "location": (f"{plant}, Vietnam" if plant else "Vietnam"),
+                    "description": _canon_jd(full_url) if len(out) < _CANON_MAX_JD else ""})
         if len(out) >= _MAX_ATS_JOBS:
             break
     logger.info(f"[ats] canon → {len(out)} jobs")
@@ -755,6 +774,30 @@ def _momo_sign(method: str, signed_url: str) -> tuple[str, str]:
     return ts, _b64.b64encode(enc.update(plain) + enc.finalize()).decode()
 
 
+_MOMO_MAX_JD = 150  # bound per-job detail GETs (board measured 103 jobs 2026-08-12)
+
+
+def _momo_jd(slug: str) -> str:
+    """Full JD from the detail page's __NEXT_DATA__ →
+    props.pageProps.dataJobDetail.{jobDesc,jobResp,jobRequire} ("" on miss)."""
+    import json as _json
+    try:
+        r = requests.get(f"https://momo.careers/jobs/{slug}", headers=_HTML_HEADERS,
+                         timeout=_TIMEOUT)
+        if r.status_code != 200:
+            return ""
+        m = re.search(r'__NEXT_DATA__"[^>]*>(.*?)</script>', r.text, re.S)
+        if not m:
+            return ""
+        d = ((_json.loads(m.group(1)).get("props") or {}).get("pageProps") or {}) \
+            .get("dataJobDetail") or {}
+    except Exception as e:
+        logger.info(f"[ats] momo detail {slug} failed: {str(e)[:60]}")
+        return ""
+    parts = [d.get("jobDesc"), d.get("jobResp"), d.get("jobRequire")]
+    return _full_desc("\n".join(p for p in parts if p))
+
+
 def _momo_api() -> list[dict]:
     """Fetch the full opening list via the signed JSON API. Paginates by lastIdx
     until TotalItems is reached. Returns [] on any failure so the caller can fall
@@ -785,7 +828,7 @@ def _momo_api() -> list[dict]:
             out.append({"title": title[:200],
                         "url": f"https://momo.careers/jobs/{slug}",
                         "location": (it.get("location") or "Hồ Chí Minh").strip()[:120],
-                        "description": ""})
+                        "description": _momo_jd(slug) if len(out) < _MOMO_MAX_JD else ""})
         total = data.get("TotalItems") or 0
         last += len(items)
         if not items or last >= total or len(out) >= _MAX_ATS_JOBS:

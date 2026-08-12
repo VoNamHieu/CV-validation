@@ -25,9 +25,27 @@ _API = "https://api-myvingroup.vingroup.net/prod/v1/app/ehiring/api/JobPosting/s
 # subsidiaries). The portal is a SPA so the route renders a shell to plain HTTP,
 # but it's the real deep-link the site itself uses.
 _JOB_URL = "https://tuyendung.vingroup.net/jobs/{jid}"
+_DETAIL_API = "https://api-myvingroup.vingroup.net/prod/v1/app/ehiring/api/JobPosting/detailVGC"
 _API_HEADERS = {"User-Agent": _HEADERS["User-Agent"], "Accept": "application/json",
                 "Origin": "https://tuyendung.vingroup.net",
                 "Referer": "https://tuyendung.vingroup.net/"}
+_MAX_JD_FETCH = 120  # bound per-job detailVGC calls (fast JSON, ~150ms each)
+
+
+def _jd_detail(jid) -> str:
+    """Full JD via detailVGC (found in the SPA bundle next to searchVGC):
+    data.jobDescription + jobRequirement + jobBenefit ("" on any miss)."""
+    try:
+        r = requests.get(_DETAIL_API, params={"id": jid}, headers=_API_HEADERS,
+                         timeout=_TIMEOUT)
+        if r.status_code != 200:
+            return ""
+        d = (r.json() or {}).get("data") or {}
+    except Exception as e:  # noqa: BLE001
+        logger.info(f"[ats] vingroup detail {jid} failed: {str(e)[:60]}")
+        return ""
+    parts = [d.get("jobDescription"), d.get("jobRequirement"), d.get("jobBenefit")]
+    return _full_desc("\n".join(p for p in parts if p))
 
 # Consolidated: every subsidiary on the portal lists under the single "Vingroup"
 # entry — no subsidiary is carved out separately, so the umbrella feed keeps all
@@ -99,7 +117,7 @@ def _vingroup(career_url: str) -> list[dict]:
                 "url": _JOB_URL.format(jid=jid),
                 "external_id": str(jid),
                 "location": loc[:120],
-                "description": "",
+                "description": _jd_detail(jid) if len(out) < _MAX_JD_FETCH else "",
             })
         if (total and seen >= total) or len(out) >= _MAX_ATS_JOBS:
             break
