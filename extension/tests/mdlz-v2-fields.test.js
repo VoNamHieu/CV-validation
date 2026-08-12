@@ -428,9 +428,11 @@ describe('MILESTONE 2 GATE — the verdict matches the page, in both directions'
         assert.equal(d.kind, 'free');
         assert.equal(d.label, 'SQL');
 
-        // 4. A single distinct catalog near-match still wins over free text.
-        const single = items([["Backlog Prioritization", "REMOTE_SKILL-1-5"], ["backlog prioritization", "backlog prioritization"]]);
-        assert.equal(exec.chooseSkillTarget(single, 'backlog prioritization').kind, 'catalog');
+        // 4. A substring-only cousin does NOT beat the verbatim create row:
+        //    "Agile" lives only inside "Agile/Scrum" (a different skill), so the
+        //    CV's own word goes on through the create row, not the cousin.
+        const cousin = items([["Agile/Scrum", "REMOTE_SKILL-1-5"], ["Agile", "Agile"]]);
+        assert.equal(exec.chooseSkillTarget(cousin, 'Agile').kind, 'free');
 
         // 5. Nothing at all → none, with evidence.
         assert.equal(exec.chooseSkillTarget(items([["No Items.", "No Items."]]), 'x').kind, 'none');

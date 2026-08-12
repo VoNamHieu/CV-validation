@@ -29,10 +29,21 @@ describe('chooseSkillTarget marks how far a partial list may be trusted', () => 
         assert.equal(c.match, 'exact');
     });
 
-    test('a single near-match is a catalog answer, but marked near — not exact', () => {
+    test('a single near-match with no verbatim option is a catalog answer, marked near', () => {
+        // No create row here (e.g. countryPhoneCode "Vietnam" → "Vietnam (+84)"):
+        // a single distinct cousin is the intended pick, marked near so a partial
+        // list still refuses it.
         const c = chooseSkillTarget([cat('Agile/Scrum')], 'Agile');
         assert.equal(c.kind, 'catalog');
-        assert.equal(c.match, 'near', 'a near hit must be distinguishable so a short list refuses it');
+        assert.equal(c.match, 'near');
+    });
+
+    test('the verbatim create row outranks a substring cousin', () => {
+        // Skills always carry a create row, so "Agile" goes on as the CV wrote
+        // it — never the catalog's different "Agile/Scrum".
+        const c = chooseSkillTarget([cat('Agile/Scrum'), make('Agile', 1)], 'Agile');
+        assert.equal(c.kind, 'free');
+        assert.equal(c.match, 'create');
     });
 
     test('the create row is free text, marked create', () => {

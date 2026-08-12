@@ -241,14 +241,20 @@ function virtualRowHeight(sc) {
  * free-text skill, and it is how "retention optimization" reached the page in
  * the candidate's own casing.
  *
- * Order of preference, per the user's decision (2026-08-10):
+ * Order of preference (2026-08-13): the create row now outranks a substring
+ * cousin — the 2026-08-10 order (exact → near → create) with those two swapped,
+ * for the reason in tier 2 —
  *   1. an EXACT catalog match — structured data beats free text, and when the
  *      catalog and the create row carry the same label the catalog row wins;
- *   2. a SINGLE distinct catalog row containing the term — what search is for;
- *   3. the CREATE row — the CV's own words go on the application, verbatim.
- *      Several different catalog near-matches no longer refuse the term: the
- *      old refusal existed to avoid picking a WRONG catalog row, and the
- *      create row is not a guess — it is exactly what the candidate wrote.
+ *   2. the CREATE row — the CV's own words go on the application, verbatim. A
+ *      term that appears only INSIDE a catalog label ("Agile" in "Agile/Scrum",
+ *      "Java" in "JavaScript") is a DIFFERENT skill, and committing it would
+ *      assert, silently, a skill the candidate never wrote — on the field
+ *      recruiters filter by. Skills ALWAYS carry a create row, so they stop
+ *      here: exact, else the candidate's own words, never a cousin.
+ *   3. a SINGLE distinct catalog row CONTAINING the term — reached only where
+ *      there is NO create row to prefer, e.g. countryPhoneCode ("Vietnam" →
+ *      "Vietnam (+84)"), whose list shares this chooser but offers no free text.
  */
 export function chooseSkillTarget(items, want) {
     const w = fold(want);
@@ -263,16 +269,21 @@ export function chooseSkillTarget(items, want) {
     const catalog = rows.filter((r) => !isCreate(r));
 
     // `match` is carried so a caller reading a PARTIAL list can tell the one
-    // safe answer (exact) from the two that a longer list could overturn (a
-    // near-match the exact row would beat, a create row the catalog would).
+    // answer a longer list cannot overturn (an exact hit) from the two it can (a
+    // create row a later exact catalog would beat; a near-match either would).
     const exact = catalog.filter((r) => fold(r.label) === w);
     if (exact.length) return { kind: 'catalog', match: 'exact', ...exact[0] };
+    // The candidate's verbatim text beats a substring cousin: "Agile" must not
+    // silently become "Agile/Scrum". Skills always carry a create row, so they
+    // stop here — at the CV's own words — and never reach the near branch below.
+    const create = rows.find((r) => isCreate(r) && fold(r.label) === w);
+    if (create) return { kind: 'free', match: 'create', ...create };
+    // Only where there is NO verbatim option (countryPhoneCode: "Vietnam" →
+    // "Vietnam (+84)") does a single distinct cousin become the intended pick.
     const near = catalog.filter((r) => fold(r.label).includes(w));
     if (near.length && new Set(near.map((r) => fold(r.label))).size === 1) {
         return { kind: 'catalog', match: 'near', ...near[0] };
     }
-    const create = rows.find((r) => isCreate(r) && fold(r.label) === w);
-    if (create) return { kind: 'free', match: 'create', ...create };
     return { kind: 'none', sample: rows.slice(0, 4).map((r) => r.label), shown: rows.length };
 }
 
@@ -281,7 +292,11 @@ export function chooseSkillTarget(items, want) {
  *
  * `exactOnly` is set when the list read is known to be PARTIAL: a near-match on
  * a short list can be shadowed by the exact row still below the fold, so only an
- * exact hit may be trusted until the whole list is in.
+ * exact hit may be trusted until the whole list is in. Skills lean on this: a
+ * partial read refuses the cousin, and a complete one carries the create row
+ * (its label IS the term) so exact takes it — the cousin is reached only by a
+ * widget with no create row (countryPhoneCode), which is exactly when it is
+ * wanted.
  */
 function pickLabel(labels, want, { exactOnly = false } = {}) {
     const w = fold(want);
