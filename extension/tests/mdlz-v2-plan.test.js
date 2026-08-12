@@ -102,6 +102,21 @@ describe('the plan is derived from the page, every time it is asked', () => {
         );
     });
 
+    test('the optional Skills chip-search task DECLARES its contract (searchMulti/many)', () => {
+        // The plan-contract suite only checks fields that ALREADY carry a
+        // declaration, and Skills is appended OUTSIDE planner.SECTIONS — so
+        // deleting its capability/cardinality would leave that suite green while
+        // the run CONTRACT_ERRORs at the executor (Skills is optional, and an
+        // optional CONTRACT_ERROR used to be silently forgiven). Assert the real
+        // planStep() task, so a lost declaration goes RED here.
+        const { tasks } = planner.planStep(CV);
+        const skills = tasks.find((t) => t.id === 'skills');
+        assert.ok(skills, 'Skills is planned when its field renders and the CV has skills');
+        assert.equal(skills.capability, 'searchMulti');
+        assert.equal(skills.cardinality, 'many');
+        assert.equal(skills.optional, true, 'and it stays optional — the guard must hold on an optional field');
+    });
+
     test('one blank and two jobs is one Add — and only one', () => {
         page.addWorkRow({});
         const { tasks } = planner.planStep(CV);
