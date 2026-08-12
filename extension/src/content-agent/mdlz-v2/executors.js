@@ -422,15 +422,30 @@ async function pickAcrossList(lease, want, { sleep, maxWindows = 24 } = {}) {
     }
 
     if (sc && !items) {
+        // The fiber read handed back null, so the WHOLE answer has to be scrolled
+        // into view — and this is where every measured `via:labels itemsLen:null`
+        // miss landed: "read 11/16", the exact row (Agile/Scrum, unit economics)
+        // sitting in the tail below the fold, missed for three passes. The list is
+        // virtualised and draws a beat behind the scroll, so a near-full-window
+        // step past a slow render skips the boundary rows. Read it densely:
+        // OVERLAPPING half-window steps, a longer settle before each read, STOP the
+        // moment every declared row has been seen, and one last settled read at the
+        // bottom for a tail that drew late — enough to close 11/16 in one pass.
         try { sc.scrollTop = 0; } catch { /* no layout */ }
-        await nap(80);
+        await nap(150);
         labelsOf().forEach((l) => seen.add(l));
+        const step = Math.max(40, Math.round((sc.clientHeight || 200) / 2));
         for (let i = 0; i < maxWindows; i++) {
+            if (declared && seen.size >= declared) break;    // every row is in — stop early
             const before = sc.scrollTop;
-            try { sc.scrollTop = Math.min(sc.scrollHeight, before + Math.max(60, sc.clientHeight - 40)); } catch { break; }
-            await nap(100);
+            try { sc.scrollTop = Math.min(sc.scrollHeight, before + step); } catch { break; }
+            await nap(180);
             labelsOf().forEach((l) => seen.add(l));
-            if (sc.scrollTop === before) break;              // the list stopped moving
+            if (sc.scrollTop === before) {                   // at the bottom
+                await nap(180);                              // let a late-drawing tail land, then read once more
+                labelsOf().forEach((l) => seen.add(l));
+                break;
+            }
         }
     }
 
