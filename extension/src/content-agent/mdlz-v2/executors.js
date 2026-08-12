@@ -295,6 +295,32 @@ function pickLabel(labels, want, { exactOnly = false } = {}) {
 }
 
 /**
+ * The skills result list, read from the tenant's own `skillsearch` endpoint —
+ * the ONE source of the list that a hidden tab cannot defer (network, unlike a
+ * React render, is not throttled by visibility). The shape is measured
+ * (2026-08-13): an array of `{id, descriptor}`, a catalog row's id is
+ * `REMOTE_SKILL-…` and the LAST row is the create/free-text one whose id EQUALS
+ * its descriptor — the same discriminator chooseSkillTarget already uses. Mapped
+ * to `{label, id, index}` so it drops straight into that decision. Best effort:
+ * any failure returns null and the caller keeps whatever the DOM gave it.
+ */
+async function fetchSkillOptions(term) {
+    try {
+        const t = String(term ?? '').trim();
+        if (!t || typeof fetch !== 'function' || typeof location === 'undefined') return null;
+        const tenant = location.pathname.match(/\/(?:recruiting|cxs)\/([^/]+)\//)?.[1] || 'mdlz';
+        const url = `${location.origin}/wday/cxs/${tenant}/skillsearch?search=${encodeURIComponent(t)}`;
+        const res = await fetch(url, { credentials: 'include', headers: { accept: 'application/json' } });
+        if (!res.ok) return null;
+        const data = await res.json();
+        if (!Array.isArray(data)) return null;
+        return data
+            .map((it, i) => ({ label: String(it?.descriptor ?? it?.label ?? '').trim(), id: String(it?.id ?? ''), index: i }))
+            .filter((r) => r.label);
+    } catch { return null; }
+}
+
+/**
  * Choose from the WHOLE result list, not the window that happens to be drawn.
  *
  * MEASURED on R-174102, 2026-08-09: the header read "Search Results (16)", the
@@ -361,6 +387,7 @@ async function pickAcrossList(lease, want, { sleep, maxWindows = 24 } = {}) {
     let items = sc ? readVirtualItems(sc) : null;
     let sawScChange = false;   // the container was swapped mid-search (stale-sc)
     let sawHidden = false;     // the search ran in a background tab (throttled render)
+    let sawApi = false;        // the item list came from the skillsearch API, not the fiber
     {
         const by = Date.now() + 4000;
         let prevLen = -1;
@@ -410,6 +437,22 @@ async function pickAcrossList(lease, want, { sleep, maxWindows = 24 } = {}) {
         hidden: sawHidden,
         scConnected: !!sc?.isConnected,
     });
+
+    // FIBER STILL SHORT — read the list from the API instead. Measured
+    // definitively (2026-08-13, mdlz.skill.fiber): scChanged:false, hidden:true,
+    // scConnected:true, itemsLen:null — the scroller is right and connected, but
+    // React DEFERS the virtualiser's render/commit while the tab is HIDDEN, so
+    // neither the fiber's props.items nor the tail DOM rows exist and only ~11/16
+    // are readable. The `skillsearch?search=` endpoint returns the SAME list
+    // ({id, descriptor}, create row last, id===descriptor) and the network is NOT
+    // deferred by visibility — so it is the one complete, visibility-independent
+    // read. Fed into the SAME index-based click below (the tail row still has to
+    // be scrolled into view to click, best-effort while hidden).
+    if (!items || (declared > 0 && items.length < declared)) {
+        const api = await fetchSkillOptions(want);
+        if (api && api.length) { items = api; declared = api.length; sawApi = true; }
+    }
+    if (sawApi) trace('mdlz.skill.api', { itemsLen: items?.length ?? null, want: String(want ?? '') });
 
     // A read is only COMPLETE once the item array is at least as long as the
     // count the header declared. Below that the answer may simply not be in the
