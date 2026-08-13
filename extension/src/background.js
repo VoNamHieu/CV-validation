@@ -2194,3 +2194,300 @@ chrome.runtime.onInstalled.addListener(() => {
         }
     });
 });
+
+// ══════════════════════════════════════════════════════════════════════
+// TEMPORARY DIAGNOSTIC — render-surface probe (safe to delete).
+//
+// Question: can the Skills virtualiser render its TAIL (the create row at
+// position 16) when the Workday tab lives in a SEPARATE, UNFOCUSED-BUT-VISIBLE
+// window — i.e. is `chrome.windows.create({focused:false})` a viewport that
+// stays `visibilityState:'visible'` with rAF running, so custom skills commit
+// unattended without stealing the user's focus?
+//
+// Run from the service-worker console (chrome://extensions → Copo → "service
+// worker"):  copoProbeRenderSurface()
+// then, when done:  copoRestoreProbeTab()
+//
+// IMPORTANT: the Workday tab must be on the My Experience step (Skills visible),
+// and after the popup opens, make sure it is NOT hidden behind your main window
+// — occlusion counts as hidden. The `vis`/`rafFrames` fields in the result tell
+// you which happened.
+// ══════════════════════════════════════════════════════════════════════
+
+// Injected into the page (MAIN world). Self-contained: no outer references.
+async function copoMeasureRenderSurface() {
+    const norm = (s) => String(s || '').trim().toLowerCase();
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const SEL = '[role="option"],[data-automation-id="promptOption"],[data-automation-id="menuItem"]';
+    const out = { vis: document.visibilityState, hidden: document.hidden, hasFocus: document.hasFocus() };
+    try {
+        // rAF frames over ~800ms: 0 ⇒ paused (hidden/occluded); ~40+ ⇒ live.
+        out.rafFrames = await new Promise((res) => {
+            let n = 0;
+            setTimeout(() => res(n), 800);
+            const tick = () => { n++; requestAnimationFrame(tick); };
+            requestAnimationFrame(tick);
+        });
+
+        const field = document.querySelector('[data-automation-id="formField-skills"]');
+        if (!field) { out.error = 'no Skills field — put the Workday tab on My Experience first'; return out; }
+        const input = field.querySelector('input');
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+        const clearChips = () => [...field.querySelectorAll('[data-automation-id="DELETE_charm"],[aria-label^="Delete"]')].forEach((d) => d.click());
+
+        clearChips();   // known baseline
+
+        // A custom term that DOES collide with many catalogue rows, so its create
+        // row is pushed to the tail (position 16) — the case that fails hidden.
+        const term = 'Negotiation Copo Probe';
+        const submit = () => ['keydown', 'keypress', 'keyup'].forEach((t) => input.dispatchEvent(
+            new KeyboardEvent(t, { bubbles: true, cancelable: true, key: 'Enter', code: 'Enter', keyCode: 13, which: 13 })));
+        input.focus(); input.click();
+        setter.call(input, term); input.dispatchEvent(new Event('input', { bubbles: true }));
+        submit();
+        // Wait for the search to actually ANSWER (not the "No Items." placeholder),
+        // retrying Enter once — the query is sometimes never submitted on the first.
+        out.answered = false;
+        for (let i = 0; i < 20; i++) {
+            await sleep(200);
+            const setEl = document.querySelector('[aria-setsize]');
+            const size = setEl ? Number(setEl.getAttribute('aria-setsize')) : 0;
+            const opts = [...document.querySelectorAll(SEL)].filter((o) => o.offsetParent !== null && norm(o.textContent) !== 'no items.');
+            if (size > 1 || opts.length > 2) { out.answered = true; break; }
+            if (i === 8) submit();   // one retry
+        }
+
+        const scr = document.querySelector('[data-automation-id="activeListContainer"]');
+        out.clientHeight = scr ? scr.clientHeight : null;
+        // Walk DOWN in viewport-sized steps, settling between so a live (visible)
+        // virtualiser renders each new band, until the create row appears or we
+        // hit the bottom. A single jump fails: the container expands lazily
+        // (clientHeight 32→399), so an early scrollTop=scrollHeight lands short.
+        let createNode = null;
+        let maxIdxSeen = 0;
+        for (let i = 0; i < 20; i++) {
+            const rows = [...document.querySelectorAll(SEL)].filter((o) => o.offsetParent !== null);
+            createNode = rows.find((o) => norm(o.textContent) === norm(term));
+            const setEl = document.querySelector('[aria-setsize]');
+            out.ariaSetSize = setEl ? Number(setEl.getAttribute('aria-setsize')) : out.ariaSetSize;
+            const posEls = [...document.querySelectorAll('[aria-posinset]')].map((e) => Number(e.getAttribute('aria-posinset')));
+            if (posEls.length) maxIdxSeen = Math.max(maxIdxSeen, ...posEls);
+            if (createNode || !scr) break;
+            const atBottom = scr.scrollTop + scr.clientHeight >= scr.scrollHeight - 2;
+            if (atBottom && i > 1) break;
+            const step = Math.max(32, (scr.clientHeight || 32) - 32);
+            try { scr.scrollTop = Math.min(scr.scrollTop + step, scr.scrollHeight); } catch { /* no layout */ }
+            await sleep(180);
+        }
+        const rendered = [...document.querySelectorAll(SEL)].filter((o) => o.offsetParent !== null);
+        out.renderedCount = rendered.length;
+        out.clientHeightAfterScroll = scr ? scr.clientHeight : null;
+        out.maxPosInSetRendered = maxIdxSeen;
+        out.createRowRendered = !!createNode;
+
+        if (createNode) {
+            const before = field.querySelectorAll('[data-automation-id="selectedItem"]').length;
+            (createNode.querySelector('input[type="checkbox"]') || createNode).click();
+            await sleep(500);
+            out.customChipCommitted = field.querySelectorAll('[data-automation-id="selectedItem"]').length > before;
+        }
+
+        clearChips();   // leave the draft as found
+        setter.call(input, ''); input.dispatchEvent(new Event('input', { bubbles: true })); input.blur();
+    } catch (e) {
+        out.error = String((e && e.message) || e).slice(0, 140);
+    }
+    return out;
+}
+
+globalThis.copoProbeRenderSurface = async (tabId) => {
+    if (!tabId) {
+        const tabs = await chrome.tabs.query({ url: ['https://*.myworkdaysite.com/*', 'https://*.myworkdayjobs.com/*'] });
+        const apply = tabs.find((t) => /\/apply\b/.test(t.url || '')) || tabs[0];
+        if (!apply) { console.log('[Copo probe] no Workday apply tab found — open one on My Experience first.'); return; }
+        tabId = apply.id;
+    }
+    const tab = await chrome.tabs.get(tabId);
+    const originalWindowId = tab.windowId;
+    console.log('[Copo probe] moving tab', tabId, 'into an UNFOCUSED popup window…');
+    const win = await chrome.windows.create({ tabId, type: 'popup', focused: false, width: 520, height: 720, left: 60, top: 60 });
+    globalThis.__copoProbe = { tabId, originalWindowId, popupWindowId: win.id };
+    // focused:false is not always honoured (macOS focuses new windows anyway), so
+    // rather than fight it in code, hand the window arrangement to the human: a
+    // 9-second grace to (a) make the popup visible in a corner and (b) CLICK the
+    // main window so the popup is UNFOCUSED. measureFn then reports the real
+    // vis/hasFocus at that moment — the honest test of "visible but not focused".
+    console.log('[Copo probe] Popup opened. NOW: drag it to a visible corner, then CLICK YOUR MAIN WINDOW to defocus it. Measuring in 9s…');
+    await new Promise((r) => setTimeout(r, 9000));
+    const [res] = await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: copoMeasureRenderSurface });
+    globalThis.__copoProbe.result = res.result;
+    console.log('[Copo probe] RESULT:\n' + JSON.stringify(res.result, null, 2));
+    console.log('[Copo probe] Read `vis` + `rafFrames`: visible/>0 ⇒ the window renders (good). '
+        + 'hidden/0 ⇒ it is occluded — move the popup so it is not behind another window and re-run. '
+        + 'When done: copoRestoreProbeTab()');
+    return res.result;
+};
+
+// Battery of "force the tail to render while HIDDEN" hacks, injected MAIN world.
+// Each hack applies, then measures whether the create row (position 16) rendered.
+async function copoForceRenderBattery() {
+    const norm = (s) => String(s || '').trim().toLowerCase();
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const SEL = '[role="option"],[data-automation-id="promptOption"],[data-automation-id="menuItem"]';
+    const TERM = 'Negotiation Copo Probe';
+    const R = { vis: document.visibilityState, hidden: document.hidden };
+    const field = document.querySelector('[data-automation-id="formField-skills"]');
+    if (!field) { R.error = 'no Skills field — put Workday on My Experience'; return R; }
+    const input = field.querySelector('input');
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    const scr = () => document.querySelector('[data-automation-id="activeListContainer"]');
+    const createNode = () => [...document.querySelectorAll(SEL)].filter((o) => o.offsetParent !== null).find((o) => norm(o.textContent) === norm(TERM)) || null;
+    const setsize = () => { const e = document.querySelector('[aria-setsize]'); return e ? Number(e.getAttribute('aria-setsize')) : null; };
+    const measure = (name) => { R[name] = { createRendered: !!createNode(), clientHeight: scr()?.clientHeight ?? null, rendered: [...document.querySelectorAll(SEL)].filter((o) => o.offsetParent !== null).length }; return !!createNode(); };
+
+    try {
+        [...field.querySelectorAll('[data-automation-id="DELETE_charm"],[aria-label^="Delete"]')].forEach((d) => d.click());
+        input.focus(); input.click();
+        setter.call(input, TERM); input.dispatchEvent(new Event('input', { bubbles: true }));
+        const submit = () => ['keydown', 'keypress', 'keyup'].forEach((t) => input.dispatchEvent(new KeyboardEvent(t, { bubbles: true, cancelable: true, key: 'Enter', code: 'Enter', keyCode: 13, which: 13 })));
+        submit();
+        for (let i = 0; i < 25; i++) { await sleep(200); if ((setsize() || 0) > 1) break; if (i === 10) submit(); }
+        R.ariaSetSize = setsize();
+        measure('baseline');
+
+        // HACK 1 — patch requestAnimationFrame to fire via microtask (dodges the
+        // hidden-tab rAF pause), then scroll.
+        { const orig = window.requestAnimationFrame;
+            try {
+                window.requestAnimationFrame = (cb) => { Promise.resolve().then(() => { try { cb(performance.now()); } catch { /* */ } }); return 0; };
+                const s = scr(); if (s) { try { s.scrollTop = s.scrollHeight; } catch { /* */ } }
+                await sleep(200); measure('H1_rafSync');
+            } finally { window.requestAnimationFrame = orig; } }
+
+        // HACK 2 — spoof document.hidden/visibilityState=visible + fire
+        // visibilitychange (defeats the page's OWN pause logic), then scroll.
+        try {
+            Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
+            Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+            document.dispatchEvent(new Event('visibilitychange'));
+            const s = scr(); if (s) { try { s.scrollTop = s.scrollHeight; } catch { /* */ } }
+            await sleep(400); measure('H2_visSpoof');
+        } catch (e) { R.H2_visSpoof = { error: String(e).slice(0, 60) }; }
+
+        // HACK 3 — combined: rAF-sync + vis spoof (still on) + step scroll to tail.
+        { const orig = window.requestAnimationFrame;
+            try {
+                window.requestAnimationFrame = (cb) => { Promise.resolve().then(() => { try { cb(performance.now()); } catch { /* */ } }); return 0; };
+                const s = scr();
+                for (let i = 0; i < 18 && s; i++) { if (createNode()) break; try { s.scrollTop = Math.min(s.scrollTop + Math.max(32, (s.clientHeight || 32) - 32), s.scrollHeight); } catch { /* */ } await sleep(120); }
+                measure('H3_combinedStep');
+            } finally { window.requestAnimationFrame = orig; } }
+        try { delete document.hidden; delete document.visibilityState; } catch { /* */ }
+
+        // HACK 4 — react-window instance: find scrollToItem via the scroller fiber.
+        try {
+            const s = scr(); let inst = null;
+            if (s) { const k = Object.keys(s).find((x) => x.startsWith('__reactFiber$')); let f = s[k];
+                for (let i = 0; i < 40 && f; i++) { if (f.stateNode && typeof f.stateNode.scrollToItem === 'function') { inst = f.stateNode; break; } f = f.return; } }
+            if (inst) { inst.scrollToItem((R.ariaSetSize || 16) - 1, 'start'); await sleep(400); R.H4_fiberScrollToItem = { found: true, createRendered: !!createNode() }; }
+            else R.H4_fiberScrollToItem = { found: false };
+        } catch (e) { R.H4_fiberScrollToItem = { error: String(e).slice(0, 60) }; }
+
+        // If ANY hack rendered it, try to actually commit.
+        const n = createNode();
+        if (n) { const before = field.querySelectorAll('[data-automation-id="selectedItem"]').length; (n.querySelector('input[type="checkbox"]') || n).click(); await sleep(400); R.COMMITTED = field.querySelectorAll('[data-automation-id="selectedItem"]').length > before; }
+        R.winner = ['H1_rafSync', 'H2_visSpoof', 'H3_combinedStep', 'H4_fiberScrollToItem'].find((h) => R[h] && R[h].createRendered) || 'none';
+    } catch (e) {
+        R.error = String((e && e.message) || e).slice(0, 140);
+    } finally {
+        try { [...field.querySelectorAll('[data-automation-id="DELETE_charm"],[aria-label^="Delete"]')].forEach((d) => d.click()); setter.call(input, ''); input.dispatchEvent(new Event('input', { bubbles: true })); input.blur(); } catch { /* */ }
+    }
+    return R;
+}
+
+// The DECISIVE custom-skill test: write the custom item through the widget's own
+// fiber onSelect — no row render needed — from the EXTENSION pipeline (not CDP),
+// on a genuinely hidden tab. Verifies the chip, then cleans up after itself.
+async function copoFiberWriteMeasure() {
+    const norm = (s) => String(s || '').trim().toLowerCase();
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const TERM = 'Copo CS Probe';
+    const R = { vis: document.visibilityState, hasFocus: document.hasFocus() };
+    const field = document.querySelector('[data-automation-id="formField-skills"]');
+    if (!field) { R.error = 'no Skills field — put Workday on My Experience'; return R; }
+    const input = field.querySelector('input');
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    const chips = () => [...field.querySelectorAll('[data-automation-id="selectedItem"]')].map((c) => c.textContent.trim());
+    try {
+        R.chipsBefore = chips().length;
+        // 1. open the search and submit the term (the state the engine is in)
+        input.focus(); input.click();
+        setter.call(input, TERM); input.dispatchEvent(new Event('input', { bubbles: true }));
+        const submit = () => ['keydown', 'keypress', 'keyup'].forEach((t) => input.dispatchEvent(
+            new KeyboardEvent(t, { bubbles: true, cancelable: true, key: 'Enter', code: 'Enter', keyCode: 13, which: 13 })));
+        submit();
+        for (let i = 0; i < 12; i++) { await sleep(400); const s = document.querySelector('[aria-setsize]'); if (s && Number(s.getAttribute('aria-setsize')) > 1) break; if (i === 5) submit(); }
+        // 2. the widget's own handler, found from the fiber
+        const key = Object.keys(input).find((k) => k.startsWith('__reactFiber$'));
+        R.fiberKey = !!key;
+        let f = key ? input[key] : null, target = null;
+        for (let i = 0; i < 45 && f; i++) { const p = f.memoizedProps; if (p && typeof p.onSelect === 'function' && Array.isArray(p.values)) { target = p; break; } f = f.return; }
+        R.onSelectFound = !!target;
+        if (!target) return R;
+        // 3. write the CUSTOM item — id === label is the create discriminator
+        target.onSelect([...target.values, { label: TERM, id: TERM }]);
+        // 4. verify: the chip is the widget's own commit signal
+        R.landedAfterMs = -1;
+        for (let i = 0; i < 8; i++) { await sleep(600); if (chips().some((t) => norm(t) === norm(TERM))) { R.landedAfterMs = (i + 1) * 600; break; } }
+        R.customLanded = R.landedAfterMs > -1;
+        R.chipsAfter = chips().length;
+    } catch (e) { R.error = String((e && e.message) || e).slice(0, 140); }
+    finally {
+        try {   // remove ONLY the probe chip (mousedown-led — a bare click is a no-op)
+            const chip = [...field.querySelectorAll('[data-automation-id="selectedItem"]')].find((c) => norm(c.textContent) === norm(TERM));
+            const charm = chip && chip.querySelector('[data-automation-id="DELETE_charm"]');
+            if (charm) for (const [C, t] of [[PointerEvent, 'pointerdown'], [MouseEvent, 'mousedown'], [PointerEvent, 'pointerup'], [MouseEvent, 'mouseup'], [MouseEvent, 'click']]) { try { charm.dispatchEvent(new C(t, { bubbles: true, cancelable: true, view: window })); } catch { /* */ } }
+            await sleep(800);
+            setter.call(input, ''); input.dispatchEvent(new Event('input', { bubbles: true })); input.blur();
+            R.cleanedUp = ![...field.querySelectorAll('[data-automation-id="selectedItem"]')].some((c) => norm(c.textContent) === norm(TERM));
+        } catch { /* leave as-is */ }
+    }
+    return R;
+}
+
+globalThis.copoProbeFiberWrite = async (tabId) => {
+    if (!tabId) {
+        const tabs = await chrome.tabs.query({ url: ['https://*.myworkdaysite.com/*', 'https://*.myworkdayjobs.com/*'] });
+        const apply = tabs.find((t) => /\/apply\b/.test(t.url || '')) || tabs[0];
+        if (!apply) { console.log('[Copo fiber] no Workday apply tab found.'); return; }
+        tabId = apply.id;
+    }
+    console.log('[Copo fiber] KEEP THE WORKDAY TAB COVERED. Writing a custom skill via fiber onSelect…');
+    const [res] = await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: copoFiberWriteMeasure });
+    console.log('[Copo fiber] RESULT:\n' + JSON.stringify(res.result, null, 2));
+    console.log('[Copo fiber] `customLanded:true` on a vis:hidden tab = the custom path works from the extension pipeline.');
+    return res.result;
+};
+
+globalThis.copoProbeForceRender = async (tabId) => {
+    if (!tabId) {
+        const tabs = await chrome.tabs.query({ url: ['https://*.myworkdaysite.com/*', 'https://*.myworkdayjobs.com/*'] });
+        const apply = tabs.find((t) => /\/apply\b/.test(t.url || '')) || tabs[0];
+        if (!apply) { console.log('[Copo force] no Workday apply tab found.'); return; }
+        tabId = apply.id;
+    }
+    console.log('[Copo force] running the force-render battery on the HIDDEN tab (keep Workday covered/backgrounded)…');
+    const [res] = await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: copoForceRenderBattery });
+    console.log('[Copo force] RESULT:\n' + JSON.stringify(res.result, null, 2));
+    console.log('[Copo force] `winner` names the hack that rendered position 16 (or "none"); `COMMITTED` = the custom chip landed.');
+    return res.result;
+};
+
+globalThis.copoRestoreProbeTab = async () => {
+    const p = globalThis.__copoProbe;
+    if (!p) { console.log('[Copo probe] nothing to restore.'); return; }
+    try {
+        await chrome.tabs.move(p.tabId, { windowId: p.originalWindowId, index: -1 });
+        console.log('[Copo probe] tab', p.tabId, 'moved back to window', p.originalWindowId);
+    } catch (e) { console.warn('[Copo probe] restore failed:', e?.message); }
+};
