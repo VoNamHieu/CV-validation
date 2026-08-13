@@ -1577,6 +1577,60 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return true;
     }
 
+    // ── Write one skill into the Workday multiselect via its own React handler ──
+    //
+    // The content script lives in the ISOLATED world, where a DOM node's
+    // `__reactFiber$…` expando (a per-world JS property) does not exist — so the
+    // engine can decide WHAT to commit but cannot reach the widget's onSelect.
+    // This bridge injects into the MAIN world (same trick as the SW probes,
+    // measured 4/4 on 2026-08-13: the chip lands in ~600ms even hidden, because
+    // React's state commit is plain JS — only the virtualiser's PAINT is
+    // visibility-throttled). The engine still re-reads the chip itself; this
+    // returns landed as a courtesy, not as the verdict.
+    if (message.type === 'SKILL_FIBER_WRITE') {
+        const tid = sender.tab && sender.tab.id;
+        const label = String(message.label ?? '');
+        const id = String(message.id ?? label);
+        if (tid == null || !label) { sendResponse({ ok: false, error: 'no tab or label' }); return true; }
+        chrome.scripting.executeScript({
+            target: { tabId: tid },
+            world: 'MAIN',
+            func: async (lbl, sid) => {
+                const norm = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+                const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+                try {
+                    const field = document.querySelector('[data-automation-id="formField-skills"]');
+                    const input = field && field.querySelector('input');
+                    if (!input) return { ok: false, error: 'no skills input' };
+                    const key = Object.keys(input).find((k) => k.startsWith('__reactFiber$'));
+                    let f = key ? input[key] : null, target = null;
+                    for (let i = 0; i < 45 && f; i++) {
+                        const p = f.memoizedProps;
+                        if (p && typeof p.onSelect === 'function' && Array.isArray(p.values)) { target = p; break; }
+                        f = f.return;
+                    }
+                    if (!target) return { ok: false, error: 'no onSelect fiber' };
+                    if (target.values.some((v) => norm(v.label) === norm(lbl))) return { ok: true, landed: true, already: true };
+                    target.onSelect([...target.values, { label: lbl, id: sid }]);
+                    // Poll the chip — hidden-tab timers are clamped to ~1s, so a
+                    // few iterations cover the measured ~600ms landing comfortably.
+                    for (let i = 0; i < 5; i++) {
+                        await sleep(400);
+                        const chips = [...(field.querySelectorAll('[data-automation-id="selectedItem"]') || [])];
+                        if (chips.some((c) => norm(c.textContent) === norm(lbl))) return { ok: true, landed: true };
+                    }
+                    return { ok: true, landed: false };
+                } catch (e) { return { ok: false, error: String((e && e.message) || e).slice(0, 120) }; }
+            },
+            args: [label, id],
+        }).then((results) => {
+            sendResponse(results && results[0] && results[0].result ? results[0].result : { ok: false, error: 'no result' });
+        }).catch((e) => {
+            try { sendResponse({ ok: false, error: String(e && e.message || e).slice(0, 120) }); } catch { /* tab gone */ }
+        });
+        return true;
+    }
+
     // ── Bring the driven tab's window forward (only the driven tab is obeyed) ──
     if (message.type === 'FOCUS_RUN_TAB') {
         const tid = sender.tab && sender.tab.id;

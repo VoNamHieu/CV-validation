@@ -1031,19 +1031,43 @@ const searchMulti = {
                     // (not-found, ambiguous) stay refusals, and the chip re-read
                     // stays the one commit signal either way.
                     if (choice.chose && choice.why === RESULT.OPEN_TIMEOUT) {
+                        const before = this.chipsNow(f);
+                        // Direct fiber first — but the content script lives in the
+                        // ISOLATED world, where the `__reactFiber$` expando does
+                        // not exist, so in production this is null and the write
+                        // goes through the background's MAIN-world bridge
+                        // (SKILL_FIBER_WRITE → chrome.scripting, world:'MAIN').
                         const props = readSkillsOnSelect(triggerOf(f));
+                        let via = 'none';
                         if (props) {
-                            const before = this.chipsNow(f);
                             props.onSelect([...props.values, { label: choice.chose.label, id: choice.chose.id }]);
+                            via = 'direct';
+                        } else if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+                            try {
+                                await new Promise((resolve) => {
+                                    const t = setTimeout(resolve, 8000);   // a dead worker must not hang the term
+                                    chrome.runtime.sendMessage(
+                                        { type: 'SKILL_FIBER_WRITE', label: choice.chose.label, id: choice.chose.id },
+                                        () => { void chrome.runtime.lastError; clearTimeout(t); resolve(); },
+                                    );
+                                });
+                                via = 'bridge';
+                            } catch { /* no extension context — the verdict below stands */ }
+                        }
+                        if (via !== 'none') {
                             await until(() => this.holding(f, term).length > 0,
                                 { sleep: ctx.sleep, budgetMs: ctx.fiberMs || 4000 });
                             const fresh = freshOnes(before, this.chipsNow(f));
                             trace('mdlz.skill.fiberWrite', {
-                                term, chip: fresh[0] || '(none)', free: choice.chose.free,
+                                term, via, chip: fresh[0] || '(none)', free: choice.chose.free,
                                 landed: fresh.length > 0,
                             });
                             if (fresh.length === 1) { added.push(fresh[0]); return { result: RESULT.COMMITTED, term }; }
                             if (fresh.length > 1) return { result: RESULT.AMBIGUOUS, term, reason: `one write added ${fresh.length} chips`, saw: fresh.slice(0, 4) };
+                        } else {
+                            // Says WHY the rescue stood down — absence of this line
+                            // cost a whole diagnostic run once.
+                            trace('mdlz.skill.fiberWrite', { term, via, landed: false });
                         }
                     }
                     // Forward the WHOLE verdict, not a hand-picked five. pickAcrossList
