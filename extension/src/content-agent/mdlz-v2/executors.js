@@ -28,6 +28,7 @@ import { sleep as domSleep } from '../dom.js';
 import { errorsIn, rowsOf } from './row.js';
 import { visibleMonthCells, visibleOptions, visiblePanels } from './page-observer.js';
 import { withList } from './popup-manager.js';
+import { resolveSkillWants } from './skill-resolve.js';
 import { trace } from '../trace.js';
 
 // The fallback is dom.js's `sleep`, not a bare setTimeout: a hidden tab's own
@@ -1692,6 +1693,11 @@ const SIGNAL = {
     [WIDGET.TEXTAREA]: 'value that stuck + no row error',
 };
 
+// Skills resolution is a network read (skillsearch); cache it per want-list so
+// it does not re-run on every idempotent planner pass. Keyed by origin + the
+// exact want list; only cached when the endpoint answered (see runField).
+const _skillWantCache = new Map();
+
 /**
  * Fill one field: skip it if it is already right, write it, then prove it.
  *
@@ -1720,6 +1726,37 @@ export async function runField(f, want, ctx = {}) {
         return { result: RESULT.USER_REQUIRED, reason: `no capability for a ${f.kind} widget` };
     }
     if (!f.present()) return { result: RESULT.WAITING_HYDRATION, reason: 'field not on the page' };
+
+    // SKILLS ONLY (the sole searchMulti/many field) — a virtualised catalogue
+    // that paints just its top rows while the tab is hidden. Map every wanted
+    // skill to a term that lands there, or drop it flagged, BEFORE satisfied/
+    // commit/verify read `want`: a canonical chip on the page ("Customer Lifetime
+    // Value") would never match the CV's phrasing ("unit economics") and the
+    // field would re-add forever. Free-text terms whose create row sits at the
+    // unpaintable tail (position 16) are exactly what hung Skills; they are
+    // flagged out instead. A dead endpoint keeps the original terms (no regress).
+    //
+    // LIVE runs only: resolution is a real skillsearch network read, so the
+    // production entry (recipe-router → runMdlzV2) opts in with ctx.resolveSkills,
+    // and the plain-div test harness — which drives runMdlzV2 directly and would
+    // otherwise fetch the real tenant — does not. Same intent as pickAcrossList
+    // gating its API read on a real scroller, but decided by the caller.
+    const resolveSkills = ctx.resolveSkills
+        && ctx.decl?.capability === 'searchMulti' && ctx.decl?.cardinality === 'many';
+    if (resolveSkills) {
+        const key = (typeof location !== 'undefined' ? location.origin : '')
+            + '' + (Array.isArray(want) ? want.join('') : String(want));
+        let mapped = _skillWantCache.get(key);
+        if (!mapped) {
+            mapped = await resolveSkillWants(want, { fetchOptions: fetchSkillOptions });
+            if (mapped.oracleReached) _skillWantCache.set(key, mapped);
+        }
+        if (mapped.flagged.length) trace('mdlz.skill.flagged', { field: f.name, flagged: mapped.flagged.join(' | ') });
+        if (!mapped.want.length) {
+            return { result: RESULT.USER_REQUIRED, reason: 'no skill maps to the MDLZ catalogue', flagged: mapped.flagged };
+        }
+        want = mapped.want;
+    }
 
     if (cap.satisfied(f, want)) {
         trace('mdlz.field.satisfied', { field: f.name, kind: f.kind });

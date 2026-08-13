@@ -136,7 +136,10 @@ export const applyRecipeFields = async (recipe, profile, cvData, cv) => {
     let decision = { useV1: true };
     try {
         rememberCv(cv);                       // so copoMdlzPreflight() can be asked for on demand
-        const v2 = await runMdlzV2({ recipe, profile, cvData, cv });
+        // resolveSkills: this is the LIVE run, so the Skills field may resolve its
+        // terms against the tenant's skillsearch (a real network read the test
+        // harness must never trigger — it drives runMdlzV2 directly, without this).
+        const v2 = await runMdlzV2({ recipe, profile, cvData, cv, resolveSkills: true });
         decision = routeAfterV2(v2);
         if (!v2?.took && v2?.reason && v2.reason !== 'flag off') {
             console.log(`[Copo mdlz-v2] ${v2.pageIsV2Owned ? 'owns this page but stood down' : 'handing back to v1'}`
