@@ -9,7 +9,7 @@ import {
 import type { Session, User } from '@supabase/supabase-js';
 import { getSupabase } from './supabase';
 import { useAppStore } from '@/store/useAppStore';
-import { syncAuthTokenToExtension } from './extension-sync';
+import { pushTokenToExtension } from './extension-sync';
 
 interface AuthResult {
     error?: string;
@@ -49,6 +49,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             if (active) {
                 setSession(data.session);
                 setLoading(false);
+                // Refresh the extension's token on EVERY load, not just on an
+                // auth-state change. getSession() already auto-refreshed a
+                // near-expiry token, so its access_token is live — and this is
+                // the reliable per-F5 path the change event isn't (see below).
+                if (data.session) void pushTokenToExtension(data.session.access_token);
             }
         });
         const { data: sub } = sb.auth.onAuthStateChange((_event, s) => {
@@ -57,11 +62,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             // Dismiss the soft-gate prompt the moment auth succeeds (covers
             // sign-in in another tab / email-confirm landing while it's open).
             if (s) setPromptOpen(false);
-            // Keep the extension's copy of the token fresh. Supabase fires this
-            // on TOKEN_REFRESHED (~hourly), which is what stops the extension's
-            // just-in-time ATS credential fetch from dying mid-batch on a stale
-            // token. Best-effort: fails silently when the extension isn't there.
-            if (s) void syncAuthTokenToExtension().catch(() => { });
+            // Keep the extension's copy of the token fresh (Supabase fires this
+            // on TOKEN_REFRESHED ~hourly, and on INITIAL_SESSION each load).
+            // Push the session HANDED to us — never getSession() from in here:
+            // awaiting a supabase call inside this callback deadlocks on the
+            // v2 auth lock, and that silent hang is what left the extension on
+            // an expired token across every reload. Best-effort.
+            if (s) void pushTokenToExtension(s.access_token).catch(() => { });
         });
         return () => {
             active = false;
