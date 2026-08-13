@@ -1,23 +1,23 @@
 /**
- * skill-resolve.js — turn a CV skill into a term the Mondelez catalogue commits
- * RELIABLY in a hidden tab.
+ * skill-resolve.js — turn a CV skill into the term the Mondelez catalogue
+ * actually holds, so the Skills widget commits STRUCTURED data wherever the
+ * catalogue has an answer, and the candidate's own words only where it does not.
  *
- * Measured live (2026-08-13, tenant mdlz): the Skills widget is a virtualised
- * checkbox list. While the tab is HIDDEN the virtualiser paints only the first
- * ~2 rows and never the tail (its own viewport collapses to ~1px because layout
- * is deferred), and a chip commits ONLY by clicking a row that is painted. An
- * exact CATALOG row lands at index 0; the free-text "create" row is always LAST
- * and, on any list longer than the render window, never paints — the whole of
- * "Skills hung at position 16".
- *
- * So the rule is: type a term skillsearch answers with an exact catalog row at
- * the TOP, or do not type it. resolveSkillToMdlz enforces exactly that.
- *
- * skillsearch is the ORACLE, never a static guess — canonical spellings differ
- * from natural phrasing in ways no map predicts ("pricing strategy" → "Pricing
- * Strategies", "lifetime value" → "Customer Lifetime Value"). Every taxonomy
- * candidate is re-verified against the live endpoint before it is used, so a
+ * Measured live (2026-08-13, tenant mdlz): skillsearch pads every query to ~16
+ * results and the create/free-text row is always LAST — so "does the catalogue
+ * have this skill, and how does it spell it" can only be answered by asking the
+ * endpoint, never by guessing. Canonical spellings differ from natural phrasing
+ * in ways no static map predicts ("pricing strategy" → "Pricing Strategies",
+ * "lifetime value" → "Customer Lifetime Value"), so skillsearch is the ORACLE:
+ * every taxonomy candidate is re-verified against it before it is used, and a
  * wrong or renamed entry self-rejects instead of committing the wrong skill.
+ *
+ * Position in the results no longer gates anything: a row that will not render
+ * in a hidden tab is committed by DATA (fiber onSelect — see readSkillsOnSelect
+ * in executors.js, measured 4/4), so the resolver's job is purely QUALITY —
+ * prefer the catalogue's structured row over minting free text of the same
+ * meaning, and keep the taxonomy mapping ("unit economics" is not an MDLZ
+ * skill; Customer Lifetime Value is).
  */
 
 const fold = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
@@ -25,10 +25,6 @@ const fold = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
 // tenant's REMOTE_SKILL-… while the create row's id EQUALS its label.
 const labelOf = (r) => (r && (r.label ?? r.descriptor ?? r.ariaLabel)) || '';
 const isCatalog = (r) => !!r && String(r.id) !== String(labelOf(r));
-
-// Only rows 0..RENDER_SAFE paint reliably in a hidden tab (measured floor: two
-// rows, indices 0 and 1). A match past this is treated as unreachable.
-export const RENDER_SAFE = 1;
 
 /**
  * CV phrasing → ranked canonical Mondelez skills. A HINT only: each candidate is
@@ -49,27 +45,23 @@ export const SKILL_TAXONOMY = {
     // Spellings that differ from the natural phrasing (verified mismatches).
     'pricing strategy': ['Pricing Strategies'],
     'margin analysis': ['Profit Margin Analysis'],
+    // Verified live: "agentic system(s)" is not exact; "Agentic AI" is, at 0.
+    'agentic system': ['Agentic AI'],
+    'agentic systems': ['Agentic AI'],
+};
+
+/** The catalogue's own row for `probe`, wherever skillsearch ranked it. */
+const exactCatalog = (rows, probeFolded) => {
+    const hit = (rows || []).find((r) => isCatalog(r) && fold(labelOf(r)) === probeFolded);
+    return hit ? labelOf(hit) : null;
 };
 
 /**
- * The catalogue's own spelling for `probe` if skillsearch puts an exact catalog
- * row inside the paintable window, else null.
- */
-function exactCatalogAtTop(rows, probeFolded) {
-    if (!rows || !rows.length) return null;
-    const limit = Math.min(rows.length, RENDER_SAFE + 1);
-    for (let i = 0; i < limit; i++) {
-        if (isCatalog(rows[i]) && fold(labelOf(rows[i])) === probeFolded) return labelOf(rows[i]);
-    }
-    return null;
-}
-
-/**
- * Resolve one CV skill to a hidden-safe MDLZ term.
+ * Resolve one CV skill to the term the widget should commit.
  *
  * @param {string} term  the CV's skill text
  * @param {{fetchOptions:(t:string)=>Promise<Array|null>, taxonomy?:object}} deps
- * @returns {{status:'ok', canonical:string, via:string, input:string}
+ * @returns {{status:'ok', canonical:string, via:'direct'|'taxonomy'|'create'|'unresolved', input:string}
  *          |{status:'flag', reason:string, input:string}
  *          |{status:'empty', input:*}}
  */
@@ -79,47 +71,40 @@ export async function resolveSkillToMdlz(term, { fetchOptions, taxonomy = SKILL_
     if (typeof fetchOptions !== 'function') return { status: 'flag', input: raw, reason: 'no skillsearch fetcher' };
     const want = fold(raw);
 
-    // 1. The CV already wrote the catalogue's own word — type it as-is.
+    // 1. The CV already wrote the catalogue's own word — commit THAT row.
     const rawRows = await fetchOptions(raw);
-    const direct = exactCatalogAtTop(rawRows, want);
+    const direct = exactCatalog(rawRows, want);
     if (direct) return { status: 'ok', canonical: direct, via: 'direct', input: raw };
 
     // Oracle unreachable (network blip) — do NOT guess and do NOT flag. Keep the
-    // CV's term so the engine's DOM path still tries it, exactly as it did before
-    // skillsearch existed. Never worse than the old behaviour on a bad network.
+    // CV's term so the engine's own paths still try it, exactly as they did
+    // before skillsearch existed. Never worse than the old behaviour.
     if (rawRows === null) return { status: 'ok', canonical: raw, via: 'unresolved', input: raw };
 
     // 2. A canonical MDLZ skill the CV phrased differently — verified live, first
-    //    candidate that lands at the top wins.
+    //    candidate the catalogue confirms wins. Structured data beats free text.
     for (const cand of (taxonomy[want] || [])) {
-        const hit = exactCatalogAtTop(await fetchOptions(cand), fold(cand));
+        const hit = exactCatalog(await fetchOptions(cand), fold(cand));
         if (hit) return { status: 'ok', canonical: hit, via: 'taxonomy', input: raw };
     }
 
-    // 3. Genuinely custom, but its create row is the top result (nothing in the
-    //    catalogue matched) so it paints — safe to add as free text.
-    if (rawRows) {
-        const createIdx = rawRows.findIndex((r) => !isCatalog(r) && fold(labelOf(r)) === want);
-        if (createIdx >= 0 && createIdx <= RENDER_SAFE) {
-            return { status: 'ok', canonical: raw, via: 'create-safe', input: raw };
-        }
-    }
+    // 3. Genuinely custom — the create row (id === label) is the answer, in the
+    //    candidate's own words. Its tail position is no obstacle: the engine
+    //    commits an unrenderable row by data (fiber onSelect fallback).
+    const create = (rawRows || []).find((r) => !isCatalog(r) && fold(labelOf(r)) === want);
+    if (create) return { status: 'ok', canonical: raw, via: 'create', input: raw };
 
-    // 4. Only a tail create row (or nothing) — never mint it; it hangs while
-    //    hidden. Flag so the caller can skip/defer instead of stalling the field.
-    return {
-        status: 'flag', input: raw,
-        reason: (taxonomy[want] ? 'taxonomy candidates absent from catalogue; ' : '')
-            + 'no exact catalog row in the paintable window',
-    };
+    // 4. The catalogue offered neither an exact row nor a create row for this
+    //    text — nothing here is safe to commit unreviewed.
+    return { status: 'flag', input: raw, reason: 'no exact catalog row and no create row for this term' };
 }
 
 /**
- * Map a whole skills list to hidden-safe canonical terms, MERGING duplicates
- * (two CV phrasings can resolve to one catalogue skill) and reporting the ones
- * with no safe home rather than letting them hang.
+ * Map a whole skills list to committable terms, MERGING duplicates (two CV
+ * phrasings can resolve to one catalogue skill) and reporting the ones with no
+ * safe answer rather than letting them hang.
  *
- * @returns {{want:string[], flagged:string[]}}
+ * @returns {{want:string[], flagged:string[], oracleReached:boolean}}
  */
 export async function resolveSkillWants(wants, deps) {
     const want = [];

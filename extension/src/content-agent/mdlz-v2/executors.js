@@ -337,6 +337,36 @@ async function fetchSkillOptions(term) {
 }
 
 /**
+ * The multiselect's own commit handler, read off the search input's fiber.
+ *
+ * MEASURED live (2026-08-13, tenant mdlz, 4/4 runs incl. one through
+ * chrome.scripting on a covered tab): a dozen levels above the input sit props
+ * with `onSelect(valuesArray)` + `values` (each value `{label, id}`). Calling
+ * onSelect with the values array PLUS one more item lands the chip in ~600ms
+ * even while the tab is hidden — React's state commit is plain JS and is not
+ * visibility-throttled; only the virtualiser's PAINT is. This is what lets a
+ * row that will never render (the create row is LAST, position 16, and a hidden
+ * tab paints ~2 rows) commit anyway: the item is written by DATA, not clicked.
+ *
+ * Fragile by nature (React internals), so it is a FALLBACK: the click path
+ * stays primary, this fires only when the chosen row cannot be materialized,
+ * and the chip re-read stays the one commit signal. Returns null off-fiber
+ * (the harness's plain divs), which disables the path exactly where it must be.
+ */
+export function readSkillsOnSelect(el) {
+    try {
+        const key = el && Object.keys(el).find((k) => k.startsWith('__reactFiber$'));
+        let f = key ? el[key] : null;
+        for (let i = 0; i < 45 && f; i++) {
+            const p = f.memoizedProps;
+            if (p && typeof p.onSelect === 'function' && Array.isArray(p.values)) return p;
+            f = f.return;
+        }
+    } catch { /* a torn-down fiber is a no, not a crash */ }
+    return null;
+}
+
+/**
  * Choose from the WHOLE result list, not the window that happens to be drawn.
  *
  * MEASURED on R-174102, 2026-08-09: the header read "Search Results (16)", the
@@ -370,6 +400,10 @@ async function pickAcrossList(lease, want, { sleep, maxWindows = 24 } = {}) {
     // top of that sweep, and it was strangling the read.
     const labelsOf = () => visibleOptions().map(txt).filter((t) => t && !NOT_A_CHOICE.test(t));
     const seen = new Set(labelsOf());
+    // The DECIDED item ({label, id, free}), kept on failure verdicts so commit
+    // can fall back to writing it by DATA when its row will not render. Set only
+    // once the read is complete enough for the choice to be final.
+    let chose = null;
     // `let`, and re-resolved INSIDE the wait loop below. MEASURED on R-170139
     // (2026-08-10, run 02:38, the trace's own via/items columns): all five
     // misses were `via=labels items=null` — the scroller was resolved ONCE,
@@ -504,6 +538,12 @@ async function pickAcrossList(lease, want, { sleep, maxWindows = 24 } = {}) {
                 via: 'items', itemsLen: items.length, declared,
             };
         }
+        // The choice is FINAL from here (complete read, or an exact hit): keep
+        // its identity so a row that will not render can still be committed by
+        // DATA (fiber onSelect) instead of by a click on a node that does not
+        // exist — measured 4/4 on 2026-08-13: the hidden tail never paints, but
+        // the widget's own handler lands the chip in ~600ms without it.
+        chose = { label: choice.label, id: choice.id, free: choice.kind === 'free' };
         // Bring the chosen INDEX into view and click the row at that offset —
         // by position, not by label, because the create row and a catalog row
         // can share the exact same label and only the index tells them apart.
@@ -566,7 +606,7 @@ async function pickAcrossList(lease, want, { sleep, maxWindows = 24 } = {}) {
     // scrolled to.
     const complete = readComplete(all.length);
     const target = pickLabel(all, want, { exactOnly: !complete });
-    const evidence = { want: String(want ?? ''), shown: all.length, sample: all.slice(0, 4), via: 'labels', declared };
+    const evidence = { want: String(want ?? ''), shown: all.length, sample: all.slice(0, 4), via: 'labels', declared, chose };
     if (!target) {
         if (!complete) {
             return { option: null, why: RESULT.OPEN_TIMEOUT, ...evidence, reason: `read ${all.length}/${declared} — list still filling` };
@@ -982,6 +1022,30 @@ const searchMulti = {
 
                 const choice = await pickAcrossList(lease, term, { sleep: ctx.sleep });
                 if (!choice.option) {
+                    // THE ROW WILL NOT RENDER, BUT THE ANSWER IS DECIDED — write
+                    // it by DATA. A hidden tab paints ~2 of 16 rows and the
+                    // create row is LAST, so the click path physically cannot
+                    // reach it; the widget's own onSelect can (measured 4/4,
+                    // ~600ms, chip verified). Only for a FINAL choice that
+                    // failed on rendering (OPEN_TIMEOUT) — semantic verdicts
+                    // (not-found, ambiguous) stay refusals, and the chip re-read
+                    // stays the one commit signal either way.
+                    if (choice.chose && choice.why === RESULT.OPEN_TIMEOUT) {
+                        const props = readSkillsOnSelect(triggerOf(f));
+                        if (props) {
+                            const before = this.chipsNow(f);
+                            props.onSelect([...props.values, { label: choice.chose.label, id: choice.chose.id }]);
+                            await until(() => this.holding(f, term).length > 0,
+                                { sleep: ctx.sleep, budgetMs: ctx.fiberMs || 4000 });
+                            const fresh = freshOnes(before, this.chipsNow(f));
+                            trace('mdlz.skill.fiberWrite', {
+                                term, chip: fresh[0] || '(none)', free: choice.chose.free,
+                                landed: fresh.length > 0,
+                            });
+                            if (fresh.length === 1) { added.push(fresh[0]); return { result: RESULT.COMMITTED, term }; }
+                            if (fresh.length > 1) return { result: RESULT.AMBIGUOUS, term, reason: `one write added ${fresh.length} chips`, saw: fresh.slice(0, 4) };
+                        }
+                    }
                     // Forward the WHOLE verdict, not a hand-picked five. pickAcrossList
                     // measures via/itemsLen/declared/reason precisely so mdlz.skill.miss
                     // can name a partial read apart from a real absence; stripping them
@@ -1727,14 +1791,14 @@ export async function runField(f, want, ctx = {}) {
     }
     if (!f.present()) return { result: RESULT.WAITING_HYDRATION, reason: 'field not on the page' };
 
-    // SKILLS ONLY (the sole searchMulti/many field) — a virtualised catalogue
-    // that paints just its top rows while the tab is hidden. Map every wanted
-    // skill to a term that lands there, or drop it flagged, BEFORE satisfied/
-    // commit/verify read `want`: a canonical chip on the page ("Customer Lifetime
-    // Value") would never match the CV's phrasing ("unit economics") and the
-    // field would re-add forever. Free-text terms whose create row sits at the
-    // unpaintable tail (position 16) are exactly what hung Skills; they are
-    // flagged out instead. A dead endpoint keeps the original terms (no regress).
+    // SKILLS ONLY (the sole searchMulti/many field) — resolve every wanted skill
+    // against the tenant's own catalogue BEFORE satisfied/commit/verify read
+    // `want`: a canonical chip on the page ("Customer Lifetime Value") would
+    // never match the CV's phrasing ("unit economics") and the field would
+    // re-add forever. The resolver's job is QUALITY (the catalogue's structured
+    // row over minted free text of the same meaning); reachability is no longer
+    // its problem — an unrenderable row is committed by data (the fiber
+    // onSelect fallback in commit). A dead endpoint keeps the original terms.
     //
     // LIVE runs only: resolution is a real skillsearch network read, so the
     // production entry (recipe-router → runMdlzV2) opts in with ctx.resolveSkills,
