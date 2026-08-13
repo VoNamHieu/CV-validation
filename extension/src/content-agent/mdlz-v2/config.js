@@ -246,6 +246,12 @@ export const RESULT = {
     // Developer-actionable only — the report must never tell the candidate to
     // fix it — and a CI test catches it before it can ever fire at runtime.
     CONTRACT_ERROR: 'CONTRACT_ERROR',
+    // A commit landed the WRONG value and the undo did not stick: wrong data is
+    // ON the application right now. Safety-fatal — never retried (another pass
+    // could add more), never forgiven on an optional field (the page must not
+    // advance over it), and the report must tell the user exactly what to
+    // remove by hand.
+    ROLLBACK_FAILED: 'ROLLBACK_FAILED',
 };
 
 /** Outcomes that must NOT spend a semantic retry, and must NOT reach the model. */
@@ -269,6 +275,9 @@ export const SEMANTIC = new Set([
     // and no model can change what the spec failed to declare — but it is the
     // DEVELOPER'S gap, and every surface that words it must say so.
     RESULT.CONTRACT_ERROR,
+    // No retry: the wrong chip is already on the page, and trying the term
+    // again can only add to the damage. Only a person removes it.
+    RESULT.ROLLBACK_FAILED,
 ]);
 
 /**
@@ -284,6 +293,14 @@ export const SEMANTIC = new Set([
 export const DEVELOPER_FATAL = new Set([RESULT.CONTRACT_ERROR]);
 
 /**
+ * Wrong DATA is on the application and the engine could not undo it. Like
+ * DEVELOPER_FATAL this is never forgiven on an optional field — a page must not
+ * advance while a chip the candidate never claimed sits on it — but the actor
+ * differs: the fix is the USER removing the chip, not a developer fixing a spec.
+ */
+export const SAFETY_FATAL = new Set([RESULT.ROLLBACK_FAILED]);
+
+/**
  * The outcomes that TERMINATE a task — no pass, no defer, no model moves them.
  * Canonical here so every layer (the completion check, the blocker list, the
  * outer loop's escalation budget) asks the SAME question. A private copy of this
@@ -297,6 +314,7 @@ export const TERMINAL = new Set([
     RESULT.COMMIT_FAILED,
     RESULT.USER_REQUIRED,
     RESULT.CONTRACT_ERROR,
+    RESULT.ROLLBACK_FAILED,
 ]);
 
 /**
@@ -317,7 +335,8 @@ export function isForgiven(task) {
     if (task?.result === RESULT.SKIPPED_OPTIONAL) return true;
     return !!task?.optional
         && SEMANTIC.has(task?.result)
-        && !DEVELOPER_FATAL.has(task?.result);
+        && !DEVELOPER_FATAL.has(task?.result)
+        && !SAFETY_FATAL.has(task?.result);
 }
 
 /**

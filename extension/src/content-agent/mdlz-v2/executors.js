@@ -952,8 +952,11 @@ async function removeFreshChip(f, text, ctx = {}) {
             charm.dispatchEvent(new Ctor(type, { bubbles: true, cancelable: true }));
         } catch { /* keep going — a missed rung is not a crash */ }
     }
-    await until(() => !f.controls().chips.some((c) => fold(txt(c)) === fold(text)), { sleep: ctx.sleep, budgetMs: 1500 });
-    return true;
+    // The VERDICT is whether the chip is actually gone — a rollback that only
+    // dispatched events has not rolled anything back, and saying so is what
+    // lets the caller escalate instead of reporting "rolled back" over a chip
+    // still sitting on the application.
+    return until(() => !f.controls().chips.some((c) => fold(txt(c)) === fold(text)), { sleep: ctx.sleep, budgetMs: 1500 });
 }
 
 const searchMulti = {
@@ -1062,13 +1065,49 @@ const searchMulti = {
                 pressEnter(t);
             };
             const r = await withList(trigger, async (lease) => {
-                // Write the DECIDED item through the widget's own handler and
-                // judge by what the page gained. Serves both "the row will not
-                // render" (hidden tail) and "no DOM node can be trusted to BE
-                // the item" (same-text twins, vanished row). STRICT: the one
-                // fresh chip must READ as what was written — anything else is
-                // OUR misfire, rolled back on the spot; the only chips this may
-                // remove are ones this very write just created.
+                // ONE verifier for BOTH commit channels — the click and the
+                // data write are judged by the same law, on what the page
+                // GAINED:
+                //   · exactly one chip that READS as the picked label → committed;
+                //   · several chips → a group row: semantic, reported, kept
+                //     (the term's own chip is among them and may be wanted);
+                //   · one DIFFERENT chip → our misfire: rolled back, and a
+                //     rollback that does not STICK is safety-fatal — wrong data
+                //     is on the application and only a person removes it, so
+                //     the page must not advance over it;
+                //   · none → nothing to undo, the caller's verdict stands (null).
+                // A near-miss is a miss: "Agile Framework" for "Agile" is a
+                // different skill, and the old substring tolerance was exactly
+                // how one became the other in silence.
+                const judgeFresh = async (expectedLabel, before) => {
+                    const fresh = freshOnes(before, this.chipsNow(f));
+                    if (fresh.length === 1 && fold(fresh[0]) === fold(expectedLabel)) {
+                        added.push(fresh[0]);
+                        return { fresh, verdict: { result: RESULT.COMMITTED, term } };
+                    }
+                    if (fresh.length > 1) {
+                        return { fresh, verdict: { result: RESULT.AMBIGUOUS, term, reason: `one answer added ${fresh.length} chips`, saw: fresh.slice(0, 4) } };
+                    }
+                    if (fresh.length === 1) {
+                        const removed = await removeFreshChip(f, fresh[0], ctx);
+                        if (!removed) {
+                            return {
+                                fresh,
+                                verdict: {
+                                    result: RESULT.ROLLBACK_FAILED, term,
+                                    reason: `landed "${fresh[0]}" instead of "${expectedLabel}" and it could not be removed — remove that chip by hand`,
+                                    saw: fresh,
+                                },
+                            };
+                        }
+                        return { fresh, verdict: { result: RESULT.COMMIT_FAILED, term, reason: `landed "${fresh[0]}", wanted "${expectedLabel}" — rolled back`, saw: fresh } };
+                    }
+                    return { fresh, verdict: null };
+                };
+                // Write the DECIDED item through the widget's own handler.
+                // Serves both "the row will not render" (hidden tail) and "no
+                // DOM node can be trusted to BE the item" (same-text twins,
+                // vanished row).
                 const fiberRescue = async (item) => {
                     const before = this.chipsNow(f);
                     const props = readSkillsOnSelect(triggerOf(f));
@@ -1096,31 +1135,12 @@ const searchMulti = {
                     }
                     await until(() => this.holding(f, term).length > 0,
                         { sleep: ctx.sleep, budgetMs: ctx.fiberMs || 4000 });
-                    const fresh = freshOnes(before, this.chipsNow(f));
-                    const matched = fresh.length === 1 && fold(fresh[0]) === fold(item.label);
+                    const { fresh, verdict } = await judgeFresh(item.label, before);
                     trace('mdlz.skill.fiberWrite', {
                         term, via, chip: fresh[0] || '(none)', free: item.free,
-                        landed: fresh.length > 0, matched,
+                        landed: fresh.length > 0, matched: verdict?.result === RESULT.COMMITTED,
                     });
-                    if (matched) { added.push(fresh[0]); return { result: RESULT.COMMITTED, term }; }
-                    if (fresh.length > 1) {
-                        // One write, several answers — a group row. Same law as
-                        // the click path: semantic, reported, chips kept (the
-                        // term's own chip is among them and may be wanted).
-                        return { result: RESULT.AMBIGUOUS, term, reason: `one write added ${fresh.length} chips`, saw: fresh.slice(0, 4) };
-                    }
-                    if (fresh.length === 1) {
-                        // The single arrival is NOT what was written — our
-                        // misfire, rolled back on the spot. A wrong skill must
-                        // never stay on a real application.
-                        await removeFreshChip(f, fresh[0], ctx);
-                        return {
-                            result: RESULT.COMMIT_FAILED, term,
-                            reason: `write landed "${fresh[0]}", wanted "${item.label}" — rolled back`,
-                            saw: fresh,
-                        };
-                    }
-                    return null;   // nothing landed, nothing to undo — the caller's verdict stands
+                    return verdict;   // null = nothing landed, caller's verdict stands
                 };
                 // THE LIST OPENS BEFORE THE SEARCH ANSWERS. Reading it now gets
                 // the "No Items." placeholder, which is how a taxonomy that has
@@ -1161,7 +1181,6 @@ const searchMulti = {
                 // never "whatever node now sits at the old offset", because the
                 // API's order and the UI's order can disagree.
                 const live = rowsByLabel(choice.matched);
-                if (typeof process !== "undefined") console.error("DBG2:", live.length, visibleOptions().filter((o)=>fold(txt(o))===fold(choice.matched)).map((o)=>({par: o.parentElement && (o.parentElement.getAttribute?.("data-automation-id")||o.parentElement.tagName), lb: !!o.closest?.("[role=\"listbox\"]"), alc: !!o.closest?.("[data-automation-id=\"activeListContainer\"]"), samePar: false})));
                 if (live.length !== 1) {
                     const rescued = await fiberRescue({ label: choice.matched, id: choice.id ?? choice.matched, free: !!choice.free });
                     if (rescued) return rescued;
@@ -1192,38 +1211,31 @@ const searchMulti = {
                 (box || again.option).click();
                 await until(() => this.chipsNow(f).length !== before.length,
                     { sleep: ctx.sleep, budgetMs: ctx.commitMs || 1200 });
-                const fresh = freshOnes(before, this.chipsNow(f));
-
-                if (fresh.length === 0) {
+                // THE SAME LAW AS THE DATA WRITE — judgeFresh. The click used to
+                // keep a looser rule ("contains the term counts"), which is how
+                // a wanted "Agile" could quietly become an "Agile Framework"
+                // chip and be called success; and its wrong-chip verdict left
+                // the wrong chip standing. One verifier, both channels.
+                const { fresh, verdict } = await judgeFresh(choice.matched, before);
+                if (!verdict) {
                     // Nothing landed. Nothing was added either, so this is safe
-                    // to try again — unlike every branch below it.
+                    // to try again — unlike every judged branch above.
                     return { result: RESULT.COMMIT_FAILED, term, reason: 'the click added no chip' };
                 }
-                if (fresh.length > 1) {
-                    // One click, several answers — a parent row, or a group.
-                    // Semantic: it will do the same thing next pass.
-                    return { result: RESULT.AMBIGUOUS, term, reason: `one click added ${fresh.length} chips`, saw: fresh.slice(0, 4) };
+                if (verdict.result === RESULT.COMMITTED) {
+                    // WHICH KIND of chip landed, read off the chip itself: a
+                    // catalog pick carries pill-REMOTE_SKILL-…, the candidate's
+                    // own words carry pill-<the text>. The review step is where
+                    // a human checks this, so the trace must say which is which.
+                    const pill = f.controls().chips.map((c) => ({ t: txt(c), id: c.id || '' }))
+                        .find((c) => c.t === fresh[0]);
+                    trace('mdlz.skill.add', {
+                        term,
+                        chip: fresh[0],
+                        free: pill ? !/REMOTE_SKILL/i.test(pill.id) : (choice.free ?? null),
+                    });
                 }
-                const got = fold(fresh[0]);
-                const meant = fold(choice.matched);
-                if (got !== meant && !got.includes(fold(term))) {
-                    // A chip arrived that is neither what we picked nor an
-                    // answer to what was asked: the row moved under the click.
-                    return { result: RESULT.AMBIGUOUS, term, reason: `clicked "${choice.matched}" but got "${fresh[0]}"`, saw: fresh };
-                }
-                added.push(fresh[0]);
-                // WHICH KIND of chip landed, read off the chip itself: a
-                // catalog pick carries pill-REMOTE_SKILL-…, the candidate's
-                // own words carry pill-<the text>. The review step is where a
-                // human checks this, so the trace must say which is which.
-                const pill = f.controls().chips.map((c) => ({ t: txt(c), id: c.id || '' }))
-                    .find((c) => c.t === fresh[0]);
-                trace('mdlz.skill.add', {
-                    term,
-                    chip: fresh[0],
-                    free: pill ? !/REMOTE_SKILL/i.test(pill.id) : (choice.free ?? null),
-                });
-                return { result: RESULT.COMMITTED, term };
+                return verdict;
             }, { sleep: ctx.sleep, label: `${f.name}:${term}`, activate });
 
             // ONE TERM THAT MISSES MUST NOT TAKE THE OTHER SEVEN WITH IT.

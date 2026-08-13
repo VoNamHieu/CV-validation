@@ -376,6 +376,32 @@ describe('MILESTONE 2 GATE — the verdict matches the page, in both directions'
         assert.equal(page.chipsOn('skills').length, 2, 'nothing was added on the second pass');
     });
 
+    test("a near-miss is a miss: 'Agile Framework' for 'Agile' is rolled back", async () => {
+        // The exact loophole the review named: the click path used to accept
+        // any chip CONTAINING the term, so a wanted "Agile" that landed an
+        // "Agile Framework" chip was called success — a different skill, in
+        // silence. The judge is shared with the write path now: one wrong chip
+        // → undone, and the verdict says so. ('Agile' is not a catalogue row,
+        // so its create row is the only text match and the CLICK path runs.)
+        page.misbehave('skills', { instead: 'Agile Framework' });
+        const r = await exec.runField(field('formField-skills'), ['Agile'], skillsCtx());
+
+        assert.equal(r.result, RESULT.COMMIT_FAILED);
+        assert.match(r.reason, /landed "Agile Framework".*rolled back/);
+        assert.deepEqual(page.chipsOn('skills'), [], 'the cousin chip is undone, not adopted');
+    });
+
+    test('ROLLBACK_FAILED is terminal and never forgiven, even on optional Skills', async () => {
+        // The safety-fatal contract: wrong data is ON the application and the
+        // undo did not stick. No retry (another pass can only add damage), and
+        // no advancing over it — optional or not, the page is not "finished".
+        const { SEMANTIC, TERMINAL, isForgiven } = await import('../src/content-agent/mdlz-v2/config.js');
+        assert.ok(SEMANTIC.has(RESULT.ROLLBACK_FAILED), 'no semantic retry');
+        assert.ok(TERMINAL.has(RESULT.ROLLBACK_FAILED), 'no pass, defer, or model moves it');
+        assert.equal(isForgiven({ optional: true, result: RESULT.ROLLBACK_FAILED }), false,
+            'a page must not advance while a chip the candidate never claimed sits on it');
+    });
+
     test('a chip that is not what was asked for is rolled back, not kept', async () => {
         // The widget answered with a DIFFERENT skill than the one written —
         // measured once as chips for "Agentforce" and "Agile Systems" nobody
