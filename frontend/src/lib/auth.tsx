@@ -9,6 +9,7 @@ import {
 import type { Session, User } from '@supabase/supabase-js';
 import { getSupabase } from './supabase';
 import { useAppStore } from '@/store/useAppStore';
+import { pushTokenToExtension } from './extension-sync';
 
 interface AuthResult {
     error?: string;
@@ -48,6 +49,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             if (active) {
                 setSession(data.session);
                 setLoading(false);
+                // Refresh the extension's copy of the JWT on EVERY load — the
+                // reliable per-F5 path. getSession() already auto-refreshed a
+                // near-expiry token, so its access_token is live. Best-effort.
+                if (data.session) void pushTokenToExtension(data.session.access_token);
             }
         });
         const { data: sub } = sb.auth.onAuthStateChange((_event, s) => {
@@ -56,6 +61,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             // Dismiss the soft-gate prompt the moment auth succeeds (covers
             // sign-in in another tab / email-confirm landing while it's open).
             if (s) setPromptOpen(false);
+            // Keep the extension's token fresh (Supabase fires this on
+            // TOKEN_REFRESHED ~hourly and INITIAL_SESSION each load). Push the
+            // session HANDED to us — never getSession() from in here: awaiting a
+            // supabase call inside this callback deadlocks on the v2 auth lock,
+            // and that silent hang is what left the extension on a stale token.
+            if (s) void pushTokenToExtension(s.access_token).catch(() => { });
         });
         return () => {
             active = false;
