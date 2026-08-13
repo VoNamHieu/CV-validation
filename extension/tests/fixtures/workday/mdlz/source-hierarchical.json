@@ -1,0 +1,30 @@
+{
+  "tenant": "mdlz",
+  "field": "How did you hear about us?",
+  "intent": "application.source",
+  "capability": "hierarchical-listbox",
+  "commitSignal": "selected-value",
+  "shape": {
+    "nestedMenu": true,
+    "leafNodes": true,
+    "virtualized": true,
+    "multiSelect": true
+  },
+  "measured": {
+    "level0": {
+      "rows": 64,
+      "measuredEdgeLabelsOnly": true,
+      "labels": [],
+      "note": "stray-popup read 64 rows; edge labels not captured on this tenant"
+    },
+    "level1": {
+      "rows": 3,
+      "measuredEdgeLabelsOnly": true,
+      "labels": ["Company Website"],
+      "note": "drill from level 0 rendered 3 rows; 'Company Website' committed (onPage evidence)"
+    },
+    "ladderTried": ["company website"],
+    "expectAtLevel1": { "company website": "Company Website" }
+  },
+  "source": "Copo trace run smsieakac3jpijn 2026-08-07 03:47:02–03:47:05 (Mondelēz R-173278): list.strayPopup rows 64, list.drill drilled:true rows 3, list.result Company Website stuck:true"
+}

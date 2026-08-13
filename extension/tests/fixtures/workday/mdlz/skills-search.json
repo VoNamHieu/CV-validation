@@ -1,0 +1,48 @@
+{
+  "tenant": "mdlz",
+  "field": "Skills",
+  "intent": "candidate.skills",
+  "capability": "searchable-multi",
+  "commitSignal": "chip",
+  "shape": {
+    "textInput": true,
+    "listboxAfterInput": true,
+    "requiresEnter": true,
+    "optionCheckbox": true,
+    "selectedItemChips": true,
+    "virtualized": true
+  },
+  "measured": {
+    "queries": [
+      {
+        "term": "unit economics (CPI, CAC, LTV)",
+        "results": ["Quantitative Economics", "It Economics", "Industrial Economics", "Plant Economics", "Financial Economics", "Business Economics"],
+        "expect": null,
+        "note": "catalogue has no such entry; every offered row is a different claim"
+      },
+      {
+        "term": "retention optimization",
+        "results": ["Retention Strategies", "Talent Optimization"],
+        "expect": null
+      },
+      {
+        "term": "Agentic Systems",
+        "results": ["Septic Systems", "Agentic Platforms"],
+        "expect": null
+      },
+      {
+        "term": "Agile/Scrum",
+        "results": ["Agile Scrum Development", "Agile Software Development"],
+        "expect": null,
+        "note": "the whole phrase is two skills; skillFallbacks must offer the narrower forms"
+      }
+    ],
+    "committedInLiveRun": [
+      "Agile/Scrum", "product roadmapping", "backlog prioritization",
+      "unit economics (CPI, CAC, LTV)", "retention optimization",
+      "LLM Orchestration", "AI Workflow Design", "Agentic Systems"
+    ],
+    "committedNote": "run smsieakac3jpijn added 8/8 with the tab VISIBLE — the same four terms that read as no-effect in the hidden-tab runs; commit evidence is the chip, timing was the variable"
+  },
+  "source": "Copo traces 2026-08-07: hidden double-run 02:04–02:21 (skills.noEffect offered lists) + run smsieakac3jpijn 03:47–03:48 (8/8 ok)"
+}
