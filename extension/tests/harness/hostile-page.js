@@ -451,6 +451,10 @@ export function buildHostilePage(doc, opts = {}) {
                 for (const text of (f.instead ? [f.instead] : [label, ...(f.alsoAdds || [])])) {
                     const chip = el('div', { 'data-automation-id': 'selectedItem', role: 'option' }, chipListOf(f));
                     chip.textContent = text;
+                    // Every live chip carries its delete charm; the engine's
+                    // rollback (its own misfire only) removes through it.
+                    const charm = el('div', { 'data-automation-id': 'DELETE_charm' }, chip);
+                    charm.addEventListener('click', () => chip.remove());
                 }
             } else {
                 f.trigger.textContent = label;
@@ -510,6 +514,30 @@ export function buildHostilePage(doc, opts = {}) {
             initialSet, searchDelayMs,
             escapeCloses, outsideClickCloses, committed: [],
         };
+        // THE WIDGET'S OWN COMMIT HANDLER, on the trigger's fiber — the shape
+        // readSkillsOnSelect walks to on the live form (measured 2026-08-13:
+        // props with onSelect(valuesArray) + values, each value {label, id}).
+        // The data-write path is real engine surface now — same-text twins and
+        // unpaintable rows commit through it — so the harness models the
+        // handler the way it models the checkbox: a write lands in the same
+        // commit() a click lands in, misbehaviour and all. The values getter
+        // reads f.chips WITHOUT creating it (an empty multi has no chip list,
+        // and making one on a read is the exact fixture bug this file fixed).
+        if (multi) {
+            trigger['__reactFiber$harness'] = {
+                return: null,
+                memoizedProps: {
+                    get values() {
+                        return [...((f.chips && f.chips.children) || [])]
+                            .map((c) => ({ label: c.textContent, id: c.textContent }));
+                    },
+                    onSelect: (vals) => {
+                        const it = Array.isArray(vals) ? vals[vals.length - 1] : null;
+                        if (it) commit(f, String(it.label));
+                    },
+                },
+            };
+        }
         trigger.addEventListener('click', () => {
             if (openLists.has(f) && f.stamps) { closeList(f); return; }   // a stamped trigger toggles
             openFor(f);

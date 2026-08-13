@@ -28,7 +28,6 @@ import { sleep as domSleep } from '../dom.js';
 import { errorsIn, rowsOf } from './row.js';
 import { visibleMonthCells, visibleOptions, visiblePanels } from './page-observer.js';
 import { withList } from './popup-manager.js';
-import { resolveSkillWants } from './skill-resolve.js';
 import { trace } from '../trace.js';
 
 // The fallback is dom.js's `sleep`, not a bare setTimeout: a hidden tab's own
@@ -544,30 +543,39 @@ async function pickAcrossList(lease, want, { sleep, maxWindows = 24 } = {}) {
         // exist — measured 4/4 on 2026-08-13: the hidden tail never paints, but
         // the widget's own handler lands the chip in ~600ms without it.
         chose = { label: choice.label, id: choice.id, free: choice.kind === 'free' };
-        // Bring the chosen INDEX into view and click the row at that offset —
-        // by position, not by label, because the create row and a catalog row
-        // can share the exact same label and only the index tells them apart.
-        const h = virtualRowHeight(sc);
-        const rowAt = (index) => {
-            const inner = sc?.firstElementChild;
-            if (!inner || !h) return null;
-            const wrapper = [...inner.children].find((c) => parseInt(c.style?.top || '', 10) === index * h);
-            if (!wrapper) return null;
-            const opt = wrapper.matches?.('[role="option"], [data-automation-id="menuItem"]')
-                ? wrapper
-                : wrapper.querySelector?.('[role="option"], [data-automation-id="menuItem"], [data-automation-id="promptOption"]');
-            return opt || wrapper;
-        };
-        let node = rowAt(choice.index);
-        if (!node && sc && h) {
-            try { sc.scrollTop = Math.max(0, (choice.index * h) - Math.round(sc.clientHeight / 2) + h); } catch { /* no layout */ }
-            await nap(250);
-            node = rowAt(choice.index);
+        // THE INDEX IS FOR SCROLLING ONLY — NEVER IDENTITY. Measured: the API's
+        // order and the UI's order can disagree (API idx 6 ≠ UI idx 6), so
+        // "the row at the chosen offset" can be a DIFFERENT skill, and a wrong
+        // chip on a real application is worse than a miss. The row to CLICK is
+        // found by its exact LABEL, and only when that label is UNIQUE in the
+        // item list — a create row and a catalog row can carry the same text,
+        // and a DOM row does not expose the id that tells them apart. Ambiguous
+        // or unrendered → the {label, id} goes to the data write instead, which
+        // is precise by construction.
+        const dup = items.filter((it) => fold(String(it?.label ?? it?.ariaLabel ?? '')) === fold(choice.label)).length > 1;
+        if (!dup) {
+            const liveByLabel = () => {
+                const m = rowsByLabel(choice.label);
+                return m.length === 1 ? m[0] : null;
+            };
+            let node = liveByLabel();
+            if (!node && sc) {
+                const h = virtualRowHeight(sc);
+                if (h) { try { sc.scrollTop = Math.max(0, (choice.index * h) - Math.round(sc.clientHeight / 2) + h); } catch { /* no layout */ } }
+                await nap(250);
+                node = liveByLabel();
+            }
+            if (node) return { option: node, matched: choice.label, id: choice.id, free: choice.kind === 'free' };
         }
-        if (node) return { option: node, matched: choice.label, free: choice.kind === 'free' };
-        // The indexed row would not render — fall through to the label walk
-        // below rather than giving up; a label hit is worse than an indexed
-        // one (collision risk) but far better than a miss.
+        // Unrendered or same-text twins: no DOM node can be trusted to BE the
+        // chosen item, so no DOM node is clicked. OPEN_TIMEOUT (interaction,
+        // retryable) with `chose` attached hands it to the data-write rescue.
+        return {
+            option: null, why: RESULT.OPEN_TIMEOUT, chose,
+            want: String(want ?? ''), via: 'items', itemsLen: items.length, declared,
+            reason: dup ? `"${choice.label}" has same-text twins — only the data write can tell them apart`
+                : 'the chosen row would not render',
+        };
     }
 
     if (sc && !items) {
@@ -900,6 +908,54 @@ const listbox = {
     },
 };
 
+/**
+ * The live option rows that ARE this label — deduped down to what a click can
+ * trust. Three realities page-wide reads must survive:
+ *   · a row can surface as menuItem AND its inner promptOption (one row, two
+ *     matching nodes) — keep the outermost, it holds the checkbox;
+ *   · a committed CHIP carries a promptOption of its own — not an option;
+ *   · a closing list lingers beside the new one (measured: orphansBefore 30),
+ *     so the same row exists once per list INSTANCE — judge uniqueness inside
+ *     the NEWEST list that shows the label, not across stale twins.
+ * What remains ambiguous after all that (same-text twins in ONE list — a create
+ * row beside a catalog row of the same text) is genuinely undecidable by DOM,
+ * and the caller hands it to the data write, which carries the id.
+ */
+function rowsByLabel(label) {
+    let m = visibleOptions().filter((o) => fold(txt(o)) === fold(label)
+        && !o.closest?.('[data-automation-id="selectedItem"]'));
+    m = m.filter((o) => !m.some((p) => p !== o && p.contains?.(o)));
+    const byList = new Map();
+    for (const o of m) {
+        const c = o.closest?.('[data-automation-id="activeListContainer"], [role="listbox"]') || o.parentElement || o;
+        const arr = byList.get(c) || [];
+        arr.push(o);
+        byList.set(c, arr);
+    }
+    const lists = [...byList.values()];
+    return lists.length ? lists[lists.length - 1] : [];   // document order — the newest list wins
+}
+
+/**
+ * Remove ONE chip this run just created by MISTAKE. The DELETE charm answers
+ * only to a mousedown-led sequence — a bare .click() is a no-op (measured
+ * 2026-08-13). Never used on pre-existing chips: those may be the candidate's
+ * own, and nothing in this engine removes a chip it did not just add.
+ */
+async function removeFreshChip(f, text, ctx = {}) {
+    const chip = f.controls().chips.find((c) => fold(txt(c)) === fold(text));
+    const charm = chip?.querySelector?.('[data-automation-id="DELETE_charm"]');
+    if (!charm) return false;
+    for (const [name, type] of [['PointerEvent', 'pointerdown'], ['MouseEvent', 'mousedown'], ['PointerEvent', 'pointerup'], ['MouseEvent', 'mouseup'], ['MouseEvent', 'click']]) {
+        try {
+            const Ctor = typeof globalThis[name] === 'function' ? globalThis[name] : MouseEvent;
+            charm.dispatchEvent(new Ctor(type, { bubbles: true, cancelable: true }));
+        } catch { /* keep going — a missed rung is not a crash */ }
+    }
+    await until(() => !f.controls().chips.some((c) => fold(txt(c)) === fold(text)), { sleep: ctx.sleep, budgetMs: 1500 });
+    return true;
+}
+
 const searchMulti = {
     /**
      * Chips are the truth, and they are also somebody's data.
@@ -1006,6 +1062,66 @@ const searchMulti = {
                 pressEnter(t);
             };
             const r = await withList(trigger, async (lease) => {
+                // Write the DECIDED item through the widget's own handler and
+                // judge by what the page gained. Serves both "the row will not
+                // render" (hidden tail) and "no DOM node can be trusted to BE
+                // the item" (same-text twins, vanished row). STRICT: the one
+                // fresh chip must READ as what was written — anything else is
+                // OUR misfire, rolled back on the spot; the only chips this may
+                // remove are ones this very write just created.
+                const fiberRescue = async (item) => {
+                    const before = this.chipsNow(f);
+                    const props = readSkillsOnSelect(triggerOf(f));
+                    let via = 'none';
+                    if (props) {
+                        props.onSelect([...props.values, { label: item.label, id: item.id }]);
+                        via = 'direct';
+                    } else if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+                        try {
+                            await new Promise((resolve) => {
+                                const t = setTimeout(resolve, 8000);   // a dead worker must not hang the term
+                                chrome.runtime.sendMessage(
+                                    { type: 'SKILL_FIBER_WRITE', label: item.label, id: item.id },
+                                    () => { void chrome.runtime.lastError; clearTimeout(t); resolve(); },
+                                );
+                            });
+                            via = 'bridge';
+                        } catch { /* no extension context — the caller's verdict stands */ }
+                    }
+                    if (via === 'none') {
+                        // Says WHY the rescue stood down — absence of this line
+                        // cost a whole diagnostic run once.
+                        trace('mdlz.skill.fiberWrite', { term, via, landed: false });
+                        return null;
+                    }
+                    await until(() => this.holding(f, term).length > 0,
+                        { sleep: ctx.sleep, budgetMs: ctx.fiberMs || 4000 });
+                    const fresh = freshOnes(before, this.chipsNow(f));
+                    const matched = fresh.length === 1 && fold(fresh[0]) === fold(item.label);
+                    trace('mdlz.skill.fiberWrite', {
+                        term, via, chip: fresh[0] || '(none)', free: item.free,
+                        landed: fresh.length > 0, matched,
+                    });
+                    if (matched) { added.push(fresh[0]); return { result: RESULT.COMMITTED, term }; }
+                    if (fresh.length > 1) {
+                        // One write, several answers — a group row. Same law as
+                        // the click path: semantic, reported, chips kept (the
+                        // term's own chip is among them and may be wanted).
+                        return { result: RESULT.AMBIGUOUS, term, reason: `one write added ${fresh.length} chips`, saw: fresh.slice(0, 4) };
+                    }
+                    if (fresh.length === 1) {
+                        // The single arrival is NOT what was written — our
+                        // misfire, rolled back on the spot. A wrong skill must
+                        // never stay on a real application.
+                        await removeFreshChip(f, fresh[0], ctx);
+                        return {
+                            result: RESULT.COMMIT_FAILED, term,
+                            reason: `write landed "${fresh[0]}", wanted "${item.label}" — rolled back`,
+                            saw: fresh,
+                        };
+                    }
+                    return null;   // nothing landed, nothing to undo — the caller's verdict stands
+                };
                 // THE LIST OPENS BEFORE THE SEARCH ANSWERS. Reading it now gets
                 // the "No Items." placeholder, which is how a taxonomy that has
                 // the term reports OPTION_NOT_FOUND. Wait for the ROWS to change.
@@ -1022,53 +1138,14 @@ const searchMulti = {
 
                 const choice = await pickAcrossList(lease, term, { sleep: ctx.sleep });
                 if (!choice.option) {
-                    // THE ROW WILL NOT RENDER, BUT THE ANSWER IS DECIDED — write
-                    // it by DATA. A hidden tab paints ~2 of 16 rows and the
-                    // create row is LAST, so the click path physically cannot
-                    // reach it; the widget's own onSelect can (measured 4/4,
+                    // THE ROW WILL NOT RENDER (or cannot be trusted), BUT THE
+                    // ANSWER IS DECIDED — write it by DATA (measured 4/4,
                     // ~600ms, chip verified). Only for a FINAL choice that
-                    // failed on rendering (OPEN_TIMEOUT) — semantic verdicts
-                    // (not-found, ambiguous) stay refusals, and the chip re-read
-                    // stays the one commit signal either way.
+                    // failed on INTERACTION (OPEN_TIMEOUT) — semantic verdicts
+                    // (not-found, ambiguous) stay refusals.
                     if (choice.chose && choice.why === RESULT.OPEN_TIMEOUT) {
-                        const before = this.chipsNow(f);
-                        // Direct fiber first — but the content script lives in the
-                        // ISOLATED world, where the `__reactFiber$` expando does
-                        // not exist, so in production this is null and the write
-                        // goes through the background's MAIN-world bridge
-                        // (SKILL_FIBER_WRITE → chrome.scripting, world:'MAIN').
-                        const props = readSkillsOnSelect(triggerOf(f));
-                        let via = 'none';
-                        if (props) {
-                            props.onSelect([...props.values, { label: choice.chose.label, id: choice.chose.id }]);
-                            via = 'direct';
-                        } else if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
-                            try {
-                                await new Promise((resolve) => {
-                                    const t = setTimeout(resolve, 8000);   // a dead worker must not hang the term
-                                    chrome.runtime.sendMessage(
-                                        { type: 'SKILL_FIBER_WRITE', label: choice.chose.label, id: choice.chose.id },
-                                        () => { void chrome.runtime.lastError; clearTimeout(t); resolve(); },
-                                    );
-                                });
-                                via = 'bridge';
-                            } catch { /* no extension context — the verdict below stands */ }
-                        }
-                        if (via !== 'none') {
-                            await until(() => this.holding(f, term).length > 0,
-                                { sleep: ctx.sleep, budgetMs: ctx.fiberMs || 4000 });
-                            const fresh = freshOnes(before, this.chipsNow(f));
-                            trace('mdlz.skill.fiberWrite', {
-                                term, via, chip: fresh[0] || '(none)', free: choice.chose.free,
-                                landed: fresh.length > 0,
-                            });
-                            if (fresh.length === 1) { added.push(fresh[0]); return { result: RESULT.COMMITTED, term }; }
-                            if (fresh.length > 1) return { result: RESULT.AMBIGUOUS, term, reason: `one write added ${fresh.length} chips`, saw: fresh.slice(0, 4) };
-                        } else {
-                            // Says WHY the rescue stood down — absence of this line
-                            // cost a whole diagnostic run once.
-                            trace('mdlz.skill.fiberWrite', { term, via, landed: false });
-                        }
+                        const rescued = await fiberRescue(choice.chose);
+                        if (rescued) return rescued;
                     }
                     // Forward the WHOLE verdict, not a hand-picked five. pickAcrossList
                     // measures via/itemsLen/declared/reason precisely so mdlz.skill.miss
@@ -1079,8 +1156,18 @@ const searchMulti = {
                 // Re-read by LABEL and click THAT, never a node held from a
                 // moment ago: the virtualiser recycles rows, and the measured
                 // cost was chips for "Agentforce" and "Agile Systems" nobody
-                // asked for.
-                const again = { option: visibleOptions().find((o) => fold(txt(o)) === fold(choice.matched)) || choice.option };
+                // asked for. EXACTLY ONE live row may claim the label; a row
+                // that vanished or multiplied goes to the data write instead —
+                // never "whatever node now sits at the old offset", because the
+                // API's order and the UI's order can disagree.
+                const live = rowsByLabel(choice.matched);
+                if (typeof process !== "undefined") console.error("DBG2:", live.length, visibleOptions().filter((o)=>fold(txt(o))===fold(choice.matched)).map((o)=>({par: o.parentElement && (o.parentElement.getAttribute?.("data-automation-id")||o.parentElement.tagName), lb: !!o.closest?.("[role=\"listbox\"]"), alc: !!o.closest?.("[data-automation-id=\"activeListContainer\"]"), samePar: false})));
+                if (live.length !== 1) {
+                    const rescued = await fiberRescue({ label: choice.matched, id: choice.id ?? choice.matched, free: !!choice.free });
+                    if (rescued) return rescued;
+                    return { result: RESULT.COMMIT_FAILED, term, reason: `the picked row ${live.length ? 'multiplied' : 'vanished'} before the click` };
+                }
+                const again = { option: live[0] };
 
                 // WHAT THE PAGE GAINED IS THE VERDICT — not what we meant to
                 // click. Re-reading by label narrows the window in which the
@@ -1781,11 +1868,6 @@ const SIGNAL = {
     [WIDGET.TEXTAREA]: 'value that stuck + no row error',
 };
 
-// Skills resolution is a network read (skillsearch); cache it per want-list so
-// it does not re-run on every idempotent planner pass. Keyed by origin + the
-// exact want list; only cached when the endpoint answered (see runField).
-const _skillWantCache = new Map();
-
 /**
  * Fill one field: skip it if it is already right, write it, then prove it.
  *
@@ -1814,37 +1896,6 @@ export async function runField(f, want, ctx = {}) {
         return { result: RESULT.USER_REQUIRED, reason: `no capability for a ${f.kind} widget` };
     }
     if (!f.present()) return { result: RESULT.WAITING_HYDRATION, reason: 'field not on the page' };
-
-    // SKILLS ONLY (the sole searchMulti/many field) — resolve every wanted skill
-    // against the tenant's own catalogue BEFORE satisfied/commit/verify read
-    // `want`: a canonical chip on the page ("Customer Lifetime Value") would
-    // never match the CV's phrasing ("unit economics") and the field would
-    // re-add forever. The resolver's job is QUALITY (the catalogue's structured
-    // row over minted free text of the same meaning); reachability is no longer
-    // its problem — an unrenderable row is committed by data (the fiber
-    // onSelect fallback in commit). A dead endpoint keeps the original terms.
-    //
-    // LIVE runs only: resolution is a real skillsearch network read, so the
-    // production entry (recipe-router → runMdlzV2) opts in with ctx.resolveSkills,
-    // and the plain-div test harness — which drives runMdlzV2 directly and would
-    // otherwise fetch the real tenant — does not. Same intent as pickAcrossList
-    // gating its API read on a real scroller, but decided by the caller.
-    const resolveSkills = ctx.resolveSkills
-        && ctx.decl?.capability === 'searchMulti' && ctx.decl?.cardinality === 'many';
-    if (resolveSkills) {
-        const key = (typeof location !== 'undefined' ? location.origin : '')
-            + '' + (Array.isArray(want) ? want.join('') : String(want));
-        let mapped = _skillWantCache.get(key);
-        if (!mapped) {
-            mapped = await resolveSkillWants(want, { fetchOptions: fetchSkillOptions });
-            if (mapped.oracleReached) _skillWantCache.set(key, mapped);
-        }
-        if (mapped.flagged.length) trace('mdlz.skill.flagged', { field: f.name, flagged: mapped.flagged.join(' | ') });
-        if (!mapped.want.length) {
-            return { result: RESULT.USER_REQUIRED, reason: 'no skill maps to the MDLZ catalogue', flagged: mapped.flagged };
-        }
-        want = mapped.want;
-    }
 
     if (cap.satisfied(f, want)) {
         trace('mdlz.field.satisfied', { field: f.name, kind: f.kind });

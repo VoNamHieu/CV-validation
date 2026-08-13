@@ -376,18 +376,21 @@ describe('MILESTONE 2 GATE — the verdict matches the page, in both directions'
         assert.equal(page.chipsOn('skills').length, 2, 'nothing was added on the second pass');
     });
 
-    test('a chip that is not what was clicked is a refusal too', async () => {
-        // The virtualiser swapped the row between reading it and clicking it —
+    test('a chip that is not what was asked for is rolled back, not kept', async () => {
+        // The widget answered with a DIFFERENT skill than the one written —
         // measured once as chips for "Agentforce" and "Agile Systems" nobody
-        // asked for. Re-reading by label narrows that window; it does not close
-        // it, so the chip that ARRIVES is what gets judged.
+        // asked for. The chip that ARRIVES is what gets judged, and a single
+        // arrival that is not the answer is OUR misfire: it is removed on the
+        // spot, because a wrong skill must never stay on a real application.
+        // (Pre-existing chips are still never touched — only the one THIS
+        // write just created.)
         page.misbehave('skills', { instead: 'Agentforce' });
         const r = await exec.runField(field('formField-skills'), ['Figma'], skillsCtx());
 
-        assert.equal(r.result, RESULT.AMBIGUOUS);
-        assert.match(r.reason, /but got "Agentforce"/);
-        assert.deepEqual(page.chipsOn('skills'), ['Agentforce'],
-            'the wrong chip is reported, never quietly removed — a chip may be the candidate\'s own');
+        assert.equal(r.result, RESULT.COMMIT_FAILED);
+        assert.match(r.reason, /landed "Agentforce".*rolled back/);
+        assert.deepEqual(page.chipsOn('skills'), [],
+            'the misfired chip is undone — retry can try again from a clean page');
     });
 
     test('a term the page already answers twice is never picked again', async () => {
