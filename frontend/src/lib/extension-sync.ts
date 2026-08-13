@@ -106,18 +106,17 @@ export function syncCvFileToExtension(
 }
 
 /**
- * Push the current auth token to the extension on its own.
+ * Push an ALREADY-RESOLVED auth token to the extension.
  *
- * Previously the token only rode along with profile sync, so it refreshed only
- * when the user edited their CV — a Supabase access token lives ~1h, and the
- * extension now needs a live one mid-batch to fetch ATS credentials just in
- * time (and again when the user clicks "Đã xác minh" hours later). This is the
- * standalone path; a separate message type on purpose, since reusing
- * JOBFIT_EXPORT_PROFILE would overwrite the stored profile with undefined.
+ * Callers on the auth path (getSession resolve, onAuthStateChange) already hold
+ * the session object, so they pass its access_token straight in. This exists as
+ * its own function precisely so those callers do NOT reach back into
+ * `sb.auth.getSession()`: a getSession() awaited from inside onAuthStateChange
+ * deadlocks on the supabase-js v2 auth lock, and that silent hang is exactly
+ * what left the extension holding an expired token across every F5.
  */
-export async function syncAuthTokenToExtension(): Promise<SyncResult> {
-    const token = await getAccessToken();
-    if (!token) return { ok: false, error: "Chưa đăng nhập." };
+export function pushTokenToExtension(token: string | null | undefined): Promise<SyncResult> {
+    if (!token) return Promise.resolve({ ok: false, error: "Chưa đăng nhập." });
     return postAndAwait(
         { type: "JOBFIT_SYNC_TOKEN", token },
         "JOBFIT_SYNC_TOKEN_RESPONSE",
