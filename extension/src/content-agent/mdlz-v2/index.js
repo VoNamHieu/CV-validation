@@ -18,7 +18,7 @@
  * exist yet.
  */
 
-import { ADD_VIA_KEY, FLAG_KEY, RESULT, SEL, STEP, isForgiven, isMdlzPage } from './config.js';
+import { ADD_VIA_KEY, FLAG_KEY, RESULT, SEL, STEP, isForgiven, isOwnedPage } from './config.js';
 import { interactionStore, interactionWatchdog } from './interaction-watchdog.js';
 import { openPopups, orphanOptionCount, pageFingerprint, waitPageReady } from './page-observer.js';
 import { census } from './popup-manager.js';
@@ -57,7 +57,7 @@ export async function flagMode() {
  * off the heading strategy from a console, for a live run that finds it wrong.
  */
 export async function settings() {
-    if (!isMdlzPage()) return { mode: MODE.OFF, addVia: 'any' };
+    if (!isOwnedPage()) return { mode: MODE.OFF, addVia: 'any' };
     try {
         const d = await new Promise((r) => chrome.storage.local.get([FLAG_KEY, ADD_VIA_KEY], r));
         const v = d?.[FLAG_KEY];
@@ -467,7 +467,7 @@ export async function preflightNow(cv) {
 }
 
 try {
-    if (isMdlzPage() && typeof globalThis !== 'undefined') {
+    if (isOwnedPage() && typeof globalThis !== 'undefined') {
         globalThis.copoMdlzPreflight = preflightNow;
     }
 } catch { /* not a browser, or a page v2 has no business on */ }

@@ -215,10 +215,57 @@ describe('the plan is derived from the page, every time it is asked', () => {
         // catalogue has no such row, so a REQUIRED field refused itself
         // USER_REQUIRED every pass and held the whole application on the page.
         const ladder = planner.degreeLadder({ degree: 'Marketing' });
-        assert.deepEqual(ladder, ['Bachelor of Arts', 'Bachelor of Science', 'Bachelor']);
+        // The verbose bucket a long-form catalogue prints, THEN the short codes a
+        // coarse one offers — the generic bachelor, spelled every way a Workday
+        // catalogue might.
+        assert.deepEqual(ladder.slice(0, 3), ['Bachelor of Arts', 'Bachelor of Science', 'Bachelor']);
+        assert.ok(ladder.includes('=BA') && ladder.includes('=BS'), 'and the codes a coarse tenant uses');
         // "ma" lives inside "marketing" — an unanchored rung reads a marketing
         // degree as a Master of Arts, which is a qualification nobody claimed.
         assert.ok(!ladder.some((r) => /master/i.test(r)));
+    });
+
+    test('the SAME ladder commits against two catalogues one is coarser than the other', async () => {
+        // NHỊP 2 (maersk R173118, 2026-08-14): degreeLadder was spelled entirely
+        // in mdlz's long labels, so on maersk — short codes, no "or equivalent" —
+        // the REQUIRED Degree matched nothing and looped. The fix is category
+        // fallthrough: verbose label first (mdlz untouched), then the codes a
+        // coarse catalogue offers. Proven here against BOTH measured vocabularies
+        // through the real chooseFromLadder — no live tenant needed.
+        const { chooseFromLadder } = await import('../src/content-agent/mdlz-v2/executors.js');
+        const opts = (labels) => labels.map((t) => ({ textContent: t }));
+        // MEASURED mdlz shape: `CODE - Full Name or equivalent`.
+        const MDLZ = opts([
+            'A.A. - Associate of Arts or equivalent', 'B.A. - Bachelor of Arts or equivalent',
+            'B.S. - Bachelor of Science or equivalent', 'B.B.A. - Bachelor of Business Administration or equivalent',
+            'M.A. - Master of Arts or equivalent', 'M.S. - Master of Science or equivalent',
+            'MBA - Master of Business Administration or equivalent', 'HS - High School or equivalent',
+            'PhD - Doctor of Philosophy or equivalent',
+        ]);
+        // MEASURED maersk: /wday/cxs/maersk/values/educations/degrees.
+        const MAERSK = opts(['High School', 'AA', 'AS', 'BA', 'BS', 'MA']);
+        const on = (options, degree) => chooseFromLadder(options, planner.degreeLadder({ degree })).matched;
+
+        // mdlz is unchanged — the verbose rung still wins its long label.
+        assert.match(on(MDLZ, 'B.S. Chemistry'), /Bachelor of Science/);
+        assert.match(on(MDLZ, 'MBA'), /Master of Business Administration/);
+        assert.match(on(MDLZ, 'Marketing'), /Bachelor of Arts/);
+        assert.match(on(MDLZ, 'High School'), /High School/);
+
+        // maersk now commits — each degree to its category's short code.
+        assert.equal(on(MAERSK, 'B.S. Chemistry'), 'BS', 'a science bachelor to the science code');
+        assert.equal(on(MAERSK, 'B.A. English'), 'BA');
+        assert.equal(on(MAERSK, 'MS in Data'), 'MA', 'the only master maersk prints');
+        assert.equal(on(MAERSK, 'MBA'), 'MA', 'an MBA is a master, to the master bucket');
+        assert.equal(on(MAERSK, 'Associate of Science'), 'AA');
+        assert.equal(on(MAERSK, 'High School'), 'High School');
+        // The coarse list cannot tell a B.B.A. from a B.S. — it falls to the
+        // generic bachelor, never inventing a flavour maersk does not carry.
+        assert.equal(on(MAERSK, 'B.B.A.'), 'BA');
+        assert.equal(on(MAERSK, 'Marketing'), 'BA', 'no stated qualification is still a bachelor');
+        // A doctorate maersk simply does not offer is left for the candidate —
+        // understating a PhD as a master is as wrong as overstating one.
+        assert.equal(chooseFromLadder(MAERSK, planner.degreeLadder({ degree: 'PhD Economics' })).option, null);
     });
 
     test('a qualification the CV states outright wins over the default', () => {

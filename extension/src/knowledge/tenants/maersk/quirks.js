@@ -37,8 +37,9 @@ export const maerskQuirks = [
         id: 'degree-options-are-abbreviations',
         statement: 'Degree options are SHORT codes: High School, AA, AS, BA, BS, MA '
             + '(/wday/cxs/maersk/values/educations/degrees). MDLZ\'s are long labels ("Bachelor of Business Administration or equivalent").',
-        impact: 'THE Nhịp-2 BLOCKER. degreeLadder() hardcodes MDLZ-catalogue labels → no rung matches Maersk → required Degree never commits → the page loops on the validation error. '
-            + 'Confirms the ladder-select invariant "the ladder is per-tenant"; the fix is category-matching (bachelor/master/…) against LIVE options, not a hardcoded label list.',
+        impact: 'WAS the Nhịp-2 blocker: degreeLadder() was spelled in MDLZ long labels → no rung matched Maersk → required Degree looped. '
+            + 'FIXED 2026-08-14: each ladder tier now falls through verbose-label → category short codes (=BA/=BS/=MA), matched against LIVE options; MDLZ hits its verbose rung first (untouched). '
+            + 'Confirms the ladder-select invariant "the ladder is per-tenant"; unit-proven both vocabularies. A doctorate Maersk does not offer is left for the candidate, not downgraded to a master.',
         evidence: 'v2 run 2026-08-14 R173118: "Degree required" ×N, degreeLadder rungs measured vs the live values API',
     },
     {

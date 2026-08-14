@@ -183,39 +183,59 @@ export const SECTIONS = [
  * of study. "Marketing" is not evidence of a B.B.A. rather than a B.S., and
  * putting a qualification the candidate never claimed on a real application is
  * worse than a generic one that says "or equivalent".
+ *
+ * SECOND TENANT (maersk, R173118, 2026-08-14): the same field, a coarser
+ * catalogue — `High School · AA · AS · BA · BS · MA`, short codes, no "or
+ * equivalent", and NO long label anywhere. The mdlz ladder, spelled entirely in
+ * long labels, matched none of them and the required Degree looped. So each rung
+ * is now a LADDER OF ITS CATEGORY: the verbose label mdlz prints, then the short
+ * codes a coarse catalogue offers (=BA, =MA, …). The verbose rung still hits
+ * first on mdlz — that tenant is untouched — and only a catalogue that prints
+ * nothing longer ever reaches the codes. Where the coarse list cannot tell a
+ * B.B.A. from a B.S. (maersk has only BA/BS), the specific code misses and it
+ * falls to the generic bachelor bucket — the same "don't claim a flavour we
+ * can't support" rule, one catalogue coarser.
  */
 export function degreeLadder(entry) {
     const s = fold(`${entry?.degree || ''} ${entry?.qualification || ''} ${entry?.degree_level || ''}`);
     // Anchored on purpose: "ma" lives inside "marketing", and an unanchored
     // rung would read a marketing degree as a Master of Arts.
-    if (/\bph\.?\s?d\b|doctorate|doctoral|tiến sĩ/.test(s)) return ['Doctor of Philosophy', 'PhD'];
-    if (/\bj\.?d\.?\b|juris doctor/.test(s)) return ['Juris Doctor', 'JD'];
+    if (/\bph\.?\s?d\b|doctorate|doctoral|tiến sĩ/.test(s)) return ['Doctor of Philosophy', '=PhD', '=Doctorate', '=Doctoral', '=DPhil'];
+    if (/\bj\.?d\.?\b|juris doctor/.test(s)) return ['Juris Doctor', '=JD'];
     // Vietnamese names the LEVEL and the FIELD as one phrase, and the two must
     // be read together: "thạc sĩ quản trị kinh doanh" is an MBA while "cử nhân
     // quản trị kinh doanh" is a B.B.A. — the field alone decides neither.
-    if (/\bmba\b|master of business|thạc sĩ quản trị kinh doanh/.test(s)) return ['Master of Business Administration', 'MBA'];
-    if (/\bm\.?sc?\.?\b|master of science/.test(s)) return ['Master of Science', 'Master of Arts'];
-    if (/\bm\.?a\.?\b|master of arts/.test(s)) return ['Master of Arts', 'Master of Science'];
-    if (/\bmaster|thạc sĩ/.test(s)) return ['Master of Science', 'Master of Arts'];
-    if (/\bassociate\b|\ba\.?a\.?\b/.test(s)) return ['Associate of Arts', 'Associate'];
-    if (/high school|secondary school|thpt|trung học/.test(s)) return ['High School'];
+    if (/\bmba\b|master of business|thạc sĩ quản trị kinh doanh/.test(s)) return ['Master of Business Administration', '=MBA', ...MASTER];
+    if (/\bm\.?sc?\.?\b|master of science/.test(s)) return ['Master of Science', '=MS', '=MSc', ...MASTER];
+    if (/\bm\.?a\.?\b|master of arts/.test(s)) return ['Master of Arts', '=MA', ...MASTER];
+    if (/\bmaster|thạc sĩ/.test(s)) return MASTER;
+    if (/\bassociate\b|\ba\.?a\.?\b/.test(s)) return ['Associate of Arts', '=AA', '=AS', 'Associate', "=Associate's"];
+    if (/high school|secondary school|thpt|trung học/.test(s)) return ['High School', '=HS', 'Secondary School', '=GED'];
     // An explicit bachelor flavour the candidate DID claim.
-    if (/\bb\.?arch\b|bachelor of architecture/.test(s)) return ['Bachelor of Architecture', ...BACHELOR];
-    if (/\bb\.?b\.?a\.?\b|business administration|cử nhân quản trị kinh doanh/.test(s)) return ['Bachelor of Business Administration', ...BACHELOR];
-    if (/\bb\.?c\.?s\.?\b|computer science/.test(s)) return ['Bachelor of Computer Science', ...BACHELOR];
-    if (/\bb\.?com\b|bachelor of commerce/.test(s)) return ['Bachelor of Commerce', ...BACHELOR];
-    if (/\bb\.?ed\b|bachelor of education/.test(s)) return ['Bachelor of Education', ...BACHELOR];
-    if (/\bb\.?eng\b|bachelor of engineering|kỹ sư/.test(s)) return ['Bachelor of Engineering', ...BACHELOR];
-    if (/\bb\.?f\.?a\.?\b|fine arts/.test(s)) return ['Bachelor of Fine Arts', ...BACHELOR];
-    if (/accountancy|accounting/.test(s)) return ['Bachelor of Accountancy', ...BACHELOR];
-    if (/\bl\.?l\.?b\.?\b|bachelor of laws/.test(s)) return ['Bachelor of Laws', ...BACHELOR];
-    if (/\bb\.?a\.?\b|bachelor of arts/.test(s)) return ['Bachelor of Arts', ...BACHELOR];
-    if (/\bb\.?sc?\.?\b|bachelor of science/.test(s)) return ['Bachelor of Science', ...BACHELOR];
+    if (/\bb\.?arch\b|bachelor of architecture/.test(s)) return ['Bachelor of Architecture', '=BArch', ...BACHELOR];
+    if (/\bb\.?b\.?a\.?\b|business administration|cử nhân quản trị kinh doanh/.test(s)) return ['Bachelor of Business Administration', '=BBA', ...BACHELOR];
+    if (/\bb\.?c\.?s\.?\b|computer science/.test(s)) return ['Bachelor of Computer Science', '=BCS', ...BACHELOR];
+    if (/\bb\.?com\b|bachelor of commerce/.test(s)) return ['Bachelor of Commerce', '=BCom', ...BACHELOR];
+    if (/\bb\.?ed\b|bachelor of education/.test(s)) return ['Bachelor of Education', '=BEd', ...BACHELOR];
+    if (/\bb\.?eng\b|bachelor of engineering|kỹ sư/.test(s)) return ['Bachelor of Engineering', '=BEng', '=BE', ...BACHELOR];
+    if (/\bb\.?f\.?a\.?\b|fine arts/.test(s)) return ['Bachelor of Fine Arts', '=BFA', ...BACHELOR];
+    if (/accountancy|accounting/.test(s)) return ['Bachelor of Accountancy', '=BAcc', ...BACHELOR];
+    if (/\bl\.?l\.?b\.?\b|bachelor of laws/.test(s)) return ['Bachelor of Laws', '=LLB', ...BACHELOR];
+    if (/\bb\.?a\.?\b|bachelor of arts/.test(s)) return ['Bachelor of Arts', '=BA', ...BACHELOR];
+    if (/\bb\.?sc?\.?\b|bachelor of science/.test(s)) return ['Bachelor of Science', '=BS', '=BSc', ...BACHELOR];
     return BACHELOR;
 }
 
-/** The default, in the order a catalogue with no generic row must be asked. */
-const BACHELOR = ['Bachelor of Arts', 'Bachelor of Science', 'Bachelor'];
+/**
+ * The category fallbacks — the verbose label a long-form catalogue (mdlz) prints
+ * FIRST, then the short codes a coarse one (maersk: BA/BS/MA) offers instead.
+ * Anchored (=) so a two-letter code matches a whole cell or its prefix, never a
+ * substring: '=MA' is Maersk's Master, not the "ma" inside "Pharmacy". The verbose
+ * rung always hits first on mdlz, so its behaviour is unchanged; the codes only
+ * fire on a tenant that prints nothing longer.
+ */
+const BACHELOR = ['Bachelor of Arts', 'Bachelor of Science', 'Bachelor', "=Bachelor's", '=BA', '=BS', '=BSc'];
+const MASTER = ['Master of Science', 'Master of Arts', 'Master', "=Master's", '=MS', '=MA'];
 
 /**
  * HOW WELL SOMEBODY SPEAKS A LANGUAGE — against a scale that may not have the
