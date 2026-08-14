@@ -33,4 +33,18 @@ export const maerskQuirks = [
         impact: 'the engine FLAGGED it for review rather than guessing — correct; proficiency rungs are tenant-specific.',
         evidence: '[Copo Needs] ⚠ flagged Overall*',
     },
+    {
+        id: 'degree-options-are-abbreviations',
+        statement: 'Degree options are SHORT codes: High School, AA, AS, BA, BS, MA '
+            + '(/wday/cxs/maersk/values/educations/degrees). MDLZ\'s are long labels ("Bachelor of Business Administration or equivalent").',
+        impact: 'THE Nhịp-2 BLOCKER. degreeLadder() hardcodes MDLZ-catalogue labels → no rung matches Maersk → required Degree never commits → the page loops on the validation error. '
+            + 'Confirms the ladder-select invariant "the ladder is per-tenant"; the fix is category-matching (bachelor/master/…) against LIVE options, not a hardcoded label list.',
+        evidence: 'v2 run 2026-08-14 R173118: "Degree required" ×N, degreeLadder rungs measured vs the live values API',
+    },
+    {
+        id: 'auth-is-a-sign-in-chooser',
+        statement: 'A FRESH application opens a "Create Account / Sign In" gateway (step 1 of 7) with a CHOOSER: Sign in with email / Apple / Google — not a direct email+password form.',
+        impact: 'a fresh dry-run cannot proceed without the candidate signing in (agent never enters credentials); resume an already-authenticated draft to measure the form. The extension login flow must click "Sign in with email" first, then fill — a per-tenant auth shape.',
+        evidence: 'R189353 fresh apply 2026-08-14',
+    },
 ];

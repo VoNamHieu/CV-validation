@@ -11,12 +11,20 @@
  */
 
 /**
- * The Workday tenants this engine is CLEARED for. A tenant joins this set only
- * after it has been MEASURED (see knowledge/tenants/<id>) — v2 stands down on
- * every Workday tenant not listed, and on every non-Workday host. MDLZ was the
- * first; Maersk the second (measured 2026-08-14: subdomain-tenant, 6 steps).
+ * The Workday tenants this engine is CLEARED TO COMPLETE. A tenant joins only
+ * once v2 can carry it end-to-end — v2 stands down on every Workday tenant not
+ * listed (v1 serves it) and on every non-Workday host.
+ *
+ * Maersk is MEASURED and v2-engagement is PROVEN (2026-08-14: subdomain-tenant
+ * derivation works, v2 filled work rows / Field of Study / GPA / languages),
+ * but it is HELD OUT: the degree field is a required LADDER whose rungs are
+ * MDLZ-catalogue labels ("Bachelor of … or equivalent") — Maersk's options are
+ * abbreviations (HS/AA/AS/BA/BS/MA), so no rung matches, Degree never commits,
+ * and the page loops on the required error. v1 reaches Review on Maersk; v2 must
+ * not half-take it and loop. Add 'maersk' back once degreeLadder is tenant-
+ * agnostic (category-matched against live options) and it passes MDLZ + Maersk.
  */
-export const ENABLED_TENANTS = new Set(['mdlz', 'maersk']);
+export const ENABLED_TENANTS = new Set(['mdlz']);
 
 /**
  * The tenant id for the CXS API, derived the way the URL actually carries it —

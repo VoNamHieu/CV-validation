@@ -36,15 +36,20 @@ describe('deriveTenant reads the id from wherever the URL carries it', () => {
     });
 });
 
-describe('isOwnedPage gates v2 to CLEARED Workday tenants only', () => {
-    test('MDLZ and Maersk are owned', () => {
+describe('isOwnedPage gates v2 to tenants it can COMPLETE, not merely recognise', () => {
+    test('MDLZ is owned', () => {
         setLocation('wd3.myworkdaysite.com', '/en-US/recruiting/mdlz/External/apply');
-        assert.equal(isOwnedPage(), true);
-        setLocation('maersk.wd3.myworkdayjobs.com', '/Maersk_Careers/job/x/apply');
         assert.equal(isOwnedPage(), true);
     });
 
-    test('a Workday tenant NOT in the allowlist is declined (v2 stands down, v1 serves it)', () => {
+    test('Maersk is DERIVABLE but not yet owned — measured, engagement proven, held until the degree ladder is tenant-agnostic', () => {
+        setLocation('maersk.wd3.myworkdayjobs.com', '/Maersk_Careers/job/x/apply');
+        assert.equal(deriveTenant(), 'maersk', 'the mechanism recognises it');
+        assert.ok(!ENABLED_TENANTS.has('maersk'), 'but it is not cleared to complete (degree-ladder loop)');
+        assert.equal(isOwnedPage(), false, 'so v2 stands down and v1 serves it to Review');
+    });
+
+    test('any Workday tenant not in the allowlist is declined (v2 stands down, v1 serves it)', () => {
         assert.ok(!ENABLED_TENANTS.has('someco'));
         setLocation('someco.wd3.myworkdayjobs.com', '/SomeCo_Careers/job/x/apply');
         assert.equal(isOwnedPage(), false);
