@@ -52,7 +52,7 @@ def _cmctelecom(career_url: str) -> list[dict]:
             "title": title[:200],
             "url": url,
             "location": loc,
-            "description": "",
+            "description": _detail_desc(url, ".recruitment-detail") if len(out) < 40 else "",
             "salary": "" if sal.lower() in ("thỏa thuận", "thoa thuan") else sal,
         })
         if len(out) >= _MAX_ATS_JOBS:

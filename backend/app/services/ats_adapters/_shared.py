@@ -70,6 +70,53 @@ def _full_desc(raw: str | None, cap: int = _FULL_JD_CAP) -> str:
 
 _HTML_HEADERS = {"User-Agent": _HEADERS["User-Agent"], "Accept": "text/html,*/*"}
 
+
+def _detail_desc(url: str, selector: str, keep_form: bool = False) -> str:
+    """Full JD from an SSR detail page: GET + the largest CSS `selector` match's
+    text, through _full_desc ("" on any miss). For adapters whose listing has no
+    JD but whose detail page is server-rendered with a stable container.
+    Largest-match (not first) so multi-block layouts (Elementor, repeated
+    wrappers) resolve to the content block, not a header stub. `keep_form` is
+    for apply-on-page sites (Honda, DOJI, FE Credit) that render the JD INSIDE
+    the application <form> — stripping it there strips the posting itself."""
+    from bs4 import BeautifulSoup
+    try:
+        r = requests.get(url, headers=_HTML_HEADERS, timeout=_TIMEOUT)
+        if r.status_code != 200:
+            return ""
+        soup = BeautifulSoup(r.text, "html.parser")
+        drop = ["script", "style", "nav", "header", "footer"]
+        for t in soup(drop if keep_form else drop + ["form"]):
+            t.decompose()
+        texts = [el.get_text("\n", strip=True) for el in soup.select(selector)]
+        return _full_desc(max(texts, key=len, default=""))
+    except Exception as e:
+        logger.info(f"[ats] detail {url[:60]} failed: {str(e)[:60]}")
+        return ""
+
+
+def _jsonld_desc(url: str) -> str:
+    """Full JD from a detail page's schema.org JobPosting JSON-LD ("" on miss)."""
+    import json as _json
+    try:
+        r = requests.get(url, headers=_HTML_HEADERS, timeout=_TIMEOUT)
+        if r.status_code != 200:
+            return ""
+        for m in re.finditer(r'<script[^>]*application/ld\+json[^>]*>(.*?)</script>',
+                             r.text, re.S):
+            try:
+                d = _json.loads(m.group(1).strip())
+            except Exception:
+                continue
+            for it in (d if isinstance(d, list) else [d]):
+                if isinstance(it, dict) and it.get("@type") in ("JobPosting", ["JobPosting"]):
+                    desc = _full_desc(it.get("description") or "")
+                    if desc:
+                        return desc
+    except Exception as e:
+        logger.info(f"[ats] jsonld {url[:60]} failed: {str(e)[:60]}")
+    return ""
+
 _JSON_POST = {"User-Agent": "Mozilla/5.0 Chrome/120", "Accept": "application/json",
               "Content-Type": "application/json"}
 _VN_MARKERS = ("vietnam", "viet nam", "việt nam", "hanoi", "ha noi", "hà nội",
@@ -137,7 +184,7 @@ def _finalize(jobs: list[dict]) -> list[dict]:
 __all__ = [
     "logger", "_html", "os", "re", "requests", "urljoin", "urlparse", "parse_qsl",
     "_TIMEOUT", "_MAX_ATS_JOBS", "_HEADERS", "_get_json", "_strip_html",
-    "_FULL_JD_CAP", "_full_desc",
+    "_FULL_JD_CAP", "_full_desc", "_detail_desc", "_jsonld_desc",
     "_HTML_HEADERS", "_JSON_POST", "_VN_MARKERS", "_WD_RX", "_is_vn_loc",
     "_BAD_TITLES", "_norm_title", "_finalize",
 ]

@@ -597,7 +597,8 @@ def _ssi(career_url: str) -> list[dict]:
         m = re.search(r"\(([^)]+)\)\s*$", title)
         if m and _is_vn_loc(m.group(1)):
             loc = m.group(1).strip()
-        out.append({"title": title[:200], "url": url, "location": loc[:120], "description": ""})
+        out.append({"title": title[:200], "url": url, "location": loc[:120],
+                    "description": _detail_desc(url, ".content-page") if len(out) < 40 else ""})
         if len(out) >= _MAX_ATS_JOBS:
             break
     logger.info(f"[ats] ssi → {len(out)} jobs")
@@ -907,9 +908,9 @@ def _vnpay_tuyendung(career_url: str) -> list[dict]:
         slug = href.lower()
         loc = ("Đà Nẵng" if "da-nang" in slug else "Hồ Chí Minh" if "hcm" in slug
                else "Hà Nội" if "ha-noi" in slug or "hanoi" in slug else "Vietnam")
-        out.append({"title": title[:200],
-                    "url": href if href.startswith("http") else "https://tuyendung.vnpay.vn" + href,
-                    "location": loc, "description": ""})
+        vurl = href if href.startswith("http") else "https://tuyendung.vnpay.vn" + href
+        out.append({"title": title[:200], "url": vurl, "location": loc,
+                    "description": _detail_desc(vurl, "main.site-main") if len(out) < 40 else ""})
         if len(out) >= _MAX_ATS_JOBS:
             break
     logger.info(f"[ats] vnpay → {len(out)} jobs")

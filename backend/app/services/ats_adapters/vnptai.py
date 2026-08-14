@@ -44,7 +44,8 @@ def _vnptai(career_url: str) -> list[dict]:
             sib = loc_span.find_next_sibling("span") if loc_span else None
             location = sib.get_text(" ", strip=True) if sib else ""
         if title and href:
-            out.append({"title": title[:200], "url": href, "location": location, "description": ""})
+            out.append({"title": title[:200], "url": href, "location": location,
+                        "description": _detail_desc(href, "div.apply-first") if len(out) < 40 else ""})
     logger.info(f"[ats] vnptai → {len(out)} jobs")
     return out
 

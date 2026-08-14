@@ -57,7 +57,8 @@ def _bat(career_url: str) -> list[dict]:
         if not title:
             continue
         seen.add(url)
-        out.append({"title": title[:200], "url": url, "location": loc.strip()[:120], "description": ""})
+        out.append({"title": title[:200], "url": url, "location": loc.strip()[:120],
+                    "description": _jsonld_desc(url) if len(out) < 40 else ""})
     logger.info(f"[ats] bat → {len(out)} VN jobs")
     return out
 

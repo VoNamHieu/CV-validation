@@ -41,7 +41,8 @@ def _honda(career_url: str) -> list[dict]:
             "title": title[:200],
             "url": urljoin(_URL, a["href"]),
             "location": loc.get_text(" ", strip=True) if loc else "",
-            "description": "",
+            "description": _detail_desc(urljoin(_URL, a["href"]), "div.job-oppurtunities",
+                                        keep_form=True) if len(out) < 40 else "",
         })
     logger.info(f"[ats] honda → {len(out)} jobs")
     return out

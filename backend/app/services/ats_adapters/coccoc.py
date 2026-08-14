@@ -42,7 +42,7 @@ def _coccoc(career_url: str) -> list[dict]:
                 "url": f"{_DETAIL}/{slug}",
                 "external_id": str(jid) if jid else str(slug),
                 "location": it.get("location") or "",
-                "description": "",
+                "description": _jsonld_desc(f"{_DETAIL}/{slug}") if len(out) < 40 else "",
             })
             if len(out) >= _MAX_ATS_JOBS:
                 return out

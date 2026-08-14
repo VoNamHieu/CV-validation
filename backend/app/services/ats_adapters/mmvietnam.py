@@ -46,7 +46,7 @@ def _mmvietnam(career_url: str) -> list[dict]:
             "url": urljoin(_URL, href),
             "location": loc.get_text(" ", strip=True) if loc else "",
             "category": cat.get_text(" ", strip=True) if cat else "",
-            "description": "",
+            "description": _jsonld_desc(urljoin(_URL, href)) if len(out) < 40 else "",
         })
         if len(out) >= _MAX_ATS_JOBS:
             break

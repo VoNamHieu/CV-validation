@@ -43,7 +43,8 @@ def _fecredit(career_url: str) -> list[dict]:
             "title": title[:200],
             "url": url,
             "location": loc.get_text(" ", strip=True) if loc else "",
-            "description": "",
+            "description": _detail_desc(url, ".apply-job-content",
+                                        keep_form=True) if len(out) < 40 else "",
             "salary": "" if salt.lower() in ("thỏa thuận", "thoa thuan") else salt,
         })
         if len(out) >= _MAX_ATS_JOBS:

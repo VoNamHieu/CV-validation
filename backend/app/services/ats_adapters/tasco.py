@@ -44,7 +44,8 @@ def _tasco(career_url: str) -> list[dict]:
                 "title": title[:200],
                 "url": f"{_SITE}/career-detail/{slug}",
                 "location": (acf.get("city") or acf.get("location") or "").strip(),
-                "description": "",
+                "description": _detail_desc(f"{_SITE}/career-detail/{slug}",
+                                            "div.container") if len(out) < 40 else "",
             })
         info = posts.get("pageInfo") or {}
         if not info.get("hasNextPage") or len(out) >= _MAX_ATS_JOBS:

@@ -987,7 +987,9 @@ def _careerspage(career_url: str) -> list[dict]:
         if loc and not _is_vn_loc(loc):
             continue
         out.append({"title": title[:200], "url": f"https://www.careers-page.com{href}",
-                    "location": (loc or "Vietnam")[:120], "description": ""})
+                    "location": (loc or "Vietnam")[:120],
+                    "description": _detail_desc(f"https://www.careers-page.com{href}",
+                                                "main") if len(out) < 40 else ""})
         if len(out) >= _MAX_ATS_JOBS:
             break
     logger.info(f"[ats] careers-page:{slug} → {len(out)} VN jobs")
