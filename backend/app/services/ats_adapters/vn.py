@@ -524,7 +524,9 @@ def _geekadventure(career_url: str) -> list[dict]:
         if not title:
             continue
         out.append({"title": title[:200], "url": f"https://geekadventure.vn/{href}",
-                    "location": loc[:120], "description": ""})
+                    "location": loc[:120],
+                    "description": _detail_desc(f"https://geekadventure.vn/{href}",
+                                                'div[class*="opportunity-detail"]') if len(out) < 40 else ""})
         if len(out) >= _MAX_ATS_JOBS:
             break
     logger.info(f"[ats] geekadventure → {len(out)} VN jobs")
