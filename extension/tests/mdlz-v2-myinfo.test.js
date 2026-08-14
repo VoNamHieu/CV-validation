@@ -20,7 +20,7 @@ import { test, describe, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { installDom } from './harness/mini-dom.js';
-import { buildMyInfoPage } from './harness/myinfo-page.js';
+import { buildMyInfoPage, MAERSK_PHONE_TYPES } from './harness/myinfo-page.js';
 
 let dom;
 let page;
@@ -137,6 +137,18 @@ describe('the widgets, each recognised by its shape', () => {
         // Office", "Telephone - Personal". A bare "Mobile" substring-matches
         // whichever is first.
         assert.equal(page.phoneType.textContent, 'Mobile - Personal');
+    });
+
+    test('phone type is per-tenant: Maersk has no "Mobile - Personal", so it takes "Private Phone" — never "Office Mobile"', async () => {
+        // R192834 (2026-08-14): the hardcoded MDLZ label "Mobile - Personal"
+        // matched none of Maersk's Office Landline / Office Mobile / Private Phone,
+        // so the required field held My Information. The ladder resolves it to the
+        // PERSONAL line, and the anchored "=Mobile" rung must not grab the office
+        // mobile.
+        page = buildMyInfoPage(dom.document, { phoneTypes: MAERSK_PHONE_TYPES });
+        dom.document.body.children[0].remove();
+        await run();
+        assert.equal(page.phoneType.textContent, 'Private Phone');
     });
 });
 

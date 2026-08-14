@@ -21,6 +21,8 @@ const OPT = 'promptOption';
 export const COUNTRIES = ['Vietnam', 'Thailand', 'Singapore', 'United States'];
 export const PROVINCES = ['Hà Nội', 'Hồ Chí Minh', 'Đà Nẵng', 'Hải Phòng'];
 export const PHONE_TYPES = ['Mobile - Personal', 'Mobile - Work', 'Telephone - Office', 'Telephone - Personal'];
+/** Maersk's list (measured R192834, 2026-08-14): no "Mobile - Personal" anywhere. */
+export const MAERSK_PHONE_TYPES = ['Office Landline', 'Office Mobile', 'Private Phone'];
 export const PHONE_CODES = ['Vietnam (+84)', 'Thailand (+66)', 'Singapore (+65)'];
 /** Measured shape of a source catalogue: no "Company Website" row on every
  *  tenant, which is why the ladder ends at an anchored "Other". */
@@ -275,7 +277,7 @@ export function buildMyInfoPage(doc, opts = {}) {
         }, cfg.rerenderMs);
     });
 
-    const phoneType = buttonPrompt('formField-phoneType', PHONE_TYPES);
+    const phoneType = buttonPrompt('formField-phoneType', cfg.phoneTypes || PHONE_TYPES);
     const phoneCode = tokenPrompt('formField-countryPhoneCode', PHONE_CODES);
     const phoneNumber = textField('formField-phoneNumber');
 

@@ -691,7 +691,17 @@ async function _runAgentLoop(rawProfile) {
             const formGone = sawForm && state.formFields.length === 0;
             const confirmationUrl = state.url !== startUrl
                 && /thank|success|confirm|complete|submitted|hoan-?tat|thanh-?cong/i.test(state.url);
-            const structuralSignal = formGone || confirmationUrl;
+            // A recipe'd multi-step ATS (Workday…) hands off at its REVIEW step and
+            // NEVER submits — so on that page formFields===0 is the read-only review
+            // SUMMARY, not a sent application. MEASURED Maersk R186339 (2026-08-14):
+            // a 4-step job's Review page (0 fields) plus a stale "Successfully
+            // Uploaded" signal left from the résumé step read as `submitted`, which
+            // would have written a false "đã nộp" for an application still sitting on
+            // Review, unsent — the exact false-success this block warns about. So
+            // `formGone` may only signal a send for a SINGLE-PAGE form; a multi-step
+            // ATS needs a real confirmation URL, which only a true submit produces.
+            const recipeMultiStep = !!recipe && !!recipe.finalStepSelector;
+            const structuralSignal = confirmationUrl || (formGone && !recipeMultiStep);
 
             if (newSignals.length > 0 && actionsTaken > 0 && !midRecipeFlow && !structuralSignal) {
                 console.log('[Copo Apply] completion text seen but the form is still here — not calling this submitted:',

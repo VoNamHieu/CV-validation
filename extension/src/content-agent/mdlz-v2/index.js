@@ -435,8 +435,17 @@ export function pageComplete(ledger, gaps = []) {
     if (unfinished.length) {
         return { complete: false, reason: `${unfinished[0].id} ended ${unfinished[0].result}`, unfinished };
     }
-    if (gaps.length) {
-        const g = gaps[0];
+    // An ABSENT section is a gap that can NEVER close — this tenant does not
+    // render it (the Maersk intern posting has no Education section while the CV
+    // has education). It is kept in `gaps` for the review summary, but it must
+    // NOT gate advance, or the page hangs on a field that does not exist.
+    // MEASURED on Maersk R192834 (2026-08-14): after every skill committed, a
+    // single absent-education gap held MY_EXPERIENCE at advance:INCOMPLETE for
+    // three passes, then v2BlockedEscalate → run.end. On mdlz every section
+    // renders, so no gap ever carries `absent` and this waiver is inert there.
+    const blocking = gaps.filter((g) => !g.absent);
+    if (blocking.length) {
+        const g = blocking[0];
         return { complete: false, reason: `${g.section}${g.field ? `.${g.field}` : ''}: ${g.why}`, gaps };
     }
     let errors = [];

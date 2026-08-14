@@ -56,11 +56,19 @@ export const FALLBACK_RECIPES = [
         // Non-form gateway the agent clicks to reach the form. The "Start Your
         // Application" modal renders its options as <a role="button"> (not
         // <button>), which the generic scan misses — so drive it by exact selector.
-        // ONLY "Autofill with Resume": the flow always syncs a CV PDF first, and
-        // letting Workday parse the résumé pre-fills the tricky required dropdowns
-        // (Country/source). "Apply Manually" is intentionally omitted — it skips
-        // that pre-fill and leaves every required field to fill by hand.
+        //
+        // "APPLY MANUALLY" FIRST — mirrors the fix the mdlz recipe already carries
+        // (recipe-mdlz-v1.js, 2026-08-09) and now proven on Maersk (R191542,
+        // 2026-08-14): "Autofill with Resume" lets Workday's own parse pre-fill
+        // the form, but that parse is a black box we cannot control — it wrote the
+        // Given Name as "HIEU (CHARLES)" (all caps, from the CV header), which
+        // trips Workday's OWN "verify capitalization" alert and refuses Save and
+        // Continue with every field otherwise correct. A pre-fill we did not write
+        // is content we cannot key or trust; filling an empty form from the
+        // profile is exactly what the deterministic engine is for. Autofill stays
+        // as a FALLBACK, for a posting that offers no manual option.
         gateways: [
+            { label: 'Apply Manually', detect: '[data-automation-id="applyManually"]' },
             { label: 'Autofill with Resume', detect: '[data-automation-id="autofillWithResume"]', needsCV: true },
         ],
         steps: [

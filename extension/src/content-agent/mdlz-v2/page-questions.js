@@ -148,6 +148,39 @@ async function answerQuestion(q, ctx) {
     }
 
     if (kind === WIDGET.CHECKBOX) {
+        // A checkbox GROUP — several boxes under one question ("What shift do you
+        // prefer?" Morning / … / Any shift, measured on Maersk R192834) — is a
+        // pick-one, not a yes/no tick. It answers exactly like a radio group,
+        // only the input type differs: read each box's label, resolve against
+        // them, and tick the match. A SINGLE checkbox stays the yes/no path below,
+        // so MDLZ's consent/acknowledge boxes are untouched.
+        const wrap = find();
+        const boxes = wrap ? [...wrap.querySelectorAll('input[type="checkbox"]')] : [];
+        if (boxes.length > 1) {
+            const nap = ctx.sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
+            const labelOf = (b) => fold(
+                (b.id && wrap.querySelector(`label[for="${b.id}"]`)?.textContent)
+                || b.closest('label')?.textContent
+                || b.parentElement?.textContent || '');
+            const labelled = boxes.map((b) => ({ b, t: labelOf(b) })).filter((x) => x.t);
+            const answer = resolveAnswer({ questionText: q.question }, labelled.map((x) => x.t), ctx.profile, ctx.cv);
+            if (!answer) return { result: RESULT.USER_REQUIRED, reason: 'no rule for this checkbox group', question: q.question, options: labelled.map((x) => x.t) };
+            const want = fold(answer.value);
+            const hit = labelled.find((x) => x.t === want) || labelled.find((x) => x.t.includes(want));
+            if (!hit) return { result: RESULT.OPTION_NOT_FOUND, question: q.question, options: labelled.map((x) => x.t) };
+            if (!hit.b.checked) {
+                const clickable = (hit.b.id && wrap.querySelector(`label[for="${hit.b.id}"]`)) || hit.b.closest('label') || hit.b;
+                try { clickable.scrollIntoView?.({ block: 'center' }); } catch { /* no layout */ }
+                clickable.click();
+                await nap(200);
+            }
+            // Re-read by label — the node can be recycled on a re-render.
+            const after = wrap.querySelectorAll('input[type="checkbox"]');
+            const stillChecked = [...after].some((b) => labelOf(b) === want && b.checked) || hit.b.checked;
+            return stillChecked
+                ? { result: RESULT.COMMITTED, answer, picked: hit.t, question: q.question }
+                : { result: RESULT.COMMIT_FAILED, reason: 'the box did not stay checked', question: q.question };
+        }
         const answer = resolveAnswer({ questionText: q.question }, ['yes', 'no'], ctx.profile, ctx.cv);
         if (!answer) return { result: RESULT.USER_REQUIRED, reason: 'no rule for this box', question: q.question };
         return runField(f, /^(yes|có|i agree|i acknowledge|đồng ý)$/i.test(String(answer.value)), ctx);

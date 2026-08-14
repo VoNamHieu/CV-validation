@@ -120,6 +120,18 @@ describe('the plan is derived from the page, every time it is asked', () => {
         assert.equal(skills.optional, true, 'and it stays optional — the guard must hold on an optional field');
     });
 
+    test('skills are capped, so a parse that over-extracts cannot grind the page', () => {
+        // Measured (HSE_Specialist CV, 2026-08-14): the parse handed over 168
+        // skills. On Maersk's create-only Skills field every one is a fresh
+        // create, so 168 would grind for minutes and trip the watchdog. A real CV
+        // lists ~15; the cap fences off the absurd without ever cutting a genuine
+        // list. Two skills (this CV) are well under it and untouched.
+        assert.equal(planner.planStep(CV).tasks.find((t) => t.id === 'skills').want.length, 2, 'a normal list is not touched');
+        const many = Array.from({ length: 168 }, (_, i) => `skill ${i}`);
+        const capped = planner.planStep({ ...CV, skills: many }).tasks.find((t) => t.id === 'skills');
+        assert.equal(capped.want.length, planner.SKILLS_CAP, '168 → SKILLS_CAP, not 168');
+    });
+
     test('one blank and two jobs is one Add — and only one', () => {
         page.addWorkRow({});
         const { tasks } = planner.planStep(CV);
@@ -175,6 +187,25 @@ describe('the plan is derived from the page, every time it is asked', () => {
         const { tasks, gaps } = planner.planStep(CV);
         assert.equal(tasks.filter((t) => t.kind === 'addRow' && t.section === 'work').length, 0);
         assert.ok(gaps.some((g) => g.section === 'work' && /add button/.test(g.why)));
+    });
+
+    test('a section this tenant does not render is SKIPPED, not a page-wide block — Maersk intern has no Education', () => {
+        // R192834 (2026-08-14): the intern My Experience has Work Experience,
+        // Languages, Skills — but NO Education, while the CV carries one. The old
+        // all-or-nothing decline stranded work AND languages too ("cannot finish
+        // education"), and v1 cannot take over an owned page, so the run stuck.
+        // An absent section (heading missing WHILE the page names others) is now a
+        // NON-blocking gap, and the sections that ARE present still plan.
+        dom.document.body.children.forEach((c) => { c.parentNode = null; });
+        dom.document.body.children = [];
+        page = buildHostilePage(dom.document, { omit: ['education'] });
+
+        const { tasks, gaps } = planner.planStep(CV);
+        const eduGap = gaps.find((g) => g.section === 'education');
+        assert.ok(eduGap?.absent, 'education is marked absent, not "cannot finish"');
+        assert.equal(gaps.filter((g) => /add button/.test(g.why)).length, 0, 'nothing blocks the page');
+        // The whole point: work is NOT stranded by education's absence.
+        assert.ok(tasks.some((t) => t.section === 'work'), 'work is still planned');
     });
 
     test('one row per language, whatever the CV called it', () => {
@@ -596,6 +627,24 @@ describe('v2 takes a step it can finish, and hands back one it cannot', () => {
         // And a REQUIRED field refused the same way still stops everything.
         const required = { tasks: [{ id: 'degree', optional: false, result: RESULT.OPTION_NOT_FOUND }] };
         assert.equal(v2.pageComplete(required, []).complete, false);
+    });
+
+    test('an ABSENT-section gap is waived at advance — a real gap still blocks', () => {
+        // The tenant does not render this section (Maersk intern: no Education
+        // while the CV has education). That gap can NEVER close, so it must not
+        // gate advance — MEASURED on Maersk R192834 (2026-08-14): a lone
+        // absent-education gap held MY_EXPERIENCE at INCOMPLETE for three passes,
+        // then escalated and ended the run AFTER every skill had committed.
+        const done = { tasks: [{ id: 'skills', result: RESULT.COMMITTED }] };
+        const absent = [{ section: 'education', why: 'section absent — this tenant does not render it', absent: true }];
+        assert.equal(v2.pageComplete(done, absent).complete, true,
+            'a section this tenant never renders must not hold the page');
+        // A gap WITHOUT the absent flag still blocks — a section we failed to
+        // fill is not the same as one that does not exist.
+        const real = [{ section: 'languages', why: 'no row and no add button we can identify' }];
+        assert.equal(v2.pageComplete(done, real).complete, false);
+        // Mixed: the real gap wins even when an absent one is also present.
+        assert.equal(v2.pageComplete(done, [...absent, ...real]).complete, false);
     });
 
     test('a CONTRACT_ERROR is NEVER forgiven — not even on an optional field', () => {

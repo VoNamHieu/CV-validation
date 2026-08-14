@@ -18,7 +18,7 @@ import { test, describe, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { installDom } from './harness/mini-dom.js';
-import { GENDER_VISA, buildDisclosuresPage } from './harness/disclosures-page.js';
+import { GENDER_VISA, NATIONALITY_COUNTRIES, buildDisclosuresPage } from './harness/disclosures-page.js';
 
 let dom;
 let page;
@@ -65,6 +65,39 @@ describe('a silent profile declines, in whatever words the tenant uses', () => {
         const r = await run({});
         const gender = r.report.answers.find((a) => a.field === 'formField-gender');
         assert.equal(gender.source, 'AGENT_DEFAULT');
+    });
+});
+
+describe('Primary Nationality — a required country picker MDLZ never rendered', () => {
+    // MEASURED Maersk R192834 (2026-08-14): a required Primary Nationality the
+    // disclosures plan had no task for. It stayed "Select One", advance held
+    // INCOMPLETE, and the run ended one page short of Review. The options are
+    // COUNTRY names, so the candidate's own stated country is the answer.
+    const natPage = (opts) => {
+        dom.document.body.children.forEach((c) => { c.parentNode = null; });
+        dom.document.body.children = [];
+        page = buildDisclosuresPage(dom.document, { nationality: NATIONALITY_COUNTRIES, ...opts });
+    };
+
+    test('the profile\'s country fills it', async () => {
+        natPage();
+        await run({ country: 'Vietnam' });
+        assert.equal(page.picked()['formField-nationality'], 'Vietnam');
+    });
+
+    test('a demonym-only profile still resolves to the country noun the picker holds', async () => {
+        natPage();
+        await run({ nationality: 'Vietnamese' });
+        assert.equal(page.picked()['formField-nationality'], 'Vietnam');
+    });
+
+    test('and where the tenant does not render it, nothing is done', async () => {
+        // Every non-Maersk page (no cfg.nationality) must not gain a task or a gap.
+        page = buildDisclosuresPage(dom.document);
+        const r = await run({ country: 'Vietnam' });
+        const task = r.ledger.tasks.find((t) => t.id === 'formField-nationality');
+        assert.equal(task?.result, RESULT.SKIPPED_OPTIONAL);
+        assert.ok(!r.gaps.some((g) => g.id === 'formField-nationality'));
     });
 });
 

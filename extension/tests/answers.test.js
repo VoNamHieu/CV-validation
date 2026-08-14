@@ -72,6 +72,14 @@ describe('screening questions with a safe default', () => {
         const a = resolveAnswer(q('Are you a current employee?'), ['Not applicable', 'Yes', 'No'], {});
         assert.equal(a.value, 'No');
     });
+    test('a prior APPLICATION defaults No — and is not the previously-WORKED rule (Maersk R192834)', () => {
+        assert.equal(resolveAnswer(q('Have you applied to A.P. Moller Maersk Group before?'), ['Yes', 'No'], {}).value, 'No');
+    });
+    test('relocation defaults Yes, like travel — applying states the willingness (Maersk R192834)', () => {
+        const a = resolveAnswer(q('Would you be willing to relocate if the company required?'), ['Yes', 'No'], {});
+        assert.equal(a.value, 'Yes');
+        assert.equal(a.source, ANSWER_SOURCE.AGENT_DEFAULT, 'a preference we assumed sits in the review list');
+    });
 });
 
 describe('work authorization and sponsorship — home-market defaults', () => {

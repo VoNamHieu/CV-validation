@@ -18,6 +18,12 @@ export const GENDER_MDLZ = ['Female', 'Male', 'Not Specified', 'Other'];
 export const GENDER_VISA = ['Female', 'Male', 'Not Declared'];
 /** A VN ethnic-group catalogue: no decline row anywhere in it. */
 export const ETHNICITY_VN = ['Kinh', 'Hoa', 'Tày', 'Thái', 'Mường', 'Khmer', 'Nùng'];
+/**
+ * Primary Nationality as Maersk renders it: a listbox of COUNTRY names, all in
+ * the DOM at once (measured R192834: 251 options, not virtualised), so the value
+ * is a country noun ("Vietnam"), never a demonym. No decline row.
+ */
+export const NATIONALITY_COUNTRIES = ['Afghanistan', 'Albania', 'United States of America', 'United Kingdom', 'Vietnam'];
 
 export function buildDisclosuresPage(doc, opts = {}) {
     const cfg = {
@@ -128,6 +134,9 @@ export function buildDisclosuresPage(doc, opts = {}) {
 
     const gender = prompt('formField-gender', 'Gender', cfg.genders);
     const ethnicity = prompt('formField-ethnicity', 'Race/Ethnicity', cfg.ethnicities);
+    // Opt-in, like dob: only the tenants that render a required Primary
+    // Nationality (Maersk) build one, so every existing test's page is unchanged.
+    const nationality = cfg.nationality ? prompt('formField-nationality', 'Primary Nationality', cfg.nationality) : null;
     // Opt-in, so the tenants that do not render a DOB (every existing test) still
     // build the page they measured. cfg.dob === true → an empty required field;
     // cfg.dob === { month, day, year } → a resumed draft that already carries it.
@@ -141,7 +150,7 @@ export function buildDisclosuresPage(doc, opts = {}) {
 
     return {
         cfg, page, nav, state,
-        gender, ethnicity, dob, terms, marketing,
+        gender, ethnicity, nationality, dob, terms, marketing,
         picked: () => state.picked,
     };
 }

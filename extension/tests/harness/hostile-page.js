@@ -146,8 +146,12 @@ export function buildHostilePage(doc, opts = {}) {
         if (title !== null) el('h3', {}, box).textContent = title;
         return box;
     };
+    // A section the tenant does not render at all — no heading, no Add button.
+    // The Maersk intern form has no Education (measured R192834), so this is how
+    // a page proves "absent section" as distinct from "headings stripped".
+    const omit = new Set(opts.omit || []);
     const workSection = section(opts.headings === false ? null : 'Work Experience');
-    const eduSection = section(opts.headings === false ? null : 'Education');
+    const eduSection = omit.has('education') ? null : section(opts.headings === false ? null : 'Education');
     const langSection = section(opts.headings === false ? null : 'Languages');
     const rows = [];
     const pickerFor = new Map();   // date wrapper → its open panel
@@ -627,7 +631,7 @@ export function buildHostilePage(doc, opts = {}) {
         return btn;
     }
     addButtonIn(workSection, () => addWorkRow({}));
-    addButtonIn(eduSection, () => addEducationRow({}));
+    if (eduSection) addButtonIn(eduSection, () => addEducationRow({}));
     addButtonIn(langSection, () => addLanguageRow({}));
 
     // Skills: the search box whose leftovers were the 20 orphans.

@@ -46,6 +46,7 @@ import { withList } from './popup-manager.js';
 import { runSequential } from './scheduler.js';
 import { trace } from '../trace.js';
 import { genderLadder } from '../semantic.js';
+import { countryName } from './page-myinfo.js';
 
 const txt = (el) => (el?.textContent || '').trim().replace(/\s+/g, ' ');
 const fold = (s) => String(s || '').trim().toLowerCase();
@@ -289,6 +290,29 @@ export async function runDisclosuresPage(ctx = {}) {
                 const r = await answerDateOfBirth('formField-dateOfBirth', ctx, { required: true });
                 if (r.result === RESULT.USER_REQUIRED) {
                     gaps.push({ id: 'formField-dateOfBirth', why: r.reason || 'no date of birth to fill' });
+                }
+                return r;
+            },
+        },
+        {
+            id: 'formField-nationality',
+            // Maersk asks a REQUIRED Primary Nationality that MDLZ never rendered
+            // (measured R192834, 2026-08-14): the plan had no task for it, so it
+            // stayed "Select One", advance held INCOMPLETE, and the run escalated
+            // and ended ONE PAGE short of Review after everything else was done.
+            // The prompt's own options are COUNTRY names ("Vietnam"), not demonyms
+            // — the SAME picker My Information fills for Country — so countryName()
+            // turns the profile's stated nationality/country into that noun. It is
+            // the candidate's own stated country, not a demographic v2 chose, so
+            // the disclosures policy admits it; the generic listbox capability,
+            // resolved from the fingerprint, makes the pick.
+            run: async () => {
+                const find = () => document.querySelector('[data-automation-id="formField-nationality"]');
+                if (!find()) return { result: RESULT.SKIPPED_OPTIONAL, reason: 'not on this tenant' };
+                const f = fingerprintOf(find, { name: 'formField-nationality' });
+                const r = await runField(f, countryName(ctx.profile), ctx);
+                if (r.result === RESULT.USER_REQUIRED) {
+                    gaps.push({ id: 'formField-nationality', why: r.reason || 'nationality not offered by the prompt' });
                 }
                 return r;
             },

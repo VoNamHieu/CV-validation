@@ -105,6 +105,52 @@ export const ANSWER_RULES = [
         candidates: ['yes', 'có'],
     },
     {
+        kind: 'relocation',
+        // "Would you be willing to relocate if the company required?" — measured
+        // on Maersk (R192834), a REQUIRED prompt that stalled App Questions. Same
+        // logic as travel (user decision 2026-08-05): applying to a job states a
+        // willingness to do it as described, and the answer sits in the review
+        // list as an agent default for the candidate to change before submitting.
+        match: /willing.{0,30}relocat|able to relocat|open to relocat|relocat(e|ion)[^?]{0,40}(if|when|required|for (the )?(role|job|position|company))|(sẵn sàng|đồng ý).{0,20}(chuyển|di dời)/i,
+        candidates: ['yes', 'có'],
+    },
+    {
+        kind: 'prior_application',
+        // "Have you applied to A.P. Moller Maersk Group before?" — measured on
+        // Maersk (R192834), REQUIRED, and left the App Questions step stuck. Same
+        // shape as previous_employment: a fact we do not hold defaults to "No" —
+        // the common case — and the candidate corrects it at review if they have
+        // applied before. NOT the "previously WORKED" question (that is its own
+        // rule); this is about a prior APPLICATION.
+        match: /have you[^?]{0,40}applied[^?]{0,40}(before|previously|in the past|to (us|this))|previously applied|prior application|submitted an application (to|with)[^?]{0,30}before|đã (từng )?(ứng tuyển|nộp đơn)/i,
+        candidates: ['no', 'không'],
+    },
+    {
+        kind: 'age_confirmation',
+        // "Are you 16 of age or above?" — a universal minimum-age screen. The
+        // candidate is applying to a professional job, so Yes / "I confirm" is the
+        // true answer (and the CV's own DOB backs it). Pattern, not per-job.
+        match: /\b(16|18|sixteen|eighteen)\b[^?]{0,25}(years?|of age|or (older|above|over))|are you[^?]{0,20}(over |at least |aged )?(16|18)\b|đủ (16|18) tuổi|(16|18)\+/i,
+        candidates: ['i confirm', 'yes', 'confirm', 'có', 'i am'],
+    },
+    {
+        kind: 'physical_demands',
+        // "Working in the warehouse can be physically demanding… please confirm
+        // this is ok?" — measured on Maersk (R192834). Same family as travel: to
+        // apply to a role IS to state you can do it as described; the confirmation
+        // sits in the review list for the candidate to reconsider before submit.
+        match: /physical(ly)? (demanding|able|fit)|stand(ing)? (for )?long|heavy lift|lift(ing)? (heavy|up)|manual (labour|labor|handling)|(confirm|okay|are you able)[^?]{0,60}(physical|warehouse|standing|demanding)/i,
+        candidates: ['i confirm', 'yes', 'confirm', 'có', 'i am able'],
+    },
+    {
+        kind: 'shift_preference',
+        // "What shift do you prefer?" — a preference the applicant states. The
+        // application-positive, least-limiting answer is "Any shift" / flexible;
+        // it sits in the review list and the candidate narrows it if they must.
+        match: /shift[^?]{0,25}(prefer|available|would you|do you|can you work)|preferred shift|shift preference|which shift|ca (làm việc|nào)/i,
+        candidates: ['any shift', 'any', 'flexible', 'no preference', 'all shifts', 'bất kỳ'],
+    },
+    {
         kind: 'certifications',
         // "Do you hold the professional certifications and/or clearance as
         // outlined in the job description?" This IS answerable from the CV, and

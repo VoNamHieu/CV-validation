@@ -1113,19 +1113,27 @@ const searchMulti = {
                     const before = this.chipsNow(f);
                     const props = readSkillsOnSelect(triggerOf(f));
                     let via = 'none';
+                    // The bridge (or a same-world write) reports whether the STATE
+                    // commit took — values now hold the term — which is the truth a
+                    // background-throttled tab hides from the DOM: the write persists
+                    // to Save even while the virtualiser's paint is still deferred.
+                    let stateLanded = false;
                     if (props) {
-                        props.onSelect([...props.values, { label: item.label, id: item.id }]);
+                        const already = props.values.some((v) => fold(v?.label ?? '') === fold(item.label));
+                        if (!already) props.onSelect([...props.values, { label: item.label, id: item.id }]);
                         via = 'direct';
+                        stateLanded = true;
                     } else if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
                         try {
-                            await new Promise((resolve) => {
-                                const t = setTimeout(resolve, 8000);   // a dead worker must not hang the term
+                            const resp = await new Promise((resolve) => {
+                                const t = setTimeout(() => resolve(null), 8000);   // a dead worker must not hang the term
                                 chrome.runtime.sendMessage(
                                     { type: 'SKILL_FIBER_WRITE', label: item.label, id: item.id },
-                                    () => { void chrome.runtime.lastError; clearTimeout(t); resolve(); },
+                                    (r) => { void chrome.runtime.lastError; clearTimeout(t); resolve(r); },
                                 );
                             });
                             via = 'bridge';
+                            stateLanded = !!(resp && resp.ok && resp.landed);
                         } catch { /* no extension context — the caller's verdict stands */ }
                     }
                     if (via === 'none') {
@@ -1139,8 +1147,19 @@ const searchMulti = {
                     const { fresh, verdict } = await judgeFresh(item.label, before);
                     trace('mdlz.skill.fiberWrite', {
                         term, via, chip: fresh[0] || '(none)', free: item.free,
-                        landed: fresh.length > 0, matched: verdict?.result === RESULT.COMMITTED,
+                        landed: fresh.length > 0 || stateLanded, matched: verdict?.result === RESULT.COMMITTED,
                     });
+                    // The write is PRECISE by construction — onSelect adds exactly
+                    // {label:item.label}, never a recycled row's skill — so there is
+                    // no wrong-chip to guard against here. When judgeFresh saw a
+                    // fresh chip its verdict stands; when it saw NONE only because
+                    // the paint is still throttled, the confirmed state commit is
+                    // the COMMIT. A non-null NON-committed verdict (2 chips) still
+                    // wins — it is a real anomaly, not a throttled paint.
+                    if (!verdict && stateLanded) {
+                        added.push(item.label);
+                        return { result: RESULT.COMMITTED, term };
+                    }
                     return verdict;   // null = nothing landed, caller's verdict stands
                 };
                 // THE LIST OPENS BEFORE THE SEARCH ANSWERS. Reading it now gets
@@ -1219,9 +1238,48 @@ const searchMulti = {
                 // the wrong chip standing. One verifier, both channels.
                 const { fresh, verdict } = await judgeFresh(choice.matched, before);
                 if (!verdict) {
-                    // Nothing landed. Nothing was added either, so this is safe
-                    // to try again — unlike every judged branch above.
-                    return { result: RESULT.COMMIT_FAILED, term, reason: 'the click added no chip' };
+                    // THE CLICK ADDED NOTHING — try ENTER before giving up.
+                    //
+                    // MEASURED on Maersk (R192834, 2026-08-14) by doing it live: on
+                    // its create-only Skills widget the checkbox click commits
+                    // NOTHING, but typing the term, letting the search resolve, and
+                    // pressing ENTER adds the create-row chip (verified for both a
+                    // catalogued-looking term and a pure free-text one). The term is
+                    // already typed and the list is still open here, so one Enter is
+                    // the whole of it. The SAME judgeFresh guards it — a wrong result
+                    // is rolled back, not kept — and a tenant where the click already
+                    // worked never reaches this branch, so MDLZ is untouched.
+                    pressEnter(trigger);
+                    await until(() => this.chipsNow(f).length !== before.length,
+                        { sleep: ctx.sleep, budgetMs: ctx.commitMs || 1500 });
+                    const byEnter = await judgeFresh(choice.matched, before);
+                    if (!byEnter.verdict) {
+                        // CLICK AND ENTER BOTH COMMIT THROUGH THE PAINT — and a
+                        // background-throttled tab DEFERS the virtualiser's paint
+                        // past any DOM-verify budget. MEASURED on Maersk (R192834,
+                        // 2026-08-14, hidden:true): the chip for every skill landed
+                        // only AFTER the 1.5s verify gave up, so each read as
+                        // COMMIT_FAILED and the field netted ZERO skills. React's
+                        // STATE commit is not throttled — the fiber onSelect write
+                        // lands the chip in ~780ms even hidden (measured 4/4). This
+                        // is the SAME rescue the hidden tail already uses; the bridge
+                        // dedups by state, so a click/Enter that DID commit late is
+                        // not written twice.
+                        const rescued = await fiberRescue({ label: choice.matched, id: choice.id ?? choice.matched, free: !!choice.free });
+                        if (rescued) return rescued;
+                        // Nothing landed by click, Enter, or state write. Safe to try
+                        // again, unlike a judged branch — nothing was added to roll back.
+                        return { result: RESULT.COMMIT_FAILED, term, reason: 'neither the click, Enter, nor fiber write added a chip' };
+                    }
+                    if (byEnter.verdict.result === RESULT.COMMITTED) {
+                        const pill = f.controls().chips.map((c) => ({ t: txt(c), id: c.id || '' }))
+                            .find((c) => c.t === byEnter.fresh[0]);
+                        trace('mdlz.skill.add', {
+                            term, chip: byEnter.fresh[0], via: 'enter',
+                            free: pill ? !/REMOTE_SKILL/i.test(pill.id) : (choice.free ?? null),
+                        });
+                    }
+                    return byEnter.verdict;
                 }
                 if (verdict.result === RESULT.COMMITTED) {
                     // WHICH KIND of chip landed, read off the chip itself: a
@@ -1455,9 +1513,10 @@ const date = {
      */
     async commit(f, want, ctx = {}) {
         if (f.controls().day && want.day != null) {
-            for (const key of ['month', 'day', 'year']) {
+            const nap = napper(ctx.sleep);
+            const writeSeg = (key) => {
                 const el = f.controls()[key];   // re-read: onChange may replace nodes
-                if (!el) return { result: RESULT.WAITING_HYDRATION, reason: `no ${key} segment yet` };
+                if (!el) return false;
                 try { el.scrollIntoView?.({ block: 'center' }); } catch { /* no layout */ }
                 el.focus?.();
                 setNativeValue(el, String(want[key]));
@@ -1466,6 +1525,30 @@ const date = {
                 try { el.dispatchEvent(new FocusEvent('focusout', { bubbles: true })); }
                 catch { try { el.dispatchEvent(new Event('focusout', { bubbles: true })); } catch { /* noop */ } }
                 try { el.blur?.(); } catch { /* the control refuses; verify will say so */ }
+                return true;
+            };
+            // WRITE month → day → year, letting React FLUSH each segment's
+            // re-render before the next is written. A segment's onChange replaces
+            // its siblings' nodes; writing the next one in the SAME synchronous
+            // tick lands the value on a node the re-render is about to discard.
+            // MEASURED Maersk R192834 (2026-08-14): every segment's aria-valuenow
+            // read the target, yet Workday kept the YEAR out of its date model and
+            // validated "Invalid Date: 03/15/", because the year write hit a stale
+            // node — a settle tick between segments closes that race.
+            for (const key of ['month', 'day', 'year']) {
+                if (!writeSeg(key)) return { result: RESULT.WAITING_HYDRATION, reason: `no ${key} segment yet` };
+                await nap(120);
+            }
+            // aria-valuenow can read right while the model still rejects the date,
+            // so the only truth is whether Workday STOPS reporting an invalid date.
+            // Re-assert the year on the settled node until it clears: the field is
+            // SATISFIED by aria-valuenow so nothing else re-touches it, and the
+            // transient error would otherwise sit in the page's summary and hold
+            // the advance for the ~16s it takes the run to give up.
+            const invalidDate = () => errorsIn(f.find()).some((e) => /invalid date/i.test(e));
+            for (let tries = 0; tries < 4; tries++) {
+                if (await until(() => !invalidDate(), { sleep: ctx.sleep, budgetMs: 700 })) break;
+                writeSeg('year');
             }
             return { result: RESULT.COMMITTED };
         }

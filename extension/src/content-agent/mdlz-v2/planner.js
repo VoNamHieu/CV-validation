@@ -451,10 +451,31 @@ export function planStep(cv, { root = null, maxRows = 8, addVia = 'any' } = {}) 
             if (!row) {
                 const { button: add, via } = addButtonFound(spec, rows, addVia);
                 if (!add) {
-                    // Neither a row nor a heading names this section's button,
-                    // and four of them are on the page: say so, and let something
-                    // that can see the page decide. Guessing which Add to click
-                    // writes an entry into another section.
+                    // ABSENT vs AMBIGUOUS, and the difference is the whole page.
+                    //
+                    // A section whose heading is missing WHILE the page still
+                    // NAMES other sections is genuinely not on this form — the
+                    // tenant does not collect it. Measured on the Maersk intern
+                    // form (R192834, 2026-08-14): Work Experience / Languages /
+                    // Skills are there, Education is not, yet the CV carries one.
+                    // Declining the whole page for a section that is not on it
+                    // stranded work AND languages AND skills too. So an absent
+                    // section is a NON-blocking gap (surfaced at review — the form
+                    // simply does not ask for it), and v2 finishes what IS present.
+                    //
+                    // A page that names NO section at all is the OTHER case:
+                    // headings unreadable, Add buttons indistinguishable, and
+                    // clicking one writes a job into the wrong section. That stays
+                    // the BLOCKING "no add button" gap — hand the page to v1 whole,
+                    // exactly as before. MDLZ renders every section with its
+                    // heading, so `headingHere` is never null there and this absent
+                    // branch is never reached — MDLZ is untouched.
+                    const headingHere = sectionByHeading(COPY.sections[spec.name]);
+                    const pageNamesSections = SECTIONS.some((s) => sectionByHeading(COPY.sections[s.name]));
+                    if (!rows.length && !headingHere && pageNamesSections) {
+                        gaps.push({ section: spec.name, why: 'section absent — this tenant does not render it', absent: true });
+                        break;
+                    }
                     gaps.push({ section: spec.name, why: 'no row and no add button we can identify' });
                     break;
                 }
@@ -540,7 +561,13 @@ export function planStep(cv, { root = null, maxRows = 8, addVia = 'any' } = {}) 
     //
     // Same rule the education fields already use: a field this posting does not
     // render is not a gap and not a task; it is simply not there.
-    const skills = normaliseSkills(cv?.skills);
+    // CAP the skills. A real CV lists a handful (~15 at most); a parse that hands
+    // over 168 (measured, HSE_Specialist CV) is over-extraction, and on a
+    // create-only tenant like Maersk EVERY skill is a fresh create — 168 of them
+    // would grind the page for minutes and trip the watchdog. Twenty is generous
+    // headroom above a real CV, so a genuine skill list is never cut; it only
+    // fences off the absurd. (The FE parse producing 168 is a separate bug.)
+    const skills = normaliseSkills(cv?.skills).slice(0, SKILLS_CAP);
     const skillsField = typeof document !== 'undefined'
         ? (root || document).querySelector('[data-automation-id="formField-skills"]')
         : null;
@@ -556,6 +583,10 @@ export function planStep(cv, { root = null, maxRows = 8, addVia = 'any' } = {}) 
 
     return { tasks, gaps };
 }
+
+/** How many skills v2 will ever add — a fence against parse over-extraction,
+ *  never a limit a real CV reaches. See the note at the call site. */
+export const SKILLS_CAP = 20;
 
 /** A CV may hold skills as a list or as one comma-separated line. */
 export function normaliseSkills(raw) {

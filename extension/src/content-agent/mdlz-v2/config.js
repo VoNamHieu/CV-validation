@@ -24,7 +24,7 @@
  * not half-take it and loop. Add 'maersk' back once degreeLadder is tenant-
  * agnostic (category-matched against live options) and it passes MDLZ + Maersk.
  */
-export const ENABLED_TENANTS = new Set(['mdlz']);
+export const ENABLED_TENANTS = new Set(['mdlz', 'maersk']);
 
 /**
  * The tenant id for the CXS API, derived the way the URL actually carries it —

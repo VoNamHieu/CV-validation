@@ -42,16 +42,17 @@ describe('isOwnedPage gates v2 to tenants it can COMPLETE, not merely recognise'
         assert.equal(isOwnedPage(), true);
     });
 
-    test('Maersk is DERIVABLE but not yet owned — engagement proven, held until a clean live pass', () => {
-        // The degree-ladder loop is FIXED (category fallthrough, unit-proven both
-        // vocabularies). But `enabled` means "can COMPLETE", and two maersk gaps
-        // are still unmeasured for v2: the segmented date-of-birth widget (v1
-        // looped ~3 min there) and the sign-in chooser. It stays declined until a
-        // clean live run clears them.
+    test('Maersk is OWNED — the clean live pass cleared it', () => {
+        // Held until a clean live run cleared the two gaps that were unmeasured for
+        // v2: the segmented date-of-birth widget (v1 looped ~3 min there) and the
+        // Skills create-only widget. Both MEASURED + fixed and the flow reached
+        // Review on three Maersk jobs, 2026-08-14 — R192834 (intern, Education
+        // absent → skip), R173118 (CX Agent, Education present + cold re-fill) and
+        // R186339 (Documentation Expert) — so it is now cleared to complete.
         setLocation('maersk.wd3.myworkdayjobs.com', '/Maersk_Careers/job/x/apply');
         assert.equal(deriveTenant(), 'maersk', 'the mechanism recognises it');
-        assert.ok(!ENABLED_TENANTS.has('maersk'), 'but it is not cleared to complete');
-        assert.equal(isOwnedPage(), false, 'so v2 stands down and v1 serves it to Review');
+        assert.ok(ENABLED_TENANTS.has('maersk'), 'and it is now cleared to complete');
+        assert.equal(isOwnedPage(), true, 'so v2 owns its form pages');
     });
 
     test('any Workday tenant not in the allowlist is declined (v2 stands down, v1 serves it)', () => {

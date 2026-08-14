@@ -70,6 +70,28 @@ export const SOURCE_LADDER = [
     '=Other', '=Khác',
 ];
 
+/**
+ * Phone Device Type — an AGENT DEFAULT, and the same per-tenant-catalogue trap
+ * that degree was. The candidate states a phone NUMBER, not a device type, so the
+ * agent picks one; the intent is "the candidate's own, personal phone".
+ *
+ * catalogs.js is an MDLZ snapshot, so a single hardcoded want was an MDLZ label:
+ * `Mobile - Personal`. Maersk's list is `Office Landline / Office Mobile /
+ * Private Phone` (measured R192834, 2026-08-14) — no overlap, so the required
+ * field refused itself and held My Information. Like source and degree, this is a
+ * ladder resolved against the LIVE options, not one label.
+ *
+ * Every rung is a PERSONAL line, and only that: a work/office phone is a claim
+ * the candidate's own number does not support, so it is better to leave the field
+ * (a gap the person fills) than to file the wrong one. `=Mobile` is ANCHORED on
+ * purpose — an unanchored "Mobile" substring-matches Maersk's "Office Mobile",
+ * which is exactly the office line this must not choose.
+ */
+export const PHONE_TYPE_LADDER = [
+    'Mobile - Personal', 'Private Phone', 'Personal Mobile', 'Mobile Personal',
+    'Personal Phone', 'Telephone - Personal', '=Mobile', '=Personal',
+];
+
 /** Vietnam's generic postal code, five digits — see the 2018 note above. */
 export const VN_POSTAL = '10000';
 
@@ -130,7 +152,7 @@ export function myInfoPlan(profile, cv) {
         { id: 'formField-city', want: p.addressDistrict || contact.address_district || city, required: true },
         { id: 'formField-countryRegion', want: p.addressProvince || city, optional: !city },
         { id: 'formField-postalCode', want: p.postalCode || VN_POSTAL, required: true, isDefault: !p.postalCode },
-        { id: 'formField-phoneType', want: 'Mobile - Personal', why: 'agent default', isDefault: true },
+        { id: 'formField-phoneType', ladder: PHONE_TYPE_LADDER, isDefault: true },
         // DOCUMENTED EXCEPTION to the chip-search contract, not a precedent: a
         // semantically-ONE field still driven by searchMulti, because that is
         // the measured-working state (live runs: the parsed "Vietnam (+84)" chip
