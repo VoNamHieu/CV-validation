@@ -224,7 +224,7 @@ describe('on a page v2 owns, nothing else forms an opinion', () => {
     test('ownership is decided once, before any engine acts', () => {
         assert.match(src, /const _v2Owns = pageOwner\(\) === 'mdlz-v2'/,
             'ownership must be resolved into a single value at the top of the iteration');
-        assert.match(src, /isMdlzPage\(\) && \(await flagMode\(\)\) === MODE\.ON/,
+        assert.match(src, /isOwnedPage\(\) && \(await flagMode\(\)\) === MODE\.ON/,
             'it must answer on the first pass too, before v2 has claimed the page');
     });
 

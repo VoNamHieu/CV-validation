@@ -22,7 +22,7 @@
  * never claimed onto a real application is worse than leaving a field empty.
  */
 
-import { MONTHS, MONTH_LABEL, RESULT, SEL, SEMANTIC } from './config.js';
+import { MONTHS, MONTH_LABEL, RESULT, SEL, SEMANTIC, deriveTenant } from './config.js';
 import { WIDGET, triggerOf } from './fingerprint.js';
 import { sleep as domSleep } from '../dom.js';
 import { errorsIn, rowsOf } from './row.js';
@@ -323,7 +323,8 @@ async function fetchSkillOptions(term) {
     try {
         const t = String(term ?? '').trim();
         if (!t || typeof fetch !== 'function' || typeof location === 'undefined') return null;
-        const tenant = location.pathname.match(/\/(?:recruiting|cxs)\/([^/]+)\//)?.[1] || 'mdlz';
+        const tenant = deriveTenant();
+        if (!tenant) return null;   // an un-derivable tenant is not a page this reads
         const url = `${location.origin}/wday/cxs/${tenant}/skillsearch?search=${encodeURIComponent(t)}`;
         const res = await fetch(url, { credentials: 'include', headers: { accept: 'application/json' } });
         if (!res.ok) return null;

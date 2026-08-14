@@ -38,7 +38,7 @@ import { applyRecipeFields, atFinalStep, clickRecipeGateway, FIELD_FAIL_BUDGET, 
 import { checkClick, logDenial } from './policy.js';
 import { buildManifest, summarizeGaps, VERDICT } from './needs.js';
 import { MODE, flagMode } from './mdlz-v2/index.js';
-import { isMdlzPage } from './mdlz-v2/config.js';
+import { isOwnedPage } from './mdlz-v2/config.js';
 import { tenantRefFor } from '../ats/tenant.js';
 // The review READER. It cannot click — that is its whole design — and it runs
 // here because the loop returns at the final step BEFORE it ever reaches the
@@ -498,7 +498,7 @@ async function _runAgentLoop(rawProfile) {
             // before the claim exists — the ordering problem the flag test was
             // a wrong fix for).
             const _v2Owns = pageOwner() === 'mdlz-v2'
-                || (isMdlzPage() && (await flagMode()) === MODE.ON && owns(observeStep()));
+                || (isOwnedPage() && (await flagMode()) === MODE.ON && owns(observeStep()));
             const stopped = stopRequested();
             if (stopped) {
                 trace('loop.stopped', { why: stopped.why, iter: i + 1 });
@@ -718,7 +718,7 @@ async function _runAgentLoop(rawProfile) {
                 // take, and reading it must never be able to break the handoff.
                 let pageReview = null;
                 try {
-                    if (isMdlzPage()) pageReview = await runReviewPage({ cv: cvStructured });
+                    if (isOwnedPage()) pageReview = await runReviewPage({ cv: cvStructured });
                 } catch (e) { console.warn('[Copo] review read failed (harmless):', e?.message || e); }
                 showToast(withTenantFlags('✅ Đã điền xong tới bước cuối — kiểm tra rồi bấm "Submit" để nộp.'), 7000);
                 reportResult(true, 'Reached review step — filled, awaiting user submit', 'filled', {
@@ -1358,7 +1358,7 @@ async function _runAgentLoop(rawProfile) {
                         // iteration hands whatever page is on screen to v2's own
                         // controller, which fills it and advances it itself.
                         const _v2HoldsNow = pageOwner() === 'mdlz-v2'
-                            || (isMdlzPage() && (await flagMode()) === MODE.ON && owns(observeStep()));
+                            || (isOwnedPage() && (await flagMode()) === MODE.ON && owns(observeStep()));
                         if (_v2HoldsNow) {
                             // Deferring is only right while v2 has an unplayed
                             // move. If v2 owns the page AND recorded a terminal

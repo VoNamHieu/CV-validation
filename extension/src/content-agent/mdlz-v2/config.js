@@ -10,14 +10,44 @@
  * answer, and so a wrong assumption has to be argued against a measurement.
  */
 
-/** The tenant this controller owns. Nothing else may use it. */
-export const TENANT = 'mdlz';
-export const isMdlzPage = () => {
+/**
+ * The Workday tenants this engine is CLEARED for. A tenant joins this set only
+ * after it has been MEASURED (see knowledge/tenants/<id>) — v2 stands down on
+ * every Workday tenant not listed, and on every non-Workday host. MDLZ was the
+ * first; Maersk the second (measured 2026-08-14: subdomain-tenant, 6 steps).
+ */
+export const ENABLED_TENANTS = new Set(['mdlz', 'maersk']);
+
+/**
+ * The tenant id for the CXS API, derived the way the URL actually carries it —
+ * which is NOT the same across tenants (measured): myworkdaysite.com puts it in
+ * the PATH (/recruiting/mdlz/), myworkdayjobs.com puts it in the SUBDOMAIN
+ * (maersk.wd3.myworkdayjobs.com; the /Maersk_Careers/ path segment is the SITE,
+ * not the tenant). A single path regex returns the wrong id on Maersk — which
+ * is why this is not one line, and why fetchSkillOptions used to fall back to
+ * 'mdlz' on any non-path tenant.
+ */
+export function deriveTenant() {
     try {
-        return /(^|\.)myworkdaysite\.com$/i.test(location.hostname)
-            && /\/mdlz\//i.test(location.pathname);
+        const { hostname, pathname } = location;
+        const inPath = pathname.match(/\/(?:recruiting|cxs)\/([^/]+)\//);
+        if (inPath) return inPath[1].toLowerCase();
+        if (/myworkdayjobs\.com$/i.test(hostname)) {
+            const sub = hostname.split('.')[0];
+            if (sub && sub !== 'www') return sub.toLowerCase();
+        }
+        return null;
+    } catch { return null; }
+}
+
+/** True on a Workday application page whose tenant this engine is cleared for. */
+export function isOwnedPage() {
+    try {
+        if (!/(^|\.)(?:myworkdaysite|myworkdayjobs)\.com$/i.test(location.hostname)) return false;
+        const t = deriveTenant();
+        return !!t && ENABLED_TENANTS.has(t);
     } catch { return false; }
-};
+}
 
 /**
  * OFF by default and read from storage, so shipping this file changes nothing.
