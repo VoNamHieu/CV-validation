@@ -98,11 +98,9 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         # `navervietnam` (all postings are HCMC) → generic `greenhouse` fetcher.
         career_url="https://job-boards.greenhouse.io/navervietnam",
     ),
-    FeaturedCompany(
-        name="Agoda",
-        homepage="https://www.agoda.com",
-        career_url="https://careersatagoda.com/vacancies/?keyword=&country=vietnam",
-    ),
+    # Agoda dropped 2026-08-14 (with Rikkeisoft below): careersatagoda.com is
+    # anti-bot-walled (Cloudflare/PerimeterX class) — every compat rung fails,
+    # so the cron only produced perpetual failure rows; DB rows purged.
     FeaturedCompany(
         name="Traveloka",
         homepage="https://www.traveloka.com",
@@ -338,11 +336,8 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         homepage="https://www.tmasolutions.com",
         career_url="https://www.tma.vn/tuyen-dung",
     ),
-    FeaturedCompany(
-        name="Rikkeisoft",
-        homepage="https://rikkeisoft.com",
-        career_url="https://tuyendung.rikkeisoft.com/recruitment/list-job",
-    ),
+    # Rikkeisoft dropped 2026-08-14: tuyendung.rikkeisoft.com is anti-bot-walled
+    # (see Agoda note above); DB rows purged.
     FeaturedCompany(
         name="CMC Global",
         homepage="https://cmcglobal.com.vn",
