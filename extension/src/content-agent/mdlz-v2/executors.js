@@ -765,7 +765,7 @@ export function readNow(f) {
     const c = f.controls();
     if (f.kind === WIDGET.DATE) {
         const at = (el) => el?.getAttribute('aria-valuenow') || '—';
-        return `${at(c.month)}/${at(c.year)}`;
+        return c.day ? `${at(c.month)}/${at(c.day)}/${at(c.year)}` : `${at(c.month)}/${at(c.year)}`;
     }
     if (f.kind === WIDGET.SEARCH_MULTI) return c.chips.map(txt).join(' | ') || '(no chips)';
     if (f.kind === WIDGET.CHECKBOX) return c.checkbox?.checked ? 'ticked' : 'unticked';
@@ -1426,21 +1426,49 @@ const date = {
     read(f) {
         const c = f.controls();
         const n = (el) => Number(el?.getAttribute('aria-valuenow'));
-        return { month: n(c.month), year: n(c.year) };
+        const out = { month: n(c.month), year: n(c.year) };
+        if (c.day) out.day = n(c.day);
+        return out;
     },
     satisfied(f, want) {
         const now = this.read(f);
-        return now.month === want.month && now.year === want.year;
+        if (now.month !== want.month || now.year !== want.year) return false;
+        // The day is only asked of a three-segment date; a month/year picker has
+        // none, so a want without a day is satisfied by month+year alone.
+        if (want.day != null && now.day !== want.day) return false;
+        return true;
     },
     /**
-     * The picker, and only the picker.
+     * TWO measured shapes, routed by a single structural fact: a DAY segment.
      *
-     * Synthetic typing into a date section writes NOTHING — value stays "",
-     * aria-valuenow stays null — and CDP insertText does not write either. Every
-     * "date filled" in a v1 trace was Workday's own résumé parse. So there is no
-     * typing rung here to fall back to, on purpose.
+     * The month/year work-date PICKER has no day and is not writable — its
+     * display spinbuttons stay .value === "" no matter what a content script
+     * writes, so it commits by opening the calendar and clicking the cell.
+     *
+     * The month/DAY/year Date-of-Birth field is the opposite (measured Maersk
+     * R173118, 2026-08-14): three CONTROLLED React inputs whose onChange listens
+     * through the native value setter, so setNativeValue + the input event it
+     * dispatches commits — and a committed segment reads on BOTH .value and
+     * aria-valuenow. v1's "date section writes nothing" was the KEYBOARD path on
+     * this widget, which is not trusted and is not what this uses. Controls are
+     * re-read per segment because a segment's onChange may re-render its siblings.
      */
     async commit(f, want, ctx = {}) {
+        if (f.controls().day && want.day != null) {
+            for (const key of ['month', 'day', 'year']) {
+                const el = f.controls()[key];   // re-read: onChange may replace nodes
+                if (!el) return { result: RESULT.WAITING_HYDRATION, reason: `no ${key} segment yet` };
+                try { el.scrollIntoView?.({ block: 'center' }); } catch { /* no layout */ }
+                el.focus?.();
+                setNativeValue(el, String(want[key]));
+                // Let go the way the text executor does — focusout is the commit
+                // Workday's own handler listens through.
+                try { el.dispatchEvent(new FocusEvent('focusout', { bubbles: true })); }
+                catch { try { el.dispatchEvent(new Event('focusout', { bubbles: true })); } catch { /* noop */ } }
+                try { el.blur?.(); } catch { /* the control refuses; verify will say so */ }
+            }
+            return { result: RESULT.COMMITTED };
+        }
         const icon = f.controls().icon;
         if (!icon) return { result: RESULT.WAITING_HYDRATION, reason: 'no calendar icon yet' };
         try { icon.scrollIntoView?.({ block: 'center' }); } catch { /* no layout */ }
@@ -1483,7 +1511,8 @@ const date = {
         const ok = await until(() => this.satisfied(f, want), { sleep: ctx.sleep, budgetMs: ctx.commitMs || 1500 });
         if (!ok) {
             const now = this.read(f);
-            return { result: RESULT.COMMIT_FAILED, reason: `aria-valuenow reads ${now.month || '—'}/${now.year || '—'}` };
+            const shown = now.day != null ? `${now.month || '—'}/${now.day || '—'}/${now.year || '—'}` : `${now.month || '—'}/${now.year || '—'}`;
+            return { result: RESULT.COMMIT_FAILED, reason: `aria-valuenow reads ${shown}` };
         }
         if (!rowClean(ctx)) return { result: RESULT.COMMIT_FAILED, reason: `row error: ${errorsIn(ctx.row)[0]}` };
         return { result: RESULT.COMMITTED };

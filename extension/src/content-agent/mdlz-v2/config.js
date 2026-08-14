@@ -146,11 +146,14 @@ export const COMMIT_SIGNAL = {
 // ── Things that do not work, with the measurement that proved it ─────────
 export const FORBIDDEN = {
     typeIntoDateSection:
-        'Synthetic KeyboardEvent from a content script writes NOTHING into a '
-        + 'Workday date spinbutton (value stays "", aria-valuenow stays null). '
-        + 'Only the calendar (ordinary synthetic clicks) or a trusted keydown '
-        + 'commits. Every "date filled" in v1 traces was Workday\'s own résumé '
-        + 'parse.',
+        'A synthetic KEYBOARDEVENT from a content script writes NOTHING into a '
+        + 'Workday date spinbutton — this was v1\'s DOB loop. But that ruled out '
+        + 'the KEYBOARD path, not the value-setter: the segmented Date-of-Birth '
+        + 'inputs are CONTROLLED React inputs (onChange), so setNativeValue + the '
+        + 'input event it dispatches DOES commit (measured Maersk R173118, '
+        + '2026-08-14: a committed segment reads value="3" AND aria-valuenow="3"). '
+        + 'The month/year PICKER is the other shape — its display spinbuttons are '
+        + 'not writable, so it commits by clicking the calendar cell.',
     indexPairingAcrossSections:
         'To disappears from the DOM when "I currently work here" is ticked, so '
         + 'checkbox[i] and endDate[i] stop describing the same row (measured: '
@@ -158,8 +161,12 @@ export const FORBIDDEN = {
     stepIndicatorAsState:
         'Reads 1/6 for a whole run across three different steps.',
     valueAsCommitProof:
-        'A committed date reads .value === "". A painted value survives in '
-        + '.value while Workday\'s state never held it.',
+        'For the month/year PICKER, a committed date reads .value === "" — a '
+        + 'painted value survives in .value while Workday\'s state never held it, '
+        + 'so that shape is verified by aria-valuenow. The segmented DOB is the '
+        + 'OPPOSITE: it is a real controlled input whose committed value reads on '
+        + 'BOTH .value and aria-valuenow (measured R173118). Verify each shape by '
+        + 'aria-valuenow regardless — it is the reading that holds for both.',
     clickWithoutScroll:
         'A click aimed at a control below the fold hit-tests as whatever covers '
         + 'that point — this is what "calendar did not open" and "add clicked, '
@@ -192,6 +199,11 @@ export const SEL = {
     dateIcon: '[data-automation-id="dateIcon"]',
     dateMonth: '[data-automation-id="dateSectionMonth-input"]',
     dateYear: '[data-automation-id="dateSectionYear-input"]',
+    // The DAY segment — present only on a full month/day/year date (Date of
+    // Birth), absent on the month/year work-date picker. Its presence is what
+    // routes the date capability to the segmented WRITE path (measured Maersk
+    // R173118, 2026-08-14) rather than the picker.
+    dateDay: '[data-automation-id="dateSectionDay-input"]',
     // The picker panel carries no automation id of its own. What it does carry,
     // measured: a UL of twelve cells, each a div[role="button"] labelled
     // "May 2026" (the current one prefixed "Selected "), with the year arrows in

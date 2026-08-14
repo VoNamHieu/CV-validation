@@ -241,3 +241,52 @@ describe('leaving the page', () => {
         assert.equal(page.picked()['formField-gender'], 'Female');
     });
 });
+
+describe('the Date of Birth — segmented, required, and never guessed', () => {
+    test('parseDob splits only what it can read unambiguously', () => {
+        const p = (s) => p5.parseDob(s);
+        assert.deepEqual(p('1998-07-22'), { year: 1998, month: 7, day: 22 }, 'ISO');
+        assert.deepEqual(p('2000/3/15'), { year: 2000, month: 3, day: 15 }, 'year-first slashes');
+        assert.deepEqual(p('22/07/1998'), { year: 1998, month: 7, day: 22 }, 'D/M/Y: 22 can only be a day');
+        assert.deepEqual(p('07/22/1998'), { year: 1998, month: 7, day: 22 }, 'M/D/Y: 22 can only be a day');
+        assert.equal(p('03/04/2000'), null, 'both parts ≤ 12 is ambiguous — never guessed');
+        assert.equal(p('2000-13-40'), null, 'out of range is not a date');
+        assert.equal(p(''), null);
+        assert.equal(p('sometime in 1998'), null);
+    });
+
+    test('an unambiguous profile date fills all three segments', async () => {
+        page = buildDisclosuresPage(dom.document, { dob: true });
+        dom.document.body.children[0].remove();
+
+        const r = await run({ dateOfBirth: '1998-07-22' });
+        assert.equal(page.dob.month.getAttribute('aria-valuenow'), '7');
+        assert.equal(page.dob.day.getAttribute('aria-valuenow'), '22');
+        assert.equal(page.dob.year.getAttribute('aria-valuenow'), '1998');
+        const task = r.ledger.tasks.find((t) => t.id === 'formField-dateOfBirth');
+        assert.equal(task.result, RESULT.COMMITTED);
+    });
+
+    test('a DOB already on the draft is the candidate\'s and is never overwritten', async () => {
+        page = buildDisclosuresPage(dom.document, { dob: { month: 3, day: 15, year: 2000 } });
+        dom.document.body.children[0].remove();
+
+        // A DIFFERENT date in the profile must not disturb what the draft holds.
+        const r = await run({ dateOfBirth: '1998-07-22' });
+        assert.equal(page.dob.month.getAttribute('aria-valuenow'), '3', 'their own March stays');
+        assert.equal(page.dob.year.getAttribute('aria-valuenow'), '2000');
+        const task = r.ledger.tasks.find((t) => t.id === 'formField-dateOfBirth');
+        assert.equal(task.result, RESULT.SATISFIED);
+    });
+
+    test('a missing or ambiguous DOB is a gap the candidate fills, NOT the loop v1 spun', async () => {
+        page = buildDisclosuresPage(dom.document, { dob: true });
+        dom.document.body.children[0].remove();
+
+        const r = await run({ dateOfBirth: '03/04/2000' });   // ambiguous — refused, not guessed
+        assert.ok(!page.dob.month.getAttribute('aria-valuenow'), 'nothing is written');
+        const task = r.ledger.tasks.find((t) => t.id === 'formField-dateOfBirth');
+        assert.equal(task.result, RESULT.USER_REQUIRED);
+        assert.ok(r.gaps.some((g) => g.id === 'formField-dateOfBirth'), 'surfaced at the review');
+    });
+});

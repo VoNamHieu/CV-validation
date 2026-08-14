@@ -46,6 +46,7 @@ export function controlsOf(wrap) {
         wrap,
         spins: all(SEL.spinbutton),
         month: first(wrap, SEL.dateMonth),
+        day: first(wrap, SEL.dateDay),
         year: first(wrap, SEL.dateYear),
         icon: first(wrap, SEL.dateIcon),
         chipList: first(wrap, SEL.selectedItemList),

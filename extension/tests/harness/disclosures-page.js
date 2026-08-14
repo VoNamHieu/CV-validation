@@ -93,8 +93,45 @@ export function buildDisclosuresPage(doc, opts = {}) {
         return box;
     }
 
+    /**
+     * Date of Birth, as measured on Maersk: three role=spinbutton inputs that are
+     * CONTROLLED — a React-style write (native value setter, what setNativeValue
+     * does) is ACCEPTED and reflected in aria-valuenow. This is the opposite of
+     * the month/year picker's spinbuttons, which refuse every synthetic write.
+     * `initial` pre-fills it, the way a resumed draft carries the candidate's own.
+     */
+    function dobField(id, initial) {
+        const wrap = el('div', { 'data-automation-id': id }, page);
+        el('label', {}, wrap).textContent = 'Date of Birth';
+        const mk = (segId, label, init) => {
+            const input = el('input', { 'data-automation-id': segId, role: 'spinbutton', type: 'text', 'aria-label': label }, wrap);
+            let held = '';
+            if (init != null) { held = String(init); input.setAttribute('aria-valuenow', String(init)); }
+            Object.defineProperty(input, 'value', {
+                get: () => held,
+                set: (v) => {
+                    held = String(v);
+                    const num = held.trim();
+                    if (num === '') input.removeAttribute('aria-valuenow');
+                    else input.setAttribute('aria-valuenow', String(Number(num)));
+                },
+                configurable: true,
+            });
+            return input;
+        };
+        return {
+            month: mk('dateSectionMonth-input', 'Month', initial?.month),
+            day: mk('dateSectionDay-input', 'Day', initial?.day),
+            year: mk('dateSectionYear-input', 'Year', initial?.year),
+        };
+    }
+
     const gender = prompt('formField-gender', 'Gender', cfg.genders);
     const ethnicity = prompt('formField-ethnicity', 'Race/Ethnicity', cfg.ethnicities);
+    // Opt-in, so the tenants that do not render a DOB (every existing test) still
+    // build the page they measured. cfg.dob === true → an empty required field;
+    // cfg.dob === { month, day, year } → a resumed draft that already carries it.
+    const dob = cfg.dob ? dobField('formField-dateOfBirth', cfg.dob === true ? null : cfg.dob) : null;
     const terms = checkbox('formField-acceptTermsAndAgreements',
         'I have read and agree to the Terms and Conditions and the Privacy Notice');
     const marketing = cfg.marketingBox
@@ -104,7 +141,7 @@ export function buildDisclosuresPage(doc, opts = {}) {
 
     return {
         cfg, page, nav, state,
-        gender, ethnicity, terms, marketing,
+        gender, ethnicity, dob, terms, marketing,
         picked: () => state.picked,
     };
 }

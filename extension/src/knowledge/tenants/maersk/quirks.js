@@ -23,9 +23,12 @@ export const maerskQuirks = [
     },
     {
         id: 'disclosures.rich',
-        statement: 'Voluntary Disclosures carries dateOfBirth (segmented), nationality, additionalNationalities, disabilities — far more than MDLZ.',
-        impact: 'the dateOfBirth segmented widget is the one place v1 looped ~3 min before self-escaping; the concrete capability gap for v2-on-Maersk.',
-        evidence: 'R173118 iters 8-25',
+        statement: 'Voluntary Disclosures carries Gender*, Date of Birth* (segmented), Primary Nationality*, Additional Nationalities — richer than MDLZ. '
+            + 'Date of Birth is REQUIRED (red *), measured 2026-08-14: formField-dateOfBirth, three role=spinbutton inputs '
+            + '(dateSection{Month,Day,Year}-input), controlled React inputs (value+onChange+onKeyDown), committed value reads on BOTH .value and aria-valuenow.',
+        impact: 'the dateOfBirth segmented widget looped v1 ~3 min — NOT because the widget is exotic but because v1 wrote .value with no React-visible input event → the write was rejected and read back "", mistaken for "not committed". '
+            + 'Because DOB is required, v2 cannot reach Review without a segmented-date executor (see capability calendar-date, now structure-measured).',
+        evidence: 'R173118 read-only fiber probe 2026-08-14 (DOB=03/15/2000 committed)',
     },
     {
         id: 'proficiency-ladder-differs',

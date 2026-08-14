@@ -153,6 +153,61 @@ async function answerDemographic(id, kind, ctx, { required }) {
     return { ...proof, answer, picked: opened.value.picked };
 }
 
+/**
+ * Split a date of birth into { year, month, day }, or return null.
+ *
+ * A date of birth is a real record: a WRONG one is worse than an empty one. So
+ * the ambiguous case — 03/04/2000, March or April? — returns null and the field
+ * becomes a gap the candidate fills, never a guess. ISO (2000-03-15) is
+ * unambiguous on the year's place; a slash/dot/dash date is read D-M-Y or M-D-Y
+ * and only disambiguated when one of the first two parts exceeds 12.
+ */
+export function parseDob(raw) {
+    const s = String(raw ?? '').trim();
+    if (!s) return null;
+    const ok = (y, m, d) => (y >= 1900 && y <= 2100 && m >= 1 && m <= 12 && d >= 1 && d <= 31)
+        ? { year: y, month: m, day: d } : null;
+    // Year-first (ISO and its slash/dot cousins): the year's position is certain.
+    let m = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+    if (m) return ok(+m[1], +m[2], +m[3]);
+    // Year-last: the first two parts need disambiguation.
+    m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
+    if (m) {
+        const [a, b, y] = [+m[1], +m[2], +m[3]];
+        if (a > 12 && b <= 12) return ok(y, b, a);   // a can only be the day → D/M/Y
+        if (b > 12 && a <= 12) return ok(y, a, b);   // b can only be the day → M/D/Y
+        return null;                                 // both ≤ 12: ambiguous, do not guess
+    }
+    return null;
+}
+
+/**
+ * Date of Birth — a segmented month/day/year spin-input, REQUIRED on some tenants
+ * (measured Maersk R173118). Filled only from an UNAMBIGUOUS profile date; a
+ * missing or ambiguous one is a gap the candidate fills, NOT the ~3-minute loop
+ * v1 spun here. A DOB already on a resumed draft is the candidate's and is left.
+ */
+async function answerDateOfBirth(id, ctx, { required }) {
+    const find = () => document.querySelector(`[data-automation-id="${id}"]`);
+    if (!find()) return { result: RESULT.SKIPPED_OPTIONAL, reason: 'not on this tenant' };
+    const f = fingerprintOf(find, { name: id });
+
+    const cur = CAPABILITY[WIDGET.DATE].read(f);
+    if (cur.month && cur.year && (cur.day == null || cur.day)) {
+        return { result: RESULT.SATISFIED, detail: { picked: readNow(f) } };
+    }
+
+    const parsed = parseDob(ctx.profile?.dateOfBirth);
+    if (!parsed) {
+        return { result: required ? RESULT.USER_REQUIRED : RESULT.SKIPPED_OPTIONAL,
+            reason: 'no unambiguous date of birth in the profile' };
+    }
+    const done = await CAPABILITY[WIDGET.DATE].commit(f, parsed, ctx);
+    if (done.result !== RESULT.COMMITTED) return { ...done, detail: { picked: readNow(f) } };
+    const proof = await CAPABILITY[WIDGET.DATE].verify(f, parsed, ctx);
+    return { ...proof, detail: { picked: readNow(f) } };
+}
+
 /** Every checkbox on the page, sorted into what may be ticked and what may not. */
 export function consentBoxes() {
     try {
@@ -224,6 +279,19 @@ export async function runDisclosuresPage(ctx = {}) {
             // Optional, and an optional demographic left blank is the right
             // outcome rather than a failure to work around.
             run: () => answerDemographic('formField-ethnicity', 'ethnicity', ctx, { required: false }),
+        },
+        {
+            id: 'formField-dateOfBirth',
+            // REQUIRED where it renders (measured Maersk); a DOB the profile
+            // cannot supply unambiguously is a gap the candidate fills, never the
+            // loop v1 spun on this segmented widget.
+            run: async () => {
+                const r = await answerDateOfBirth('formField-dateOfBirth', ctx, { required: true });
+                if (r.result === RESULT.USER_REQUIRED) {
+                    gaps.push({ id: 'formField-dateOfBirth', why: r.reason || 'no date of birth to fill' });
+                }
+                return r;
+            },
         },
     ];
 
