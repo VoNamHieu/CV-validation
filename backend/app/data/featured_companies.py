@@ -1000,11 +1000,10 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         homepage="https://google.com",
         career_url="https://careers.google.com",
     ),
-    FeaturedCompany(
-        name="IBM",
-        homepage="https://ibm.com",
-        career_url="https://careers.ibm.com",
-    ),
+    # IBM and Salesforce were dropped 2026-08-14: careers.ibm.com and
+    # careers.salesforce.com defeat every compat rung (headless-blocked SPA,
+    # no readable API) and never yielded a single stored job — the cron only
+    # produced perpetual "needs adapter" failures in the compat panel.
     FeaturedCompany(
         name="SAP",
         homepage="https://sap.com",
@@ -1012,11 +1011,6 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         # global board (all foreign → 0 VN after filtering); the VN location
         # facet returns the real Vietnam postings.
         career_url="https://jobs.sap.com/search/?q=&locationsearch=Vietnam",
-    ),
-    FeaturedCompany(
-        name="Salesforce",
-        homepage="https://salesforce.com",
-        career_url="https://careers.salesforce.com",
     ),
     FeaturedCompany(
         name="ServiceNow",
