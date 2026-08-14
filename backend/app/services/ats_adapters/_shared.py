@@ -170,6 +170,11 @@ def _finalize(jobs: list[dict]) -> list[dict]:
         nt = _norm_title(title)
         if nt in _BAD_TITLES or nt.startswith(("tu ngay ", "from ")):  # date-range rows (Canon)
             continue
+        # A title carrying markup is never a job — it's page copy harvested as
+        # innerHTML (spa_sniff minted 6 fake "jobs" from Dentsu's Workday
+        # footer: "<p><b><span>Dream loud…"). Real titles never contain tags.
+        if re.search(r"<[a-zA-Z/!]", title):
+            continue
         tkey = (nt[:80], _norm_title(str(j.get("location") or ""))[:40])
         if url in seen_url or tkey in seen_title:
             continue

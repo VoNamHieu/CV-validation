@@ -45,11 +45,22 @@ async def _render(url: str) -> str:
         return ""
 
 
+# Hosted-ATS domains whose platform adapter speaks a definitive JSON API: when
+# that adapter says 0 jobs, 0 is the truth (e.g. Dentsu's Workday tenant has no
+# VN postings). Sniffing the rendered DOM there can only harvest page chrome as
+# fake jobs — spa_sniff minted 6 "jobs" from Dentsu's footer copy.
+_NO_SNIFF_HOSTS = (".myworkdayjobs.com", ".myworkdaysite.com", ".smartrecruiters.com",
+                   ".greenhouse.io", ".lever.co", ".ashbyhq.com", ".recruitee.com")
+
+
 async def _spa_sniff(url: str, html: str | None = None) -> list[dict]:
     """Last-resort acquisition: render the page and watch its XHR for the job
     feed. Many career SPAs (Grab, Siemens, EY, DHL, Renesas, KiotViet, Sea…)
     render jobs the static ATS parser can't see; this is the same path
     career_compat.probe uses. Best-effort → [] on failure.
+
+    Hosted-ATS hosts (Workday, SmartRecruiters, …) never take this path — their
+    platform adapter's API answer is authoritative, see _NO_SNIFF_HOSTS.
 
     OutSystems career portals (One Mount, …) get the dedicated ``outsystems_jobs``
     path instead of the generic sniff: the generic ``_items_to_jobs`` fallback
@@ -63,6 +74,10 @@ async def _spa_sniff(url: str, html: str | None = None) -> list[dict]:
     but none VN, it's a global page with no VN roles → drop (don't flood the
     store with foreign jobs); if none are location-tagged (VN-domestic sites
     often aren't), keep them all."""
+    host = (urlparse(url).netloc or "").lower()
+    if host.endswith(_NO_SNIFF_HOSTS):
+        logger.info("ingest: skip sniff on hosted-ATS host %s (adapter is authoritative)", host)
+        return []
     try:
         from app.services.spa_sniff import sniff_jobs, outsystems_jobs, is_outsystems
         from app.services.ats_adapters.core import _is_vn_loc, _finalize
