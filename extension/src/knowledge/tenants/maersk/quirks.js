@@ -27,8 +27,9 @@ export const maerskQuirks = [
             + 'Date of Birth is REQUIRED (red *), measured 2026-08-14: formField-dateOfBirth, three role=spinbutton inputs '
             + '(dateSection{Month,Day,Year}-input), controlled React inputs (value+onChange+onKeyDown), committed value reads on BOTH .value and aria-valuenow.',
         impact: 'the dateOfBirth segmented widget looped v1 ~3 min — NOT because the widget is exotic but because v1 wrote .value with no React-visible input event → the write was rejected and read back "", mistaken for "not committed". '
-            + 'Because DOB is required, v2 cannot reach Review without a segmented-date executor (see capability calendar-date, now structure-measured).',
-        evidence: 'R173118 read-only fiber probe 2026-08-14 (DOB=03/15/2000 committed)',
+            + 'Because DOB is required, v2 cannot reach Review without a segmented-date executor — BUILT + write live-confirmed '
+            + '(see capability calendar-date): setNativeValue on dateSectionDay-input took 15→16, Workday rendered and held it, then restored.',
+        evidence: 'R173118 fiber probe + live write test 2026-08-14 (day 15→16→15, no revert)',
     },
     {
         id: 'proficiency-ladder-differs',

@@ -43,11 +43,12 @@ export const calendarDate = {
 
     measuredOn: [
         { tenant: 'mdlz', date: '2026-08-03', traces: ['R-174102'], result: 'confirmed' },   // month/year picker
-        { tenant: 'maersk', date: '2026-08-14', traces: ['R173118'], result: 'structure-measured' },  // DOB segmented: DOM + fiber read; write not yet live
+        { tenant: 'maersk', date: '2026-08-14', traces: ['R173118'], result: 'confirmed' },   // DOB segmented: write live-verified
     ],
-    confidence: 2,
-    status: 'unverified',
-    todo: 'Segmented executor BUILT + harness-verified (date.commit segmented path; page-disclosures answerDateOfBirth; parseDob '
-        + 'refuses ambiguous dates → gap not guess). Still unverified because the WRITE has not been live-committed on Maersk — '
-        + 'the harness proves setNativeValue reflects in aria-valuenow, a real run proves Workday accepts it. Live-commit once → confirmed.',
+    confidence: 3,
+    status: 'confirmed',
+    todo: 'Segmented executor BUILT + harness-verified + WRITE LIVE-CONFIRMED on Maersk R173118 (2026-08-14): setNativeValue on '
+        + 'dateSectionDay-input took a probe value (15→16) that Workday RENDERED and HELD — no revert, the thing that looped v1 — '
+        + 'then restored. The write primitive is the ATS-accepted one. Remaining formality: one full v2 Auto Apply reaching Review '
+        + 'to exercise the orchestration end-to-end, then re-enable maersk in ENABLED_TENANTS.',
 };
