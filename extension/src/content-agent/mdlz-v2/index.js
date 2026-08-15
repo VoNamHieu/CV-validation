@@ -19,7 +19,7 @@
  */
 
 import { ADD_VIA_KEY, FLAG_KEY, RESULT, SEL, STEP, isForgiven, isOwnedPage } from './config.js';
-import { interactionStore, interactionWatchdog } from './interaction-watchdog.js';
+import { anchorBlindStore, interactionStore, interactionWatchdog } from './interaction-watchdog.js';
 import { openPopups, orphanOptionCount, pageFingerprint, waitPageReady } from './page-observer.js';
 import { census } from './popup-manager.js';
 import { addRow, answerFromLadder, runField } from './executors.js';
@@ -133,9 +133,17 @@ function runnable(task, ctx) {
             run: async () => {
                 const spec = SECTIONS.find((s) => s.name === task.section);
                 const rows = rowsOf(spec.anchor, { root: ctx.root });
-                return addRow(addButtonFor(spec, rows, ctx.addVia), {
+                const r = await addRow(addButtonFor(spec, rows, ctx.addVia), {
                     sleep: ctx.sleep, anchor: spec.anchor, root: ctx.root, budgetMs: ctx.addMs,
                 });
+                // A committed Add whose row the anchor cannot see (PwC education,
+                // 2026-08-15) is remembered PER SECTION: the next pass drops the
+                // section's add instead of piling up panels nobody will fill.
+                if (r?.anchorBlind) {
+                    const store = anchorBlindStore();
+                    store[task.section] = (store[task.section] || 0) + 1;
+                }
+                return r;
             },
         };
     }
@@ -327,7 +335,32 @@ export async function runMdlzV2(ctx = {}) {
         }
         return { took: false, reason: decision.reason, gaps: decision.plan?.gaps, result: RESULT.SKIPPED_OPTIONAL, pageIsV2Owned: !!decision.pageIsV2Owned };
     }
-    const { tasks, gaps } = decision.plan;
+    const { tasks: planned, gaps } = decision.plan;
+
+    // ── the anchor-blind escalation ──────────────────────────────────
+    //
+    // A section whose committed Add produced no row the planner recognises
+    // (anchorBlindStore, written by the add's own runnable) must NOT be re-armed
+    // every pass — that is the measured PwC livelock, and before the add was
+    // verified honestly it was a 39-row runaway. One blind add is the whole
+    // measurement: the click works, the shape is unknown, and clicking again
+    // only adds panels nobody will fill. So the add is DROPPED and carried as a
+    // NON-blocking gap (`dropped`, waived by pageComplete the way `absent` is):
+    // the page advances if Workday lets it, and Workday's own row validation —
+    // not our replan — is what says no when the unfillable panel is required.
+    const blind = anchorBlindStore();
+    const droppedAdds = [...new Set(
+        planned.filter((t) => t.kind === 'addRow' && blind[t.section]).map((t) => t.section),
+    )];
+    const tasks = planned.filter((t) => !(t.kind === 'addRow' && blind[t.section]));
+    for (const section of droppedAdds) {
+        trace('mdlz.add.dropped', { section, blindAdds: blind[section] });
+        gaps.push({
+            section,
+            why: 'Add committed a row this engine cannot recognise — left for the candidate to fill',
+            dropped: true,
+        });
+    }
 
     trace('mdlz.plan', {
         tasks: tasks.length,
@@ -385,7 +418,10 @@ export async function runMdlzV2(ctx = {}) {
     // A COMMITTED task still holds the page: leaving is done on the strength of
     // what the page SAYS next pass, never on what we just wrote.
     const settled = (t) => t.result === RESULT.SATISFIED || isForgiven(t);
-    const quiet = ledger.tasks.length > 0 && ledger.tasks.every(settled);
+    // A pass whose only work was a DROPPED add did run: emptiness there is the
+    // escalation succeeding, and refusing to offer the page to the advance check
+    // would just move the livelock one gate up. every() on [] is true.
+    const quiet = (ledger.tasks.length > 0 || droppedAdds.length > 0) && ledger.tasks.every(settled);
     let navigation = null;
     // `advance: false` is for a caller that wants the fill and not the move —
     // the Review controller is read-only by definition, and a pass being
@@ -443,7 +479,10 @@ export function pageComplete(ledger, gaps = []) {
     // single absent-education gap held MY_EXPERIENCE at advance:INCOMPLETE for
     // three passes, then v2BlockedEscalate → run.end. On mdlz every section
     // renders, so no gap ever carries `absent` and this waiver is inert there.
-    const blocking = gaps.filter((g) => !g.absent);
+    // `dropped` is the anchor-blind add's gap and is waived for the same reason:
+    // it can never close by another pass, and Workday's own row validation is
+    // what decides whether the unrecognised panel may be advanced over.
+    const blocking = gaps.filter((g) => !g.absent && !g.dropped);
     if (blocking.length) {
         const g = blocking[0];
         return { complete: false, reason: `${g.section}${g.field ? `.${g.field}` : ''}: ${g.why}`, gaps };

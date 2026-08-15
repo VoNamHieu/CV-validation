@@ -44,12 +44,12 @@ import { WIDGET, fingerprintOf, triggerOf } from './fingerprint.js';
 import { NAV, advance } from './navigation.js';
 import { withList } from './popup-manager.js';
 import { runSequential } from './scheduler.js';
+import { fold } from './text.js';
 import { trace } from '../trace.js';
 import { genderLadder } from '../semantic.js';
 import { countryName } from './page-myinfo.js';
 
 const txt = (el) => (el?.textContent || '').trim().replace(/\s+/g, ' ');
-const fold = (s) => String(s || '').trim().toLowerCase();
 
 /**
  * The shapes a wrong demographic pick would take, measured per catalogue.

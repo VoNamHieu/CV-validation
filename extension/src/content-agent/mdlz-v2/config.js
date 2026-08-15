@@ -24,7 +24,7 @@
  * not half-take it and loop. Add 'maersk' back once degreeLadder is tenant-
  * agnostic (category-matched against live options) and it passes MDLZ + Maersk.
  */
-export const ENABLED_TENANTS = new Set(['mdlz', 'maersk']);
+export const ENABLED_TENANTS = new Set(['mdlz', 'maersk', 'pwc']);
 
 /**
  * The tenant id for the CXS API, derived the way the URL actually carries it —
@@ -221,7 +221,14 @@ export const SEL = {
         startDate: '[data-automation-id="formField-startDate"]',
         endDate: '[data-automation-id="formField-endDate"]',
         roleDescription: '[data-automation-id="formField-roleDescription"]',
-        schoolName: '[data-automation-id="formField-schoolName"]',
+        // BOTH measured shapes of an education row's identity field. mdlz
+        // renders free-text formField-schoolName; PwC (715624WD, 2026-08-15)
+        // renders NO schoolName at all — its row is the school-PICKER variant,
+        // formField-school ("School or University*", search-on-Enter). One
+        // anchor with a hardcoded id made PwC's rows invisible: Add succeeded
+        // every time, the count read 0 forever, and the pass re-planned the add
+        // each cycle (yesterday a 39-row runaway, today a livelock).
+        schoolName: '[data-automation-id="formField-schoolName"], [data-automation-id="formField-school"]',
         degree: '[data-automation-id="formField-degree"]',
         language: '[data-automation-id="formField-language"]',
         fluent: '[data-automation-id="formField-native"]',

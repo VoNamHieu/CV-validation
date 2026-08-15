@@ -23,7 +23,7 @@
  */
 
 import { STEP } from './config.js';
-import { forgetInteractionStuck } from './interaction-watchdog.js';
+import { forgetAnchorBlind, forgetInteractionStuck } from './interaction-watchdog.js';
 import { observeStep, pageFingerprint, vis } from './page-observer.js';
 import { trace } from '../trace.js';
 
@@ -219,6 +219,7 @@ export async function observePageState(ctx = {}) {
         // streak and skip an optional field on its first failure).
         try { (await import('./executors.js')).forgetRefusals(); } catch { /* noop */ }
         forgetInteractionStuck();
+        forgetAnchorBlind();
     } else { _lastPage = r.page; }
     const ours = owns(r.page);
     if (ours) claimPage(r.page); else releasePage();

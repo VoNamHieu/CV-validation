@@ -323,7 +323,13 @@ export function buildHostilePage(doc, opts = {}) {
     /** The option rows of a list, rebuilt for one result set. */
     function fillList(f, list, shown) {
         [...(list.children || [])].forEach((c) => c.remove());
-        for (const label of shown) {
+        // A VIRTUALISED list paints only a WINDOW of its results (measured on the
+        // live PwC fieldOfStudy: 21 results, ~11 painted, the exact match below
+        // the window never rendered). `renderCap` models that: the DOM carries
+        // only the first N rows, so an exact match past N cannot be clicked — the
+        // engine must reach it through the fiber item array instead.
+        const rendered = f.renderCap ? shown.slice(0, f.renderCap) : shown;
+        for (const label of rendered) {
             const o = el('div', { role: 'option', 'data-automation-id': OPT_ID }, list);
             o.textContent = label;
             o.addEventListener('click', () => commit(f, label));
@@ -331,7 +337,32 @@ export function buildHostilePage(doc, opts = {}) {
         // The placeholder is a real option that answers nothing.
         const ph = el('div', { role: 'option', 'data-automation-id': OPT_ID, id: 'select-one' }, list);
         ph.textContent = 'Select One';
+        // The widget's OWN item array on the list fiber — the WHOLE result set,
+        // each item carrying an `onSelect` whose length-bearing branch commits it
+        // (item.onSelect([item]), measured live 2026-08-15). readVirtualItems
+        // walks to this; fiberCommit writes through it without a paint.
+        if (f.virtual) {
+            const items = shown.map((label, i) => ({
+                label, ariaLabel: label, index: i, id: label,
+                isSelected: false,
+                onSelect: (arg) => { if (Array.isArray(arg) && arg[0]) commit(f, String(arg[0].label)); },
+            }));
+            list['__reactFiber$harness'] = { return: null, alternate: null, memoizedProps: { items }, memoizedState: null };
+        }
     }
+
+    // How the search decides a row is a hit. A plain field matches by SUBSTRING,
+    // all the DOM-filter ever modelled. A VIRTUAL field matches by shared WORD —
+    // the way a real server search does — so a reordered name ("Management and
+    // Marketing") surfaces for a candidate's "Marketing and Management", which is
+    // exactly the reorder case sameConcept has to answer.
+    const searchHit = (f, entry, filter) => {
+        const q = String(filter).toLowerCase();
+        if (!f.virtual) return entry.toLowerCase().includes(q);
+        const toks = (s) => s.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
+        const qt = new Set(toks(q));
+        return toks(entry).some((t) => qt.has(t));
+    };
 
     function openFor(f, { filter = null } = {}) {
         // An Enter that lands while the click's open is still in flight is a
@@ -348,7 +379,7 @@ export function buildHostilePage(doc, opts = {}) {
         // free-text path from every test.
         if (openLists.has(f)) {
             if (filter === null || !String(filter).trim()) return;
-            let shown = f.catalogue.filter((s) => s.toLowerCase().includes(String(filter).toLowerCase()));
+            let shown = f.catalogue.filter((s) => searchHit(f, s, filter));
             if (f.multi) shown = [...shown, String(filter)];
             const list = openLists.get(f);
             setTimeout(() => {
@@ -368,7 +399,7 @@ export function buildHostilePage(doc, opts = {}) {
         // what makes the employer's taxonomy searchable rather than browsable.
         let shown = filter === null
             ? (f.initialSet || f.catalogue)   // a click can open an initial list (decoy/window) unlike the search
-            : f.catalogue.filter((s) => s.toLowerCase().includes(String(filter).toLowerCase()));
+            : f.catalogue.filter((s) => searchHit(f, s, filter));
         if (filter !== null && !String(filter).trim()) return;
         // A MULTI-SELECT SEARCH ENDS WITH A CREATE ROW — measured on the live
         // form (R-170139, 2026-08-10): the last item of every result list is
@@ -476,7 +507,7 @@ export function buildHostilePage(doc, opts = {}) {
     function makeField({
         automationId, tag, catalogue, stamps, label = null, parent = page,
         multi = false, singleChip = false, keepOpenOnCommit = false,
-        initialSet = null, searchDelayMs = 0,
+        initialSet = null, searchDelayMs = 0, virtual = false, renderCap = 0,
         escapeCloses = true, outsideClickCloses = false,
     }) {
         const wrap = el('div', { 'data-automation-id': automationId }, parent);
@@ -515,7 +546,7 @@ export function buildHostilePage(doc, opts = {}) {
         const guid = tag === 'button' ? el('input', { type: 'text' }, wrap) : null;
         const f = {
             wrap, trigger, chips, catalogue, stamps, multi, singleChip, keepOpenOnCommit, guid,
-            initialSet, searchDelayMs,
+            initialSet, searchDelayMs, virtual, renderCap,
             escapeCloses, outsideClickCloses, committed: [],
         };
         // THE WIDGET'S OWN COMMIT HANDLER, on the trigger's fiber — the shape
@@ -682,11 +713,11 @@ export function buildHostilePage(doc, opts = {}) {
          * list open after the pick so a test can prove the commit is read from the
          * chip, not from the list closing.
          */
-        addFieldOfStudy(catalogue, { keepOpenOnCommit = false, initialSet = null, searchDelayMs = 0 } = {}) {
+        addFieldOfStudy(catalogue, { keepOpenOnCommit = false, initialSet = null, searchDelayMs = 0, virtual = false, renderCap = 0 } = {}) {
             return addField('fieldOfStudy', {
                 automationId: 'formField-fieldOfStudy', tag: 'input',
                 catalogue, stamps: false, singleChip: true, keepOpenOnCommit,
-                initialSet, searchDelayMs,
+                initialSet, searchDelayMs, virtual, renderCap,
             });
         },
         /**

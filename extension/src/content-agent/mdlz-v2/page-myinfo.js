@@ -67,6 +67,15 @@ import { trace } from '../trace.js';
 export const SOURCE_LADDER = [
     'Company Website', 'Company Careers Website', 'Employer Website', 'Careers Website',
     'Career Site', 'Careers Page', 'Career Page', 'Company Webpage', 'Website', 'Webpage',
+    // Some tenants phrase the LEVEL-2 leaf as a full first-person SENTENCE that no
+    // website-noun rung above can hit. MEASURED PwC (715624WD, 2026-08-14): the
+    // "Website" category (matched by the nouns above) drills to "I found the job on
+    // a job board" / "I was referred by a search engine". These are ANCHORED — the
+    // same rule as "=Other": a substring "job board" would also claim a noun option
+    // like "Another job board", a specific and false way of having heard. The
+    // sentences appear nowhere as a noun option, so an exact rung is safe; kept
+    // AFTER the nouns so a plain "Company Website" leaf still matches first.
+    '=I found the job on a job board', '=I was referred by a search engine',
     '=Other', '=Khác',
 ];
 
@@ -127,6 +136,15 @@ export function myInfoPlan(profile, cv) {
     // street and district with the city name rather than leaving two required
     // fields empty and the run dead.
     const city = p.addressProvince || contact.address_city || p.city || '';
+    // A courtesy TITLE (Prefix) is a REQUIRED select on some tenants (PwC) and
+    // optional on others (MDLZ leaves it blank). v2 supplies one ONLY from the
+    // candidate's OWN stated gender — never a guess — and the `whenRequired` gate
+    // on the field keeps it off tenants that do not demand it, so MDLZ's blank
+    // prefix is unchanged. A profile with no gender leaves it for the review.
+    const gender = String(p.gender || '').trim().toLowerCase();
+    const title = /^(male|nam|mr)\b/.test(gender) ? 'Mr.'
+        : (/^(female|mrs|miss|ms)\b/.test(gender) || /^n[ữu]$/.test(gender)) ? 'Ms.'
+            : undefined;
 
     return [
         { id: 'formField-candidateIsPreviousWorker', want: 'No', why: 'agent default', isDefault: true },
@@ -134,6 +152,9 @@ export function myInfoPlan(profile, cv) {
         // 3M, a searchable input on Mondelez — so the capability is resolved
         // from the shape, and the answer from the ladder above.
         { id: 'formField-source', ladder: SOURCE_LADDER, required: true, isDefault: true },
+        // Prefix — required on PwC (Mr./Ms./…), optional on MDLZ. whenRequired
+        // fills it only where the form demands it; from stated gender, or a gap.
+        { id: 'formField-legalName--title', want: title, whenRequired: true, isDefault: true },
         { id: 'formField-legalName--firstName', want: first, required: true },
         { id: 'formField-legalName--lastName', want: last, required: true },
         { id: 'formField-legalName--firstNameLocal', want: first, optional: true },
@@ -149,6 +170,11 @@ export function myInfoPlan(profile, cv) {
         // field re-opened every pass while already reading "Vietnam".
         { id: 'formField-country', want: countryName(p), required: true, isDefault: true, rerenders: ['formField-countryRegion', 'formField-postalCode'] },
         { id: 'formField-addressLine1', want: p.addressStreet || contact.address_street || city, required: true },
+        // PwC splits the address into four required lines incl. "City or Ward"
+        // (addressLine2) that MDLZ/Maersk never render — the not-rendered skip in
+        // taskFor isolates it there. A sparse "Hà Nội" profile fills it with the
+        // city name, the same measured decision as addressLine1/city above.
+        { id: 'formField-addressLine2', want: p.addressWard || contact.address_ward || p.addressDistrict || city, required: true },
         { id: 'formField-city', want: p.addressDistrict || contact.address_district || city, required: true },
         { id: 'formField-countryRegion', want: p.addressProvince || city, optional: !city },
         { id: 'formField-postalCode', want: p.postalCode || VN_POSTAL, required: true, isDefault: !p.postalCode },
@@ -187,6 +213,19 @@ async function settleRerender(ids, ctx = {}) {
 
 const present = (id) => {
     try { return !!document.querySelector(`[data-automation-id="${id}"]`); } catch { return false; }
+};
+
+// Is this field REQUIRED on the tenant rendering it right now? The label carries
+// a "*" and the control an aria-required. A `whenRequired` field is planned only
+// where the form itself demands it, so an optional courtesy field (the Prefix
+// MDLZ leaves blank) is never supplied a default it did not ask for.
+const requiredNow = (id) => {
+    try {
+        const el = document.querySelector(`[data-automation-id="${id}"]`);
+        if (!el) return false;
+        if (el.querySelector('[aria-required="true"]')) return true;
+        return /\*/.test(el.querySelector('label')?.textContent || '');
+    } catch { return false; }
 };
 
 /** One planned field → a task the scheduler can run. */
@@ -246,13 +285,17 @@ export async function runMyInfoPage(ctx = {}) {
     const gaps = [];
     const tasks = [];
     for (const e of entries) {
+        // whenRequired: some tenants render this field OPTIONAL (or not at all);
+        // v2 supplies a default ONLY where the form marks it required.
+        if (e.whenRequired && !requiredNow(e.id)) continue;
         // A ladder IS the answer for its field — it just is not a single value.
         const empty = !e.ladder && (e.want === null || e.want === undefined || e.want === ''
             || (Array.isArray(e.want) && !e.want.filter(Boolean).length));
         if (empty) {
             // Required and unanswerable is a gap to report; optional and absent
-            // costs nothing to skip.
-            if (e.required) gaps.push({ id: e.id, why: 'neither the profile nor the CV says' });
+            // costs nothing to skip. A whenRequired field that reached here IS
+            // required on this tenant, so an empty one is a gap, not a silent skip.
+            if (e.required || e.whenRequired) gaps.push({ id: e.id, why: 'neither the profile nor the CV says' });
             continue;
         }
         // An optional field this tenant does not render is not worth a task.

@@ -66,3 +66,24 @@ export const interactionStore = () => (win()[INTERACTION_STUCK] || (win()[INTERA
  *  Called from observePageState on a page-NAME change (beside forgetRefusals) so
  *  leave-and-return and a new application in the same tab both reset. */
 export const forgetInteractionStuck = () => { try { win()[INTERACTION_STUCK] = {}; } catch { /* noop */ } };
+
+// ── Anchor-blind adds ────────────────────────────────────────────────────
+//
+// The OTHER way a section refuses to converge, measured on PwC's Education
+// (2026-08-15): the Add COMMITS — a panel of fresh formField-* appears — but the
+// planner's anchor recognises nothing in it, so the next pass reads zero rows
+// and plans the add again. That is not an interaction failure (the click
+// worked), so the watchdog above never sees it; unguarded it is a runaway (39
+// rows) or, with the add verified honestly, an add-per-pass livelock. One blind
+// add is all the evidence there is: clicking again adds another panel nobody
+// will ever fill. The controller drops the section's add on the next pass and
+// carries it as a non-blocking gap instead ([[feedback_agent_must_escalate_not_repeat]]).
+const ANCHOR_BLIND = '__copoV2AnchorBlindAdds';
+
+/** Sections whose committed Add produced no recognisable row, per section name.
+ *  On window for the same two-copies reason as the stuck store. */
+export const anchorBlindStore = () => (win()[ANCHOR_BLIND] || (win()[ANCHOR_BLIND] = {}));
+
+/** Cleared beside forgetInteractionStuck on a page-NAME change: a fresh page's
+ *  sections deserve a fresh chance to be recognised. */
+export const forgetAnchorBlind = () => { try { win()[ANCHOR_BLIND] = {}; } catch { /* noop */ } };

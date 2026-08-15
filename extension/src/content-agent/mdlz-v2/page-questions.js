@@ -36,6 +36,7 @@ import { WIDGET, fingerprintOf, triggerOf } from './fingerprint.js';
 import { NAV, advance } from './navigation.js';
 import { withList } from './popup-manager.js';
 import { runSequential } from './scheduler.js';
+import { fold } from './text.js';
 import { trace } from '../trace.js';
 
 const txt = (el) => (el?.textContent || '').trim().replace(/\s+/g, ' ');

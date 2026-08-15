@@ -28,6 +28,7 @@ import { sleep as domSleep } from '../dom.js';
 import { errorsIn, rowsOf } from './row.js';
 import { visibleMonthCells, visibleOptions, visiblePanels } from './page-observer.js';
 import { withList } from './popup-manager.js';
+import { fold, sameConcept } from './text.js';
 import { trace } from '../trace.js';
 
 // The fallback is dom.js's `sleep`, not a bare setTimeout: a hidden tab's own
@@ -35,7 +36,6 @@ import { trace } from '../trace.js';
 // that. `sleep` borrows the background worker's clock, which is exempt.
 const napper = (sleep) => sleep || domSleep;
 const txt = (el) => (el?.textContent || '').trim();
-const fold = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
 const isPlaceholder = (s) => /^select one$/i.test(String(s || '').trim());
 
 /** Poll a condition to a deadline. Cheap, and never a fixed sleep. */
@@ -384,7 +384,7 @@ export function readSkillsOnSelect(el) {
  * option by the time it is clicked. So: collect the labels, decide on the text,
  * then go find that text again and click the node that is live at that moment.
  */
-async function pickAcrossList(lease, want, { sleep, maxWindows = 24 } = {}) {
+async function pickAcrossList(lease, want, { sleep, maxWindows = 24, exactOnly = false } = {}) {
     const nap = napper(sleep);
     // GLOBAL reads, not lease-scoped — the structural difference between v1
     // (works) and v2 (failed), found by correlation on 2026-08-10: every
@@ -614,7 +614,11 @@ async function pickAcrossList(lease, want, { sleep, maxWindows = 24 } = {}) {
     // cache — a near-match or a "not found" here can both be the tail we never
     // scrolled to.
     const complete = readComplete(all.length);
-    const target = pickLabel(all, want, { exactOnly: !complete });
+    // exactOnly forces an exact-label match even on a complete list — the
+    // single-select's rule (a near-match on a closed taxonomy is a fabricated
+    // claim: "Marketing" must never commit as "Marketing Management"). Skills
+    // passes it false and keeps its lone-near-match convenience.
+    const target = pickLabel(all, want, { exactOnly: exactOnly || !complete });
     const evidence = { want: String(want ?? ''), shown: all.length, sample: all.slice(0, 4), via: 'labels', declared, chose };
     if (!target) {
         if (!complete) {
@@ -1362,12 +1366,58 @@ const searchMulti = {
  * Study was live-searched "M", "a", "r"… one letter at a time (R-173704).
  */
 const searchSelect = {
-    /** Exactly ONE chip, and it is the answer — the single-exact-chip invariant. */
+    /** Exactly ONE chip, and it is the answer — the single-exact-chip invariant.
+     *  sameConcept, not fold-equal: a picker commits the CATALOGUE's spelling, so
+     *  "Marketing and Management" is the right answer to a CV's "Management and
+     *  Marketing" — the reorder is the same field, not a mismatch to redo. It
+     *  still refuses a narrower cousin, so a wrong chip never reads as satisfied. */
     satisfied(f, want) {
         const chips = f.controls().chips.map((c) => fold(txt(c)));
-        return chips.length === 1 && chips[0] === fold(String(want ?? '').trim());
+        return chips.length === 1 && sameConcept(chips[0], want);
     },
     chipsNow: (f) => f.controls().chips.map((c) => txt(c)),
+    /**
+     * Commit the EXACT item by a DATA WRITE off the list's fiber — no scroll, no
+     * click, paint-independent.
+     *
+     * MEASURED LIVE (PwC 715624WD fieldOfStudy "Marketing", 2026-08-15): the
+     * search returns 21 rows, the widget paints ~11 (indices 0–10, alphabetical),
+     * and the exact "Marketing" (index 12) NEVER renders — scrolling does not
+     * paint it, so there is no node to click. The list's own item array is on the
+     * fiber (readVirtualItems walks to it), and each item carries an `onSelect`
+     * whose commit path is `e => 'length' in e ? ee(e) : Q(e)`; calling
+     * `item.onSelect([item])` takes the length-bearing branch and commits that
+     * one item as the single chip in one call — verified live, no row error. This
+     * is the single-select twin of the Skills fiber-write, and the same reason it
+     * exists: a background popup throttles PAINT, never a React state-commit.
+     *
+     * Returns {done} — `avail` whether the fiber list was readable at all,
+     * `committed` whether the chip stuck, `items` the labels in hand when no
+     * exact matched (a DEFINITIVE miss, since the whole list is read, not a
+     * painted window). EXACT ONLY: a near-match on a closed taxonomy is a
+     * fabricated claim ("Marketing" must never commit as "Marketing Management").
+     */
+    async fiberCommit(f, term, ctx = {}) {
+        let listNode = null;
+        try { listNode = (visibleOptions()[0] && visibleOptions()[0].closest(SEL.listContainer)) || document.querySelector(SEL.listContainer); }
+        catch { listNode = null; }
+        const items = listNode ? readVirtualItems(listNode) : null;
+        if (!Array.isArray(items) || !items.length) return { avail: false };
+        const labelOf = (it) => String(it?.label ?? it?.ariaLabel ?? '').trim();
+        // sameConcept, not fold-equal: a closed catalogue that lists "Management
+        // and Marketing" answers a CV's "Marketing and Management" — same words,
+        // reordered — and that IS the exact field, not a near-match. It never
+        // reaches a narrower cousin ("Marketing" ≠ "Digital Marketing"), so a
+        // real gap still escalates. See text.js/sameConcept.
+        const exact = items.find((it) => labelOf(it) && sameConcept(labelOf(it), term));
+        if (exact && typeof exact.onSelect === 'function') {
+            try { exact.onSelect([exact]); }
+            catch { return { avail: true, exact: true, committed: false }; }
+            const ok = await until(() => this.satisfied(f, term), { sleep: ctx.sleep, budgetMs: ctx.commitMs || 1500 });
+            return { avail: true, exact: true, committed: ok };
+        }
+        return { avail: true, exact: false, items: items.map(labelOf).filter(Boolean) };
+    },
     async commit(f, want, ctx = {}) {
         const term = String(want ?? '').trim();
         // The planner gaps an empty want before it ever becomes a task; an empty
@@ -1384,7 +1434,7 @@ const searchSelect = {
             typeInto(t, term);
             pressEnter(t);
         };
-        const r = await withList(trigger, async () => {
+        const r = await withList(trigger, async (lease) => {
             // Watch the CHIP and the results in the SAME wait. A one-result query
             // commits on Enter and CLOSES the list before the results can ever
             // settle — MEASURED LIVE (R-172558, 2026-08-13: on commit the search
@@ -1425,36 +1475,64 @@ const searchSelect = {
             }
             if (!outcome.settled) return { result: RESULT.OPEN_TIMEOUT, reason: 'the search never answered' };
 
-            // Several results → filtered, nothing committed. Only the EXACT row
-            // is an answer on a closed taxonomy; near-matches are how a wrong
-            // major got onto a real application once already.
+            // Several results → filtered, nothing committed. Commit the EXACT row
+            // by a DATA WRITE off the fiber (fiberCommit) — the painted window may
+            // never include it. MEASURED LIVE (PwC 715624WD fieldOfStudy
+            // "Marketing", 2026-08-15): 21 results, ~11 painted, "Marketing"
+            // (index 12) never rendered, so the old DOM-click path — read the
+            // fiber, scroll the exact row into view, click it — could never reach
+            // it (scrolling does not paint the below-window rows). The item's own
+            // onSelect([item]) commits it in one call, no scroll. The whole list
+            // is read from the fiber, so a no-exact result here is DEFINITIVE, not
+            // a painted-window artefact.
             //
-            // But the rows that just settled may be a PRE-SEARCH list — the one a
+            // The rows that just settled may be a PRE-SEARCH list — the one a
             // click opened before the server's filtered rows arrived (measured
             // concern, R-172558: a slow search lands after the initial list has
-            // settled). Concluding OPTION_NOT_FOUND from that would CACHE a
-            // refusal for a term the search was about to match. So on no exact
-            // row, re-search and wait for the rows to CHANGE from what just
-            // settled before deciding: the slow filtered result surfaces the exact
-            // row; a genuine miss re-settles to nothing new and concludes as
-            // before, one search later.
-            let exact = visibleOptions().filter((o) => fold(txt(o)) === fold(term));
-            if (!exact.length) {
+            // settled). So a no-exact verdict re-searches ONCE before concluding:
+            // the slow filtered result surfaces the exact row; a genuine miss
+            // re-settles to nothing new and concludes, one search later.
+            let fib = await this.fiberCommit(f, term, ctx);
+            if (fib.avail) {
+                if (fib.exact && fib.committed) { trace('mdlz.select.fiber-commit', { field: f.name, term }); return { result: RESULT.COMMITTED }; }
+                if (!fib.exact) {
+                    // Whole list in hand, no exact — guard the pre-search race once.
+                    pressEnter(trigger);
+                    const again = await raceCommitOrResults(ctx.searchMs || 6000, outcome.settled);
+                    if (again.committed) { trace('mdlz.select.enter-commit', { field: f.name, term }); return { result: RESULT.COMMITTED }; }
+                    fib = await this.fiberCommit(f, term, ctx);
+                    if (fib.avail && fib.exact && fib.committed) { trace('mdlz.select.fiber-commit', { field: f.name, term }); return { result: RESULT.COMMITTED }; }
+                    if (fib.avail && !fib.exact) {
+                        // exactOnly: a near-match on a closed taxonomy is fabrication.
+                        const near = (fib.items || []).filter((l) => fold(l).includes(fold(term)));
+                        return near.length
+                            ? { result: RESULT.AMBIGUOUS, reason: 'no exact row; near-matches on a closed taxonomy', saw: [...new Set(near)].slice(0, 4) }
+                            : { result: RESULT.OPTION_NOT_FOUND, reason: 'no exact row', sample: (fib.items || []).slice(0, 4) };
+                    }
+                }
+                // fib.exact but the write did not stick → fall through to the DOM
+                // path below as a last resort.
+            }
+
+            // FALLBACK — the fiber list was unreadable (a tenant whose widget does
+            // not expose props.items). Find the exact row via pickAcrossList and
+            // click a live node. exactOnly: same closed-taxonomy rule as above.
+            let pick = await pickAcrossList(lease, term, { sleep: ctx.sleep, exactOnly: true });
+            if (!pick.option && pick.why !== RESULT.AMBIGUOUS) {
                 pressEnter(trigger);
                 const again = await raceCommitOrResults(ctx.searchMs || 6000, outcome.settled);
                 if (again.committed) {
                     trace('mdlz.select.enter-commit', { field: f.name, term });
                     return { result: RESULT.COMMITTED };
                 }
-                exact = visibleOptions().filter((o) => fold(txt(o)) === fold(term));
+                pick = await pickAcrossList(lease, term, { sleep: ctx.sleep, exactOnly: true });
             }
-            if (!exact.length) {
-                const sample = visibleOptions().map(txt).filter(Boolean).slice(0, 4);
-                return { result: RESULT.OPTION_NOT_FOUND, reason: 'no exact row', sample };
+            if (!pick.option) {
+                return { result: pick.why || RESULT.OPTION_NOT_FOUND, reason: pick.reason || 'no exact row', sample: pick.sample, saw: pick.saw };
             }
             const before = this.chipsNow(f);
-            const box = exact[0].querySelector('input[type="checkbox"]');
-            (box || exact[0]).click();
+            const box = pick.option.querySelector('input[type="checkbox"]');
+            (box || pick.option).click();
             await until(() => this.chipsNow(f).join('|') !== before.join('|'),
                 { sleep: ctx.sleep, budgetMs: ctx.commitMs || 1200 });
             if (this.satisfied(f, term)) return { result: RESULT.COMMITTED };
@@ -1784,6 +1862,84 @@ const isBackControl = (el) => {
  * still owns the page — the sweep cleared it before the open — so the only list
  * on it is ours, whichever container is currently holding the level.
  */
+/**
+ * Search-and-pick — the way v1 answers this exact prompt (recipe.js
+ * fillPromptField). "How Did You Hear About Us?" is a SEARCHABLE prompt: its
+ * trigger is an <input> (placeholder "Search", enterkeyhint=search,
+ * data-uxi-widget-type=selectinput), not a click-only cascade. It does NOT
+ * live-filter — MEASURED PwC 715624WD (2026-08-14): typing "job board" left all 11
+ * categories untouched; pressing ENTER ran a server search that FLATTENED the tree
+ * to the 2 matching leaves ("I found the job on a job board", "PwC Global Job
+ * Board"), and clicking one committed the chip. A search result is SHORT, so it
+ * paints in full even in a background-throttled tab (virtualisation only bites the
+ * long unfiltered level that collapses to ~2 painted rows). So where the DOM drill
+ * cannot reach an unpainted category row, one typed rung + Enter surfaces the leaf
+ * and it is one click away. The server search is GLOBAL, so this works from any
+ * level — even after a wrong category was drilled into.
+ *
+ * Typing is per-character but WITHOUT a per-key sleep (`typeInto`), and the query
+ * runs on ONE Enter, not per keystroke: a slept keystroke loop both crawls under
+ * the hidden tab's ~1s timer clamp AND — measured live 2026-08-14 — fires the
+ * /source fetch once per key into a mid-init atom, the TypeError storm behind
+ * Workday's "Something went wrong". Returns null when there is no text box to type
+ * into — a button-only cascade (MDLZ's measured shape) — so the DOM drill stays
+ * the path there.
+ */
+async function typeFilterPick(f, ladder, ctx, committedNow) {
+    const trigger = triggerOf(f);
+    const wrap = trigger ? trigger.closest('[data-automation-id^="formField-"]') : null;
+    const filter = trigger && trigger.tagName === 'INPUT'
+        ? trigger
+        : (wrap || document).querySelector('input[type="text"], input:not([type])');
+    if (!filter) return null;
+    const nap = napper(ctx.sleep);
+    // A search-shaped box lists NOTHING until Enter runs the query; a live-filter
+    // box narrows as you type. Only the former needs Enter (which can also commit
+    // the highlighted row — guarded below).
+    const searchShaped = filter.getAttribute('enterkeyhint') === 'search'
+        || filter.getAttribute('data-uxi-widget-type') === 'selectinput';
+
+    for (const rawRung of ladder) {
+        const term = rawRung.replace(/^=/, '');   // '=' anchors matching, it is not text
+        const beforeKey = resultsKey();
+        typeInto(filter, term);
+        // A search-shaped box lists NOTHING new until Enter runs the query on the
+        // server (MEASURED: typing alone left all 11 categories); a live-filter box
+        // narrows as you type, and Enter there commits the highlighted — often
+        // wrong — row (v1's measured hazard). So press Enter only for the former.
+        if (searchShaped) { await nap(150); pressEnter(filter); }
+        await waitForResults(beforeKey, { sleep: ctx.sleep, budgetMs: ctx.searchMs || 6000 });
+
+        // Enter can also COMMIT a highlighted row on its own — accept that chip
+        // only when it carries this rung's text (v1 measured it committing the
+        // alphabetically-first WRONG option, and that rode all the way to Review).
+        const early = committedNow();
+        if (early && (fold(early).includes(fold(term)) || fold(term).includes(fold(early)))) {
+            setNativeValue(filter, '');
+            return { result: RESULT.COMMITTED, picked: term, rung: rawRung, onPage: early, via: 'type-filter' };
+        }
+        // The search flattened the tree; match THIS rung against what surfaced and
+        // click the leaf. A category-option that only drills commits nothing, so
+        // committedNow stays false and the loop tries the next rung — the leaf rung
+        // reaches a real leaf and clicks it.
+        const opts = visibleOptions().filter((o) => !isBackControl(o));
+        const pick = chooseFromLadder(opts, [rawRung]);
+        if (pick.option) {
+            const hit = commitControl(pick.option) || leafNode(pick.option) || pick.option;
+            try { hit.scrollIntoView?.({ block: 'center' }); } catch { /* no layout */ }
+            hit.click();
+            const now = await until(() => committedNow(), { sleep: ctx.sleep, budgetMs: ctx.commitMs || 2000 });
+            if (now) { setNativeValue(filter, ''); return { result: RESULT.COMMITTED, picked: pick.matched, rung: rawRung, onPage: now, via: 'type-filter' }; }
+        }
+        setNativeValue(filter, '');
+        await nap(200);
+    }
+    // Leave nothing typed behind: uncommitted text reads as an answer and would
+    // block the field from ever being re-tried (recipe.js prompt.clear hazard).
+    try { setNativeValue(filter, ''); } catch { /* gone */ }
+    return { result: RESULT.OPTION_NOT_FOUND, reason: 'no rung surfaced a match after filtering', via: 'type-filter' };
+}
+
 async function walkCascadeLadder(lease, f, ladder, ctx = {}) {
     const before = readNow(f);
     const committedNow = () => { const now = readNow(f); return now && now !== before ? now : null; };
@@ -1794,10 +1950,21 @@ async function walkCascadeLadder(lease, f, ladder, ctx = {}) {
         if (already) return { result: RESULT.COMMITTED, picked: null, onPage: already, levels: level };
 
         const opts = visibleOptions().filter((o) => !isBackControl(o));
-        if (!opts.length) return { result: RESULT.OPTION_NOT_FOUND, reason: 'the list emptied mid-cascade', level };
+        const choice = opts.length ? chooseFromLadder(opts, ladder) : { option: null };
 
-        const choice = chooseFromLadder(opts, ladder);
+        // The DOM walk found no matching row. On a throttled tab that is not a
+        // dead end — the level is virtualised and only ~2 rows painted, so the
+        // rung's row was never rendered to be clicked. TYPE it instead: the server
+        // filter flattens the cascade and the leaf surfaces in a short, fully
+        // painted list (v1's mechanism; see typeFilterPick). An unthrottled tenant
+        // (MDLZ) matches on the DOM walk above and never reaches here.
         if (!choice.option) {
+            const typed = await typeFilterPick(f, ladder, ctx, committedNow);
+            if (typed && typed.result === RESULT.COMMITTED) return { ...typed, levels: level + 1 };
+            if (typed && typed.result === RESULT.OPTION_NOT_FOUND) return { ...typed, level };
+            // typed === null → not a searchable prompt (no text box); fall through
+            // and report the DOM miss the way the drill always has.
+            if (!opts.length) return { result: RESULT.OPTION_NOT_FOUND, reason: 'the list emptied mid-cascade', level };
             return { result: choice.why, want: choice.want, shown: choice.shown, sample: choice.sample, level };
         }
 
@@ -1920,14 +2087,36 @@ export function resolveCapability(f, decl) {
 export async function addRow(button, { sleep, anchor, root = null, budgetMs } = {}) {
     const budget = budgetMs || 4000;
     if (!button) return { result: RESULT.USER_REQUIRED, reason: 'no add button for this section' };
+    // TWO readings of "a row arrived", because the anchor alone lied once.
+    // MEASURED (PwC 715624WD, 2026-08-15): Education's Add succeeded on every
+    // click — an "Education 1" panel appeared — while the anchor count read 0
+    // forever, because that tenant's row renders formField-school and the anchor
+    // then knew only formField-schoolName. Each pass re-planned the add: 39 real
+    // rows one day, a livelock the next. So the click is ALSO verified by the
+    // page growing new formField-* wrappers at all — tenant-blind, id-blind.
+    // The pass is sequential and swept clean before this runs, so growth right
+    // after our click is ours. `anchorBlind` on the result is the escalation
+    // signal: the add WORKED but produced rows the planner cannot recognise, and
+    // clicking again can only pile up rows nobody will ever fill.
+    const fieldCount = () => {
+        try { return (root || document).querySelectorAll('[data-automation-id^="formField-"]').length; }
+        catch { return 0; }
+    };
     const before = rowsOf(anchor, { root }).length;
+    const beforeFields = fieldCount();
     try { button.scrollIntoView?.({ block: 'center' }); } catch { /* no layout in a test DOM */ }
     button.click();
-    const grew = await until(() => rowsOf(anchor, { root }).length > before, { sleep, budgetMs: budget });
-    trace('mdlz.row.add', { anchor, before, after: rowsOf(anchor, { root }).length, grew });
-    return grew
-        ? { result: RESULT.COMMITTED, rows: rowsOf(anchor, { root }).length }
-        : { result: RESULT.OPEN_TIMEOUT, reason: `the section still has ${before} row(s)` };
+    const grew = await until(
+        () => rowsOf(anchor, { root }).length > before || fieldCount() > beforeFields,
+        { sleep, budgetMs: budget },
+    );
+    const after = rowsOf(anchor, { root }).length;
+    const anchorBlind = grew && after <= before;
+    trace('mdlz.row.add', { anchor, before, after, grew, fields: fieldCount(), anchorBlind });
+    if (!grew) return { result: RESULT.OPEN_TIMEOUT, reason: `the section still has ${before} row(s)` };
+    return anchorBlind
+        ? { result: RESULT.COMMITTED, rows: after, anchorBlind: true }
+        : { result: RESULT.COMMITTED, rows: after };
 }
 
 /**

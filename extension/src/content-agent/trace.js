@@ -41,7 +41,14 @@ function load() {
 
 function save(rows) {
     if (!hasStore()) return;
-    try { sessionStorage.setItem(KEY, JSON.stringify(rows.slice(-MAX))); } catch { /* full or blocked */ }
+    const json = JSON.stringify(rows.slice(-MAX));
+    try { sessionStorage.setItem(KEY, json); } catch { /* full or blocked */ }
+    // Cross-tab mirror: a driven run lives in its own popup WINDOW, and
+    // sessionStorage is per-tab — invisible to any other tab. localStorage is
+    // shared across same-origin tabs, so mirroring here lets a second tab on the
+    // same ATS origin read a hidden run's trace live (the only way to observe a
+    // background-window run without switching to it).
+    try { localStorage.setItem(KEY, json); } catch { /* full or blocked */ }
 }
 
 function here() {
@@ -169,6 +176,10 @@ export function traceClear() {
     // run's story is worth one sessionStorage slot.
     try { const rows = sessionStorage.getItem(KEY); if (rows) sessionStorage.setItem(KEY + 'Last', rows); } catch { /* ignore */ }
     try { sessionStorage.removeItem(KEY); } catch { /* ignore */ }
+    // Mirror the archive cross-tab too (see save()): a hidden run that ENDS
+    // before it is read is still readable from another same-origin tab.
+    try { const rows = localStorage.getItem(KEY); if (rows) localStorage.setItem(KEY + 'Last', rows); } catch { /* ignore */ }
+    try { localStorage.removeItem(KEY); } catch { /* ignore */ }
 }
 
 // ═══════════════════════════════════════════════════════════════════════

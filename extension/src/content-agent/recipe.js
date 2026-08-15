@@ -80,8 +80,9 @@ export const FALLBACK_RECIPES = [
                     // the profile's own gender via prefixLadder; an empty
                     // gender leaves it a named gap, never a guess.
                     {
-                        label: 'Prefix', labelMatch: 'prefix', profileKey: 'gender',
-                        prefixLadder: true, type: 'custom-select', answerSource: 'PROFILE',
+                        label: 'Prefix', labelMatch: 'prefix',
+                        selector: '[data-automation-id="formField-legalName--title"] button',
+                        profileKey: 'gender', prefixLadder: true, type: 'custom-select', answerSource: 'PROFILE',
                     },
                     { label: 'First name', selector: '[data-automation-id="formField-legalName--firstName"] input', profileKey: 'firstName', type: 'text', required: true, normalize: 'name' },
                     { label: 'Last name', selector: '[data-automation-id="formField-legalName--lastName"] input', profileKey: 'lastName', type: 'text', required: true, normalize: 'name' },
@@ -110,6 +111,13 @@ export const FALLBACK_RECIPES = [
                     // only says "Hà Nội" answers street/district with the city
                     // instead of stalling a required field.
                     { label: 'Address line 1', selector: '[data-automation-id="formField-addressLine1"] input', profileKey: 'addressStreet', cvPath: 'contact.address_street', fallbackProfileKey: 'addressProvince', type: 'text', required: true },
+                    // PwC splits the address further, adding "City or Ward"
+                    // (addressLine2) REQUIRED between line 1 and District/Town.
+                    // Single-line tenants do not render it and the selector
+                    // resolves to nothing (absent, a lookup and nothing else); a
+                    // sparse "Hà Nội" profile answers it with the city fallback,
+                    // the same measured decision as line 1 and District.
+                    { label: 'City or Ward', selector: '[data-automation-id="formField-addressLine2"] input', profileKey: 'addressWard', cvPath: 'contact.address_ward', fallbackProfileKey: 'addressProvince', type: 'text', required: true },
                     { label: 'District or Town', selector: '[data-automation-id="formField-city"] input', profileKey: 'addressDistrict', cvPath: 'contact.address_district', fallbackProfileKey: 'addressProvince', type: 'text', required: true },
                     // Required text input; a résumé never carries it, so autofill leaves
                     // it blank and the step's Next validation blocks. Default to the VN

@@ -26,9 +26,8 @@
 
 import { COPY, MONTHS, SEL } from './config.js';
 import { fieldByLabel, fieldIn, isEmptyRow, rowsOf, valueIn } from './row.js';
+import { fold } from './text.js';
 import { trace } from '../trace.js';
-
-const fold = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
 
 /**
  * A CV date, as month and year.
@@ -83,23 +82,58 @@ export const SECTIONS = [
     },
     {
         name: 'education',
+        // The anchor matches BOTH measured row shapes (see SEL.row.schoolName):
+        // mdlz's free-text schoolName and PwC's school PICKER. Every reading
+        // below asks both ids and takes whichever the tenant rendered.
         anchor: SEL.row.schoolName,
         entries: (cv) => (cv?.education || []),
-        keyOf: (row) => fold(valueIn(row, 'formField-schoolName')),
+        keyOf: (row) => fold(valueIn(row, 'formField-schoolName') || valueIn(row, 'formField-school')),
         keyOfEntry: (e) => fold(e.institution || e.school || ''),
-        emptyWhen: ['formField-schoolName'],
+        // The picker commits the CATALOGUE's name for the school, not the CV's
+        // spelling — the row must still be claimable by the entry that put it
+        // there, or the next pass reads it as nobody's and Adds again (the PwC
+        // runaway, one layer up). The catalogue hit was FOUND by searching the
+        // CV's own name, so one contains the other; and a committed "School Not
+        // Listed" is the fallback rung's own honest answer, claimable by the
+        // entry that fell to it.
+        keyMatches: (rowKey, entryKey) => {
+            if (!rowKey) return false;
+            if (/school not listed/.test(rowKey)) return true;
+            const stem = (s) => String(s || '').replace(/[(（][^)）]*[)）]?/g, ' ').replace(/\s+/g, ' ').trim();
+            const a = stem(rowKey);
+            const b = stem(entryKey);
+            return !!a && !!b && (a.includes(b) || b.includes(a));
+        },
+        emptyWhen: ['formField-schoolName', 'formField-school'],
         fields: (e) => [
-            { id: 'formField-schoolName', want: e.institution || e.school },
+            // The free-text variant (mdlz). whenPresent keeps it off the picker
+            // tenant, where the id simply does not render.
+            { id: 'formField-schoolName', want: e.institution || e.school, whenPresent: true },
+            // The PICKER variant (PwC, measured 2026-08-15): search-on-Enter,
+            // same widget family as the HDYHAU cascade, so it is answered the
+            // same way — a LADDER walked by typeFilterPick. The CV's own name
+            // first (verbatim, then bracket-stripped), and Workday's designed
+            // escape — "School Not Listed" — when the catalogue does not hold
+            // it. NEVER a semantically-near catalogue school: picking a school
+            // the candidate did not name rewrites their academic record.
+            { id: 'formField-school', ladder: schoolLadder(e), whenPresent: true },
             // Degree is asked for as a LADDER, not a value — see degreeLadder.
             { id: 'formField-degree', ladder: degreeLadder(e), optional: true },
             // REQUIRED where it renders, and it does not render on every tenant
             // (measured: absent on mdlz, present and required on others). Planned
             // only when the row actually has it — a plan full of fields nobody
             // renders wastes a pass and hides what is really missing.
-            // want is the MAJOR only — never `|| e.degree`. A degree ("B.B.A.")
-            // is a qualification, not a major, and is not on Workday's closed
-            // Field-of-Study catalogue, so falling back to it types a value the
-            // search cannot match and gaps the page.
+            // want is the MAJOR — from field_of_study/major, and FAILING THOSE,
+            // from `degree` ONLY when that string names a subject and not a
+            // qualification (fieldOfStudy()). A degree of "B.B.A." is a
+            // qualification, not a major, is not on Workday's closed Field-of-
+            // Study catalogue, and is never used here — the search would miss and
+            // the page would gap. But the extractor mis-slots a bare subject into
+            // `degree` too (MEASURED live PwC 715624WD, 2026-08-15: education
+            // {degree:"Marketing"}, no field_of_study), and "Marketing" IS the
+            // major the CV stated — reading it is not inventing. Salvaging it is
+            // safe both ways: a real subject commits, a qualification misses the
+            // catalogue and gaps exactly as an empty want would.
             //
             // NOT optional, for the same reason GPA is not: where this field
             // RENDERS it is REQUIRED (measured on the intern form), so an empty
@@ -116,7 +150,7 @@ export const SECTIONS = [
             // this declaration the router refuses the field (CONTRACT_ERROR)
             // rather than let the multi engine spread the string into
             // one-character searches again (measured, R-173704).
-            { id: 'formField-fieldOfStudy', want: e.field_of_study, whenPresent: true,
+            { id: 'formField-fieldOfStudy', want: fieldOfStudy(e), whenPresent: true,
                 capability: 'searchSelect', cardinality: 'one' },
             // "Overall Result (GPA)" — REQUIRED on the intern postings (measured
             // R-172558 Marketing Intern, 2026-08-11) and absent on the executive
@@ -129,6 +163,14 @@ export const SECTIONS = [
             // and stalled the whole intern run). The value comes from the CV, and
             // ONLY the CV: a plausible GPA is a fabricated academic record.
             { id: 'formField-gradeAverage', want: e.gpa, whenPresent: true },
+            // Attendance years — rendered on the picker tenant (PwC, measured
+            // 2026-08-15), absent on mdlz. Optional like Degree: their required-
+            // ness is unmeasured, so a CV without dates must not hold the page —
+            // if the tenant does demand them, Workday's own row error says so
+            // and blocks the advance with a reason. "Present" yields no year,
+            // and an ongoing degree rightly leaves the last year unanswered.
+            { id: 'formField-firstYearAttended', want: yearOf(e.start_date), whenPresent: true, optional: true },
+            { id: 'formField-lastYearAttended', want: yearOf(e.end_date), whenPresent: true, optional: true },
         ],
     },
     {
@@ -196,6 +238,85 @@ export const SECTIONS = [
  * falls to the generic bachelor bucket — the same "don't claim a flavour we
  * can't support" rule, one catalogue coarser.
  */
+/**
+ * WHAT SCHOOL TO ASK THE PICKER FOR — the CV's own name, then Workday's own
+ * escape hatch, and nothing in between.
+ *
+ * MEASURED (PwC 715624WD, 2026-08-15): formField-school is a search-on-Enter
+ * picker — type ≥4 chars, Enter runs the server search, pick from the list —
+ * with "School Not Listed" as the catalogue's own designed answer for a school
+ * it does not hold. The same widget family as the HDYHAU cascade, so the ladder
+ * rides the same executor (answerFromLadder → typeFilterPick).
+ *
+ * The bracket-stripped rung exists because CVs write "Foreign Trade University
+ * (FTU)" while catalogues hold the plain name — a search seeded with the
+ * bracket misses a school that is there. What this NEVER does is fall to a
+ * similar catalogue school: the skills incident ("unit economics" → CLV)
+ * settled that policy — exact claim or verbatim fallback, no semantic mapping.
+ */
+export function schoolLadder(entry) {
+    const name = String(entry?.institution || entry?.school || '').trim();
+    const plain = name.replace(/[(（][^)）]*[)）]?/g, ' ').replace(/\s+/g, ' ').trim();
+    return [...new Set([name, plain].filter(Boolean)), '=School Not Listed'];
+}
+
+/**
+ * The YEAR a CV date carries, as the string a year dropdown offers.
+ *
+ * monthYear() first (it reads every shape the extractor produces), then a bare
+ * four-digit year, which monthYear alone rejects — "2019" has no month in it.
+ * "Present" and friends yield nothing: an ongoing degree has no last year.
+ */
+export function yearOf(value) {
+    const my = monthYear(value);
+    if (my) return String(my.year);
+    return (String(value || '').match(/\b(19|20)\d{2}\b/) || [])[0] || '';
+}
+
+/**
+ * Does this string NAME A QUALIFICATION (a degree level), rather than a subject?
+ *
+ * The same tokens degreeLadder recognises — every level and every abbreviation
+ * it ladders — folded into one test. It exists so fieldOfStudy can tell a
+ * mis-slotted SUBJECT ("Marketing") from a real qualification ("B.B.A.") sitting
+ * in the same `degree` key: the first is the major and belongs in Field of
+ * Study, the second is not on that catalogue and must not be typed into it.
+ *
+ * Deliberately matches "business administration" and other qualification-named
+ * subjects as qualifications — the safe direction. A borderline subject gaps to
+ * the candidate (unchanged from today); it is never mis-typed into the search.
+ */
+const QUALIFICATION = new RegExp([
+    'ph\\.?\\s?d', 'doctorate', 'doctoral', 'tiến sĩ', 'juris doctor', '\\bj\\.?d\\b',
+    '\\bmba\\b', 'master of business', 'thạc sĩ', 'master of science', 'master of arts',
+    '\\bm\\.?sc?\\b', '\\bm\\.?a\\b', '\\bmaster\\b',
+    'associate of', '\\ba\\.?a\\b', '\\ba\\.?s\\b',
+    'high school', 'secondary school', 'thpt', 'trung học',
+    'bachelor', 'cử nhân', 'kỹ sư', 'business administration',
+    'b\\.?arch', 'b\\.?b\\.?a', 'b\\.?c\\.?s', 'b\\.?com', 'b\\.?ed', 'b\\.?eng',
+    'b\\.?f\\.?a', 'l\\.?l\\.?b', '\\bb\\.?a\\b', '\\bb\\.?sc?\\b',
+    'diploma', 'đại học',
+].join('|'), 'i');
+
+export const isQualification = (s) => QUALIFICATION.test(fold(s));
+
+/**
+ * THE SUBJECT SOMEONE STUDIED, for Workday's closed Field-of-Study catalogue.
+ *
+ * The extractor is inconsistent about where the major lands: `field_of_study`,
+ * `major`, or — MEASURED live (PwC 715624WD, 2026-08-15: education
+ * {degree:"Marketing"}, no field_of_study) — inside `degree` when the CV wrote
+ * only the subject. So the explicit keys win, and failing them the degree string
+ * is used ONLY when it is not itself a qualification. "Marketing" is the
+ * candidate's stated field; "B.B.A." is a level and is left for the person.
+ */
+export function fieldOfStudy(entry) {
+    const explicit = String(entry?.field_of_study || entry?.major || '').trim();
+    if (explicit) return explicit;
+    const degree = String(entry?.degree || '').trim();
+    return degree && !isQualification(degree) ? degree : '';
+}
+
 export function degreeLadder(entry) {
     const s = fold(`${entry?.degree || ''} ${entry?.qualification || ''} ${entry?.degree_level || ''}`);
     // Anchored on purpose: "ma" lives inside "marketing", and an unanchored
@@ -361,6 +482,13 @@ export function claimRow(spec, entry, rows, taken) {
     const want = spec.keyOfEntry(entry);
     const exact = free.find((r) => spec.keyOf(r) === want);
     if (exact) return { row: exact, how: 'key' };
+    // A section whose rows hold a CATALOGUE's spelling of the entry (the school
+    // picker) declares keyMatches — the near-claim that keeps a committed row
+    // from reading as nobody's and triggering another Add.
+    if (spec.keyMatches) {
+        const near = free.find((r) => spec.keyMatches(spec.keyOf(r), want));
+        if (near) return { row: near, how: 'near-key' };
+    }
     if (spec.partialOf) {
         const partial = free.find((r) => spec.partialOf(r) && spec.partialOf(r) === spec.partialOfEntry(entry));
         if (partial) return { row: partial, how: 'partial-key' };
@@ -640,7 +768,12 @@ export function resolveTarget(task, { root = null } = {}) {
     }
     const spec = SECTIONS.find((s) => s.name === task.section);
     const rows = rowsOf(task.anchor, { root });
+    // keyMatches sits between the exact key and the empty fallback for the same
+    // reason it does in claimRow: mid-pass, the school picker has already put
+    // the CATALOGUE's spelling on the row, and the entry's remaining fields
+    // (degree, years) must still find it.
     const row = rows.find((r) => spec.keyOf(r) === task.rowKey)
+        || (spec.keyMatches ? rows.find((r) => spec.keyMatches(spec.keyOf(r), task.rowKey)) : null)
         || (spec.partialOf ? rows.find((r) => spec.partialOf(r) && spec.partialOf(r) === task.rowKey.split('@')[0]) : null)
         || rows.find((r) => isEmptyRow(r, spec.emptyWhen))
         || null;
@@ -654,6 +787,7 @@ export function resolveRow(task, { root = null } = {}) {
     const spec = SECTIONS.find((s) => s.name === task.section);
     const rows = rowsOf(task.anchor, { root });
     return rows.find((r) => spec.keyOf(r) === task.rowKey)
+        || (spec.keyMatches ? rows.find((r) => spec.keyMatches(spec.keyOf(r), task.rowKey)) : null)
         || rows.find((r) => spec.partialOf && spec.partialOf(r) === task.rowKey.split('@')[0])
         || null;
 }

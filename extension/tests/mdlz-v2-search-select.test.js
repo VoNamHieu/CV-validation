@@ -95,14 +95,79 @@ describe('searchSelect drives the single-select chip-search end to end', () => {
             'the exact row, never the longer near-match');
     });
 
-    test('a term with no EXACT row is OPTION_NOT_FOUND — no free chip on a closed list', async () => {
+    test('near-matches but no EXACT row is AMBIGUOUS — no free chip on a closed list', async () => {
         page.addFieldOfStudy(['Marketing Analytics', 'Digital Marketing', 'Data Science']);
-        // "Marketing" filters to two rows, neither of which IS "Marketing". A
-        // genuine miss re-searches once (the slow-server guard) and, finding
-        // nothing new, concludes — a short searchMs keeps that second wait brief.
+        // "Marketing" filters to two rows that CONTAIN it, neither of which IS
+        // "Marketing". The full-list scan (pickAcrossList) reports that as
+        // AMBIGUOUS — there are candidates, just no exact one — and commits
+        // nothing: a near-match on a closed taxonomy is a fabricated claim. A
+        // genuine miss re-searches once (the slow-server guard); a short searchMs
+        // keeps that second wait brief.
+        const r = await exec.runField(field('formField-fieldOfStudy'), 'Marketing', { ...fosCtx(), searchMs: 400 });
+        assert.equal(r.result, RESULT.AMBIGUOUS);
+        assert.deepEqual(page.chipsOn('fieldOfStudy'), [], 'nothing was committed');
+    });
+
+    test('a term nothing even contains is OPTION_NOT_FOUND — the other terminal miss', async () => {
+        page.addFieldOfStudy(['Data Science', 'Economics', 'Physics']);
+        // "Marketing" is not a substring of any row: no candidates at all, so the
+        // verdict is OPTION_NOT_FOUND, not AMBIGUOUS. Both are terminal semantic
+        // gaps that commit nothing; this locks the boundary between them.
         const r = await exec.runField(field('formField-fieldOfStudy'), 'Marketing', { ...fosCtx(), searchMs: 400 });
         assert.equal(r.result, RESULT.OPTION_NOT_FOUND);
         assert.deepEqual(page.chipsOn('fieldOfStudy'), [], 'nothing was committed');
+    });
+
+    // The 21-result PwC field-of-study list, in the alphabetical order the live
+    // widget returned it: every row contains "marketing", the exact "Marketing"
+    // sits at index 12, and the painted window never reaches it.
+    const PWC_MARKETING = [
+        'Accountancy and Marketing', 'Accounting and Marketing', 'Advertising and Marketing',
+        'Banking, Finance and Marketing', 'Big Data Marketing',
+        'Corporate Communications, Marketing and Public Relations', 'Digital Marketing',
+        'Economics and Marketing', 'Fashion Marketing and Branding', 'Finance and Marketing',
+        'Integrated Marketing', 'Management and Marketing', 'Marketing', 'Marketing Analytics',
+        'Marketing and Management', 'Marketing Communications', 'Marketing Science',
+        'Quantitative Marketing',
+    ];
+
+    test('a below-window EXACT row commits via the fiber data-write — no paint, no click', async () => {
+        // MEASURED LIVE (PwC 715624WD, 2026-08-15): "marketing" → 21 results, the
+        // widget paints ~2 compounds, and the exact "Marketing" (index 12) NEVER
+        // renders — it cannot be clicked. renderCap:2 models that. The item's own
+        // onSelect([item]) off the fiber commits it anyway.
+        page.addFieldOfStudy(PWC_MARKETING, { virtual: true, renderCap: 2 });
+        const r = await exec.runField(field('formField-fieldOfStudy'), 'Marketing', fosCtx());
+        assert.equal(r.result, RESULT.COMMITTED);
+        assert.deepEqual(page.chipsOn('fieldOfStudy'), ['Marketing'],
+            'the exact row, reached through the fiber — never the painted compounds');
+    });
+
+    test('a REORDERED catalogue name is the same concept — committed, not escalated', async () => {
+        // MEASURED: PwC's catalogue lists "Marketing and Management"; a CV that
+        // says "Management and Marketing" is the SAME field, reordered. The
+        // token-based search surfaces it and sameConcept commits it — never the
+        // narrower "Digital Marketing" that also shares the word.
+        // Four marketing rows surface (readVirtualItems needs >3 to trust a fiber
+        // array; a shorter result renders in full and takes the DOM path anyway).
+        page.addFieldOfStudy(
+            ['Marketing and Management', 'Digital Marketing', 'Big Data Marketing', 'Integrated Marketing', 'Data Science'],
+            { virtual: true, renderCap: 1 });
+        const r = await exec.runField(field('formField-fieldOfStudy'), 'Management and Marketing', fosCtx());
+        assert.equal(r.result, RESULT.COMMITTED);
+        assert.deepEqual(page.chipsOn('fieldOfStudy'), ['Marketing and Management'],
+            'the reordered exact — same words, same field; never a cousin');
+    });
+
+    test('a virtualised list with only near-matches is AMBIGUOUS off the FULL fiber read', async () => {
+        // Same widget, but the catalogue holds no bare "Marketing" — only
+        // compounds. Reading the whole fiber array (not the painted window) is
+        // what makes this a DEFINITIVE miss, and exactOnly refuses every cousin.
+        page.addFieldOfStudy(PWC_MARKETING.filter((s) => s.toLowerCase() !== 'marketing'),
+            { virtual: true, renderCap: 2 });
+        const r = await exec.runField(field('formField-fieldOfStudy'), 'Marketing', { ...fosCtx(), searchMs: 400 });
+        assert.equal(r.result, RESULT.AMBIGUOUS);
+        assert.deepEqual(page.chipsOn('fieldOfStudy'), [], 'no compound is ever committed for a bare major');
     });
 
     test('a new pick REPLACES the chip — single-select never accumulates', async () => {

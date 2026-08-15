@@ -27,10 +27,10 @@
  */
 
 import { COPY, RESULT, SEL } from './config.js';
+import { fold } from './text.js';
 import { trace } from '../trace.js';
 
 const txt = (el) => (el?.textContent || '').replace(/\s+/g, ' ').trim();
-const fold = (s) => String(s || '').toLowerCase();
 
 /** Section headings, in Workday's own words. */
 const SECTIONS = [
