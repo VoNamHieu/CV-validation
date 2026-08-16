@@ -112,7 +112,14 @@ export const STEP = {
 export const STEP_SIGNALS = [
     { step: STEP.REVIEW, any: ['[data-automation-id="applyFlowReviewPage"]'] },
     { step: STEP.AUTOFILL, any: ['[data-automation-id="applyFlowAutoFillPage"]'] },
-    { step: STEP.APPLICATION_QUESTIONS, any: ['[data-automation-id="applyFlowPrimaryQuestionsPage"]'] },
+    // MEASURED primary; the ENDS-WITH selector also catches
+    // "applyFlowSecondaryQuestionsPage". PwC's Global_Campus flow has TWO
+    // questions pages ("Application Questions 1 of 2" and "2 of 2"), and listing
+    // only the primary id left page 2 as UNKNOWN — the legacy engine then took it
+    // and livelocked on its accounting-qualification / fitness fields. Matching
+    // the shared "QuestionsPage" suffix recognises both without guessing the exact
+    // secondary id, and no non-questions page ends that way.
+    { step: STEP.APPLICATION_QUESTIONS, any: ['[data-automation-id$="QuestionsPage"]'] },
     { step: STEP.VOLUNTARY_DISCLOSURES, any: ['[data-automation-id="applyFlowVoluntaryDisclosuresPage"]', '[data-automation-id="formField-gender"]', '[data-automation-id="formField-ethnicity"]'] },
     { step: STEP.MY_EXPERIENCE, any: ['[data-automation-id="applyFlowMyExpPage"]', '[data-automation-id="formField-jobTitle"]', '[data-automation-id="formField-schoolName"]', '[data-automation-id="formField-language"]'] },
     // applyFlowMyInfoPage is MEASURED the same way its siblings are (PwC

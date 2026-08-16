@@ -86,6 +86,57 @@ export const ANSWER_RULES = [
         candidates: ['no', 'không'],
     },
     {
+        kind: 'contractor_to_hirer',
+        // MEASURED on PwC Global_Campus (747959WD), verbatim: "Are you currently
+        // working, or have you worked, as third party labor or an independent
+        // contractor to PwC?" — a Big-4 independence screen (Yes/No). User
+        // decision 2026-08-16: answer it FROM THE CV. No role in this candidate's
+        // history ties them to the hiring firm as contractor or temp labour, so
+        // the fact is No; when a CV DOES name such a tie the rule yields and the
+        // candidate speaks to it. Narrow phrasings — "third party labo(u)r" /
+        // "independent contractor" — so an ordinary "are you currently working?"
+        // question is not captured here.
+        match: /third[- ]party labo(u)?r|independent contractor|as a contractor (to|for)/i,
+        fromCv: (cv) => {
+            if (!cv) return null;
+            const hay = JSON.stringify(cv.experience || []).toLowerCase();
+            return /pwc|pricewaterhouse/.test(hay) ? null : ['no', 'không'];
+        },
+        candidates: [],
+    },
+    {
+        kind: 'engagement_client_history',
+        // MEASURED on PwC Global_Campus (747959WD), verbatim: "Within the last 24
+        // months, have you worked with a PwC engagement team as a client? If yes,
+        // please identify the client and your role in relation to the engagement."
+        // Rendered as FREE TEXT. User decision 2026-08-16: default "No" — this
+        // product's candidate has no such engagement history — and it sits in the
+        // review list for correction. Kept distinct from the "ever employed by
+        // PwC" screen, which asks for structured detail and is collected apart.
+        match: /worked with (a |an )?[a-z& ]{0,20}engagement team|engagement team as a client|as a client[^?]{0,30}engagement/i,
+        candidates: ['no', 'không'],
+    },
+    {
+        kind: 'prior_pwc_history',
+        // MEASURED on PwC Global_Campus (747959WD), verbatim: "Have you ever
+        // applied, interviewed, received an offer, or been employed with PwC or
+        // its predecessor firms? If yes, please provide firm name, estimated date,
+        // location, position, and name at time of application." FREE TEXT.
+        // Answer FROM THE CV: no PwC role in this candidate's history → No. When
+        // the CV DOES name PwC the rule YIELDS — that Yes case is exactly what a
+        // structured custom form (firm/date/location/position) is meant to collect
+        // (TODO), and it is not the agent's to invent. User decision 2026-08-16:
+        // answer No so the required field stops blocking the flow; the default
+        // sits in the review list for the candidate to correct before submitting.
+        match: /have you ever[^?]{0,40}(applied|interviewed)[^?]{0,80}(received an offer|been employed)/i,
+        fromCv: (cv) => {
+            if (!cv) return null;
+            const hay = JSON.stringify(cv.experience || []).toLowerCase();
+            return /pwc|pricewaterhouse/.test(hay) ? null : ['no', 'không'];
+        },
+        candidates: [],
+    },
+    {
         kind: 'conflict_of_interest',
         // "Are you related to a PwC partner, principal, or employee?" — measured
         // on PwC and NOT matched by the older wording, so a REQUIRED question
@@ -195,7 +246,11 @@ export const ANSWER_RULES = [
         // decision 2026-08-02): a VN candidate on a VN-located job IS
         // authorized. REVISIT for abroad jobs — there "yes" would be a
         // material misstatement.
-        match: /legally authoriz|legally entitled|right to work|work permit|authorized to work|được phép làm việc/i,
+        // British spelling is not optional here: PwC's Global_Campus form asks
+        // "Are you legally AUTHORISED to work…" and the American-only "authoriz"
+        // missed it, so a question whose answer is a product default (Yes) went
+        // out as a user gap. Match both spellings on both phrasings.
+        match: /legally author(iz|is)|legally entitled|right to work|work permit|author(iz|is)ed to work|được phép làm việc/i,
         profileKeys: ['workAuthorized'],
         candidates: ['yes', 'có'],
     },
@@ -237,6 +292,20 @@ export const ANSWER_RULES = [
         kind: 'recruitment_communication_consent',
         match: /consent to (receive|be contacted).{0,80}(communication|contact|email|sms)|receive communication.{0,60}(recruit|application|job|position|vacanc)/i,
         deny: /marketing|newsletter|promotion|advertis|third[- ]part(y|ies)|quảng cáo|tiếp thị/i,
+        candidates: ['yes', 'i agree', 'i consent', 'opt-in', 'opt in', 'đồng ý', 'có'],
+    },
+    {
+        // MEASURED on PwC Global_Campus (747959WD), verbatim: "I agree to have my
+        // personal data processed by PwC for the purpose of recruitment for OTHER
+        // positions than the one I have initially applied for." This is the
+        // talent-pool retention consent — OPTIONAL, and separate from the consent
+        // needed to apply. User decision 2026-08-16: opt IN (Yes), so the
+        // candidate is considered for other roles. Match REQUIRES the "other/
+        // future positions" scope, and the deny list keeps marketing/newsletter
+        // opt-ins out — this rule only ever answers a recruitment-retention box.
+        kind: 'talent_pool_consent',
+        match: /personal data (processed|retained|kept|stored).{0,80}(other|future|additional) (position|role|vacanc|opportunit)|recruitment for (other|future|additional)|talent (pool|community|network|bank)/i,
+        deny: /marketing|newsletter|promotion|advertis|quảng cáo|tiếp thị/i,
         candidates: ['yes', 'i agree', 'i consent', 'opt-in', 'opt in', 'đồng ý', 'có'],
     },
     {

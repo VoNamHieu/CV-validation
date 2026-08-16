@@ -66,6 +66,11 @@ describe('all six pages are recognised, and recognised while empty', () => {
         ['applyFlowAutoFillPage', 'AUTOFILL'],
         ['applyFlowMyExpPage', 'MY_EXPERIENCE'],
         ['applyFlowPrimaryQuestionsPage', 'APPLICATION_QUESTIONS'],
+        // "Application Questions 2 of 2" — PwC Global_Campus renders a SECOND
+        // questions page; only the primary id was listed, so page 2 fell to
+        // UNKNOWN and the legacy engine livelocked on it. The "QuestionsPage"
+        // suffix recognises both.
+        ['applyFlowSecondaryQuestionsPage', 'APPLICATION_QUESTIONS'],
         ['applyFlowVoluntaryDisclosuresPage', 'VOLUNTARY_DISCLOSURES'],
         ['applyFlowReviewPage', 'REVIEW'],
     ];

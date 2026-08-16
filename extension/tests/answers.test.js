@@ -337,3 +337,81 @@ describe('the certification RULE vs the certification SECTION', () => {
         assert.equal(resolveAnswer(q('Certifications'), options, {}, { certifications: [] }), null);
     });
 });
+
+// ── Questions measured on PwC Global_Campus / 747959WD (2026-08-16) ───────────
+// A SECOND PwC Workday site whose Application-Questions page uses British spelling
+// and renders several Big-4 independence declarations as FREE TEXT. Each wording
+// is verbatim from the page; every value is a user decision (2026-08-16) that
+// lands in the review list, never an invented fact. Live-validated: the page went
+// from 5 unanswerable questions to 1 (the custom-form deferral below).
+describe('PwC Global_Campus application questions', () => {
+    test('work authorization matches British "authorised" → Yes', () => {
+        // The American-only "authoriz" missed this, so a product-default question
+        // (a VN candidate on a VN job IS authorized) went out as a user gap.
+        const a = resolveAnswer(
+            q('Are you legally authorised to work in the Socialist Republic of Vietnam?'),
+            ['Yes', 'No'], { workAuthorized: '' });
+        assert.equal(a.value, 'Yes');
+        assert.equal(a.kind, 'work_authorization');
+    });
+
+    test('contractor / third-party-labour to the hirer → No, from the CV', () => {
+        const label = 'Are you currently working, or have you worked, as third party labor or an independent contractor to PwC?';
+        const a = resolveAnswer(q(label), ['Yes', 'No'], {}, { experience: [{ company: 'XGX' }] });
+        assert.equal(a.value, 'No');
+        assert.equal(a.kind, 'contractor_to_hirer');
+        assert.equal(a.source, ANSWER_SOURCE.AGENT_DEFAULT);
+    });
+
+    test('…and yields when the CV names a tie to the hiring firm', () => {
+        // Evidence of a PwC role is the candidate's to speak to — the rule steps
+        // aside rather than assert "No" over a fact the CV contradicts.
+        const label = 'Are you currently working, or have you worked, as third party labor or an independent contractor to PwC?';
+        assert.equal(resolveAnswer(q(label), ['Yes', 'No'], {}, { experience: [{ company: 'PwC Vietnam' }] }), null);
+    });
+
+    test('engagement-team-as-a-client, rendered as FREE TEXT → No', () => {
+        const label = 'Within the last 24 months, have you worked with a PwC engagement team as a client? If yes, please identify the client and your role in relation to the engagement.';
+        const a = resolveAnswer(q(label), [], {});
+        assert.equal(a.value, 'no');
+        assert.equal(a.kind, 'engagement_client_history');
+    });
+
+    test('related-to-a-partner rendered as FREE TEXT still answers No', () => {
+        // The bug this closes: the free-text branch never consulted the answer
+        // rules, so a declaration whose answer the policy holds fell straight
+        // through to a user gap. Options empty ⇒ resolveAnswer returns the default.
+        const label = 'Are you related to a PwC partner, principal, or employee? If yes, please provide his/her name and your relationship to the individual.';
+        const a = resolveAnswer(q(label), [], {});
+        assert.equal(a.value, 'no');
+        assert.equal(a.kind, 'conflict_of_interest');
+    });
+
+    test('talent-pool retention consent (OTHER positions) → Yes', () => {
+        const label = 'I agree to have my personal data processed by PwC for the purpose of recruitment for other positions than the one I have initially applied for. In the case you do not provide consent, your data will be deleted.';
+        const a = resolveAnswer(q(label), ['Yes', 'No'], {});
+        assert.equal(a.value, 'Yes');
+        assert.equal(a.kind, 'talent_pool_consent');
+        assert.equal(a.source, ANSWER_SOURCE.AGENT_DEFAULT);
+    });
+
+    test('a marketing-scoped data-retention line is denied, not opted in', () => {
+        // Same "keep my data for future roles" shape, but marketing scope — the
+        // deny list keeps it out so nobody is opted into promo processing to
+        // advance a form.
+        assert.equal(
+            resolveAnswer(q('I agree to have my personal data processed for future roles, and to receive marketing communication.'), ['Yes', 'No'], {}),
+            null);
+    });
+
+    test('the "ever applied / employed with PwC" screen is CV-derived — No, else custom form', () => {
+        // User decision 2026-08-16: answer No FROM THE CV so this required field
+        // stops blocking the flow. A PwC tie in the CV yields to a future custom
+        // form (firm/date/location/position), and no CV read answers nothing —
+        // the "If yes, provide detail" case is never invented.
+        const label = 'Have you ever applied, interviewed, received an offer, or been employed with PwC or its predecessor firms? If yes, please provide firm name, estimated date, location, position, and name at time of application.';
+        assert.equal(resolveAnswer(q(label), [], {}, { experience: [{ company: 'XGX' }] }).value, 'no');
+        assert.equal(resolveAnswer(q(label), [], {}, { experience: [{ company: 'PwC Vietnam' }] }), null, 'a PwC tie yields to the custom form');
+        assert.equal(resolveAnswer(q(label), [], {}, null), null, 'no CV read → not answered');
+    });
+});

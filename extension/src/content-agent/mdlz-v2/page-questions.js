@@ -93,16 +93,27 @@ async function answerQuestion(q, ctx) {
     const f = fingerprintOf(find, { name: q.id });
     const kind = f.kind;
 
-    // Text boxes: the two measured values, or nothing.
+    // Text boxes: a measured value (notice period, salary) first; failing that,
+    // the answer policy. A free-text field can still be a declaration the policy
+    // holds an answer for — "Are you related to a PwC partner? If yes…" is a No,
+    // typed into the box — and until now this branch never consulted the rules,
+    // so every such declaration fell straight through to a user gap. resolveAnswer
+    // yields a value only when a rule matches and names an unambiguous default
+    // (options empty ⇒ it returns that default); anything else stays a gap.
     if (kind === WIDGET.TEXT || kind === WIDGET.TEXTAREA) {
         const rule = TEXT_ANSWERS.find((r) => r.match.test(q.question));
-        if (!rule) return { result: RESULT.USER_REQUIRED, reason: 'no answer for this question', question: q.question };
-        let value = rule.value(ctx.profile);
-        if (rule.money) {
-            value = moneyFor(value, find(), f.controls().text);
-            if (!value) return { result: RESULT.USER_REQUIRED, reason: 'no numeric salary to write', question: q.question };
+        if (rule) {
+            let value = rule.value(ctx.profile);
+            if (rule.money) {
+                value = moneyFor(value, find(), f.controls().text);
+                if (!value) return { result: RESULT.USER_REQUIRED, reason: 'no numeric salary to write', question: q.question };
+            }
+            return runField(f, value, ctx);
         }
-        return runField(f, value, ctx);
+        const answer = resolveAnswer({ questionText: q.question }, [], ctx.profile, ctx.cv);
+        if (!answer) return { result: RESULT.USER_REQUIRED, reason: 'no answer for this question', question: q.question };
+        const r = await runField(f, answer.value, ctx);
+        return { ...r, answer };
     }
 
     // Radios: the options are already on the page, so the answer can be
@@ -238,6 +249,19 @@ export async function runQuestionsPage(ctx = {}) {
     if (quiet && !ledger.halted && ctx.advance !== false) {
         navigation = await advance({ sleep: ctx.sleep, verifyComplete: () => questionsComplete(ledger, gaps) });
     }
+
+    // Per-gap diagnostics — the WHOLE question and the options the page really
+    // offered, untruncated. A gap is either "no rule for this text" or "a rule
+    // matched but none of its answers is on the list"; only the verbatim wording
+    // and the real option set tell the two apart, and that is exactly what a new
+    // answer rule has to be written against. The summary line above stays a
+    // 30-char digest; this is the ground truth beneath it.
+    gaps.forEach((g, i) => trace('mdlz.questions.gap', {
+        n: i + 1,
+        q: g.question,
+        opts: (g.options || []).join(' | ') || '(free-text / no list)',
+        why: g.why || '',
+    }));
 
     trace('mdlz.questions.pass', {
         answered: done.length,

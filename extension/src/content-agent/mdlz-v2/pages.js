@@ -227,5 +227,19 @@ export async function observePageState(ctx = {}) {
     trace('mdlz.page', {
         page: state.page, state: state.state, fields: state.fields, owner: state.owner,
     });
+    // When we cannot name the page, record the container ids that WOULD name it —
+    // the only measurement that lets a real id be added to STEP_SIGNALS instead of
+    // guessed. Cheap, UNKNOWN-only, and the reason a page falling to the legacy
+    // engine is now diagnosable from the trace alone.
+    if (state.page === PAGE.UNKNOWN) {
+        let ids = [];
+        try {
+            ids = [...new Set([...document.querySelectorAll('[data-automation-id]')]
+                .filter(vis)
+                .map((el) => el.getAttribute('data-automation-id'))
+                .filter((id) => id && /applyFlow|Page$|Questionnaire|Questions/i.test(id)))].slice(0, 12);
+        } catch { /* no DOM */ }
+        trace('mdlz.page.unknownIds', { ids: ids.join(' | ') || '(none)' });
+    }
     return state;
 }
