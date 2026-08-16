@@ -1631,6 +1631,73 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return true;
     }
 
+    // ── Single-select fiber write, MAIN world (fieldOfStudy) ──
+    //
+    // The twin of SKILL_FIBER_WRITE for a SINGLE-select chip-search: the content
+    // script is isolated-world and never sees `__reactFiber$`, so a searchSelect
+    // field whose exact row will not paint (measured PwC "Marketing", below the
+    // virtualised window) can only be committed from the MAIN world here. Unlike
+    // Skills it REPLACES the value (onSelect([one]) — a single-select holds one
+    // chip), and it targets the field by its automation id, since more than one
+    // chip-search lives on the page.
+    if (message.type === 'SELECT_FIBER_WRITE') {
+        const tid = sender.tab && sender.tab.id;
+        const label = String(message.label ?? '');
+        const id = String(message.id ?? label);
+        const aid = String(message.field ?? '');
+        if (tid == null || !label || !aid) { sendResponse({ ok: false, error: 'no tab, label, or field' }); return true; }
+        chrome.scripting.executeScript({
+            target: { tabId: tid },
+            world: 'MAIN',
+            func: async (fieldId, lbl) => {
+                const norm = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+                const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+                try {
+                    const field = document.querySelector(`[data-automation-id="${fieldId}"]`);
+                    if (!field) return { ok: false, error: 'no field' };
+                    const has = () => [...(field.querySelectorAll('[data-automation-id="selectedItem"]') || [])]
+                        .some((c) => norm(c.textContent) === norm(lbl));
+                    if (has()) return { ok: true, landed: true, already: true };
+                    // Find the REAL field-of-study item in the open list's fiber (the
+                    // main world sees __reactFiber$). Its own onSelect carries the
+                    // widget's real instance id — the id passed from the isolated-
+                    // world content script came from the SKILLS search API and is
+                    // wrong for this field ("Invalid id for field" on Save). Calling
+                    // the item's own onSelect([item]) sidesteps the id entirely.
+                    let item = null;
+                    const lists = [...document.querySelectorAll('[data-automation-id="activeListContainer"]')];
+                    for (const L of lists) {
+                        const k = Object.keys(L).find((x) => x.startsWith('__reactFiber$'));
+                        if (!k) continue;
+                        let f = L[k];
+                        for (let i = 0; i < 25 && f && !item; i++, f = f.return) {
+                            const items = f.memoizedProps && f.memoizedProps.items;
+                            if (Array.isArray(items)) {
+                                const hit = items.find((it) => typeof it?.onSelect === 'function'
+                                    && norm(it.label ?? it.ariaLabel) === norm(lbl));
+                                if (hit) item = hit;
+                            }
+                        }
+                        if (item) break;
+                    }
+                    if (!item) return { ok: false, error: 'item not found in list' };
+                    item.onSelect([item]);   // the item's own handler, its own real id
+                    for (let i = 0; i < 6; i++) {
+                        await sleep(400);
+                        if (has()) return { ok: true, landed: true };
+                    }
+                    return { ok: true, landed: false };
+                } catch (e) { return { ok: false, error: String((e && e.message) || e).slice(0, 120) }; }
+            },
+            args: [aid, label],
+        }).then((results) => {
+            sendResponse(results && results[0] && results[0].result ? results[0].result : { ok: false, error: 'no result' });
+        }).catch((e) => {
+            try { sendResponse({ ok: false, error: String(e && e.message || e).slice(0, 120) }); } catch { /* tab gone */ }
+        });
+        return true;
+    }
+
     // ── Bring the driven tab's window forward (only the driven tab is obeyed) ──
     if (message.type === 'FOCUS_RUN_TAB') {
         const tid = sender.tab && sender.tab.id;

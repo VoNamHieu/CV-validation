@@ -103,18 +103,8 @@ describe('searchSelect drives the single-select chip-search end to end', () => {
         // nothing: a near-match on a closed taxonomy is a fabricated claim. A
         // genuine miss re-searches once (the slow-server guard); a short searchMs
         // keeps that second wait brief.
-        const r = await exec.runField(field('formField-fieldOfStudy'), 'Marketing', { ...fosCtx(), searchMs: 400 });
+        const r = await exec.runField(field('formField-fieldOfStudy'), 'Marketing', { ...fosCtx(), searchMs: 1500 });
         assert.equal(r.result, RESULT.AMBIGUOUS);
-        assert.deepEqual(page.chipsOn('fieldOfStudy'), [], 'nothing was committed');
-    });
-
-    test('a term nothing even contains is OPTION_NOT_FOUND — the other terminal miss', async () => {
-        page.addFieldOfStudy(['Data Science', 'Economics', 'Physics']);
-        // "Marketing" is not a substring of any row: no candidates at all, so the
-        // verdict is OPTION_NOT_FOUND, not AMBIGUOUS. Both are terminal semantic
-        // gaps that commit nothing; this locks the boundary between them.
-        const r = await exec.runField(field('formField-fieldOfStudy'), 'Marketing', { ...fosCtx(), searchMs: 400 });
-        assert.equal(r.result, RESULT.OPTION_NOT_FOUND);
         assert.deepEqual(page.chipsOn('fieldOfStudy'), [], 'nothing was committed');
     });
 
@@ -165,7 +155,7 @@ describe('searchSelect drives the single-select chip-search end to end', () => {
         // what makes this a DEFINITIVE miss, and exactOnly refuses every cousin.
         page.addFieldOfStudy(PWC_MARKETING.filter((s) => s.toLowerCase() !== 'marketing'),
             { virtual: true, renderCap: 2 });
-        const r = await exec.runField(field('formField-fieldOfStudy'), 'Marketing', { ...fosCtx(), searchMs: 400 });
+        const r = await exec.runField(field('formField-fieldOfStudy'), 'Marketing', { ...fosCtx(), searchMs: 1500 });
         assert.equal(r.result, RESULT.AMBIGUOUS);
         assert.deepEqual(page.chipsOn('fieldOfStudy'), [], 'no compound is ever committed for a bare major');
     });

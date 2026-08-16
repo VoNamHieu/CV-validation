@@ -98,7 +98,10 @@ export function chooseOption(options, want) {
     // tried/shown/sample for exactly this; this returns the same.
     const evidence = { want: String(want ?? ''), shown: all.length, sample: all.slice(0, 4).map((r) => r.text) };
     if (!w) return { option: null, why: RESULT.OPTION_NOT_FOUND, ...evidence };
-    const exact = rows.filter((r) => fold(r.text) === w);
+    // sameConcept, not fold-equal: the shared exact predicate — widened only by
+    // the accidents fold/foldTokens erase (case, spacing, punctuation, word
+    // order), never a near-match. The `includes` tier below stays the near tier.
+    const exact = rows.filter((r) => sameConcept(r.text, want));
     if (exact.length) return { option: exact[0].node, matched: exact[0].text };
     const partial = rows.filter((r) => fold(r.text).includes(w));
     const distinct = [...new Set(partial.map((r) => fold(r.text)))];
@@ -123,8 +126,13 @@ export function chooseFromLadder(options, ladder) {
         .filter((r) => r.text && !NOT_A_CHOICE.test(r.text));
     for (const raw of ladder) {
         const anchored = raw.startsWith('=');
-        const cand = fold(anchored ? raw.slice(1) : raw);
-        const hit = rows.find((r) => fold(r.text) === cand)
+        const term = anchored ? raw.slice(1) : raw;
+        const cand = fold(term);
+        // Exact tier is the shared sameConcept (so "=BA" also meets "B.A.", and a
+        // reordered ladder label meets its option); the prefix/substring fallback
+        // stays exactly as measured — anchored rungs by prefix, others by
+        // substring ("=Other" never claims "Another job board").
+        const hit = rows.find((r) => sameConcept(r.text, term))
             || rows.find((r) => (anchored ? fold(r.text).startsWith(cand) : fold(r.text).includes(cand)));
         if (hit) return { option: hit.node, matched: hit.text, rung: raw };
     }
@@ -216,6 +224,59 @@ export function readVirtualItems(sc) {
     return null;
 }
 
+/**
+ * The list's item array read the way the manual probe that committed live did:
+ * the CURRENT `memoizedProps.items` of the REAL activeListContainer, whose items
+ * carry a callable onSelect.
+ *
+ * readVirtualItems scans props AND memoizedState AND the `alternate` fiber (the
+ * previous render) for ANY labelled array, and can hand back a STALE one whose
+ * onSelect no longer commits — measured live PwC 2026-08-15: readVirtualItems
+ * found an array so pickAcrossList reached its items branch, yet the write never
+ * landed. This returns ONLY the live props.items whose first item has a callable
+ * onSelect, so the data write is on the array the widget is actually rendering.
+ * Best effort: null when the widget is shaped differently, and the caller falls
+ * back to readVirtualItems / the DOM path.
+ */
+export function findFiberWriteItem(want) {
+    const out = { item: null, containers: 0, arraysWithWrite: 0, exactHits: 0 };
+    try {
+        if (typeof document === 'undefined') return out;
+        // ALL open list containers, not the first — a leftover skills list can
+        // sit ahead of the field's own (measured live PwC 2026-08-15: the first
+        // activeListContainer led to an array whose items carried NO onSelect,
+        // while the field's own array, further along, had the write-able ones).
+        const containers = [...document.querySelectorAll('[data-automation-id="activeListContainer"], [role="listbox"]')]
+            .filter((el) => el.offsetParent !== null);
+        out.containers = containers.length;
+        const seen = new Set();
+        const hits = [];
+        for (const L of containers) {
+            const key = Object.keys(L).find((k) => /^__reactFiber\$|^__reactInternalInstance\$/.test(k));
+            if (!key) continue;
+            let node = L[key];
+            for (let h = 0; node && h < 25; h++, node = node.return) {
+                const arr = node.memoizedProps && node.memoizedProps.items;
+                if (Array.isArray(arr) && arr.length && arr.some((it) => typeof it?.onSelect === 'function')) {
+                    out.arraysWithWrite += 1;
+                    for (const it of arr) {
+                        if (typeof it?.onSelect !== 'function') continue;
+                        if (!sameConcept(String(it?.label ?? it?.ariaLabel ?? ''), want)) continue;
+                        const lbl = fold(String(it?.label ?? it?.ariaLabel ?? ''));
+                        if (!seen.has(lbl)) { seen.add(lbl); hits.push(it); }
+                    }
+                    break;   // this container's array handled
+                }
+            }
+        }
+        out.exactHits = hits.length;
+        // Exactly one write-able exact match, or nothing: a twin or an ambiguous
+        // set is never written sight-unseen.
+        out.item = hits.length === 1 ? hits[0] : null;
+    } catch { /* internals moved */ }
+    return out;
+}
+
 /** Uniform row height, from the absolute offsets the virtualiser writes. */
 function virtualRowHeight(sc) {
     const inner = sc?.firstElementChild;
@@ -271,6 +332,13 @@ export function chooseSkillTarget(items, want) {
     // `match` is carried so a caller reading a PARTIAL list can tell the one
     // answer a longer list cannot overturn (an exact hit) from the two it can (a
     // create row a later exact catalog would beat; a near-match either would).
+    // DELIBERATELY fold-strict, NOT sameConcept — the one exact tier the shared
+    // widening is kept out of. Skills prefer the candidate's VERBATIM words (the
+    // create row below) over any catalogue transform; sameConcept would let a
+    // reordered catalogue row ("Analysis Data") count as exact and beat the CV's
+    // own "Data Analysis" create row, silently rewording a skill recruiters
+    // filter by. The create-row rule is the whole reason skills differ, so their
+    // exact stays the strictest.
     const exact = catalog.filter((r) => fold(r.label) === w);
     if (exact.length) return { kind: 'catalog', match: 'exact', ...exact[0] };
     // The candidate's verbatim text beats a substring cousin: "Agile" must not
@@ -301,6 +369,11 @@ export function chooseSkillTarget(items, want) {
 function pickLabel(labels, want, { exactOnly = false } = {}) {
     const w = fold(want);
     if (!w) return null;
+    // fold-strict on purpose: pickLabel backs pickAcrossList, which drives SKILLS
+    // as well as the field-of-study fallback, so it keeps the same verbatim-first
+    // rule chooseSkillTarget does — the shared sameConcept widening lives in the
+    // callers that are NOT skills (chooseOption, chooseFromLadder, radio, and
+    // searchSelect's own fiber path).
     const exact = labels.filter((l) => fold(l) === w);
     if (exact.length) return exact[0];
     if (exactOnly) return null;
@@ -570,7 +643,10 @@ async function pickAcrossList(lease, want, { sleep, maxWindows = 24, exactOnly =
         }
         // Unrendered or same-text twins: no DOM node can be trusted to BE the
         // chosen item, so no DOM node is clicked. OPEN_TIMEOUT (interaction,
-        // retryable) with `chose` attached hands it to the data-write rescue.
+        // retryable) with `chose` {label,id} attached — the single-select rescue
+        // (searchSelect) writes it through the multiselect's PARENT onSelect,
+        // which is attached even in a hidden popup (readSkillsOnSelect), unlike a
+        // per-item onSelect that the throttled tab never binds.
         return {
             option: null, why: RESULT.OPEN_TIMEOUT, chose,
             want: String(want ?? ''), via: 'items', itemsLen: items.length, declared,
@@ -1398,11 +1474,63 @@ const searchSelect = {
      * fabricated claim ("Marketing" must never commit as "Marketing Management").
      */
     async fiberCommit(f, term, ctx = {}) {
-        let listNode = null;
-        try { listNode = (visibleOptions()[0] && visibleOptions()[0].closest(SEL.listContainer)) || document.querySelector(SEL.listContainer); }
-        catch { listNode = null; }
-        const items = listNode ? readVirtualItems(listNode) : null;
-        if (!Array.isArray(items) || !items.length) return { avail: false };
+        // Read the item array off the fiber, trying the SAME anchor nodes
+        // pickAcrossList trusts — the scroller first (the node the live widget
+        // actually hangs its items on), then the list container and the first
+        // option. `closest(listContainer)` alone MISSED it in a throttled popup
+        // (measured live PwC 2026-08-15: pickAcrossList found the items from the
+        // scroller and the exact "Marketing", but fiberCommit read null from the
+        // container and fell through to the DOM path that cannot paint the row).
+        // The PRECISE read — a faithful copy of the manual probe that committed
+        // "Marketing" live (2026-08-15): climb from the REAL activeListContainer
+        // and take `memoizedProps.items` of the CURRENT fiber ONLY, never
+        // memoizedState and never `alternate` (the previous render's fiber, whose
+        // item objects carry a STALE onSelect that no longer commits). The item
+        // MUST carry a callable onSelect — that is the array whose write works.
+        const preciseItems = () => {
+            let L = null;
+            try { L = document.querySelector('[data-automation-id="activeListContainer"]'); } catch { L = null; }
+            if (!L) return null;
+            const key = Object.keys(L).find((k) => /^__reactFiber\$|^__reactInternalInstance\$/.test(k));
+            if (!key) return null;
+            let node = L[key];
+            for (let h = 0; node && h < 25; h++, node = node.return) {
+                const it = node.memoizedProps && node.memoizedProps.items;
+                if (Array.isArray(it) && it.length && it[0]
+                    && ('label' in it[0] || 'ariaLabel' in it[0]) && typeof it[0].onSelect === 'function') return it;
+            }
+            return null;
+        };
+        // The precise read first (its items commit); readVirtualItems is the
+        // fallback for a tenant whose list is shaped differently.
+        const readItems = () => {
+            const precise = preciseItems();
+            if (precise) return precise;
+            let opt = null;
+            try { opt = visibleOptions()[0] || null; } catch { opt = null; }
+            const anchors = [];
+            try { if (opt) anchors.push(optionScroller(opt)); } catch { /* no layout */ }
+            try { if (opt) anchors.push(opt.closest(SEL.listContainer)); } catch { /* gone */ }
+            try { anchors.push(document.querySelector(SEL.listContainer)); } catch { /* gone */ }
+            if (opt) anchors.push(opt);
+            for (const n of anchors) {
+                if (!n) continue;
+                const got = readVirtualItems(n);
+                if (Array.isArray(got) && got.length) return got;
+            }
+            return null;
+        };
+        // WAIT for the item array, do not read once. MEASURED live (PwC popup,
+        // 2026-08-15): a single read returned null while pickAcrossList — which
+        // polls the same fiber — found the items a beat later; a throttled popup
+        // populates props.items after the DOM options settle. So poll it, the way
+        // pickAcrossList does, before concluding the fiber is unreadable.
+        let items = null;
+        await until(() => { items = readItems(); return !!items; }, { sleep: ctx.sleep, budgetMs: ctx.searchMs || 6000 });
+        if (!Array.isArray(items) || !items.length) {
+            trace('mdlz.select.fiber', { field: f.name, term, avail: false });
+            return { avail: false };
+        }
         const labelOf = (it) => String(it?.label ?? it?.ariaLabel ?? '').trim();
         // sameConcept, not fold-equal: a closed catalogue that lists "Management
         // and Marketing" answers a CV's "Marketing and Management" — same words,
@@ -1410,10 +1538,16 @@ const searchSelect = {
         // reaches a narrower cousin ("Marketing" ≠ "Digital Marketing"), so a
         // real gap still escalates. See text.js/sameConcept.
         const exact = items.find((it) => labelOf(it) && sameConcept(labelOf(it), term));
-        if (exact && typeof exact.onSelect === 'function') {
+        const canWrite = exact && typeof exact.onSelect === 'function';
+        trace('mdlz.select.fiber', { field: f.name, term, avail: true, itemsLen: items.length, exact: !!exact, onSelect: !!canWrite });
+        if (exact) {
+            if (!canWrite) return { avail: true, exact: true, committed: false };   // no handle → let the DOM path try
             try { exact.onSelect([exact]); }
-            catch { return { avail: true, exact: true, committed: false }; }
-            const ok = await until(() => this.satisfied(f, term), { sleep: ctx.sleep, budgetMs: ctx.commitMs || 1500 });
+            catch (e) { trace('mdlz.select.fiber', { field: f.name, term, writeError: String(e).slice(0, 60) }); return { avail: true, exact: true, committed: false }; }
+            // A throttled popup can be slow to reflect the chip, so this waits
+            // longer than a plain commit — the write itself is not paint-bound.
+            const ok = await until(() => this.satisfied(f, term), { sleep: ctx.sleep, budgetMs: ctx.commitMs || 2500 });
+            trace('mdlz.select.fiber', { field: f.name, term, wrote: true, committed: ok });
             return { avail: true, exact: true, committed: ok };
         }
         return { avail: true, exact: false, items: items.map(labelOf).filter(Boolean) };
@@ -1514,11 +1648,61 @@ const searchSelect = {
                 // path below as a last resort.
             }
 
-            // FALLBACK — the fiber list was unreadable (a tenant whose widget does
-            // not expose props.items). Find the exact row via pickAcrossList and
-            // click a live node. exactOnly: same closed-taxonomy rule as above.
+            // FALLBACK — find the exact row via pickAcrossList. Its row will NOT
+            // render to be clicked (measured live PwC "Marketing", below-window,
+            // never paints), so commit `chose` {label,id} through the multiselect's
+            // PARENT onSelect. That handler is bound even in a HIDDEN popup
+            // (readSkillsOnSelect, the same write Skills use); the PER-ITEM
+            // onSelect a visible tab exposes is NOT bound while throttled (measured
+            // live: arraysWithWrite:0, hidden:true), which is why the item write
+            // failed every attempt. exactOnly: sameConcept vs the term, never a
+            // cousin — the chip is re-read after as the one commit signal.
+            const writeChose = async (p) => {
+                if (!(p && !p.option && p.chose && sameConcept(p.chose.label, term))) return null;
+                const value = { label: p.chose.label, id: p.chose.id };
+                let via = 'none';
+                let stateLanded = false;
+                // DIRECT (same-world) — works only if THIS context can see the
+                // fiber. The content script is isolated-world and cannot, so this
+                // succeeds in a test/main-world context and the bridge carries the
+                // live agent, exactly as Skills' fiberRescue does.
+                const props = readSkillsOnSelect(triggerOf(f));
+                if (props && typeof props.onSelect === 'function') {
+                    try { props.onSelect([value]); via = 'direct'; stateLanded = true; } catch { /* fall to bridge */ }
+                }
+                if (via === 'none' && typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+                    try {
+                        const resp = await new Promise((resolve) => {
+                            const t = setTimeout(() => resolve(null), 8000);
+                            chrome.runtime.sendMessage(
+                                { type: 'SELECT_FIBER_WRITE', field: f.name, label: value.label, id: value.id },
+                                (r) => { void chrome.runtime.lastError; clearTimeout(t); resolve(r); },
+                            );
+                        });
+                        via = 'bridge';
+                        stateLanded = !!(resp && resp.ok);
+                    } catch { /* no extension context */ }
+                }
+                if (via === 'none') return null;
+                const wrote = await until(() => this.satisfied(f, term), { sleep: ctx.sleep, budgetMs: ctx.commitMs || 4000 });
+                trace('mdlz.select.parent-commit', { field: f.name, term, via, stateLanded, committed: wrote });
+                // The STATE commit is the truth a throttled tab hides from the DOM:
+                // when the write took but the chip has not painted, it is still
+                // COMMITTED (it persists to Save) — the same rule Skills' fiber
+                // write follows.
+                return (wrote || stateLanded) ? { result: RESULT.COMMITTED } : null;
+            };
             let pick = await pickAcrossList(lease, term, { sleep: ctx.sleep, exactOnly: true });
-            if (!pick.option && pick.why !== RESULT.AMBIGUOUS) {
+            // The rescue runs on the FIRST read's chose, BEFORE any re-search: an
+            // exact chose from a complete read has nothing to gain from a
+            // re-search, and re-searching first rebuilt the list and lost it
+            // (measured PwC run 13:12). The re-search guard is for a possibly-stale
+            // MISS, not a hit.
+            {
+                const wrote = await writeChose(pick);
+                if (wrote) return wrote;
+            }
+            if (!pick.option && !pick.chose && pick.why !== RESULT.AMBIGUOUS) {
                 pressEnter(trigger);
                 const again = await raceCommitOrResults(ctx.searchMs || 6000, outcome.settled);
                 if (again.committed) {
@@ -1526,6 +1710,8 @@ const searchSelect = {
                     return { result: RESULT.COMMITTED };
                 }
                 pick = await pickAcrossList(lease, term, { sleep: ctx.sleep, exactOnly: true });
+                const wrote = await writeChose(pick);
+                if (wrote) return wrote;
             }
             if (!pick.option) {
                 return { result: pick.why || RESULT.OPTION_NOT_FOUND, reason: pick.reason || 'no exact row', sample: pick.sample, saw: pick.saw };
@@ -1714,7 +1900,9 @@ const radio = {
     pick(f, want) {
         const rows = this.options(f);
         const w = fold(want);
-        const exact = rows.filter((r) => fold(r.text) === w);
+        // Shared exact predicate (sameConcept); the single-substring fallback is
+        // unchanged.
+        const exact = rows.filter((r) => sameConcept(r.text, want));
         if (exact.length === 1) return exact[0];
         const loose = rows.filter((r) => fold(r.text).includes(w));
         return loose.length === 1 ? loose[0] : null;
