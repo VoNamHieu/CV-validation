@@ -409,6 +409,18 @@ async def list_for_facet(*, limit: int = 500) -> list[dict]:
     return rows_to_dicts(rows)
 
 
+async def active_external_ids(company_id: str) -> list[str]:
+    """The company's currently-active job identities — read BEFORE an ingest
+    upserts, so the caller can diff the incoming feed against what stood and
+    spot a wholesale identity turnover (site changed its detail-URL scheme)."""
+    if not company_id:
+        return []
+    pool = await get_pool()
+    rows = await pool.fetch(
+        "SELECT external_id FROM jobs WHERE company_id = $1 AND is_active", company_id)
+    return [r["external_id"] for r in rows]
+
+
 async def deactivate_missing(company_id: str, live_external_ids: Sequence[str]) -> int:
     """ATS diff (v1 liveness): mark a company's active jobs dead when they're no
     longer in its current feed. Returns rows deactivated.

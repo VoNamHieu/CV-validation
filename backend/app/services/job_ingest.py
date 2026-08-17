@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from typing import Sequence
 from urllib.parse import urljoin, urlparse
 
 logger = logging.getLogger(__name__)
@@ -289,6 +290,13 @@ _HEAL_JITTER_S = (0.4, 1.8)
 _HEAL_ANTIBOT_MAX_STREAK = 2
 
 
+def _identity_turnover(prev_active: set, live_ids: Sequence[str]) -> bool:
+    """True when a healthy-size feed shares ZERO identities with what stood —
+    the "site changed its detail-URL scheme" signature (GHN: ObjectId → slug).
+    Small sets stay quiet: a 2-job feed replacing 3 jobs is churn, not drift."""
+    return len(prev_active) >= 5 and len(live_ids) >= 5 and not prev_active & set(live_ids)
+
+
 async def _upsert_company_jobs(c, jobs_list: list[dict]) -> dict | None:
     """Shared upsert path for BOTH phases: classify, upsert company + jobs,
     deactivate postings no longer in the feed. Returns None on total failure
@@ -318,6 +326,13 @@ async def _upsert_company_jobs(c, jobs_list: list[dict]) -> dict | None:
         logger.warning("ingest: company upsert failed for %s: %s", c.name, e)
         return None
     cid = company.get("id")
+
+    # Snapshot the identities that stood BEFORE this run's upserts, so the
+    # fresh feed can be diffed against them for the drift detector below.
+    try:
+        prev_active = set(await jobs_repo.active_external_ids(cid))
+    except Exception:  # noqa: BLE001 — detector input only, never block ingest
+        prev_active = set()
 
     n = 0
     live_ids: list[str] = []
@@ -352,6 +367,21 @@ async def _upsert_company_jobs(c, jobs_list: list[dict]) -> dict | None:
             logger.info("ingest: job upsert failed (%s): %s", url, str(e)[:80])
     if not n:
         return None
+    # Drift detector: a healthy-size feed that overlaps ZERO with what stood
+    # means every job got a new identity — the GHN class (detail URLs moved
+    # ObjectId → slug), not N simultaneous closures. Alert the operator: the
+    # anti-flap guard in deactivate_missing will (correctly) refuse to prune,
+    # so without a human the stale rows would sit broken-but-active forever.
+    if _identity_turnover(prev_active, live_ids):
+        from app.services import ops_alert
+        await ops_alert.alert(
+            "url_scheme_changed", c.name,
+            f"Feed trả {len(live_ids)} job nhưng không job nào trùng định danh với "
+            f"{len(prev_active)} job đang active — khả năng site đổi format URL chi tiết. "
+            f"Cần map URL cũ→mới hoặc deactivate tay (anti-flap chặn prune tự động).",
+            context={"live": len(live_ids), "prev_active": len(prev_active),
+                     "career_url": c.career_url},
+        )
     # v1 liveness diff: postings this company had but that are NO LONGER in
     # the feed are dead → deactivate so search stops showing them. Safe: only
     # runs when the feed returned jobs (empty feed skipped above).
