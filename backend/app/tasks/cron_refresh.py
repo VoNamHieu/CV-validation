@@ -82,6 +82,38 @@ def _mostly_broken(checked: int, broken: int) -> bool:
     return (checked >= 3 and broken == checked) or (checked >= 5 and broken / checked >= 0.6)
 
 
+async def _diagnose_feed_death(career_url: str) -> str:
+    """One cheap probe → the root-cause class for a feed_died alert, from the
+    taxonomy every dead feed so far has fallen into: site unreachable,
+    anti-bot wall, whole-site migration (host redirect), dead endpoint, or
+    "page alive → API/adapter drift or genuinely 0 VN openings" (DSV/Ogilvy)."""
+    import httpx
+    from urllib.parse import urlparse
+
+    def _host(u: str) -> str:
+        return (urlparse(u).netloc or "").lower().removeprefix("www.")
+
+    try:
+        async with httpx.AsyncClient(timeout=10, follow_redirects=True,
+                                     headers={"User-Agent": _DRIFT_UA}) as client:
+            r = await client.get(career_url)
+    except Exception as e:  # noqa: BLE001
+        return (f"career_url không truy cập được ({type(e).__name__}) — "
+                f"site chết hoặc chặn IP tầng mạng")
+    low = (r.text or "")[:20000].lower()
+    if r.status_code in (403, 429) or "just a moment" in low or "cf-browser-verification" in low:
+        return (f"HTTP {r.status_code} + dấu hiệu anti-bot — chặn scanner/IP "
+                f"(link có thể vẫn sống với người dùng); thử /debug/fetch từ IP VN")
+    final = _host(str(r.url))
+    if final and final != _host(career_url):
+        return (f"career_url redirect sang host khác: {final} — site đã migrate, "
+                f"cần cập nhật career_url + adapter (bài Ahamove)")
+    if r.status_code >= 400:
+        return f"HTTP {r.status_code} — endpoint chết, site có thể đổi cấu trúc URL"
+    return ("trang career vẫn sống (200, cùng host) — hoặc API/adapter lệch "
+            "(đổi format, bài GHN) hoặc công ty hết job VN thật (bài DSV)")
+
+
 async def _career_url_drift() -> dict:
     """Detect featured career_url pages that now redirect to a DIFFERENT host —
     the "whole site migrated" class (Ahamove: ahamove.com/recruitment →
@@ -262,8 +294,10 @@ async def _run() -> None:
                               f"compat = needs_capture → nghi bị chặn IP từ Railway, "
                               f"chưa chắc site đổi URL. Thử /debug/fetch từ IP VN trước.")
                 else:
+                    cause = await _diagnose_feed_death(e.get("career_url") or "")
                     detail = (f"Feed rỗng {s['fail_streak']} chu kỳ liên tiếp "
-                              f"(baseline {s['baseline']} job) — khả năng site đổi URL/API. "
+                              f"(baseline {s['baseline']} job).\n"
+                              f"Chẩn đoán: {cause}\n"
                               f"career_url: {e.get('career_url')}")
                 await ops_alert.alert("feed_died", e.get("name") or "?", detail,
                                       context={**e, **s})

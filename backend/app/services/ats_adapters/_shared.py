@@ -93,12 +93,26 @@ def _norm_title(s: str) -> str:
     return s.replace("đ", "d").replace("Đ", "D").lower().strip()
 
 
+# Descriptions: real inline JDs top out ~13.5k chars across the whole store
+# (measured 2026-08-17), so 20k is a pure safety net — it only ever cuts a
+# page-dump accident (nav soup, a whole SPA shell), never a real JD.
+_MAX_DESC_CHARS = 20_000
+
+
+def _clean_desc(desc: str) -> str:
+    """Normalize an adapter-supplied description: collapse the whitespace runs
+    _strip_html leaves behind, then cap at the safety bound."""
+    desc = re.sub(r"[ \t]*\n(?:[ \t]*\n)+[ \t]*", "\n\n", desc)
+    desc = re.sub(r"[ \t]{2,}", " ", desc).strip()
+    return desc[:_MAX_DESC_CHARS]
+
+
 def _finalize(jobs: list[dict]) -> list[dict]:
     """Single exit gate for every adapter: keep title+url rows, drop nav/section
-    labels and date-range rows, dedup by url then by (title, location), cap per
-    company. Location is part of the title key because big employers (banks,
-    retail, logistics) legitimately post the SAME title per city — those are
-    distinct jobs, not duplicates."""
+    labels and date-range rows, normalize/cap descriptions, dedup by url then by
+    (title, location), cap per company. Location is part of the title key
+    because big employers (banks, retail, logistics) legitimately post the SAME
+    title per city — those are distinct jobs, not duplicates."""
     out, seen_url, seen_title = [], set(), set()
     for j in jobs:
         title = (j.get("title") or "").strip()
@@ -120,6 +134,8 @@ def _finalize(jobs: list[dict]) -> list[dict]:
             continue
         seen_url.add(url)
         seen_title.add(tkey)
+        if j.get("description"):
+            j["description"] = _clean_desc(j["description"])
         out.append(j)
         if len(out) >= _MAX_ATS_JOBS:
             break
@@ -130,5 +146,5 @@ __all__ = [
     "logger", "_html", "os", "re", "requests", "urljoin", "urlparse", "parse_qsl",
     "_TIMEOUT", "_MAX_ATS_JOBS", "_HEADERS", "_get_json", "_strip_html",
     "_HTML_HEADERS", "_JSON_POST", "_VN_MARKERS", "_WD_RX", "_is_vn_loc",
-    "_BAD_TITLES", "_norm_title", "_finalize",
+    "_BAD_TITLES", "_norm_title", "_finalize", "_clean_desc", "_MAX_DESC_CHARS",
 ]

@@ -42,3 +42,14 @@ def test_finalize_keeps_fragment_routed_spa_and_anchored_detail():
         {"title": "CS KShip Hà Nội", "url": "https://about.kiotviet.vn/jobs/customer-service-kship-ha-noi/#apply-form", "location": "Hà Nội"},
     ]
     assert len(_finalize(jobs)) == 2
+
+
+def test_finalize_normalizes_and_caps_description():
+    from app.services.ats_adapters._shared import _MAX_DESC_CHARS
+    jobs = [{"title": "Data Engineer", "url": "https://x.com/j/1", "location": "HN",
+             "description": "Mô tả  công việc\n\n\n\n   \n\nYêu cầu:   3 năm" + "x" * 30000}]
+    out = _finalize(jobs)
+    d = out[0]["description"]
+    assert "\n\n\n" not in d and "  " not in d.split("\n")[0]
+    assert d.startswith("Mô tả công việc\n\nYêu cầu: 3 năm")
+    assert len(d) == _MAX_DESC_CHARS

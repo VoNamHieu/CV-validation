@@ -206,6 +206,9 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Ogilvy",
         homepage="https://www.ogilvy.com",
+        # The vanity board page 302s to ogilvy.com/work-with-us, but the
+        # Greenhouse tenant is ALIVE — the adapter reads boards-api directly
+        # (verified 2026-08-17: 133 jobs, 0 VN). Don't "fix" this URL.
         career_url="https://boards.greenhouse.io/ogilvy",
     ),
     FeaturedCompany(
@@ -317,11 +320,9 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         homepage="https://nashtechglobal.com",
         career_url="https://careers.nashtechglobal.com",
     ),
-    FeaturedCompany(
-        name="KMS Technology",
-        homepage="https://kms-technology.com",
-        career_url="https://kms-technology.com/careers",
-    ),
+    # KMS Technology removed 2026-08-17: kms-technology.com is Cloudflare-walled
+    # server-side (403 on every path incl. wp-json) — no fetchable feed; the
+    # crawl only ever produced junk. Re-add if an extension-capture path lands.
     FeaturedCompany(
         name="Cốc Cốc",
         homepage="https://coccoc.com",
@@ -853,11 +854,9 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         # (SEVT/SEV/SRV) and zero JD — useless for facet/embedding/tailoring.
         career_url="https://sec.wd3.myworkdayjobs.com/Samsung_Careers",
     ),
-    FeaturedCompany(
-        name="LG",
-        homepage="https://lg.com",
-        career_url="https://careers.lg.com",
-    ),
+    # LG removed 2026-08-17: careers.lg.com is LG's Korea-domestic portal (no
+    # Vietnam facet in api.careers.lg.com/rmk), and no LG Vietnam careers page
+    # exists — the crawl produced 57 fake Korean "jobs" and can never do better.
     FeaturedCompany(
         name="Canon",
         homepage="https://canon.com",
@@ -1036,11 +1035,9 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         homepage="https://salesforce.com",
         career_url="https://careers.salesforce.com",
     ),
-    FeaturedCompany(
-        name="ServiceNow",
-        homepage="https://servicenow.com",
-        career_url="https://careers.servicenow.com",
-    ),
+    # ServiceNow removed 2026-08-17: careers.servicenow.com is Cloudflare-walled
+    # server-side (403 even on the Phenom API paths, no jobdetails.* bypass
+    # host) — no fetchable feed, only junk ever came out of the crawl.
 
     # ── Consulting / Professional Services ───────────────────────────
     FeaturedCompany(
