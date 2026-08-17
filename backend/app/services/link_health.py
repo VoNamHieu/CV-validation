@@ -206,17 +206,20 @@ async def validate_job_url(url: str, expected_title: str = "", allow_render: boo
     body = r.text or ""
 
     if code >= 400:
-        # 403/429 are the site talking to our SCANNER, not about the posting —
-        # verified live: careersatagoda.com 403s httpx yet renders fine in a
-        # real browser. Try the render pass; if that's also blocked, report
-        # unknown, never broken (a false "broken" here would both mislead the
-        # admin log and spam the links_broken drift alert).
-        if code in (403, 429):
-            return await _render_verdict(code, {
-                "status": "unknown", "http_code": code, "reason": f"http_{code}",
-                "detail": "blocked for scanner (anti-bot?)", "method": "http"})
-        return {"status": "broken", "http_code": code, "reason": f"http_{code}",
-                "detail": "", "method": "http"}
+        # No error status is trusted without a render pass:
+        # - 403/429 are the site talking to our SCANNER, not about the posting
+        #   (careersatagoda.com 403s httpx yet renders fine in a real browser)
+        #   → fall back to unknown when the render can't settle it.
+        # - Other 4xx/5xx can still carry a working page: TPBank/OCB (iVIEC)
+        #   serve HTTP 500 whose Next.js error shell boots the SPA and renders
+        #   the FULL posting client-side → only a render that can't find the
+        #   title keeps the broken verdict.
+        antibot = code in (403, 429)
+        return await _render_verdict(code, {
+            "status": "unknown" if antibot else "broken",
+            "http_code": code, "reason": f"http_{code}",
+            "detail": "blocked for scanner (anti-bot?)" if antibot else "",
+            "method": "http"})
 
     # Confident server-side verdict? (title present in raw HTML = real SSR page.)
     cheap = _content_verdict(body, words, code, rendered=False)
