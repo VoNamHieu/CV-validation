@@ -731,7 +731,8 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Ahamove",
         homepage="https://ahamove.com",
-        career_url="https://ahamove.com/recruitment",
+        # 2026-08: /recruitment on the main domain 302s to the new careers SPA
+        career_url="https://careers.ahamove.com/jobs",
     ),
     FeaturedCompany(
         name="Avina Logistics",
