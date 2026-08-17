@@ -693,7 +693,9 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Kuehne+Nagel",
         homepage="https://kuehne-nagel.com",
-        career_url="https://careers.kuehne-nagel.com",
+        # careers.<host> is a landing shell; the Phenom board (job search +
+        # /widgets API) lives on jobs.<host> — /search-results keys the gate
+        career_url="https://jobs.kuehne-nagel.com/global/en/search-results",
     ),
     FeaturedCompany(
         name="FedEx",
@@ -703,7 +705,9 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="UPS",
         homepage="https://ups.com",
-        career_url="https://www.jobs-ups.com/apac/vi/c/vi%E1%BB%87c-b%C3%A1n-h%C3%A0ng-jobs",
+        # jobs-ups.com is Phenom (/widgets) — the old category-page URL fed the
+        # crawl nav labels ("Lợi ích") as jobs; /search-results keys the gate
+        career_url="https://www.jobs-ups.com/global/en/search-results",
     ),
     FeaturedCompany(
         name="GHTK",
@@ -999,7 +1003,10 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Oracle",
         homepage="https://oracle.com",
-        career_url="https://careers.oracle.com",
+        # careers.oracle.com fronts this ORC tenant; the adapter gate needs the
+        # oraclecloud host + /sites/ path. 0 VN reqs as of 2026-08 — wired so
+        # the cron catches it when they hire again.
+        career_url="https://eeho.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_45001/jobs",
     ),
     FeaturedCompany(
         name="Microsoft",
