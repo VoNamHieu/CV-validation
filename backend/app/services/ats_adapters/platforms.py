@@ -578,7 +578,8 @@ def _phenom_widgets(origin: str, locale: str, country: str) -> list[dict]:
     headers = {**_JSON_POST, "Referer": f"{origin}/{locale}/search-results"}
     out, seen = [], set()
     _PER = 100
-    for start in range(0, _MAX_ATS_JOBS, _PER):
+
+    def _page(start: int, cval: str) -> dict | None:
         try:
             r = requests.post(f"{origin}/widgets", headers=headers, timeout=_TIMEOUT, json={
                 "lang": "en_global", "deviceType": "desktop", "country": "global",
@@ -587,16 +588,33 @@ def _phenom_widgets(origin: str, locale: str, country: str) -> list[dict]:
                 "all_fields": ["country"], "size": _PER, "clearAll": False,
                 "jdsource": "facets", "isSliderEnable": False, "pageId": "",
                 "siteType": "external", "keywords": "", "global": True,
-                "selected_fields": {"country": [country]}, "locationData": {},
+                "selected_fields": {"country": [cval]}, "locationData": {},
             })
             if r.status_code != 200:
-                break
-            rs = (r.json() or {}).get("refineSearch") or {}
-            jobs = (rs.get("data") or {}).get("jobs") or []
-            total = int(rs.get("totalHits") or 0)
+                return None
+            return (r.json() or {}).get("refineSearch") or {}
         except Exception as e:
             logger.info(f"[ats] phenom-widgets {origin} failed: {str(e)[:80]}")
-            break
+            return None
+
+    rs = _page(0, country)
+    # Tenants spell the country facet differently — Kuehne+Nagel says
+    # "Viet Nam", so the strict "Vietnam" filter finds 0 while 15 jobs exist.
+    # The same response carries the country aggregation (counts:true); when
+    # page 1 is empty, retry once with the tenant's own VN spelling from it.
+    if rs is not None and not ((rs.get("data") or {}).get("jobs")):
+        for a in (rs.get("data") or {}).get("aggregations") or []:
+            if a.get("field") == "country":
+                vn = next((str(c) for c in (a.get("value") or {})
+                           if _is_vn_loc(str(c))), None)
+                if vn and vn != country:
+                    country, rs = vn, _page(0, vn)
+                break
+
+    start = 0
+    while rs is not None:
+        jobs = (rs.get("data") or {}).get("jobs") or []
+        total = int(rs.get("totalHits") or 0)
         if not jobs:
             break
         for j in jobs:
@@ -621,8 +639,11 @@ def _phenom_widgets(origin: str, locale: str, country: str) -> list[dict]:
             seen.add(url)
             out.append({"title": title[:200], "url": url, "location": loc[:120],
                         "description": ""})
-        if (total and start + _PER >= total) or len(jobs) < _PER or len(out) >= _MAX_ATS_JOBS:
+        start += _PER
+        if (total and start >= total) or len(jobs) < _PER \
+                or len(out) >= _MAX_ATS_JOBS or start >= _MAX_ATS_JOBS:
             break
+        rs = _page(start, country)
     logger.info(f"[ats] phenom-widgets → {len(out)} VN jobs ({origin})")
     return out
 
@@ -651,28 +672,37 @@ def _oracle_hcm(career_url: str) -> list[dict]:
     site = m.group(1) if m else "CX_1"
     country = os.getenv("DISCOVER_COUNTRY", "Vietnam")
     ep = f"{origin}/hcmRestApi/resources/latest/recruitingCEJobRequisitions"
-    finder = f"findReqs;siteNumber={site},facetsList=LOCATIONS;limit=50,keyword={country}"
-    out = []
-    try:
-        r = requests.get(ep, headers=_JSON_POST, timeout=_TIMEOUT,
-                         params={"onlyData": "true",
-                                 "expand": "requisitionList.secondaryLocations", "finder": finder})
-        if r.status_code != 200 or "json" not in r.headers.get("content-type", ""):
-            return []
-        items = (r.json() or {}).get("items", [])
-        rl = items[0].get("requisitionList", []) if items else []
-        for it in rl:
-            title = (it.get("Title") or "").strip()
-            loc = it.get("PrimaryLocation") or ""
-            if not title or not _is_vn_loc(loc):
-                continue
-            jid = it.get("Id")
-            url = (f"{origin}/hcmUI/CandidateExperience/en/sites/{site}/job/{jid}"
-                   if jid else career_url)
-            out.append({"title": title[:200], "url": url, "location": str(loc)[:120],
-                        "description": _strip_html(it.get("ShortDescriptionStr", ""))})
-    except Exception as e:
-        logger.info(f"[ats] oracle-hcm {origin} failed: {str(e)[:80]}")
+
+    def _query(filt: str) -> list[dict]:
+        rows = []
+        try:
+            r = requests.get(ep, headers=_JSON_POST, timeout=_TIMEOUT,
+                             params={"onlyData": "true",
+                                     "expand": "requisitionList.secondaryLocations",
+                                     "finder": f"findReqs;siteNumber={site},"
+                                               f"facetsList=LOCATIONS;limit=50,{filt}"})
+            if r.status_code != 200 or "json" not in r.headers.get("content-type", ""):
+                return []
+            items = (r.json() or {}).get("items", [])
+            rl = items[0].get("requisitionList", []) if items else []
+            for it in rl:
+                title = (it.get("Title") or "").strip()
+                loc = it.get("PrimaryLocation") or ""
+                if not title or not _is_vn_loc(loc):
+                    continue
+                jid = it.get("Id")
+                url = (f"{origin}/hcmUI/CandidateExperience/en/sites/{site}/job/{jid}"
+                       if jid else career_url)
+                rows.append({"title": title[:200], "url": url, "location": str(loc)[:120],
+                             "description": _strip_html(it.get("ShortDescriptionStr", ""))})
+        except Exception as e:
+            logger.info(f"[ats] oracle-hcm {origin} failed: {str(e)[:80]}")
+        return rows
+
+    # keyword search first (works on the VN-heavy tenants), but some tenants
+    # spell-correct it away ("Vietnam" → "vienna" on Oracle's own board) — when
+    # it yields nothing VN, retry with the location filter, which can't drift.
+    out = _query(f"keyword={country}") or _query(f"location={country}")
     logger.info(f"[ats] oracle-hcm:{site} → {len(out)} VN jobs ({origin})")
     return out
 

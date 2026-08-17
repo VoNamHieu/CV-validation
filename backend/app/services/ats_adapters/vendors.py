@@ -27,6 +27,8 @@ from app.services.ats_adapters.vnptai import *  # noqa: F401,F403
 from app.services.ats_adapters.aeon import *  # noqa: F401,F403
 from app.services.ats_adapters.axonactive import *  # noqa: F401,F403
 from app.services.ats_adapters.dsv import *  # noqa: F401,F403
+from app.services.ats_adapters.viettelsoftware import *  # noqa: F401,F403
+from app.services.ats_adapters.ghtk import *  # noqa: F401,F403
 from app.services.ats_adapters.coccoc import *  # noqa: F401,F403
 from app.services.ats_adapters.seongon import *  # noqa: F401,F403
 from app.services.ats_adapters.bidv import *  # noqa: F401,F403
@@ -124,6 +126,8 @@ _ADAPTERS: list = [
     ("aeon",            lambda u, h: _is_aeon(u),            lambda u, h: _aeon(u)),
     ("axonactive",      lambda u, h: _is_axonactive(u),      lambda u, h: _axonactive(u)),
     ("dsv",             lambda u, h: _is_dsv(u),             lambda u, h: _dsv(u)),
+    ("viettelsw",       lambda u, h: _is_viettelsw(u),       lambda u, h: _viettelsw(u)),
+    ("ghtk",            lambda u, h: _is_ghtk(u),            lambda u, h: _ghtk(u)),
     ("coccoc",          lambda u, h: _is_coccoc(u),          lambda u, h: _coccoc(u)),
     ("seongon",         lambda u, h: _is_seongon(u),         lambda u, h: _seongon(u)),
     ("bidv",            lambda u, h: _is_bidv(u),            lambda u, h: _bidv(u)),

@@ -51,7 +51,10 @@ def _strip_html(s: str) -> str:
 # adapters, and SuccessFactors detail lives on the per-job page.
 
 def _mbbank_detail(jd_url: str) -> str | None:
-    m = re.search(r"mbbank\.com\.vn/job/([0-9a-f]{12,})", jd_url, re.I)
+    # Old route: tuyendung.mbbank.com.vn/job/{id}; new (2026-08): careers.
+    # mbbank.com.vn/list-of-posts/detail-list-of-posts?id={id}&workGroupId=…
+    # Same libra ids either way — accept both shapes.
+    m = re.search(r"mbbank\.com\.vn/(?:job/|[^#]*[?&]id=)([0-9a-f]{12,})", jd_url, re.I)
     if not m:
         return None
     try:

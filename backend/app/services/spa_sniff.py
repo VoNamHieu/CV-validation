@@ -21,6 +21,10 @@ _SLUG_DETAIL_PREFIX = {
     # 247Express SPA returns rows with a numeric id but no url; its detail route
     # is /tuyen-dung/{id} (the bare /job/{id} default 404s).
     "247express.vn": "tuyen-dung",
+    # Lazada careers: the GP-coded rows deep-link at /en/careers/job-description/
+    # {GPid} — the /job/{id} default 404s (verified live 2026-08-17).
+    "lazada.com": "/en/careers/job-description/",
+    "www.lazada.com": "/en/careers/job-description/",
 }
 
 import requests
@@ -713,6 +717,63 @@ async def _llm_map_jobs(parsed, origin: str) -> list[dict]:
         url_keys=_ext(_URL_KEYS, "url_key"),
         loc_keys=_ext(_LOC_KEYS, "location_key"),
     )
+
+
+_FPTSOFT_API = "https://career.fpt-software.com/service/api/v1.0/public/job-postings"
+
+
+def is_fptsoft(career_url: str) -> bool:
+    return (urlparse(career_url or "").netloc or "").lower() == "career.fpt-software.com"
+
+
+async def fptsoft_jobs(career_url: str) -> list[dict]:
+    """career.fpt-software.com went behind Cloudflare TLS fingerprinting
+    (~2026-07-10): plain httpx gets "Just a moment" even with full browser
+    headers, killing the phase-1 adapter — while the generic sniff kept
+    "working" by capturing the page's TAXONOMY endpoints (/specialisms,
+    locations, experience-years) and ingesting "Hong Kong" / "5 Years" as
+    jobs. A rendered page passes the wall, and an in-page fetch inherits its
+    clearance — so render once, then page through the real job-postings API
+    from inside the page."""
+    import json
+    from app.services.ats_adapters._shared import _strip_html
+    from app.services.browser_pool import get_browser
+
+    browser = await get_browser()
+    ctx = await browser.new_context(locale="vi-VN", user_agent="Mozilla/5.0 Chrome/120")
+    page = await ctx.new_page()
+    out: list[dict] = []
+    try:
+        await page.goto(career_url, timeout=40000, wait_until="domcontentloaded")
+        await page.wait_for_timeout(1500)
+        for pg in range(0, 15):
+            body = await page.evaluate(
+                _REPLAY_GET_JS, f"{_FPTSOFT_API}?page={pg}&pageSize=10")
+            try:
+                d = json.loads(body)
+            except Exception:
+                break
+            content = d.get("content") or []
+            for j in content:
+                title = (j.get("title") or "").strip()
+                slug = j.get("slug")
+                if not title or not slug:
+                    continue
+                out.append({
+                    "title": title[:200],
+                    "url": f"https://career.fpt-software.com/co-hoi-viec-lam/{slug}",
+                    "location": (j.get("locationName") or "")[:120],
+                    "description": _strip_html(j.get("description") or j.get("summary") or ""),
+                })
+            if d.get("last") or not content or len(out) >= 150:
+                break
+    finally:
+        try:
+            await ctx.close()
+        except Exception:
+            pass
+    logger.info(f"[spa_sniff] fptsoft in-page API → {len(out)} jobs")
+    return out
 
 
 async def sniff_jobs(career_url: str) -> list[dict]:
