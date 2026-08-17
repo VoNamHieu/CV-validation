@@ -58,7 +58,8 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         homepage="https://grab.com",
         # grab.careers is a JS shell; the real board is SmartRecruiters (company
         # "Grab") → existing generic SmartRecruiters adapter, VN-facet filtered.
-        career_url="https://jobs.smartrecruiters.com/Grab",
+        # jobs.smartrecruiters.com now 301s to careers.<same> — same SR gate
+        career_url="https://careers.smartrecruiters.com/Grab",
     ),
     FeaturedCompany(
         name="Be",
@@ -281,7 +282,8 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         name="NielsenIQ",
         homepage="https://nielseniq.com",
         # SmartRecruiters company "NielsenIQ" → existing generic adapter.
-        career_url="https://jobs.smartrecruiters.com/NielsenIQ",
+        # jobs.smartrecruiters.com now 301s to careers.<same> — same SR gate
+        career_url="https://careers.smartrecruiters.com/NielsenIQ",
     ),
     FeaturedCompany(
         name="Thiên Long Group",

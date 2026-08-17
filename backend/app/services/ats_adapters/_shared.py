@@ -108,6 +108,13 @@ def _finalize(jobs: list[dict]) -> list[dict]:
         nt = _norm_title(title)
         if nt in _BAD_TITLES or nt.startswith(("tu ngay ", "from ")):  # date-range rows (Canon)
             continue
+        # A fragment hung on a bare origin ("careers.lg.com#<blob>") is a crawl
+        # artifact — an in-page anchor scraped as a link — never a job detail
+        # page (produced 57 fake LG "jobs"). Real fragment-routed SPAs (mokahr
+        # /social-recruitment/…#/job/{id}) carry a path and pass untouched.
+        p = urlparse(url)
+        if p.fragment and p.path in ("", "/"):
+            continue
         tkey = (nt[:80], _norm_title(str(j.get("location") or ""))[:40])
         if url in seen_url or tkey in seen_title:
             continue
