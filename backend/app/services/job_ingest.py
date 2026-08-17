@@ -65,12 +65,20 @@ async def _spa_sniff(url: str, html: str | None = None) -> list[dict]:
     store with foreign jobs); if none are location-tagged (VN-domestic sites
     often aren't), keep them all."""
     try:
-        from app.services.spa_sniff import sniff_jobs, outsystems_jobs, is_outsystems
+        from app.services.spa_sniff import (sniff_jobs, outsystems_jobs, is_outsystems,
+                                            fptsoft_jobs, is_fptsoft)
         from app.services.ats_adapters.core import _is_vn_loc, _finalize
         if is_outsystems(html or ""):
             jobs = await asyncio.wait_for(outsystems_jobs(url), timeout=70)
             for j in (jobs or []):
                 j.setdefault("source", "outsystems")
+        elif is_fptsoft(url):
+            # Cloudflare-walled API — the generic sniff only ever finds the
+            # taxonomy endpoints here (fake "Hong Kong"/"5 Years" jobs); the
+            # dedicated path fetches the real job-postings API in-page.
+            jobs = await asyncio.wait_for(fptsoft_jobs(url), timeout=70)
+            for j in (jobs or []):
+                j.setdefault("source", "fptsoft-render")
         else:
             jobs = await asyncio.wait_for(sniff_jobs(url), timeout=50)
     except Exception as e:  # noqa: BLE001

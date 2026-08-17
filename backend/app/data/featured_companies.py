@@ -102,7 +102,10 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Agoda",
         homepage="https://www.agoda.com",
-        career_url="https://careersatagoda.com/vacancies/?keyword=&country=vietnam",
+        # careersatagoda.com is Cloudflare-walled for scanners (fine for real
+        # users); the Greenhouse tenant behind it serves the same VN jobs on
+        # scanner-friendly job-boards.greenhouse.io URLs — key the gate on it.
+        career_url="https://boards.greenhouse.io/agoda",
     ),
     FeaturedCompany(
         name="Traveloka",
@@ -341,11 +344,10 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         homepage="https://www.tmasolutions.com",
         career_url="https://www.tma.vn/tuyen-dung",
     ),
-    FeaturedCompany(
-        name="Rikkeisoft",
-        homepage="https://rikkeisoft.com",
-        career_url="https://tuyendung.rikkeisoft.com/recruitment/list-job",
-    ),
+    # Rikkeisoft removed 2026-08-17: tuyendung.rikkeisoft.com WAF 403s every
+    # path AND its /api/front/recruitment even from inside a rendered page
+    # (headless fingerprint) — the DOM never fills, no fetchable feed, zero
+    # rows ever ingested. Re-add if an extension-capture path lands.
     FeaturedCompany(
         name="CMC Global",
         homepage="https://cmcglobal.com.vn",
