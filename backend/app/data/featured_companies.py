@@ -1083,7 +1083,10 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="VCBS",
         homepage="https://www.vcbs.com.vn",
-        career_url="https://www.vcbs.com.vn/co-hoi-nghe-nghiep",
+        # Real board = the Talentnetwork portal (SSR /viec-lam/*.html links the
+        # _talentnet adapter scrapes); the old main-site page fed the sniff
+        # /job/{1..n} routes that render the corporate homepage.
+        career_url="https://tuyendung.vcbs.com.vn/tim-viec-lam/tat-ca-viec-lam/vi",
     ),
     FeaturedCompany(
         name="VPBank Securities",

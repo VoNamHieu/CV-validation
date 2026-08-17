@@ -21,6 +21,10 @@ _SLUG_DETAIL_PREFIX = {
     # 247Express SPA returns rows with a numeric id but no url; its detail route
     # is /tuyen-dung/{id} (the bare /job/{id} default 404s).
     "247express.vn": "tuyen-dung",
+    # Lazada careers: the GP-coded rows deep-link at /en/careers/job-description/
+    # {GPid} — the /job/{id} default 404s (verified live 2026-08-17).
+    "lazada.com": "/en/careers/job-description/",
+    "www.lazada.com": "/en/careers/job-description/",
 }
 
 import requests

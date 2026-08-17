@@ -21,7 +21,10 @@ from app.services.ats_adapters._shared import *  # noqa: F401,F403
 
 _HOSTS = ("careersdecathlonvn.com", "www.careersdecathlonvn.com")
 _API = "https://careersdecathlonvn.com/api/portals/recruitments"
-_DETAIL = "https://careersdecathlonvn.com/en/recruitment/{jid}"
+# 2026-08: the SPA route went plural — /en/recruitment/{id} (singular) now
+# renders an empty shell with a generic page title; /en/recruitments/{id}
+# resolves the job (tab title = job title, verified in a real browser).
+_DETAIL = "https://careersdecathlonvn.com/en/recruitments/{jid}"
 
 
 def _is_decathlon(career_url: str) -> bool:
@@ -71,6 +74,7 @@ def _decathlon(career_url: str) -> list[dict]:
             out.append({
                 "title": title[:200],
                 "url": _DETAIL.format(jid=jid),
+                "external_id": str(jid),  # survives the next route rename
                 "location": "",
                 "description": _strip_html(desc)[:4000] if desc else "",
             })

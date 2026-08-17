@@ -99,8 +99,16 @@ def _mbbank(career_url: str) -> list[dict]:
             jid = it.get("id")
             if not name or not jid:
                 continue
+            # 2026-08: the SPA's detail route moved — /job/{id} on the
+            # tuyendung host now renders the HOMEPAGE (empty shell); the card
+            # click navigates to careers.<host>/list-of-posts/… with the SAME
+            # ids. external_id = the libra id, so the next route change swaps
+            # URLs in place instead of re-identifying 190 rows.
+            wg = it.get("workGroupId") or ""
             out.append({"title": name[:200],
-                        "url": f"https://tuyendung.mbbank.com.vn/job/{jid}",
+                        "url": ("https://careers.mbbank.com.vn/list-of-posts/"
+                                f"detail-list-of-posts?id={jid}&workGroupId={wg}"),
+                        "external_id": str(jid),
                         "location": str(it.get("province") or "")[:120], "description": ""})
         if page + 1 >= body.get("totalPages", page + 1) or len(out) >= _MAX_ATS_JOBS:
             break

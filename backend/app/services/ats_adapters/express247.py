@@ -39,13 +39,16 @@ def _express247(career_url: str) -> list[dict]:
     for j in rows:
         seo = j.get("SEO") or {}
         title = (j.get("Name") or seo.get("Name") or "").strip()
-        slug = (seo.get("Slug") or "").strip()
-        if not title or not slug:
+        jid = j.get("Id")
+        if not title or not jid:
             continue
         cities = [c for c in (j.get("Cities") or []) if c]
+        # 2026-08: /tuyen-dung/{slug} renders an empty card skeleton — the SPA's
+        # real route (what a card click navigates to) is /tuyen-dung/{Id}.
         out.append({
             "title": title[:200],
-            "url": _DETAIL + slug,
+            "url": f"{_DETAIL}{jid}",
+            "external_id": str(jid),
             "location": ", ".join(cities)[:120],
             "description": _strip_html(j.get("JobSummary") or j.get("JobDescription") or "")[:600],
         })
