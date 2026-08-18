@@ -1,6 +1,6 @@
 // AUTO-SPLIT from content-agent.js (Phase 2). Part of the Copo apply agent.
 import { SCROLL_PAUSE_MS, SCROLL_STEP_PX } from './constants.js';
-import { buildUniqueSelector, detectComponentType, findActiveModal, findLabelFor, getNearbyText, sleep } from './dom.js';
+import { FIELD_ERROR_SEL, buildUniqueSelector, detectComponentType, findActiveModal, findLabelFor, getNearbyText, readFileCommitState, sleep } from './dom.js';
 import { isThirdPartyApply } from './detect.js';
 
 /**
@@ -46,6 +46,33 @@ export async function scrollAndCollect() {
 }
 
 /**
+ * Is this control REQUIRED? Read from the DOM, never from a recipe.
+ *
+ * Requiredness is per-tenant, not per-ATS: the same automation id is optional at
+ * one company and mandatory at the next, so a list baked into shared config is
+ * wrong somewhere by construction. The page is the only authority.
+ *
+ * Four signals because no single one is reliable. Measured on Mondelez: the
+ * REQUIRED Degree and Language dropdowns carry `required=false` AND
+ * `aria-required=null` — their asterisk lives in an <abbr> inside the field
+ * wrapper. Reading only the input's own attributes made every required custom
+ * select invisible, so `unfilledRequired` was empty on a step that could not
+ * advance, and the planner was told there was nothing left to do.
+ */
+export function isRequiredField(el) {
+    try {
+        if (el.required || el.getAttribute('aria-required') === 'true') return true;
+        const wrap = el.closest(
+            '[data-automation-id^="formField-"], .form-group, .form-field, .ant-form-item, .MuiFormControl-root');
+        if (!wrap) return false;
+        if (wrap.querySelector('abbr')) return true;               // Workday's marker
+        if (wrap.querySelector('[aria-required="true"]')) return true;
+        const label = wrap.querySelector('label, legend');
+        return !!label && /\*/.test(label.textContent || '');      // the universal one
+    } catch { return false; }
+}
+
+/**
  * Extract form fields from a DOM root (document, modal, or iframe doc).
  */
 export function extractFieldsFromRoot(root) {
@@ -57,7 +84,13 @@ export function extractFieldsFromRoot(root) {
         'input:not([type="hidden"]):not([type="submit"]):not([type="button"]), ' +
         'input[type="file"], ' +
         'select, textarea, [contenteditable="true"], ' +
-        '[role="combobox"], [role="listbox"], [role="radiogroup"]'
+        '[role="combobox"], [role="listbox"], [role="radiogroup"], ' +
+        // Workday's single-selects are BUTTONS that open a listbox. They were
+        // invisible to this extraction — only the blocker audit saw them — so
+        // on any tenant shape the recipe didn't cover, the generic layers
+        // (answer rules, free-answer inference) never got to fill them: the
+        // page could not complete without the planner.
+        'button[aria-haspopup="listbox"]'
     );
 
     for (const el of elements) {
@@ -90,7 +123,7 @@ export function extractFieldsFromRoot(root) {
                 el.value || '';
             group.options.push({ value: el.value, text: optLabel });
             if (el.checked) group.value = el.value;
-            if (el.required || el.getAttribute('aria-required') === 'true') group.required = true;
+            if (isRequiredField(el)) group.required = true;
             if (!group.label) group.label = findLabelFor(el, root);
             if (!group.nearbyText) group.nearbyText = getNearbyText(el);
             continue;
@@ -114,7 +147,7 @@ export function extractFieldsFromRoot(root) {
                 ariaLabel: el.getAttribute('aria-label') || '',
                 classes: el.className?.toString().substring(0, 100) || '',
                 value: el.checked ? 'true' : 'false',
-                required: el.required || el.getAttribute('aria-required') === 'true',
+                required: isRequiredField(el),
                 componentType: 'checkbox',
                 selector,
             });
@@ -146,6 +179,20 @@ export function extractFieldsFromRoot(root) {
                 ?.querySelector('[data-automation-id="selectedItemList"]');
             const chip = sil ? (sil.textContent || '').replace(/\s+/g, ' ').trim() : '';
             if (chip) value = chip.slice(0, 60);
+        }
+        // A file input's `value`/`files` say nothing once the ATS ingests the
+        // file (Workday clears them) — so an attached CV read as an unfilled
+        // REQUIRED field, withheld the deterministic advance, and the run sat
+        // "frozen" in a needless planner call. Same commit definition as the
+        // recipe, via the shared helper.
+        if (componentType === 'file-upload') {
+            value = readFileCommitState(el).committed ? 'uploaded' : '';
+        }
+        // A button-select's answer is its visible text; the placeholder rows
+        // ("Select One") mean empty, whatever the value attribute holds.
+        if (el.tagName === 'BUTTON') {
+            const t = (el.textContent || '').replace(/\s+/g, ' ').trim();
+            value = /^(select one|select|choose one)$/i.test(t) ? '' : t;
         }
 
         // Get options for select elements
@@ -181,7 +228,7 @@ export function extractFieldsFromRoot(root) {
             classes,
             value,
             options: options.length > 0 ? options.slice(0, 30) : undefined,
-            required: el.required || el.getAttribute('aria-required') === 'true',
+            required: isRequiredField(el),
             componentType,
             selector,
         });
@@ -251,7 +298,15 @@ export function extractFormFields() {
  */
 export function scanButtons() {
     const buttons = [];
-    const allClickables = document.querySelectorAll('button, a[role="button"], [role="button"], input[type="submit"]');
+    // Scope to the open dialog, exactly as extractFormFields does. Measured on
+    // Workday's "Start Your Application" modal: scanning the whole document
+    // offered the planner "Sign In", "Search for Jobs", the page's video control
+    // bar and the "Apply" button behind the backdrop, alongside the three options
+    // that were actually clickable. Every one of those is inert while the modal
+    // is up, and each is a way for the planner to spend an iteration on nothing.
+    const modal = findActiveModal();
+    const root = modal || document;
+    const allClickables = root.querySelectorAll('button, a[role="button"], [role="button"], input[type="submit"]');
 
     const navTexts = [
         'next', 'tiếp', 'tiep theo', 'continue', 'tiếp tục', 'kế tiếp',
@@ -290,35 +345,113 @@ export function scanButtons() {
     return buttons;
 }
 
+/** Wording that states something is wrong with what was entered. */
+const ERROR_TEXT_RE =
+    /\berror\b|\binvalid\b|\brequired\b|must be|must contain|cannot be|can't be|is not valid|please (enter|select|provide|choose|correct|fix)|missing|too (short|long)|lỗi|bắt buộc|không hợp lệ|không được để trống|vui lòng (nhập|chọn|điền)|chưa (nhập|chọn|điền)/i;
+
+/** Wording that is a page STATUS announcement — the thing live regions exist for. */
+const STATUS_TEXT_RE =
+    /\bis loaded\b|\bloaded\b|\bloading\b|\bpage\b.*\b(loaded|ready)\b|results? (found|updated|loaded)|\bsaved\b|\bsuccess/i;
+
+/**
+ * An ADVISORY, not a validation failure.
+ *
+ * Workday distinguishes the two and the agent did not. Measured on a real My
+ * Information step: a legal name in capitals raises
+ *
+ *   "Alert - Family Name … Verify that the field Family Name is correctly
+ *    capitalized because it contains more than 2 capital letters."
+ *
+ * in an "Alerts Found" panel. Nothing is wrong and Next works — but the
+ * deterministic advance requires `errors.length === 0`, so counting an advisory
+ * as an error withholds the click for as long as the advisory is on screen, i.e.
+ * forever. That is a step that fills perfectly and then never moves, with no
+ * failure anywhere to point at.
+ *
+ * Checked BEFORE the error vocabulary, because these sentences legitimately
+ * contain error-ish words ("must", "cannot") while asking the user to confirm
+ * something rather than fix it.
+ */
+const ADVISORY_TEXT_RE =
+    /^alert\b|\balert -|verify that|please (verify|confirm|review)|we recommend|for your information|xác nhận lại|kiểm tra lại/i;
+
+/**
+ * Does this live-region text actually report a validation problem?
+ *
+ * Split out as a pure function because it is a judgement about language, and the
+ * cost of getting it wrong is not obvious from the DOM: a false error is fed to
+ * the planner every iteration as evidence the form is failing, which is exactly
+ * how "Sales Specialist page is loaded" ended up in an agent's error list.
+ *
+ * A live region INSIDE a form-field wrapper is trusted without a text match —
+ * that is where frameworks put a field's own error, and its wording is
+ * unpredictable. Everywhere else needs the text to say something went wrong,
+ * and a status announcement is rejected outright even if it happens to contain
+ * an error-ish word.
+ */
+export function isLikelyValidationError(text, { inFieldWrapper = false } = {}) {
+    const t = String(text || '').trim();
+    if (!t) return false;
+    // An advisory is not a failure, wherever it is rendered — including inside a
+    // field wrapper, where the old rule treated anything non-status as an error.
+    if (ADVISORY_TEXT_RE.test(t)) return false;
+    if (inFieldWrapper) return !STATUS_TEXT_RE.test(t);
+    if (STATUS_TEXT_RE.test(t)) return false;
+    return ERROR_TEXT_RE.test(t);
+}
+
 /**
  * Detect validation errors on the page.
  */
 export function detectErrors() {
     const errors = [];
     const seen = new Set();
+    // Selectors that NAME an error. Whatever they contain is one.
     const errorSelectors = [
         '.error', '.invalid-feedback', '.field-error', '[class*="error-msg"]',
-        '[role="alert"]', '.text-danger', '.has-error', '.ant-form-item-explain-error',
+        '.text-danger', '.has-error', '.ant-form-item-explain-error',
         '.MuiFormHelperText-root.Mui-error', '[class*="validation-error"]',
         // Workday: a failed field renders an errorMessage node inside its formField
-        // wrapper; page-level issues use errorSummary / alertBanner. Without these the
-        // agent was blind to why "Next" wouldn't advance and looped until it stalled.
+        // wrapper; page-level issues use errorSummary. Without these the agent was
+        // blind to why "Next" wouldn't advance and looped until it stalled.
+        // `inputAlert` is the same verdict on other tenants (measured mdlz: it is
+        // the ONLY per-field idiom — "Error: The field From is required…" was
+        // invisible to every selector below it). Advisory wording is filtered
+        // the same way ("Alert: Verify that…"), so the id alone does not decide.
         '[data-automation-id="errorMessage"]', '[data-automation-id="formFieldError"]',
-        '[data-automation-id="errorSummary"]', '[data-automation-id="alertBanner"]',
+        '[data-automation-id="inputAlert"]',
+        '[data-automation-id="errorSummary"]',
     ];
+    // Selectors that are a DELIVERY MECHANISM, not a verdict — see
+    // isLikelyValidationError. `role="alert"` is how a page announces anything
+    // urgent to a screen reader; on a Workday job page it carries "Sales
+    // Specialist page is loaded", which was reported as a validation error on
+    // every single iteration and shipped to the planner as evidence the form was
+    // failing. A banner is the same shape: it can just as easily say a draft was
+    // saved.
+    const ambiguousSelectors = ['[role="alert"]', '[data-automation-id="alertBanner"]'];
 
-    for (const sel of errorSelectors) {
+    for (const sel of [...errorSelectors, ...ambiguousSelectors]) {
+        const ambiguous = ambiguousSelectors.includes(sel);
         for (const el of document.querySelectorAll(sel)) {
             if (!el.offsetParent) continue;
             const msg = el.textContent?.trim();
             if (!msg || msg.length > 200 || seen.has(msg)) continue;
-            seen.add(msg);
 
             // Associate with the nearest field — Workday formField wrapper first (so
             // we can name the field), then a generic form-group.
             let nearFieldSelector = '';
             let field = '';
             const wd = el.closest('[data-automation-id^="formField-"]');
+            if (ambiguous && !isLikelyValidationError(msg, { inFieldWrapper: !!wd })) continue;
+            // An advisory is skipped even from a selector NAMED for errors.
+            // Workday renders its "Alerts Found" summary in the same furniture as
+            // its error summary, so trusting the selector name here would let a
+            // capitalization advisory withhold the step advance indefinitely —
+            // `errors.length === 0` is a precondition for it. Wording decides,
+            // not the container.
+            if (!ambiguous && ADVISORY_TEXT_RE.test(msg)) continue;
+            seen.add(msg);
             if (wd) {
                 nearFieldSelector = `[data-automation-id="${wd.getAttribute('data-automation-id')}"]`;
                 field = findLabelFor(wd.querySelector('input, textarea, button') || wd, document);
@@ -349,6 +482,80 @@ export function detectErrors() {
     }
 
     return errors;
+}
+
+/**
+ * Audit which REQUIRED fields are still empty/invalid — i.e. WHY "Next"/"Submit"
+ * won't advance. The generic scanners miss custom widgets (Workday's degree
+ * dropdown, its MM/YYYY date groups) that aren't <input>s, so a step blocked by
+ * one of those reads as "stuck" with no explanation. Returns [{label, kind}] so the
+ * agent can say what's missing and (recipe) try to fill it instead of looping.
+ */
+export function auditRequiredBlockers() {
+    const out = [];
+    const seen = new Set();
+    const push = (label, kind) => { const k = `${kind}:${label}`; if (label && !seen.has(k)) { seen.add(k); out.push({ label, kind }); } };
+    const labelOf = (el) => {
+        const wrap = el.closest?.('[data-automation-id^="formField-"]');
+        const l = (wrap?.querySelector('label, legend')?.textContent) || el.getAttribute?.('aria-label') || '';
+        return l.replace(/\*/g, ' ').replace(/\brequired\b/i, '').replace(/\s+/g, ' ').trim().slice(0, 40);
+    };
+    const isRequired = (el) => {
+        const wrap = el.closest?.('[data-automation-id^="formField-"]');
+        return el.getAttribute?.('aria-required') === 'true' || el.required
+            || !!wrap?.querySelector('abbr') || /required/i.test(el.getAttribute?.('aria-label') || '');
+    };
+    // A prompt's SEARCH BOX is empty by design once its answer is committed —
+    // the answer lives in a chip, not in the input. Reading that empty box as
+    // an unfilled required field is what pinned three finished PwC fields as
+    // "blockers" ("How Did You Hear About Us? (text)", "City or Ward",
+    // "Country / Territory Phone Code") on a page where every one of them
+    // carried a committed chip: the step could never advance, and the run
+    // ended "Stuck" with a form that was actually complete.
+    const answeredByChip = (el) => {
+        const wrap = el.closest?.('[data-automation-id^="formField-"]');
+        const chips = wrap?.querySelector('[data-automation-id="selectedItemList"]');
+        return !!chips && chips.children.length > 0;
+    };
+    // 1) text / tel / email / textarea inputs
+    for (const inp of document.querySelectorAll('input[type="text"], input[type="tel"], input[type="email"], input:not([type]), textarea')) {
+        if (inp.offsetParent === null) continue;
+        if (answeredByChip(inp)) continue;
+        if (isRequired(inp) && !String(inp.value || '').trim()) push(labelOf(inp), 'text');
+    }
+    // 2) custom-select buttons (Workday: button[aria-haspopup=listbox] showing "Select One")
+    for (const btn of document.querySelectorAll('button[aria-haspopup="listbox"], [data-automation-id^="formField-"] button[aria-haspopup]')) {
+        if (btn.offsetParent === null) continue;
+        const unset = !String(btn.getAttribute('value') || '').trim() && /select one|choose|^\s*$/i.test((btn.textContent || '').trim());
+        if (isRequired(btn) && unset) push(labelOf(btn), 'dropdown');
+    }
+    // 3) date groups (Workday dateInputWrapper) — empty when no digits are present
+    for (const dg of document.querySelectorAll('[data-automation-id="dateInputWrapper"]')) {
+        if (dg.offsetParent === null) continue;
+        const wrap = dg.closest('[data-automation-id^="formField-"]');
+        if (!wrap?.querySelector('abbr')) continue;   // required only
+        const help = wrap.querySelector('[id^="helpText"]')?.textContent || '';
+        if (!/\d/.test(help) && !/\d/.test(dg.textContent || '')) push(labelOf(dg), 'date');
+    }
+    // 4) visible validation errors already on screen. `role="alert"` is filtered
+    //    the same way detectErrors filters it — otherwise the "blockers" report
+    //    the agent shows the user when it gives up would name a page-load
+    //    announcement as the reason the step won't advance.
+    for (const e of document.querySelectorAll(`${FIELD_ERROR_SEL}, [data-automation-id="errorSummary"], [role="alert"]`)) {
+        if (e.offsetParent === null) continue;
+        const t = (e.textContent || '').replace(/\s+/g, ' ').trim();
+        if (!t) continue;
+        const isLiveRegion = e.getAttribute?.('role') === 'alert';
+        if (isLiveRegion && !isLikelyValidationError(t, {
+            inFieldWrapper: !!e.closest?.('[data-automation-id^="formField-"]'),
+        })) continue;
+        // Same wording gate detectErrors applies: an inputAlert carries
+        // advisories too ("Alert: Verify that…"), and an advisory must not be
+        // named as the reason a step won't advance.
+        if (ADVISORY_TEXT_RE.test(t)) continue;
+        push(t.slice(0, 60), 'error');
+    }
+    return out;
 }
 
 /**

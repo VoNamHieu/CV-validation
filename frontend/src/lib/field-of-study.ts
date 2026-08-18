@@ -1,0 +1,211 @@
+// Resolve a CV's field of study to a value Workday's closed catalogue accepts,
+// BEFORE it reaches the extension. FE-only — the deterministic apply engine is
+// never told to translate.
+//
+// Field of Study on Workday is a SINGLE-select closed list of 327 English majors
+// (measured, R-172558/R-173704). A Vietnamese major ("Kinh doanh quốc tế") or an
+// English one the list does not carry ("International Economics") never matches,
+// and the intern form gaps mid-run. Two layers resolve it: the deterministic one
+// here — the exact catalogue label first, then a Vietnamese-major dictionary
+// whose every target is asserted (by test) to be in the catalogue — and, for
+// anything it cannot place, the LLM long tail (resolveCvFieldsOfStudy →
+// /api/ai/field-of-study, below). A value neither layer can place is returned
+// UNCHANGED; for an INTERN posting the apply-time gate (intern-context's
+// internApplyGaps) then BLOCKS rather than dispatch a non-catalogue value — no
+// longer "no worse than today", but "does not gap".
+
+import type { CVData } from './types';
+import { FIELD_OF_STUDY_CATALOG } from './field-of-study-catalog';
+
+/** Accent-fold + lowercase + collapse spaces, so "Kinh tế Quốc tế", "kinh te
+ *  quoc te" and "  KINH  TE " all key the same. `đ`→`d` is explicit — NFD does
+ *  not decompose it.
+ *
+ *  Also strips EDGE punctuation (a trailing "Computer Science," or a quoted
+ *  '"Marketing"') so a stray comma/period/quote a CV extraction left on the end
+ *  does not miss an otherwise-exact catalogue row. EDGE only — the inner commas
+ *  and slashes that real labels carry ("African Languages, Literatures, and
+ *  Linguistics", "Agricultural/Biological Engineering") must survive untouched,
+ *  and the same fold runs over the catalogue itself so both sides key alike. */
+export function foldMajor(s: string): string {
+    return String(s ?? '')
+        .normalize('NFD').replace(/[̀-ͯ]/g, '')
+        .toLowerCase()
+        .replace(/đ/g, 'd')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(/^[\s.,;:!?"'’“”()[\]]+|[\s.,;:!?"'’“”()[\]]+$/g, '');
+}
+
+const CATALOG_BY_FOLD = new Map(FIELD_OF_STUDY_CATALOG.map((label) => [foldMajor(label), label]));
+
+/**
+ * Common Vietnamese majors → the nearest catalogue label. Keys are folded. Every
+ * target is a real catalogue row (asserted in the test). The nearest-match ones
+ * (kinh tế quốc tế / kinh tế đối ngoại — the catalogue has no "International
+ * Economics" or "Foreign Trade") are the honest deterministic answer; the LLM
+ * layer can refine them, but a defensible economics/international label beats a
+ * gap.
+ */
+const VN_MAJOR: Record<string, string> = {
+    'quan tri kinh doanh': 'Business Administration',
+    'kinh doanh quoc te': 'International Business',
+    'kinh te quoc te': 'Economics',
+    'kinh te doi ngoai': 'International Business',
+    'kinh te': 'Economics',
+    'kinh te hoc': 'Economics',
+    'thuong mai': 'Business Administration',
+    'thuong mai quoc te': 'International Business',
+    'marketing': 'Marketing',
+    'tiep thi': 'Marketing',
+    'ke toan': 'Accounting',
+    'kiem toan': 'Accounting',
+    'ke toan kiem toan': 'Accounting',
+    'tai chinh': 'Finance',
+    'tai chinh ngan hang': 'Finance',
+    'ngan hang': 'Finance',
+    'cong nghe thong tin': 'Information Technology',
+    'khoa hoc may tinh': 'Computer and Information Science',
+    'he thong thong tin': 'Management Information Systems',
+    'he thong thong tin quan ly': 'Management Information Systems',
+    'khoa hoc du lieu': 'Data Science',
+    'luat': 'Law',
+    'luat kinh te': 'Law',
+    'quan tri nhan luc': 'Human Resources Management',
+    'quan tri nhan su': 'Human Resources Management',
+    'ngon ngu anh': 'English',
+    'su pham': 'Education',
+    'logistics': 'Logistics Management',
+    'logistics va quan ly chuoi cung ung': 'Logistics Management',
+    'quan ly chuoi cung ung': 'Logistics Management',
+    'quan tri chuoi cung ung': 'Logistics Management',
+    'xay dung': 'Civil Engineering',
+    'ky thuat xay dung': 'Civil Engineering',
+    'co khi': 'Mechanical Engineering',
+    'ky thuat co khi': 'Mechanical Engineering',
+    'dien': 'Electrical Engineering',
+    'dien tu': 'Electrical Engineering',
+    'ky thuat dien': 'Electrical Engineering',
+    'kien truc': 'Architecture',
+    'quan tri khach san': 'Hospitality',
+    'quan tri du lich': 'Hospitality',
+    'du lich': 'Hospitality',
+    'tam ly hoc': 'Psychology',
+    'quan he quoc te': 'International Relations',
+    'truyen thong': 'Mass Communication',
+    'bao chi': 'Journalism',
+    'y khoa': 'Medicine',
+    'duoc': 'Pharmacy',
+    'dieu duong': 'Nursing',
+};
+
+/**
+ * Map a raw field of study to a catalogue label, or leave it unchanged.
+ *
+ *   1. an EXACT catalogue major (any casing / accent) — return the canonical
+ *      spelling the catalogue uses;
+ *   2. a known Vietnamese major — return its mapped label;
+ *   3. otherwise the input verbatim — unknown is not wrong here, it is "the
+ *      deterministic layer has no answer", and the value flows on exactly as it
+ *      does today for the extension's search and, failing that, the review gap.
+ */
+export function resolveFieldOfStudy(raw: string | null | undefined): string {
+    const value = String(raw ?? '').trim();
+    if (!value) return value;
+    const folded = foldMajor(value);
+    const exact = CATALOG_BY_FOLD.get(folded);
+    if (exact) return exact;
+    const mapped = VN_MAJOR[folded];
+    if (mapped) return mapped;
+    return value;
+}
+
+/** True when the resolver could place this value in the catalogue. */
+export function isResolvableMajor(raw: string | null | undefined): boolean {
+    const value = String(raw ?? '').trim();
+    if (!value) return false;
+    const folded = foldMajor(value);
+    return CATALOG_BY_FOLD.has(folded) || folded in VN_MAJOR;
+}
+
+/**
+ * True when this value IS a catalogue major (case/accent-insensitive) — i.e. a
+ * value Workday's closed Field-of-Study will accept. Distinct from
+ * isResolvableMajor: this checks the RESULT, so it is what an apply gate calls
+ * AFTER resolveCvFieldsOfStudy to decide whether a REQUIRED intern field will
+ * actually fill. A still-raw Vietnamese major, an unmapped one, or a degree
+ * ("B.B.A." — a qualification, not a major) all return false. There is no
+ * fail-open here: an unresolved value is not a catalogue row, so the caller
+ * blocks rather than dispatches a value the closed dropdown cannot match.
+ */
+export function isCatalogueFieldOfStudy(value: string | null | undefined): boolean {
+    const v = String(value ?? '').trim();
+    return !!v && CATALOG_BY_FOLD.has(foldMajor(v));
+}
+
+// ── LLM long-tail: majors the deterministic layer cannot place ──────────────
+//
+// The deterministic layer knows the common majors; an unusual one ("Kinh tế
+// đầu tư", "Công nghệ sinh học thực phẩm") would still gap the intern form. This
+// asks the model ONCE per unknown major to pick the nearest catalogue row — at
+// APPLY time, never on a keystroke — validated server-side against the catalogue
+// so it can only return a real row. Fail-safe throughout: any error leaves the
+// value raw, exactly as today, and never blocks the apply.
+
+const CATALOG = new Set<string>(FIELD_OF_STUDY_CATALOG);
+const llmCache = new Map<string, string>();   // foldMajor(raw) → catalogue label
+
+async function askLlmForMajors(rawMajors: string[]): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    const ask: string[] = [];
+    for (const raw of rawMajors) {
+        const value = String(raw ?? '').trim();
+        if (!value || isResolvableMajor(value)) continue;      // deterministic owns these
+        const key = foldMajor(value);
+        const cached = llmCache.get(key);
+        if (cached) { out.set(value, cached); continue; }
+        ask.push(value);
+    }
+    const unique = [...new Set(ask)];
+    if (unique.length === 0) return out;
+    try {
+        const res = await fetch('/api/ai/field-of-study', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ majors: unique }),
+        });
+        const data: { map?: Record<string, string> } = res.ok ? await res.json() : {};
+        for (const raw of unique) {
+            const label = data.map?.[raw];
+            if (label && CATALOG.has(label)) {
+                llmCache.set(foldMajor(raw), label);
+                out.set(raw, label);
+            }
+        }
+    } catch { /* fail-safe: unresolved majors stay raw */ }
+    return out;
+}
+
+/**
+ * Resolve every education entry's field of study on a COPY of the CV — the
+ * deterministic layer, then the LLM for whatever it could not place. Call this
+ * at APPLY time so the value the extension fills is catalogue-valid before the
+ * agent runs. The FE state is untouched (the editor keeps the candidate's own
+ * words); only the returned copy is normalised. Never throws.
+ */
+export async function resolveCvFieldsOfStudy(cv: CVData): Promise<CVData> {
+    if (!cv?.education?.length) return cv;
+    const afterRules = cv.education.map((e) =>
+        e?.field_of_study ? { ...e, field_of_study: resolveFieldOfStudy(e.field_of_study) } : e);
+    const stillUnknown = afterRules
+        .map((e) => e?.field_of_study)
+        .filter((v): v is string => !!v && !isResolvableMajor(v));
+    if (stillUnknown.length === 0) return { ...cv, education: afterRules };
+    const llm = await askLlmForMajors(stillUnknown);
+    if (llm.size === 0) return { ...cv, education: afterRules };
+    const education = afterRules.map((e) => {
+        const mapped = e?.field_of_study ? llm.get(e.field_of_study) : undefined;
+        return mapped ? { ...e, field_of_study: mapped } : e;
+    });
+    return { ...cv, education };
+}

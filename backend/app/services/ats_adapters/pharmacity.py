@@ -12,6 +12,25 @@ from app.services.ats_adapters._shared import *  # noqa: F401,F403
 
 _HOSTS = ("corp.pharmacity.vn", "pharmacity.vn", "www.pharmacity.vn")
 _JOB_RX = re.compile(r"/career/[a-z0-9-]{3,}/?$", re.I)
+_MAX_JD_FETCH = 80  # bound per-job detail GETs (board ~60 jobs)
+
+
+def _jd_detail(url: str) -> str:
+    """Full JD from the Elementor detail page: the single-post content is the
+    largest `div[data-elementor-type]` container ("" on any miss)."""
+    from bs4 import BeautifulSoup
+    try:
+        r = requests.get(url, headers=_HTML_HEADERS, timeout=_TIMEOUT)
+        if r.status_code != 200:
+            return ""
+        soup = BeautifulSoup(r.text, "html.parser")
+        for t in soup(["script", "style", "nav", "header", "footer", "form"]):
+            t.decompose()
+        blocks = [e.get_text("\n", strip=True) for e in soup.select("div[data-elementor-type]")]
+        return _full_desc(max(blocks, key=len, default=""))
+    except Exception as e:  # noqa: BLE001
+        logger.info(f"[ats] pharmacity detail failed: {str(e)[:60]}")
+        return ""
 
 
 def _is_pharmacity(career_url: str) -> bool:
@@ -39,7 +58,8 @@ def _pharmacity(career_url: str) -> list[dict]:
         if url in seen or not title or len(title) < 4:
             continue
         seen.add(url)
-        out.append({"title": title[:200], "url": url, "location": "", "description": ""})
+        out.append({"title": title[:200], "url": url, "location": "",
+                    "description": _jd_detail(url) if len(out) < _MAX_JD_FETCH else ""})
     logger.info(f"[ats] pharmacity → {len(out)} jobs")
     return out
 

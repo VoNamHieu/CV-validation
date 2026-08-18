@@ -421,7 +421,7 @@ interface CvDocumentPreviewProps {
 }
 
 const EMPTY_EXPERIENCE: ExperienceDetail = { title: '', company: '', duration_months: 0, description: '' };
-const EMPTY_EDUCATION: EducationDetail = { degree: '', institution: '', year: '' };
+const EMPTY_EDUCATION: EducationDetail = { degree: '', institution: '', year: '', field_of_study: '' };
 const EMPTY_PROJECT: ProjectDetail = { name: '', description: '' };
 
 export default function CvDocumentPreview({
@@ -652,7 +652,17 @@ export default function CvDocumentPreview({
                                     <InlineEdit
                                         value={edu.degree}
                                         onChange={(v) => updateEducation(i, 'degree', v)}
-                                        placeholder="Bằng cấp/Chuyên ngành"
+                                        placeholder="Bằng cấp (VD: Cử nhân)"
+                                    />
+                                </div>
+                                {/* Ngành học ≠ bằng cấp: "Marketing" là ngành, "Cử nhân" là bằng.
+                                    ATS (Workday) hỏi hai ô riêng, và ô Field of Study được điền
+                                    từ đây trước, chỉ rơi về degree khi trống. */}
+                                <div style={{ color: '#444', fontSize: '0.88rem' }}>
+                                    <InlineEdit
+                                        value={edu.field_of_study ?? ''}
+                                        onChange={(v) => updateEducation(i, 'field_of_study', v)}
+                                        placeholder="Ngành học (VD: Marketing)"
                                     />
                                 </div>
                             </div>

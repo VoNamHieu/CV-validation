@@ -105,6 +105,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         # careersatagoda.com is Cloudflare-walled for scanners (fine for real
         # users); the Greenhouse tenant behind it serves the same VN jobs on
         # scanner-friendly job-boards.greenhouse.io URLs — key the gate on it.
+        # (Was dropped 2026-08-14 as unfetchable — the tenant re-key fixed it.)
         career_url="https://boards.greenhouse.io/agoda",
     ),
     FeaturedCompany(
@@ -1019,11 +1020,10 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         homepage="https://google.com",
         career_url="https://careers.google.com",
     ),
-    FeaturedCompany(
-        name="IBM",
-        homepage="https://ibm.com",
-        career_url="https://careers.ibm.com",
-    ),
+    # IBM and Salesforce were dropped 2026-08-14: careers.ibm.com and
+    # careers.salesforce.com defeat every compat rung (headless-blocked SPA,
+    # no readable API) and never yielded a single stored job — the cron only
+    # produced perpetual "needs adapter" failures in the compat panel.
     FeaturedCompany(
         name="SAP",
         homepage="https://sap.com",
@@ -1032,11 +1032,7 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         # facet returns the real Vietnam postings.
         career_url="https://jobs.sap.com/search/?q=&locationsearch=Vietnam",
     ),
-    FeaturedCompany(
-        name="Salesforce",
-        homepage="https://salesforce.com",
-        career_url="https://careers.salesforce.com",
-    ),
+    # Salesforce dropped 2026-08 (vanity page redirects away, no VN feed).
     # ServiceNow removed 2026-08-17: careers.servicenow.com is Cloudflare-walled
     # server-side (403 even on the Phenom API paths, no jobdetails.* bypass
     # host) — no fetchable feed, only junk ever came out of the crawl.

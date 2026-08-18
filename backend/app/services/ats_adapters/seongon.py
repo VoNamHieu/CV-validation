@@ -40,7 +40,8 @@ def _seongon(career_url: str) -> list[dict]:
             continue
         out.append({"title": title[:200], "url": url,
                     "external_id": str(it.get("id") or url),
-                    "location": "Hà Nội", "description": ""})
+                    "location": "Hà Nội",
+                    "description": _detail_desc(url, ".recruit-detail") if len(out) < 40 else ""})
         if len(out) >= _MAX_ATS_JOBS:
             break
     logger.info(f"[ats] seongon → {len(out)} jobs")

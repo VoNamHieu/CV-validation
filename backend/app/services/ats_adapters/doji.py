@@ -44,7 +44,8 @@ def _doji(career_url: str) -> list[dict]:
             "title": title[:200],
             "url": urljoin(_LIST_URL, a["href"]),
             "location": tds[1].get_text(" ", strip=True),
-            "description": "",
+            "description": _detail_desc(urljoin(_LIST_URL, a["href"]), ".homepage",
+                                        keep_form=True) if len(out) < 40 else "",
         })
     logger.info(f"[ats] doji → {len(out)} jobs")
     return out

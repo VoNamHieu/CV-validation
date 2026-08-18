@@ -86,6 +86,45 @@ export async function getOrCreateApplication({ origin, tenant, jobId }) {
     return { appId, created: false, via: 'existing', debug };
 }
 
+// ── Submission reconciliation ──────────────────────────────────────────────
+// Before re-running a job whose previous outcome is unclear (tab closed, worker
+// recycled, network died mid-submit), ASK Workday what actually happened.
+// Without this a retry can submit a second application for the same posting —
+// visible to the recruiter, and not something we can undo.
+//
+// → { state: 'submitted' | 'draft' | 'not_found' | 'unknown', appId? }
+//   'unknown' is deliberately NOT treated as "safe to rerun": when we can't
+//   tell, the job is surfaced to the user instead of guessed at.
+export async function reconcileSubmission(jobUrlOrRef) {
+    const ref = typeof jobUrlOrRef === 'string' ? parseWorkdayJob(jobUrlOrRef) : jobUrlOrRef;
+    const { origin, tenant, jobId } = ref;
+    if (!origin || !tenant || !jobId) return { state: 'unknown', reason: 'unparsable job url' };
+
+    // The candidate's own application list is the authoritative record; unlike
+    // getOrCreateApplication this NEVER creates anything.
+    const apps = await wdFetch(origin, `/wday/cxs/${tenant}/Search/applications`);
+    if (!apps.ok) return { state: 'unknown', reason: `applications ${apps.status}` };
+
+    const list = (apps.json && (apps.json.applications || apps.json.data || apps.json)) || [];
+    if (!Array.isArray(list)) return { state: 'unknown', reason: 'unexpected shape' };
+
+    const mine = list.find(a => JSON.stringify(a).includes(jobId));
+    if (!mine) return { state: 'not_found' };
+
+    const blob = JSON.stringify(mine).toLowerCase();
+    const appId = mine.jobApplicationId || mine.applicationId || mine.id || firstGuid(mine);
+    // Workday words this differently per tenant/version, so match on the status
+    // family rather than an exact string.
+    if (/"(status|applicationstatus)"\s*:\s*"[^"]*(submitted|under review|received|in progress)/.test(blob)
+        || /\bsubmitted\b/.test(blob)) {
+        return { state: 'submitted', appId };
+    }
+    if (/\b(draft|incomplete|not submitted)\b/.test(blob)) return { state: 'draft', appId };
+    // An application row exists but we can't read its status: treat as unknown,
+    // NOT as a draft — assuming draft is what causes a duplicate submission.
+    return { state: 'unknown', appId, reason: 'status not recognized' };
+}
+
 // Does Workday serve the form SCHEMA to a GET once the application is active?
 // (Bare /namedefinition 500s; the SPA gets 200 mid-flow.) Dumps package + the
 // section definitions so we can decide data-driven vs hardcoded filling.

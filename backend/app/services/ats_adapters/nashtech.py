@@ -47,7 +47,7 @@ def _nashtech(career_url: str) -> list[dict]:
             "title": title[:200],
             "url": url,
             "location": ", ".join(locs)[:120],
-            "description": "",
+            "description": _detail_desc(url, ".site-main") if len(out) < 40 else "",
         })
     logger.info(f"[ats] nashtech → {len(out)} VN jobs")
     return out

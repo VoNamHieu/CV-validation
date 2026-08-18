@@ -6,6 +6,24 @@
 import type { CVData } from "@/lib/types";
 import type { ExtensionProfile } from "@/lib/extension-profile";
 import { getAccessToken } from "@/lib/auth-headers";
+import { resolveFieldOfStudy } from "@/lib/field-of-study";
+
+/**
+ * Resolve each education entry's field of study to a value Workday's closed
+ * catalogue accepts, on a COPY — the FE state (and what the editor shows) keeps
+ * the candidate's own words; only the payload the extension reads is normalised.
+ * This is the whole FE-only field-of-study adapter: the deterministic apply
+ * engine is never asked to translate.
+ */
+function resolveCvForExtension(cvData?: CVData): CVData | undefined {
+    if (!cvData?.education?.length) return cvData;
+    return {
+        ...cvData,
+        education: cvData.education.map((e) =>
+            e?.field_of_study ? { ...e, field_of_study: resolveFieldOfStudy(e.field_of_study) } : e,
+        ),
+    };
+}
 
 export interface SyncResult {
     ok: boolean;
@@ -55,7 +73,7 @@ function postAndAwait(
     });
 }
 
-/** Sync the 23-field profile into extension storage. */
+/** Sync the flat profile into extension storage. */
 export async function syncProfileToExtension(
     profile: ExtensionProfile,
     cvData?: CVData,
@@ -64,7 +82,7 @@ export async function syncProfileToExtension(
         {
             type: "JOBFIT_EXPORT_PROFILE",
             profile,
-            cvData,
+            cvData: resolveCvForExtension(cvData),
             // Hand the extension the current JWT so its credit-metered auto-apply
             // / tailor calls can be attributed + charged to this user. Piggybacks
             // on profile sync (runs on upload + edits) so the token stays fresh
@@ -88,18 +106,20 @@ export function syncCvFileToExtension(
 }
 
 /**
- * Sync the login credentials the auto-apply agent reuses to sign in / create an
- * account on ATS that gate their apply behind a login (Workday, SuccessFactors…).
- * Collected by LoginCredentialsBanner; the agent fills them ONLY into a genuine
- * login/signup form's own email + password fields.
+ * Push an ALREADY-RESOLVED auth token to the extension.
+ *
+ * Callers on the auth path (getSession resolve, onAuthStateChange) already hold
+ * the session object, so they pass its access_token straight in. This exists as
+ * its own function precisely so those callers do NOT reach back into
+ * `sb.auth.getSession()`: a getSession() awaited from inside onAuthStateChange
+ * deadlocks on the supabase-js v2 auth lock, and that silent hang is exactly
+ * what left the extension holding an expired token across every F5.
  */
-export function syncApplyCredentialsToExtension(
-    email: string,
-    password: string,
-): Promise<SyncResult> {
+export function pushTokenToExtension(token: string | null | undefined): Promise<SyncResult> {
+    if (!token) return Promise.resolve({ ok: false, error: "Chưa đăng nhập." });
     return postAndAwait(
-        { type: "JOBFIT_SYNC_CREDENTIALS", email, password },
-        "JOBFIT_SYNC_CREDENTIALS_RESPONSE",
+        { type: "JOBFIT_SYNC_TOKEN", token },
+        "JOBFIT_SYNC_TOKEN_RESPONSE",
     );
 }
 
@@ -126,7 +146,7 @@ export function pushTokenToExtension(token: string | null | undefined): Promise<
 
 /**
  * Sync the rich CV JSON into extension storage. The extension needs this to
- * tailor the CV against a job page's JD (Mode 1) — the flat 23-field profile
+ * tailor the CV against a job page's JD (Mode 1) — the flat profile
  * isn't enough (no experience bullets / skills detail).
  */
 export function syncCvDataToExtension(cv: CVData): Promise<SyncResult> {

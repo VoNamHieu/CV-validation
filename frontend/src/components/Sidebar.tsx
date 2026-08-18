@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useAppStore, AppView } from '@/store/useAppStore';
+import { useAtsCredentials } from '@/lib/ats-credentials-context';
 import { MagicWand, Briefcase, FileText, List, X, Sun, Moon, ChatCircleDots, Sparkle } from '@phosphor-icons/react';
 import type { Icon } from '@phosphor-icons/react';
 import AuthButton from './AuthButton';
@@ -28,6 +29,9 @@ export default function Sidebar() {
     const setView = useAppStore((s) => s.setView);
     const openInterviewList = useAppStore((s) => s.openInterviewList);
     const historyCount = useAppStore((s) => s.jobHistory.length);
+    // Tenants blocked on the user. Surfaced here because we never poll a pending
+    // email verification — this badge is what brings the user back to finish.
+    const { actionNeededCount } = useAtsCredentials();
     const [mobileOpen, setMobileOpen] = useState(false);
 
     // Theme toggle — reads the attr set by the no-FOUC bootstrap script,
@@ -102,6 +106,11 @@ export default function Sidebar() {
                     const isActive = view === item.id;
                     const Icon = item.icon;
                     const showBadge = item.id === 'history' && historyCount > 0;
+                    // Tenants waiting on the user. Since we deliberately never
+                    // poll a pending verification, this badge is the only thing
+                    // that brings back a user who verified their email in another
+                    // app hours ago — without it their jobs just sit there.
+                    const showActionBadge = item.id === 'history' && actionNeededCount > 0;
 
                     return (
                         <button
@@ -165,7 +174,23 @@ export default function Sidebar() {
                                     <span style={{ fontWeight: isActive ? 700 : 500, fontSize: '0.85rem', letterSpacing: '-0.01em' }}>
                                         {item.label}
                                     </span>
-                                    {showBadge && (
+                                    {showActionBadge && (
+                                        <span
+                                            title={`${actionNeededCount} công ty cần bạn xử lý`}
+                                            style={{
+                                                fontSize: '0.65rem',
+                                                fontWeight: 700,
+                                                padding: '1px 7px',
+                                                borderRadius: 10,
+                                                background: 'rgba(245,158,11,0.18)',
+                                                color: 'var(--accent-amber)',
+                                                lineHeight: 1.5,
+                                            }}
+                                        >
+                                            {actionNeededCount} cần xử lý
+                                        </span>
+                                    )}
+                                    {showBadge && !showActionBadge && (
                                         <span
                                             style={{
                                                 fontSize: '0.65rem',

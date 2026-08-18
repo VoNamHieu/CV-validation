@@ -15,12 +15,33 @@ The server does NOT validate pageId/config (an empty pageId still returns the
 full result set), so a static body is enough — no HTML pre-fetch. Detail page =
 {origin}/global/en/job/{jobId}/{slug}; jobId keeps its "AV-"/"VN…" prefix and the
 slug segment is cosmetic (verified: numeric-only id 410s, full id + any slug 200s).
+
+The SAME /widgets endpoint also serves the detail: ddoKey="jobDetail" + jobId →
+jobDetail.data.job.description = the whole posting (measured 2026-08-12:
+2.6k chars vs the 200-char descriptionTeaser).
 """
 from __future__ import annotations
 
 from app.services.ats_adapters._shared import *  # noqa: F401,F403
 
 _DETAIL_LOCALE = "global/en"
+_MAX_JD_FETCH = 30  # bound per-job jobDetail calls (VN board is small)
+
+
+def _jd_detail(origin: str, jid: str, headers: dict) -> str:
+    """Full JD via /widgets ddoKey=jobDetail for one jobId ("" on any miss)."""
+    body = {"lang": "en_global", "deviceType": "desktop", "country": "global",
+            "pageName": "page-jobdetails", "ddoKey": "jobDetail", "jobId": jid,
+            "pageId": "page-jobdetails", "siteType": "external"}
+    try:
+        r = requests.post(f"{origin}/widgets", json=body, headers=headers, timeout=_TIMEOUT)
+        if r.status_code != 200:
+            return ""
+        job = ((((r.json() or {}).get("jobDetail") or {}).get("data") or {}).get("job") or {})
+        return _full_desc(job.get("description"))
+    except Exception as e:
+        logger.info(f"[ats] dhl detail {jid} failed: {str(e)[:60]}")
+        return ""
 
 
 def _is_dhl(career_url: str) -> bool:
@@ -76,8 +97,11 @@ def _dhl(career_url: str) -> list[dict]:
             if url in seen:
                 continue
             seen.add(url)
+            # descriptionTeaser is never the full posting — pull the real JD
+            # from the jobDetail widget (full-or-blank: a miss ships "").
+            desc = _jd_detail(origin, jid, headers) if len(out) < _MAX_JD_FETCH else ""
             out.append({"title": title[:200], "url": url, "location": str(loc)[:120],
-                        "description": _strip_html(j.get("descriptionTeaser") or "")[:600]})
+                        "description": desc})
         if start + _PER >= total or len(jobs) < _PER or len(out) >= _MAX_ATS_JOBS:
             break
     logger.info(f"[ats] dhl → {len(out)} VN jobs ({origin})")

@@ -1,0 +1,32 @@
+{
+  "tenant": "pwc",
+  "field": "How Did You Hear About Us?",
+  "intent": "application.source",
+  "capability": "hierarchical-listbox",
+  "commitSignal": "selected-value",
+  "shape": {
+    "nestedMenu": true,
+    "leafNodes": true,
+    "virtualized": true,
+    "multiSelect": true,
+    "clipRectDegenerate": true
+  },
+  "measured": {
+    "level0": {
+      "rows": 64,
+      "measuredEdgeLabelsOnly": true,
+      "labels": ["Alumni", "Former Intern", "University / Campus", "Website"],
+      "note": "windows walked Alumni…Former Intern → University / Campus…Website; 'Website' is a CATEGORY (no radio), clicking it drills"
+    },
+    "level1UnderWebsite": {
+      "rows": 6,
+      "measuredEdgeLabelsOnly": true,
+      "labels": ["I found the job on a job board", "I was referred by a search engine"],
+      "note": "leaves are CLAIMS with radios; no ladder rung can name them — the drill-level inference exists for exactly this catalogue"
+    },
+    "ladderTried": ["company website", "company careers website"],
+    "expectAtLevel0": { "company website": null, "company careers website": null, "website": "Website" },
+    "clip": "list container measured 1–2px tall (clip 542..543, clientH 1) — geometry unusable for reveal math on this widget"
+  },
+  "source": "Copo trace 2026-08-07 02:03–02:15 (PwC Associate L&D 744157WD): list.exhausted windows, list.drill L0/L1, list.infer picks"
+}

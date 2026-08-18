@@ -114,12 +114,19 @@ async def _diagnose_feed_death(career_url: str) -> str:
             "(đổi format, bài GHN) hoặc công ty hết job VN thật (bài DSV)")
 
 
-async def _career_url_drift() -> dict:
+async def _career_url_drift(empty_names: set | None = None) -> dict:
     """Detect featured career_url pages that now redirect to a DIFFERENT host —
     the "whole site migrated" class (Ahamove: ahamove.com/recruitment →
     careers.ahamove.com). Only the redirect target is judged: fetch errors are
     ignored here (feed_died's turf), and a 4xx final page still shows its host.
-    Same-host redirects (path moves, / → /careers) are normal and stay quiet."""
+    Same-host redirects (path moves, / → /careers) are normal and stay quiet.
+
+    `empty_names` scopes the probe to companies whose feed came back EMPTY this
+    run: big boards often keep a vanity page that redirects away while the feed
+    behind the configured URL stays alive (TikTok → lifeattiktok, Bosch/Accor
+    on SmartRecruiters, Google, Salesforce — all fired as false "moved" on the
+    first prod cycle). A redirect only matters when the feed is ALSO gone.
+    None (ingest crashed, no signal) → probe everything, as before."""
     import httpx
     from urllib.parse import urlparse
 
@@ -129,6 +136,8 @@ async def _career_url_drift() -> dict:
     def _host(u: str) -> str:
         return (urlparse(u).netloc or "").lower().removeprefix("www.")
 
+    targets = [c for c in FEATURED_COMPANIES
+               if empty_names is None or c.name in empty_names]
     sem = asyncio.Semaphore(10)
     moved: list[tuple] = []
 
@@ -144,7 +153,7 @@ async def _career_url_drift() -> dict:
             if final and final != _host(c.career_url):
                 moved.append((c, final))
 
-        await asyncio.gather(*[probe(c) for c in FEATURED_COMPANIES],
+        await asyncio.gather(*[probe(c) for c in targets],
                              return_exceptions=True)
 
     for c, final in moved:
@@ -155,7 +164,7 @@ async def _career_url_drift() -> dict:
             fingerprint=f"career_url_moved:{c.name}:{final}", ttl_days=30,
             context={"career_url": c.career_url, "final_host": final},
         )
-    return {"probed": len(FEATURED_COMPANIES), "moved": len(moved)}
+    return {"probed": len(targets), "moved": len(moved)}
 
 
 async def _link_scan() -> dict:
@@ -308,9 +317,13 @@ async def _run() -> None:
     try:
         # Drift detector (career_url_moved): career pages now redirecting to a
         # different host — catches full site migrations even while the old
-        # adapter still limps along.
-        logger.info("[cron] career_url drift probe starting…")
-        drift = await _career_url_drift()
+        # adapter still limps along. Scoped to this run's empty-feed companies
+        # (a vanity redirect over a live feed is cosmetic, not drift).
+        empty = ({e.get("name") for e in ingest.get("ats_feed_empty", [])}
+                 if ingest else None)
+        logger.info("[cron] career_url drift probe starting… (scope=%s)",
+                    "all" if empty is None else len(empty))
+        drift = await _career_url_drift(empty)
         logger.info("[cron] career_url drift probe done: %s", drift)
     except Exception as e:
         logger.exception("[cron] career_url drift probe failed — continuing")

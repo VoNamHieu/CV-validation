@@ -49,7 +49,7 @@ def _bidv(career_url: str) -> list[dict]:
             "url": f"{_BASE}/{jid}/{slug}.html",
             "external_id": str(jid),
             "location": loc[:120],
-            "description": _strip_html(it.get("descriptionjob") or "")[:600],
+            "description": _full_desc(it.get("descriptionjob")),
         })
         if len(out) >= _MAX_ATS_JOBS:
             break

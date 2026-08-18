@@ -1,6 +1,12 @@
 // AUTO-SPLIT from content-agent.js (Phase 2). Part of the Copo apply agent.
 // ─── Config ───
-export const AGENT_MAX_ITERATIONS = 25;
+// No iteration cap (user decision 2026-08-02): a fixed count killed legit long
+// runs while real loops are caught by the SEMANTIC guards — the same-state
+// stuck detector, the per-field needs/recovery budgets, and the background
+// watchdog. What remains is a wall-clock ceiling matched to the background's
+// JOB_HARD_CAP_MS: a run may take as long as a careful human form session,
+// never forever (a manual run has no external watchdog to kill it otherwise).
+export const AGENT_MAX_RUNTIME_MS = 15 * 60 * 1000;
 
 export const SCROLL_STEP_PX = 600;
 
@@ -58,3 +64,15 @@ export const JOB_CONTEXT_KEYWORDS = [
 // user opens later. The background clears it on result / tab-close, but this is
 // the content-side backstop.
 export const APPLY_SESSION_TTL_MS = 10 * 60 * 1000;
+
+// Tenants whose review needs a SPECIFIC human look before Submit, keyed by
+// hostname. P&G renders every address line REQUIRED in two scripts, so the
+// city fallback validates the form while the submitted address is only as
+// exact as the profile — the review must say so out loud. Other tenants skip
+// for now (user decision 2026-08-03); add entries as they are measured.
+export const TENANT_REVIEW_FLAGS = [
+    {
+        host: /pgcareers|(^|\.)pg\.wd\d+\.myworkday/i,
+        flag: 'P&G yêu cầu địa chỉ chính xác từng dòng — kiểm tra lại mục Address trước khi Submit.',
+    },
+];

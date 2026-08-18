@@ -363,13 +363,13 @@ def _trustingsocial(career_url: str) -> list[dict]:
             if dr.status_code == 200:
                 op = (((dr.json() or {}).get("result") or {}).get("data") or {}) \
                     .get("recruiterboxOpening", {}) or {}
-                desc = _strip_html(op.get("description") or "")[:600]
+                desc = op.get("description") or ""
         except Exception:
             pass
         out.append({"title": title[:200],
                     "url": f"{base}/careers/openings/{slug}",
                     "location": loc_str[:120] or "Vietnam",
-                    "description": desc,
+                    "description": _full_desc(desc),  # per-opening detail = full JD
                     "employment_type": (n.get("position_type") or "").strip(),
                     "category": (n.get("team") or "").strip()})
         if len(out) >= _MAX_ATS_JOBS:
@@ -409,8 +409,8 @@ def _timo(career_url: str) -> list[dict]:
                 continue
             locs = [locmap.get(i, "") for i in (j.get("career-location") or [])]
             loc = ", ".join(x for x in locs if x) or "Vietnam"
-            desc = _strip_html((j.get("content") or {}).get("rendered", ""))[:600]
-            out.append({"title": title[:200], "url": link, "location": loc[:120], "description": desc})
+            out.append({"title": title[:200], "url": link, "location": loc[:120],
+                        "description": _full_desc((j.get("content") or {}).get("rendered", ""))})
     except Exception as e:
         logger.info(f"[ats] timo failed: {str(e)[:80]}")
     logger.info(f"[ats] timo → {len(out)} jobs")
@@ -462,6 +462,24 @@ def _is_canon(career_url: str) -> bool:
     return (urlparse(career_url or "").netloc or "").lower().removeprefix("www.") == "cvn.canon"
 
 
+_CANON_MAX_JD = 150  # bound per-job detail GETs (board measured 114 jobs 2026-08-12)
+
+
+def _canon_jd(url: str) -> str:
+    """Full JD from the SSR detail page's `.lContainer` ("" on any miss)."""
+    from bs4 import BeautifulSoup
+    try:
+        r = requests.get(url, headers=_HTML_HEADERS, timeout=_TIMEOUT)
+        if r.status_code != 200:
+            return ""
+        soup = BeautifulSoup(r.content.decode("utf-8-sig", "ignore"), "html.parser")
+        el = soup.select_one("div.lContainer")
+        return _full_desc(el.get_text("\n", strip=True) if el else "")
+    except Exception as e:
+        logger.info(f"[ats] canon detail failed: {str(e)[:60]}")
+        return ""
+
+
 def _canon(career_url: str) -> list[dict]:
     from bs4 import BeautifulSoup
     try:
@@ -488,9 +506,10 @@ def _canon(career_url: str) -> list[dict]:
             continue
         slug = href.rsplit("/", 1)[-1].lower()
         plant = "Thang Long" if slug.startswith("tl_") else "Tien Son" if slug.startswith("ts_") else ""
-        out.append({"title": title[:200],
-                    "url": href if href.startswith("http") else "https://cvn.canon" + href,
-                    "location": (f"{plant}, Vietnam" if plant else "Vietnam"), "description": ""})
+        full_url = href if href.startswith("http") else "https://cvn.canon" + href
+        out.append({"title": title[:200], "url": full_url,
+                    "location": (f"{plant}, Vietnam" if plant else "Vietnam"),
+                    "description": _canon_jd(full_url) if len(out) < _CANON_MAX_JD else ""})
         if len(out) >= _MAX_ATS_JOBS:
             break
     logger.info(f"[ats] canon → {len(out)} jobs")
@@ -538,7 +557,9 @@ def _geekadventure(career_url: str) -> list[dict]:
         if not title:
             continue
         out.append({"title": title[:200], "url": f"https://geekadventure.vn/{href}",
-                    "location": loc[:120], "description": ""})
+                    "location": loc[:120],
+                    "description": _detail_desc(f"https://geekadventure.vn/{href}",
+                                                'div[class*="opportunity-detail"]') if len(out) < 40 else ""})
         if len(out) >= _MAX_ATS_JOBS:
             break
     logger.info(f"[ats] geekadventure → {len(out)} VN jobs")
@@ -571,7 +592,7 @@ def _garena(career_url: str) -> list[dict]:
         if not title or not jid or not _is_vn_loc(loc):
             continue
         out.append({"title": title[:200], "url": f"https://careers.garena.vn/vn/careers/{jid}",
-                    "location": loc[:120], "description": _strip_html(j.get("description") or "")[:600],
+                    "location": loc[:120], "description": _full_desc(j.get("description")),
                     "category": ", ".join(tags.get("job_category") or [])[:120]})
         if len(out) >= _MAX_ATS_JOBS:
             break
@@ -611,7 +632,8 @@ def _ssi(career_url: str) -> list[dict]:
         m = re.search(r"\(([^)]+)\)\s*$", title)
         if m and _is_vn_loc(m.group(1)):
             loc = m.group(1).strip()
-        out.append({"title": title[:200], "url": url, "location": loc[:120], "description": ""})
+        out.append({"title": title[:200], "url": url, "location": loc[:120],
+                    "description": _detail_desc(url, ".content-page") if len(out) < 40 else ""})
         if len(out) >= _MAX_ATS_JOBS:
             break
     logger.info(f"[ats] ssi → {len(out)} jobs")
@@ -651,7 +673,7 @@ def _appota(career_url: str) -> list[dict]:
             continue
         wp = (c.get("workplace") or "").strip()
         out.append({"title": title[:200], "url": f"https://appota.com/careers/jobs/{jid}",
-                    "location": (wp or "Vietnam")[:120], "description": _strip_html(c.get("description") or "")[:600]})
+                    "location": (wp or "Vietnam")[:120], "description": _full_desc(c.get("description"))})
         if len(out) >= _MAX_ATS_JOBS:
             break
     logger.info(f"[ats] appota → {len(out)} jobs")
@@ -750,7 +772,7 @@ def _zalo(career_url: str) -> list[dict]:
                         "url": f"https://zalo.careers/job/{slug}",
                         "external_id": f"zalo:{stable}",
                         "location": (j.get("locationName") or "Vietnam")[:120],
-                        "description": _strip_html(j.get("desc") or "")[:600]})
+                        "description": _full_desc(j.get("desc"))})
         if len(out) >= _MAX_ATS_JOBS:
             break
     logger.info(f"[ats] zalo → {len(out)} jobs")
@@ -788,6 +810,30 @@ def _momo_sign(method: str, signed_url: str) -> tuple[str, str]:
     return ts, _b64.b64encode(enc.update(plain) + enc.finalize()).decode()
 
 
+_MOMO_MAX_JD = 150  # bound per-job detail GETs (board measured 103 jobs 2026-08-12)
+
+
+def _momo_jd(slug: str) -> str:
+    """Full JD from the detail page's __NEXT_DATA__ →
+    props.pageProps.dataJobDetail.{jobDesc,jobResp,jobRequire} ("" on miss)."""
+    import json as _json
+    try:
+        r = requests.get(f"https://momo.careers/jobs/{slug}", headers=_HTML_HEADERS,
+                         timeout=_TIMEOUT)
+        if r.status_code != 200:
+            return ""
+        m = re.search(r'__NEXT_DATA__"[^>]*>(.*?)</script>', r.text, re.S)
+        if not m:
+            return ""
+        d = ((_json.loads(m.group(1)).get("props") or {}).get("pageProps") or {}) \
+            .get("dataJobDetail") or {}
+    except Exception as e:
+        logger.info(f"[ats] momo detail {slug} failed: {str(e)[:60]}")
+        return ""
+    parts = [d.get("jobDesc"), d.get("jobResp"), d.get("jobRequire")]
+    return _full_desc("\n".join(p for p in parts if p))
+
+
 def _momo_api() -> list[dict]:
     """Fetch the full opening list via the signed JSON API. Paginates by lastIdx
     until TotalItems is reached. Returns [] on any failure so the caller can fall
@@ -818,7 +864,7 @@ def _momo_api() -> list[dict]:
             out.append({"title": title[:200],
                         "url": f"https://momo.careers/jobs/{slug}",
                         "location": (it.get("location") or "Hồ Chí Minh").strip()[:120],
-                        "description": ""})
+                        "description": _momo_jd(slug) if len(out) < _MOMO_MAX_JD else ""})
         total = data.get("TotalItems") or 0
         last += len(items)
         if not items or last >= total or len(out) >= _MAX_ATS_JOBS:
@@ -897,9 +943,9 @@ def _vnpay_tuyendung(career_url: str) -> list[dict]:
         slug = href.lower()
         loc = ("Đà Nẵng" if "da-nang" in slug else "Hồ Chí Minh" if "hcm" in slug
                else "Hà Nội" if "ha-noi" in slug or "hanoi" in slug else "Vietnam")
-        out.append({"title": title[:200],
-                    "url": href if href.startswith("http") else "https://tuyendung.vnpay.vn" + href,
-                    "location": loc, "description": ""})
+        vurl = href if href.startswith("http") else "https://tuyendung.vnpay.vn" + href
+        out.append({"title": title[:200], "url": vurl, "location": loc,
+                    "description": _detail_desc(vurl, "main.site-main") if len(out) < 40 else ""})
         if len(out) >= _MAX_ATS_JOBS:
             break
     logger.info(f"[ats] vnpay → {len(out)} jobs")

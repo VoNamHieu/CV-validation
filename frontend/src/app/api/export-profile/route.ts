@@ -4,7 +4,7 @@ import type { CVData } from '@/lib/types';
 
 /**
  * GET /api/export-profile
- * Returns the canonical 23-field schema the extension popup expects.
+ * Returns the canonical profile schema the extension popup expects.
  * The server is stateless and has no session — the actual profile data
  * flows from the web app to the extension via window.postMessage, not via
  * this endpoint. Kept as a schema reference + health check.
@@ -12,7 +12,7 @@ import type { CVData } from '@/lib/types';
 export async function GET() {
     return NextResponse.json({
         status: 'ready',
-        message: 'Profile data is pushed to the extension via postMessage from the CV editor. This endpoint exposes the canonical 23-field schema only.',
+        message: 'Profile data is pushed to the extension via postMessage from the CV editor. This endpoint exposes the canonical profile schema only.',
         schema: {
             fullName: 'string',
             firstName: 'string',
@@ -22,6 +22,7 @@ export async function GET() {
             dateOfBirth: 'string (YYYY-MM-DD)',
             gender: 'string',
             nationality: 'string',
+            ethnicity: 'string (ethnic group, e.g. Kinh)',
             maritalStatus: 'string',
             addressProvince: 'string',
             addressDistrict: 'string',
@@ -30,20 +31,30 @@ export async function GET() {
             currentLevel: 'string',
             yearsOfExperience: 'number',
             highestDegree: 'string',
+            postalCode: 'string',
+            noticePeriod: 'string',
+            gpa: 'string (education GPA, e.g. 3.6/4.0)',
+            workAuthorized: 'string',
+            requiresSponsorship: 'string',
             currentSalary: 'string',
             currentIndustry: 'string',
             currentFields: 'string',
             desiredLocations: 'string',
             desiredSalary: 'string',
             coverLetter: 'string',
+            applyMessage: 'string (short note for an ATS message-to-hiring-team box)',
             skills: 'string (comma-separated)',
+            middleName: 'string (tên đệm — some tenants require it in both scripts)',
+            addressStreet2: 'string (address line 2, usually empty)',
+            driversLicense: 'string (Yes/No — driver license question, Unilever requires it)',
+            availableStartDate: 'string (YYYY-MM-DD earliest start date; empty derives from notice period)',
         } satisfies Record<keyof ExtensionProfile, string>,
     });
 }
 
 /**
  * POST /api/export-profile
- * Body: { cvData: CVData } — server maps it into the 23-field ExtensionProfile.
+ * Body: { cvData: CVData } — server maps it into the ExtensionProfile.
  * Single source of truth for the mapping: cvToExtensionProfile.
  */
 export async function POST(request: Request) {

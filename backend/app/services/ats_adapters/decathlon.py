@@ -76,7 +76,7 @@ def _decathlon(career_url: str) -> list[dict]:
                 "url": _DETAIL.format(jid=jid),
                 "external_id": str(jid),  # survives the next route rename
                 "location": "",
-                "description": _strip_html(desc)[:4000] if desc else "",
+                "description": _full_desc(desc),
             })
         if page >= (d.get("pageCount") or 1) or len(out) >= _MAX_ATS_JOBS:
             break

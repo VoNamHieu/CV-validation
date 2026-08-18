@@ -17,7 +17,7 @@ Return ONLY valid JSON matching this exact schema:
   "desired_job_title": "string (the single job title this candidate is most likely searching for next)",
   "skills": ["string"],
   "experience": [{"title": "string", "company": "string", "start_date": "string", "end_date": "string", "duration_months": number, "description": "string"}],
-  "education": [{"degree": "string", "institution": "string", "year": "string"}],
+  "education": [{"degree": "string", "field_of_study": "string", "institution": "string", "year": "string"}],
   "projects": [{"name": "string", "description": "string"}],
   "certifications": [{"name": "string", "issuer": "string", "year": "string"}],
   "languages": [{"language": "string", "level": "string (e.g., IELTS 7.0, TOEIC 800, Native, Fluent, Intermediate)"}],
@@ -60,6 +60,7 @@ Rules:
 - COMPLETENESS IS CRITICAL: this output replaces the original CV, so any detail you omit is lost forever. Extract EVERY section and EVERY line of the CV into the schema.
 - For experience[].description, projects[].description, and activities[].description: copy EVERY bullet point and sentence from the source, keeping the original wording (translate nothing, summarize nothing). Output each bullet on its own line, separated by "\\n", without leading "-" or "*" characters. NEVER shorten, merge, drop, or paraphrase bullets — the bullet count in your output must equal the bullet count in the CV.
 - Map CV sections to schema fields: "Certifications" / "Chứng chỉ" / courses → certifications; "Languages" / "Ngoại ngữ" → languages; "Awards" / "Honors" / "Giải thưởng" / "Danh hiệu" → awards; "Activities" / "Volunteering" / "Hoạt động" / "Tình nguyện" / extracurriculars → activities.
+- DERIVE languages from language certificates even when the CV has no Languages section — a score is a proficiency statement. Keep the certificate under certifications AND add a languages entry with a normalized level: IELTS ≥7.0 / TOEFL iBT ≥100 / TOEIC ≥900 → English "Fluent"; IELTS 5.5–6.5 / TOEFL 80–99 / TOEIC 750–899 → "Advanced"; lower scored certificates → "Intermediate". HSK 5–6 → Chinese "Fluent", HSK 3–4 → "Intermediate". JLPT N1 → Japanese "Fluent", N2 → "Advanced", N3 → "Intermediate". TOPIK 5–6 → Korean "Fluent". DALF C1/C2 → French "Fluent", DELF B2 → "Advanced". The CV's own written language (Vietnamese CV → Vietnamese) is "Native" unless stated otherwise. Never invent a language no certificate or statement supports.
 - If the CV contains content that fits no schema field (e.g., interests, references, publications), append it as extra lines to the most closely related description field rather than dropping it — e.g., publications under the related experience or activities entry.
 - Extract contact info (email, phone, address, LinkedIn, GitHub, portfolio URL) from anywhere in the CV — usually the header.
 - If the address looks Vietnamese (e.g., contains "Quan", "Huyen", "Phuong", "Tinh", "TP", "Ha Noi", "Ho Chi Minh", "Da Nang", or similar), split it into address_province / address_district / address_street. Otherwise put the city or region in address_province and leave the rest empty.
@@ -68,6 +69,7 @@ Rules:
 - Compute experience[].duration_months from start_date/end_date when both are known (treat "Hiện tại" as today); otherwise use a duration stated explicitly in the CV; otherwise 0.
 - Compute employment.years_of_experience by summing experience[].duration_months / 12 and rounding to the nearest integer.
 - Set employment.highest_degree from the highest-ranked education entry (PhD > Master > Bachelor > Diploma > High School). Use the value verbatim from the CV.
+- education[].degree and education[].field_of_study are DIFFERENT things and go in different fields: degree is the qualification / credential ("Bachelor of Arts", "Cử nhân", "B.B.A.", "MSc"); field_of_study is the MAJOR / subject ("Marketing", "Kinh doanh quốc tế", "Computer Science"). They are usually written together on one line ("Cử nhân Marketing", "Bachelor of Science in Finance", "Kỹ sư CNTT") — SPLIT them: put the qualification in degree and the subject in field_of_study, in the CV's own words. If the CV states only a qualification with no subject, leave field_of_study "". NEVER put the degree/qualification into field_of_study, and never invent a major.
 - Only fill date_of_birth, gender, nationality, marital_status, current_level, current_industry, current_fields, current_salary, desired_locations, desired_salary if they appear explicitly in the CV. Otherwise leave them as empty strings.
 - NEVER invent or guess values. Empty string is always preferable to a hallucinated value.
 - For arrays where no data exists, return [].`;
@@ -203,7 +205,7 @@ export const CV_EXTRACTION_RESPONSE_SCHEMA: Record<string, unknown> = {
             title: STR, company: STR, start_date: STR, end_date: STR,
             duration_months: NUM, description: STR,
         }),
-        education: objArray({ degree: STR, institution: STR, year: STR }),
+        education: objArray({ degree: STR, field_of_study: STR, institution: STR, year: STR }),
         projects: objArray({ name: STR, description: STR }),
         certifications: objArray({ name: STR, issuer: STR, year: STR }),
         languages: objArray({ language: STR, level: STR }),

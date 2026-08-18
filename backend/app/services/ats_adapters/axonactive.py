@@ -56,7 +56,7 @@ def _axonactive(career_url: str) -> list[dict]:
             "title": title[:200],
             "url": link,
             "location": ", ".join(cats),
-            "description": _strip_html(_txt(it, "description"))[:2000],
+            "description": _full_desc(_txt(it, "description")),
         })
         if len(out) >= _MAX_ATS_JOBS:
             break

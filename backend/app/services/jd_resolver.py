@@ -24,10 +24,11 @@ from app.services.ats_adapters import fetch_ats_jobs
 logger = logging.getLogger(__name__)
 
 _MIN_DESC = 100
-# Below this, a stored description may well be a marketing teaser rather than the
-# JD, so it is still worth asking a by-URL detail adapter (Phenom teasers run
-# ~300 chars; a real JD is thousands). Shared with the JD backfill queue.
-_TEASER_MAX = 800
+# Above the 600-char cap old list-adapters used for teaser descriptions.
+# Adapters are full-or-blank now, but rows ingested before that still hold
+# stored teasers (upsert COALESCEs description, so "" never washes them out) —
+# those must not count as "already substantial" in resolve_full_jd.
+_SUBSTANTIAL = 700
 _UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 _TIMEOUT = 12
 
@@ -488,6 +489,10 @@ def resolve_jd_via_ats(jd_url: str) -> str | None:
         return None
 
     desc = match.get("description", "") or ""
+    # Listing descriptions are full-or-blank by adapter contract
+    # (_shared._full_desc): teasers and over-cap text ship as "". So a match
+    # either carries the whole posting or fails this gate and the caller falls
+    # back to its real full-JD path (Playwright / extension DOM).
     if len(desc) < _MIN_DESC:
         return None
 
@@ -513,14 +518,14 @@ async def resolve_full_jd(source_url: str, existing: str = "") -> str:
     import asyncio
 
     existing = (existing or "").strip()
-    if not source_url or len(existing) >= _TEASER_MAX:
+    if len(existing) >= _SUBSTANTIAL or not source_url:
         return existing
 
     best = existing
     # A stored description over the old 200-char bar is USUALLY the real JD — but
     # some list adapters ship a marketing teaser (Phenom's `descriptionTeaser`,
     # ~300 chars: "Join us and make an impact!") that clears that bar carrying
-    # none of the requirements. So up to _TEASER_MAX we still ask the by-URL
+    # none of the requirements. So up to _SUBSTANTIAL we still ask the by-URL
     # detail adapters; each gates on the URL, so this is an instant no-op (zero
     # HTTP) for a platform we have no adapter for.
     try:
@@ -533,11 +538,9 @@ async def resolve_full_jd(source_url: str, existing: str = "") -> str:
     except Exception as e:  # never break publish
         logger.info(f"[resolve_full_jd] detail miss {source_url}: {str(e)[:80]}")
 
-    # Everything below is expensive (whole-board scan, then a browser). Keep the
-    # old bar for entering it: 200 chars of real JD is good enough.
-    if len(best) >= 200:
-        return best
-
+    # No early return between here and the list-scan: anything under
+    # _SUBSTANTIAL may still be a stored teaser, and the board scan is what
+    # upgrades it (test_stored_teaser_still_tries_ats pins this).
     # The ATS list-scan paginates a whole board and often returns nothing for one
     # URL (e.g. thegioididong takes 20s+ → 0 chars). Cap it so a single slow site
     # can't hang the publish request — the crawl below usually gets the JD anyway.
@@ -551,6 +554,9 @@ async def resolve_full_jd(source_url: str, existing: str = "") -> str:
     except Exception as e:  # never break publish
         logger.info(f"[resolve_full_jd] ats miss {source_url}: {str(e)[:80]}")
 
+    # Generic crawl only for truly-thin descriptions: its cleaned page text
+    # mixes site chrome, so a 200–700-char teaser/short JD must not be
+    # "upgraded" to longer garbage — for those, ATS-verified text or nothing.
     if len(best) < 200:
         try:
             from app.services.crawler import crawl_url

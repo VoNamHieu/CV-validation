@@ -34,6 +34,11 @@ COSTS: dict[str, int] = {
     "tailor": 5,     # × units
     "gap_report": 5,  # one deep reasoning report (Pro tier)
     "cover_letter": 3,  # per-job tailored cover letter (judge tier)
+    # The 110–160 word note an ATS free-text box takes, generated per APPLY
+    # rather than per user click. Same route as cover_letter but a fraction of
+    # the output, and charging the letter's price would make every auto-apply
+    # on a form with a message box cost as much as a document the user reads.
+    "apply_message": 1,
     "practice": 2,  # interview practice-answer eval (judge tier)
     "interview_dossier": 2,  # dossier generation past the free first-3-jobs allowance
 

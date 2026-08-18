@@ -2,14 +2,31 @@
 `frontline` job-search widget (loaded from cdn-bot.phenompeople.com), which
 queries the Phenom `/widgets` refineSearch API on the tenant host
 `virtualhiringassistant.mondelezinternational.com` (same request/response shape as
-DHL). Each job's `applyUrl` is the canonical (Workday) job page — the Phenom
-detail URL 404s here, so we use applyUrl directly. VN via country=Vietnam.
+DHL). Each job's `applyUrl` is the canonical Workday job page on the
+custom-tenant host (wd3.myworkdaysite.com/recruiting/mdlz/External/job/…) —
+the Phenom detail URL 404s here, so we use applyUrl directly, and the same
+path under /wday/cxs/{tenant}/{site}/ is Workday's public CXS REST serving
+the FULL JD (jobPostingInfo.jobDescription). VN via country=Vietnam.
 """
 from __future__ import annotations
 
 from app.services.ats_adapters._shared import *  # noqa: F401,F403
 
 _WIDGETS = "https://virtualhiringassistant.mondelezinternational.com/widgets"
+
+_CXS_RX = re.compile(
+    r"^https://(wd\d+)\.myworkdaysite\.com/recruiting/([^/]+)/([^/]+)/(job/[^?#]+)", re.I)
+_MAX_JD_FETCH = 30  # bound per-job CXS calls (VN board is small; odoo precedent)
+
+
+def _cxs_jd(apply_url: str) -> str:
+    """Full JD via Workday CXS for a custom-tenant (myworkdaysite.com) job URL."""
+    m = _CXS_RX.match(apply_url or "")
+    if not m:
+        return ""
+    pod, tenant, site, jobpath = m.groups()
+    d = _get_json(f"https://{pod}.myworkdaysite.com/wday/cxs/{tenant}/{site}/{jobpath}")
+    return _full_desc(((d or {}).get("jobPostingInfo") or {}).get("jobDescription"))
 
 
 def _is_mondelez(career_url: str) -> bool:
@@ -55,12 +72,12 @@ def _mondelez(career_url: str) -> list[dict]:
             if url in seen:
                 continue
             seen.add(url)
-            # description="" like every other list adapter: `descriptionTeaser` is
-            # a ~300-char marketing blurb, and storing it made the row look like
-            # it already had a JD — so neither the backfill nor promote ever
-            # fetched the real one from applyUrl's Workday CXS API.
+            # descriptionTeaser is never the full posting — pull the real JD
+            # from the Workday CXS mirror of applyUrl (full-or-blank: a CXS
+            # miss ships "" and resolves on-demand later).
+            desc = _cxs_jd(url) if len(out) < _MAX_JD_FETCH else ""
             out.append({"title": title[:200], "url": url, "location": str(loc)[:120],
-                        "description": ""})
+                        "description": desc})
         if start + _PER >= total or len(jobs) < _PER or len(out) >= _MAX_ATS_JOBS:
             break
     logger.info(f"[ats] mondelez → {len(out)} VN jobs")

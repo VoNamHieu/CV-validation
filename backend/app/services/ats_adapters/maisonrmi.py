@@ -55,7 +55,8 @@ def _maisonrmi(career_url: str) -> list[dict]:
             if not title or href in seen:
                 continue
             seen.add(href)
-            out.append({"title": title[:200], "url": href, "location": "", "description": ""})
+            out.append({"title": title[:200], "url": href, "location": "",
+                        "description": _detail_desc(href, "div[data-elementor-type]") if len(out) < 40 else ""})
         if len(out) >= _MAX_ATS_JOBS:
             break
     logger.info(f"[ats] maisonrmi → {len(out)} jobs")

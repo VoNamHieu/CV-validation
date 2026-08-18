@@ -1,6 +1,182 @@
 // AUTO-SPLIT from content-agent.js (Phase 2). Part of the Copo apply agent.
+import { checkClick, logDenial } from './policy.js';
+import { mayActivate, ownershipNote } from './mdlz-v2/pages.js';
+import { spanBucket } from './trace.js';
+
 // ─── Helpers ───
-export function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+/**
+ * The agent's clock — and the reason a hidden tab can WORK instead of crawl.
+ *
+ * Chrome clamps a hidden tab's setTimeout to ≥1s, and to ~one fire per MINUTE
+ * after five hidden minutes. Measured on run smsik0vk4pw1h46 (PwC,
+ * 2026-08-07): a 30-second list walk stretched to 25 minutes and the run
+ * burned an hour learning nothing. The background service worker's timers are
+ * NOT subject to tab visibility, so a hidden tab borrows its clock over a
+ * message round-trip (~2ms). Visible tabs, and waits too short to matter,
+ * keep the local timer. The local fallback timer stays armed in case the
+ * worker is recycling mid-sleep — late is recoverable, hung is not.
+ */
+export function sleep(ms) {
+    // Waiting is the biggest line item in a slow run, so it is measured
+    // (no-op unless span tracking is on).
+    try { spanBucket('sleepMs', ms); } catch { /* never break a sleep */ }
+
+    // The local timer ALWAYS stays armed: late is recoverable, hung is not.
+    const local = new Promise(r => setTimeout(r, ms));
+
+    // RECONNECTED 2026-08-09. The comment above described borrowing the
+    // worker's clock and background.js has answered AGENT_SLEEP all along —
+    // "see sleep() in dom.js", its own comment says — but this function was a
+    // bare setTimeout, so nothing ever asked. MEASURED the cost on a hidden
+    // tab that day: `setTimeout(…, 30)` returned after 989ms, and later a
+    // 50ms sleep did not return within 45 SECONDS (Chrome drops a deeply
+    // backgrounded tab to roughly one fire per minute). Typing one skill cost
+    // 11 seconds; the Skills field cost 208.
+    let hidden = false;
+    try { hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden'; } catch { /* no document */ }
+    if (!hidden || ms < 50) return local;   // visible tabs, and waits too short to matter
+
+    const borrowed = new Promise(r => {
+        try {
+            chrome.runtime.sendMessage({ type: 'AGENT_SLEEP', ms }, () => {
+                void chrome.runtime.lastError;   // an orphaned context is not an error here
+                r();
+            });
+        } catch { /* no extension context — `local` still resolves, just late */ }
+    });
+    return Promise.race([borrowed, local]);
+}
+
+/**
+ * Every automation-id Workday uses for "a live validation error attached to
+ * THIS field". One list, imported everywhere, because a missing idiom is not a
+ * cosmetic gap: an error the agent cannot see turns the painted-value guard
+ * into a permanent false-done. Measured on mdlz 2026-08-03: the per-field
+ * error is `inputAlert` — errorMessage/formFieldError never appeared — so
+ * every verify that read only those two saw "0 errors" beside a red
+ * "The field From is required and must have a value."
+ */
+export const FIELD_ERROR_SEL =
+    '[data-automation-id="errorMessage"], [data-automation-id="formFieldError"], [data-automation-id="inputAlert"]';
+
+/**
+ * Diacritics stripped, đ→d — "Võ Nam Hiếu" → "Vo Nam Hieu". For the WESTERN
+ * half of a dual-script pair: the "- Vietnamese" twin keeps its marks, the
+ * "- Western Script" twin is the same fact romanized.
+ */
+export function foldDiacritics(s) {
+    return String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '')
+        .replace(/đ/g, 'd').replace(/Đ/g, 'D');
+}
+
+/**
+ * A legal-name box is never a picker — no tenant renders "Given Name(s)" as a
+ * dropdown, and the one time the probe said otherwise it had been fooled by a
+ * stray popup (Mondelez, 2026-08-06: three listbox-timeouts on a plain text
+ * input, run dead). Both reroute sites consult this BEFORE trusting a picker
+ * verdict on a field whose label says it is a name.
+ */
+export function isLegalNameLabel(label) {
+    return /given name|family name|first name|last name|middle name|legal name|(^|[^a-zà-ỹ])(họ|tên đệm|tên)([^a-zà-ỹ]|$)/i
+        .test(String(label || ''));
+}
+
+/**
+ * The ~20 Vietnamese family names that cover most of the country, with and
+ * without diacritics. Mirrors VN_FAMILY_NAMES in
+ * frontend/src/lib/extension-profile.ts — deliberately duplicated: the whole
+ * point of the repair below is that it must NOT depend on the web app being
+ * up to date.
+ */
+const VN_FAMILY_NAMES = new Set([
+    'nguyen', 'nguyễn', 'tran', 'trần', 'le', 'lê', 'pham', 'phạm',
+    'hoang', 'hoàng', 'huynh', 'huỳnh', 'phan', 'vu', 'vũ', 'vo', 'võ',
+    'dang', 'đặng', 'bui', 'bùi', 'do', 'đỗ', 'ho', 'hồ', 'ngo', 'ngô',
+    'duong', 'dương', 'truong', 'trương', 'dinh', 'đinh',
+]);
+
+/**
+ * Split a full name into the given/family pair, HERE, from the name itself.
+ *
+ * The web app already does this — but a profile is only ever as correct as the
+ * web app build that produced it, and a production still running the old rule
+ * ("the last token is the given name") re-poisons the profile on every CV
+ * edit: measured three times on 2026-08-06, each sync putting the family name
+ * in the given box and the nickname in the legal name. The agent is the last
+ * layer before a real employer sees this, so it re-derives instead of
+ * trusting, and a deploy stops being a prerequisite for correct applications.
+ *
+ * Returns null when the name cannot settle the question — one token, or an
+ * order neither convention makes obvious — so the stored values stand.
+ */
+export function splitLegalName(raw) {
+    const cleaned = String(raw ?? '')
+        .replace(/[（(\[][^）)\]]*[）)\]]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const parts = cleaned.split(' ').filter(Boolean);
+    if (parts.length < 2) return null;
+    const norm = (x) => x.toLowerCase().replace(/[^\p{L}]/gu, '');
+    const lastIsFamily = VN_FAMILY_NAMES.has(norm(parts[parts.length - 1]));
+    const firstIsFamily = VN_FAMILY_NAMES.has(norm(parts[0]));
+    // Western order only when the END looks like a family name and the START
+    // does not — "Nguyen Van Le" (both ends plausible) keeps the VN reading.
+    if (lastIsFamily && !firstIsFamily) {
+        return {
+            firstName: normalizeNameCase(parts.slice(0, -1).join(' ')),
+            lastName: normalizeNameCase(parts[parts.length - 1]),
+        };
+    }
+    if (!firstIsFamily) return null;   // neither end is a known family name
+    return {
+        firstName: normalizeNameCase(parts[parts.length - 1]),
+        lastName: normalizeNameCase(parts.slice(0, -1).join(' ')),
+    };
+}
+
+/**
+ * A profile whose name fields disagree with its own fullName, repaired.
+ *
+ * Pure and idempotent: same input, same output, and a profile already correct
+ * comes back unchanged (=== the input), so callers can compare by identity to
+ * know whether anything was wrong.
+ */
+export function repairProfileNames(profile) {
+    const full = String(profile?.fullName || '').trim();
+    if (!full) return profile;
+    const split = splitLegalName(full);
+    if (!split) return profile;
+    const same = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+    if (same(profile.firstName, split.firstName) && same(profile.lastName, split.lastName)) return profile;
+    return { ...profile, ...split };
+}
+
+/**
+ * ALL-CAPS words → Title Case, everything else untouched. CVs write names in
+ * caps ("HIEU VO") and Workday raises a capitalization advisory on every one;
+ * but a mixed-case word is already someone's deliberate spelling, and a
+ * legal-name field is the wrong place to be clever (McDonald → Mcdonald).
+ * Single letters are left alone so a middle initial survives. Mirrors
+ * normalizeNameCase in frontend/src/lib/extension-profile.ts.
+ */
+export function normalizeNameCase(raw) {
+    // A parenthesised NICKNAME never belongs in a legal-name box — and a
+    // profile synced through a stale web-app build can arrive carrying one
+    // ("Hieu (Charles)", measured 2026-08-06 after a production re-sync
+    // clobbered the repaired split). Stripping here defends every fill layer
+    // at once, whatever upstream did.
+    return String(raw ?? '')
+        .replace(/\s*[（(\[][^）)\]]*[）)\]]\s*/g, ' ')
+        .replace(/\s+/g, ' ').trim()
+        .split(/(\s+)/)
+        .map((word) => {
+            const letters = word.replace(/[^\p{L}]/gu, '');
+            if (letters.length < 2 || word !== word.toUpperCase()) return word;
+            return word.toLowerCase()
+                .replace(/(^|[^\p{L}])(\p{L})/gu, (_m, sep, ch) => sep + ch.toUpperCase());
+        })
+        .join('');
+}
 
 export function waitForElement(selector, timeout = 5000) {
     return new Promise((resolve) => {
@@ -65,6 +241,27 @@ export function detectComponentType(el) {
     if (el.type === 'radio') return 'radio-group';
     // Custom dropdown (div-based)
     if (el.getAttribute('role') === 'combobox' || el.getAttribute('role') === 'listbox') {
+        return 'custom-dropdown';
+    }
+    // Anything that OPENS a listbox is a select whatever its tag — Workday's
+    // single-selects are buttons with aria-haspopup and no role, and they fell
+    // through to 'native' (a text setter aimed at a button).
+    if (el.getAttribute('aria-haspopup') === 'listbox') return 'custom-dropdown';
+    // Workday's search-to-select input (measured: data-uxi-widget-type=
+    // "selectinput" on Field of Study) — free text never commits on it.
+    if (el.getAttribute?.('data-uxi-widget-type') === 'selectinput'
+        || el.getAttribute?.('data-uxi-multiselect-id')) {
+        return 'custom-dropdown';
+    }
+    // A Workday searchable prompt renders as a text INPUT, but free text never
+    // commits — the value only exists once a search result is clicked. Typing
+    // into it as 'native' leaves the field invalid while LOOKING answered
+    // (measured: "How Did You Hear About Us?" — the gap-filler's text pinned
+    // the step on a validation error for ten straight iterations).
+    if (el.tagName === 'INPUT'
+        && (el.getAttribute('aria-haspopup') === 'listbox'
+            || el.getAttribute('aria-autocomplete') === 'list'
+            || !!el.closest('[data-automation-id^="formField-"]')?.querySelector('[data-automation-id="selectedItemList"]'))) {
         return 'custom-dropdown';
     }
     return 'native';
@@ -209,7 +406,7 @@ export function buildUniqueSelector(el) {
 /**
  * Set a value on an input using the native setter to trigger React/Vue reactivity.
  */
-export function setNativeValue(el, value) {
+export function setNativeValue(el, value, { quiet = false } = {}) {
     // Pick the setter for the ELEMENT's own type — calling HTMLInputElement's value
     // setter on a <textarea> (or vice-versa) throws "Illegal invocation" (this hit
     // SmartRecruiters' message <textarea> in a shadow root).
@@ -223,28 +420,48 @@ export function setNativeValue(el, value) {
         el.value = value;
     }
     el.dispatchEvent(new Event('input', { bubbles: true }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-    el.dispatchEvent(new Event('blur', { bubbles: true }));
+    // `quiet` fires input ONLY. change and blur both close a prompt's result
+    // list, so a search box must never be written with them — I rewrote
+    // simulateTyping to route each character through here and it began blurring
+    // after every keystroke, which shut the list before the search could answer
+    // and turned three working fields into "0 shown".
+    if (!quiet) {
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        el.dispatchEvent(new Event('blur', { bubbles: true }));
+    }
 }
 
 /**
  * Simulate typing character by character (nuclear option for stubborn frameworks).
  */
-export async function simulateTyping(el, text) {
+export async function simulateTyping(el, text, { commit = false } = {}) {
     el.focus();
-    el.value = '';
+    // Through the NATIVE setter, not `el.value =`. React keeps a value-tracker on
+    // the input and dedupes against it, so a direct assignment leaves the
+    // component's state disagreeing with the DOM — the box shows one string and
+    // the search runs on another. Every other fill in this file already goes
+    // through setNativeValue; this one did not, which is why typed terms came out
+    // wrong.
+    setNativeValue(el, '', { quiet: true });
     el.dispatchEvent(new Event('focus', { bubbles: true }));
 
+    let typed = '';
     for (const char of text) {
         el.dispatchEvent(new KeyboardEvent('keydown', { key: char, bubbles: true }));
-        el.value += char;
-        el.dispatchEvent(new Event('input', { bubbles: true }));
+        typed += char;
+        setNativeValue(el, typed, { quiet: true });
         el.dispatchEvent(new KeyboardEvent('keyup', { key: char, bubbles: true }));
         await sleep(30);
     }
 
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-    el.dispatchEvent(new Event('blur', { bubbles: true }));
+    // NO blur by default. Blurring a search box closes its result list, so the
+    // old unconditional blur cleared the options a beat after asking for them —
+    // the caller then searched an empty popup it had just dismissed itself.
+    // `commit` is for the fields that genuinely want the value settled.
+    if (commit) {
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        el.dispatchEvent(new Event('blur', { bubbles: true }));
+    }
 }
 
 /**
@@ -253,26 +470,177 @@ export async function simulateTyping(el, text) {
  * underneath is silently swallowed. So click the TOPMOST element at the button's
  * centre (elementFromPoint) with a full pointer/mouse sequence at real
  * coordinates. On a normal page this just clicks the button (or a harmless child
- * that bubbles to it), so it's safe to use for every click. Returns false only if
- * `el` is missing.
+ * that bubbles to it), so it's safe to use for every click.
+ *
+ * This is also the agent's single click choke point, so the action policy is
+ * enforced HERE rather than at each call site — a new call site cannot bypass it
+ * by forgetting a check. `ctx` declares who is asking; omitting it means the
+ * strictest caller ('planner'), so the failure mode of forgetting is a refused
+ * click, not a silent submit. Returns false when `el` is missing OR the policy
+ * refused the action (the refusal is logged with its code).
  */
-export function overlayClick(el) {
+export function safeActivate(el, ctx = {}, originSelector) {
     if (!el) return false;
-    let r = el.getBoundingClientRect();
-    // elementFromPoint needs the element in the viewport.
+
+    // ONE OWNER PER PAGE, enforced here rather than asked of each caller.
+    //
+    // While mdlz-v2 holds a page, nothing else may click on it — not the v1
+    // recipe, not the generic one, not the planner. Two owners writing the same
+    // widget, each verifying against state the other just changed, is the
+    // disorder the rewrite exists to end, and a rule that depends on every call
+    // site remembering it is not a rule. This is the choke point every click
+    // already goes through, so a new caller cannot miss it either.
+    if (!mayActivate(ctx.source)) {
+        console.warn(`[Copo] click refused — ${ownershipNote()} and this page is not shared`
+            + ` (asked by: ${ctx.source || 'planner'})`);
+        return false;
+    }
+
+    // The selector the caller USED to reach this element. It matters because the
+    // exact-control rule (`ctx.submitSelector`) can only fire when the descriptor
+    // carries a selector — and without it, a submit button that the planner
+    // mis-typed as `custom-dropdown` reached the dropdown handler, arrived here
+    // with no selector, read as harmless text ("Continue"), and was clicked.
+    const selector = originSelector || ctx.originSelector || '';
+
+    const intended = checkClick(el, ctx, selector);
+    if (!intended.allowed) { logDenial(intended, el, ctx); return false; }
+
+    const point = _viewportCentre(el);
+    if (!point) return false;
+
+    // What will ACTUALLY receive the click. Workday covers its footer buttons with
+    // a transparent "click_filter" div that owns the handler, which is why we aim
+    // at coordinates rather than calling el.click() — but it also means the element
+    // the page acts on is not always the one the policy just approved. So approve
+    // that one too, and require it to be on the intended element's own path: an
+    // overlay that belongs to something else entirely is not a click we understand.
+    const stack = _stackAt(point);
+    let target = stack[0] || el;
+    if (target !== el) {
+        if (!_sharesPath(stack, el)) {
+            // The topmost element is not on the intended control's path — a modal
+            // backdrop, a focus trap, a sibling overlay. Do NOT click it: it is
+            // not what the caller asked for. Judged BEFORE its policy verdict:
+            // an unrelated cover is never clicked, so its verdict must not veto
+            // the element we were actually asked about — measured on Mondelez
+            // skills, where a selected-skill pill ("Remove …" = destructive)
+            // overlapped a legit result row and denied every attempt on it.
+            //
+            // Refusing outright was wrong too, and broke Workday's apply modal:
+            // its overlay is a SIBLING of the button, so "Autofill with Resume"
+            // stopped being clickable at all. Fall back to the element we were
+            // asked about and have already judged — that is both the right target
+            // and a judged one.
+            console.warn('[Copo] overlay at the click point is unrelated to the intended control — '
+                + 'activating the intended element directly instead');
+            target = el;
+        } else {
+            const actual = checkClick(target, ctx, selector);
+            if (!actual.allowed) { logDenial(actual, target, ctx); return false; }
+        }
+    }
+    return _dispatchOne(target, point);
+}
+
+/** Kept for readability at call sites that are literally clicking a page button. */
+export const overlayClick = safeActivate;
+
+/** Centre of the element, scrolled into view first — elementFromPoint only sees
+ *  what is in the viewport. Null when the element has no box to aim at. */
+function _viewportCentre(el) {
+    let r;
+    try { r = el.getBoundingClientRect(); } catch { return null; }
+    if (!r) return null;
     if (r.bottom < 0 || r.top > innerHeight || r.width === 0) {
         try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch { /* ignore */ }
-        r = el.getBoundingClientRect();
+        try { r = el.getBoundingClientRect(); } catch { return null; }
     }
-    const cx = Math.round(r.left + r.width / 2);
-    const cy = Math.round(r.top + r.height / 2);
-    const target = document.elementFromPoint(cx, cy) || el;   // the overlay, if any
-    const opts = { bubbles: true, cancelable: true, composed: true, view: window, clientX: cx, clientY: cy, button: 0, buttons: 1 };
-    for (const type of ['pointerover', 'pointerenter', 'pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+}
+
+/** The extension's OWN floating UI (toast, progress panel, confirm overlay).
+ *  It hovers bottom-right and, on a short window, sits exactly over Workday's
+ *  footer buttons — measured: the progress panel's copy contains "trước khi
+ *  nộp", SUBMIT_RE matched «nộp», and the policy denied our own Next click as
+ *  submit_application. Our chrome is never the click target and never policy
+ *  evidence: hit-testing looks straight through it. */
+function _isOwnUi(el) {
+    return !!el?.closest?.('#jobfit-toast, #jobfit-progress, #jobfit-confirm-overlay, #jobfit-auto-apply-btn, [id^="jobfit-agent"]');
+}
+
+/** Every element under the point, topmost first — the agent's own UI excluded. */
+function _stackAt({ x, y }) {
+    try {
+        const all = typeof document.elementsFromPoint === 'function'
+            ? (document.elementsFromPoint(x, y) || [])
+            : (document.elementFromPoint(x, y) ? [document.elementFromPoint(x, y)] : []);
+        return all.filter(e => !_isOwnUi(e));
+    } catch { return []; }
+}
+
+/**
+ * Is `el` part of the stack under the click point?
+ *
+ * Plain `stack.includes(el)` is not enough: elementsFromPoint reports the shadow
+ * HOST, not the control inside it, so every SmartRecruiters field would look
+ * unrelated to its own overlay. Walk el's ancestry across shadow boundaries and
+ * accept a stack entry that contains el, is contained by el, or hosts it.
+ */
+function _sharesPath(stack, el) {
+    const chain = new Set();
+    let node = el;
+    for (let i = 0; node && i < 40; i++) {
+        chain.add(node);
+        node = node.parentNode || node.host || null;
+        if (node && node.nodeType === 11 /* DocumentFragment: a shadow root */) node = node.host;
+    }
+    return stack.some(s => chain.has(s)
+        || (s.contains && s.contains(el))
+        || (el.contains && el.contains(s)));
+}
+
+/**
+ * Deliver exactly ONE activation at real coordinates.
+ *
+ * The pointer/mouse preamble deliberately excludes `click`: dispatching a
+ * synthetic click AND calling `.click()` ran the page's handler twice, which on a
+ * login or create-account button is a duplicate submission and an extra
+ * failed-attempt tick against a tenant we are trying not to get locked out of.
+ */
+function _dispatchOne(target, { x, y }) {
+    const opts = {
+        bubbles: true, cancelable: true, composed: true, view: window,
+        clientX: x, clientY: y, button: 0, buttons: 1,
+    };
+    for (const type of ['pointerover', 'pointerenter', 'pointerdown', 'mousedown', 'pointerup', 'mouseup']) {
         try { target.dispatchEvent(type.startsWith('pointer') ? new PointerEvent(type, opts) : new MouseEvent(type, opts)); } catch { /* ignore */ }
     }
-    try { target.click(); } catch { /* already dispatched */ }
+    try { target.click(); } catch { /* element detached mid-sequence */ }
     return true;
+}
+
+/**
+ * ONE definition of "the ATS has the file" — shared by the recipe (should I
+ * upload?), the observer (is this required field filled?) and any audit.
+ *
+ * Two modules answering that question differently is how a run froze: the
+ * recipe read uploadedRows=2 and skipped the upload, while the observer read
+ * input.value (which Workday clears after ingesting) and reported the SAME
+ * upload as an unfilled required field — advance withheld, planner consulted.
+ * `input.files` is the native signal; the row markers are Workday's own
+ * (file-upload-item / file-upload-successful — the ids the recipe's
+ * advanceWhen already trusts; broader wildcards stay out until measured).
+ * Rows are looked for in the input's own formField/section first, then
+ * page-wide as fallback (`scoped` says which matched).
+ */
+export function readFileCommitState(input, root = document) {
+    const ROWS = '[data-automation-id="file-upload-item"], [data-automation-id="file-upload-successful"]';
+    const scope = input?.closest?.('[data-automation-id^="formField-"], form, fieldset, section') || root;
+    const nativeFiles = input?.files?.length || 0;
+    const scopedRows = scope.querySelectorAll(ROWS).length;
+    const uploadedRows = scopedRows || root.querySelectorAll(ROWS).length;
+    return { committed: nativeFiles > 0 || uploadedRows > 0, nativeFiles, uploadedRows, scoped: scopedRows > 0 };
 }
 
 /** Build a File from base64 (shared by the input + dropzone upload paths). */
@@ -346,3 +714,49 @@ export function setFileOnInput(el, base64Data, fileName, mimeType = 'application
 // ═══════════════════════════════════════════════════════════════════
 // Phase 3 + 5 + 6: Execute Fill Instructions (enhanced)
 // ═══════════════════════════════════════════════════════════════════
+
+/**
+ * A prompt listbox that is genuinely OPEN — not a committed chip, not a leftover.
+ *
+ * The test used to be `querySelector('[data-automation-id="promptOption"]')`,
+ * which is true on almost every filled Workday page: a COMMITTED chip contains a
+ * promptOption too (measured — the chip for "Company Website" holds
+ * `<p data-automation-id="promptOption">`). So the Escape meant to close a
+ * leftover dropdown fired constantly, and on Workday Escape closes the ACTIVE
+ * MODAL. The agent opened the "Start Your Application" modal, dismissed it on the
+ * next pass, and then reported a modal it could no longer see.
+ *
+ * A real open list has an activeListContainer, or at minimum an option that is
+ * not part of a selected-item chip.
+ */
+export function openPromptListbox() {
+    const vis = (e) => !!(e && e.offsetParent !== null);
+    try {
+        const live = [...document.querySelectorAll('[data-automation-id="activeListContainer"]')].filter(vis);
+        if (live.length) return live[0];
+        const opt = [...document.querySelectorAll('[data-automation-id="promptOption"], [role="option"]')]
+            .filter(vis)
+            .filter(o => o.getAttribute('data-automation-id') !== 'selectedItem')
+            .filter(o => !o.closest('[data-automation-id="selectedItemList"]'));
+        return opt[0] || null;
+    } catch { return null; }
+}
+
+/**
+ * Escape ONLY a dropdown, never a modal.
+ *
+ * Escape is a blunt key: it closes whatever is topmost. When the thing on screen
+ * is the apply-flow modal rather than a listbox, pressing it throws away the step
+ * the agent was about to act on.
+ */
+export function closeOpenDropdown() {
+    const list = openPromptListbox();
+    if (!list) return false;
+    const modal = findActiveModal();
+    // A listbox rendered INSIDE the modal is safe to close; one that is not means
+    // the modal is the topmost layer and Escape would take that instead.
+    if (modal && !modal.contains(list)) return false;
+    (document.activeElement || document.body)?.dispatchEvent?.(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    return true;
+}

@@ -5,10 +5,42 @@
 // The loadable / zippable extension is dist/. Dev: `npm run watch` then load
 // dist/ unpacked. Ship: `npm run zip`.
 import esbuild from 'esbuild';
-import { cpSync, mkdirSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, rmSync } from 'node:fs';
+import { execSync } from 'node:child_process';
+import { resolve } from 'node:path';
+
+// Stamp the bundle with the commit it was built from, and whether the tree was
+// dirty at build time. Folded in through `define` (below) so build-meta.js
+// carries them as literals — a trace can then prove which code produced it, and
+// "run against a stale dist/" stops being an invisible failure. Never throws:
+// outside a git checkout the build still has to succeed.
+function gitMeta() {
+    try {
+        const sha = execSync('git rev-parse --short HEAD', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+        // Dirty = TRACKED code differs from HEAD (staged or not). `git status`
+        // would count untracked scratch files — a PDF, a HAR, a dev/ folder —
+        // that never enter the bundle, and flag every build dirty for nothing.
+        // What matters is whether the source that produced this dist/ is HEAD.
+        let dirty = false;
+        try { execSync('git diff --quiet HEAD', { stdio: 'ignore' }); } catch { dirty = true; }
+        return { sha, dirty };
+    } catch { return { sha: 'unknown', dirty: true }; }
+}
+const BUILD = gitMeta();
 
 const OUT = 'dist';
 const watch = process.argv.includes('--watch');
+// `npm run build:test` → a bundle that seeds itself with a fake candidate so the
+// apply agent can be driven without the web app, a synced profile or a tailored
+// CV. Off by default, and esbuild folds the constant so a normal build contains
+// neither the fixture data nor the call that would use it.
+const fixture = process.argv.includes('--fixture');
+
+// The middle bundle: PRODUCTION data behaviour (no seeding, no fake candidate)
+// but the local-credential path stays on — for exercising login flows with
+// real data before the server-side credential store is configured. Temporary
+// tooling; ship builds remain the plain `node build.mjs`.
+const localCreds = !fixture && process.argv.includes('--local-creds');
 
 // Static assets (source of truth at the extension root) copied as-is into dist.
 const STATIC = ['manifest.json', 'popup.html', 'content.css', 'popup.css', 'icons'];
@@ -35,8 +67,41 @@ const options = {
     format: 'iife',
     target: ['chrome110'],
     logLevel: 'info',
+    define: {
+        __COPO_BUILD_SHA__: JSON.stringify(BUILD.sha),
+        __COPO_BUILD_DIRTY__: JSON.stringify(BUILD.dirty),
+    },
     minify: false,      // keep readable — we debug these live in the browser
     sourcemap: false,
+    // Point the fixture import at an empty stub unless this is a fixture build.
+    // Dead-code elimination alone was not enough: esbuild folds the guard and
+    // tree-shakes the module but keeps the `if (false)` block calling into it,
+    // leaving a production bundle that referenced a function it no longer
+    // contained. Swapping the file makes the absence structural instead.
+    plugins: [
+        // The test accounts live OUTSIDE the repo (public), so the import has to
+        // resolve to something either way: the developer's local file when it
+        // exists, the tracked template — which supplies nulls — when it does not.
+        // Without this a fresh clone fails to build on a missing file.
+        {
+            name: 'local-creds',
+            setup(build) {
+                build.onResolve({ filter: /fixtures\/creds\.local\.js$/ }, () => ({
+                    path: resolve(existsSync('src/fixtures/creds.local.js')
+                        ? 'src/fixtures/creds.local.js'
+                        : 'src/fixtures/creds.local.example.js'),
+                }));
+            },
+        },
+        ...(fixture ? [] : [{
+            name: 'strip-fixtures',
+            setup(build) {
+                build.onResolve({ filter: /fixtures\/dummy\.js$/ }, () => ({
+                    path: resolve(localCreds ? 'src/fixtures/creds-only.js' : 'src/fixtures/noop.js'),
+                }));
+            },
+        }]),
+    ],
 };
 
 if (watch) {
@@ -47,5 +112,6 @@ if (watch) {
     console.log('[build] watching src/ → dist/ (re-run `npm run build` after editing manifest/static)');
 } else {
     await esbuild.build(options);
-    console.log('[build] done → dist/');
+    console.log(`[build] done → dist/  @ ${BUILD.sha}${BUILD.dirty ? ' (dirty)' : ''}`
+        + `${fixture ? '  ⚠️  FIXTURE BUILD — seeds fake candidate data' : localCreds ? '  ⚠️  LOCAL-CREDS BUILD — reads jobfitApplyCredentials, no seeding' : ''}`);
 }

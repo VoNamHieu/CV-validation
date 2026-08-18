@@ -48,6 +48,20 @@ def _pass_gate(url: str) -> str:
         return ""
 
 
+def _jd_detail(url: str) -> str:
+    """Full JD from the gated SSR detail page ("" on any miss, full-or-blank)."""
+    from bs4 import BeautifulSoup
+    html = _pass_gate(url)
+    if not html:
+        return ""
+    soup = BeautifulSoup(html, "html.parser")
+    for t in soup(["script", "style", "nav", "header", "footer", "form"]):
+        t.decompose()
+    texts = [el.get_text("\n", strip=True)
+             for el in soup.select("div.s-content, .page-cate-career")]
+    return _full_desc(max(texts, key=len, default=""))
+
+
 def _viettelhightech(career_url: str) -> list[dict]:
     from bs4 import BeautifulSoup
     html = _pass_gate(_LIST_URL)
@@ -63,7 +77,8 @@ def _viettelhightech(career_url: str) -> list[dict]:
         href = a["href"]
         if not title or not href or "/tuyen-dung/" not in href:
             continue
-        out.append({"title": title[:200], "url": href, "location": "", "description": ""})
+        out.append({"title": title[:200], "url": href, "location": "",
+                    "description": _jd_detail(href) if len(out) < 40 else ""})
     logger.info(f"[ats] viettelhightech → {len(out)} jobs")
     return out
 

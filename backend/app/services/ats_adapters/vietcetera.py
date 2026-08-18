@@ -46,7 +46,7 @@ def _vietcetera(career_url: str) -> list[dict]:
             "title": title[:200],
             "url": f"https://vietcetera.com/careers/{uslug}",
             "location": (j.get("location") or "").strip()[:120],
-            "description": _strip_html(j.get("description") or "")[:600],
+            "description": _full_desc(j.get("description")),
             "category": (j.get("department") or "").strip(),
             "employment_type": (j.get("type") or "").strip(),
         })

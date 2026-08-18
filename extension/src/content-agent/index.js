@@ -14,54 +14,377 @@
  *   - Simulate keyboard typing for stubborn frameworks
  */
 
-import { AGENT_MAX_ITERATIONS, APPLY_SESSION_TTL_MS, FILL_RETRY_THRESHOLD, POST_ACTION_WAIT_MS } from './constants.js';
-import { overlayClick, sleep } from './dom.js';
+import { BUILD_DIRTY, BUILD_SHA } from './build-meta.js';
+import { AGENT_MAX_RUNTIME_MS, APPLY_SESSION_TTL_MS, FILL_RETRY_THRESHOLD, POST_ACTION_WAIT_MS, TENANT_REVIEW_FLAGS } from './constants.js';
+import { closeOpenDropdown, isLegalNameLabel, repairProfileNames, safeActivate, setNativeValue, sleep } from './dom.js';
 import { removeProgress, showConfirmation, showProgress, showToast } from './ui.js';
 import { callAgentPlan, callLLMMapping } from './llm.js';
 import { executeFillInstructions } from './fill.js';
-import { observePageState, scrollAndCollect } from './observe.js';
+import { auditRequiredBlockers, observePageState, scrollAndCollect } from './observe.js';
+import { isPickerShape, probeFieldShape } from './probe.js';
 import { findApplyButton, isApplicationFormPage, summarizeState, waitForJobPageSignal } from './detect.js';
-import { getApplyCredentials, handleLoginWall } from './login.js';
-import { applyRecipeFields, atFinalStep, clickRecipeGateway, loadRecipes, recipeForUrl } from './recipe.js';
+import { detectLoginWall, handleLoginWall } from './login.js';
+import { setSpanTracking, setTraceRun, spanIteration, trace, traceClear, traceDump, traceOnce, traceReport, traceSpansClear } from './trace.js';
+import { requestStop, setRunMode, stopRequested } from './run-state.js';
+
+// NO pause-on-hidden. That behavior shipped 2026-08-07 without the user's
+// sign-off and was rejected outright: the agent EXISTS to work while the user
+// is elsewhere. What makes that viable is not waiting — it is that a hidden
+// tab's clock now borrows the background worker's (see sleep() in dom.js,
+// exempt from tab throttling), the driven page opens in its own small window
+// so it is rarely occluded at all, and verify budgets still stretch under
+// document.hidden for the rendering that genuinely lags.
+import { applyRecipeFields, atFinalStep, clickRecipeGateway, FIELD_FAIL_BUDGET, fillResolvedDate, inferFillDynamicField, loadRecipes, recipeBlockingFields, recipeForUrl, recipeOwnedWrappers, recipeReleased, resetFieldStatus, recipeFieldStatus, LOCKED_TENANT } from './recipe-router.js';
+import { checkClick, logDenial } from './policy.js';
+import { buildManifest, summarizeGaps, VERDICT } from './needs.js';
+import { MODE, flagMode } from './mdlz-v2/index.js';
+import { isOwnedPage } from './mdlz-v2/config.js';
+import { tenantRefFor } from '../ats/tenant.js';
+// The review READER. It cannot click — that is its whole design — and it runs
+// here because the loop returns at the final step BEFORE it ever reaches the
+// fill, so a controller wired only into the fill path would never see this page.
+import { owns, pageOwner } from './mdlz-v2/pages.js';
+import { observeStep } from './mdlz-v2/page-observer.js';
+import { runReviewPage } from './mdlz-v2/page-review.js';
 
 // Build marker — logs the moment content-agent.js injects on a matched page, so
 // you can confirm (in the PAGE / tab console, NOT the service-worker console) that
 // the freshly-built dist is actually loaded. If you don't see this line on the
 // apply tab, the new build isn't injected (reload the extension + refresh the tab).
-const COPO_BUILD = 'smartrecruiters-recipe-v1-2026-07-26';
+const COPO_BUILD = 'mdlz-v2-default-2026-08-09';
 try { console.log(`%c[Copo] content-agent build ${COPO_BUILD} loaded → ${location.host}`, 'color:#c43b2e;font-weight:700'); } catch { /* noop */ }
+
+/**
+ * The CV this apply may upload.
+ *
+ * A driven apply (batch, or a single apply launched from the web app) uses the
+ * document attached to ITS session — and nothing else. There is deliberately no
+ * fallback here, because the obvious-looking one is wrong: the global
+ * `cvFileBase64` slot is not a generic CV. `buildCvPdfCache` writes whichever
+ * job was optimised most recently into it (the filename even carries that job's
+ * title), so falling back to it would upload another company's tailored CV —
+ * the exact bug session-scoping exists to prevent, one hop removed.
+ *
+ * A job queued without its own PDF therefore applies text-only, which is what
+ * the web app already promises the user when it counts them: "Các công việc
+ * thiếu file sẽ ứng tuyển chỉ với văn bản."
+ *
+ * The global slot is used ONLY when there is no session at all — a manual apply
+ * from the floating button, on a page the user opened themselves. There it is
+ * the sole candidate, and the most recent CV is the best available guess.
+ *
+ * @returns {{cv: object|null, driven: boolean}} `driven` marks an apply we were
+ *   sent to do (batch / web-app single). Those must carry their own tailored CV;
+ *   the caller refuses to apply without one rather than sending a weaker
+ *   application that can never be taken back.
+ */
+async function loadSessionCv() {
+    try {
+        const { applySession, pendingAutoApply } = await chrome.storage.local.get(['applySession', 'pendingAutoApply']);
+        const sid = applySession?.sessionId;
+        if (sid) {
+            const key = `run:${sid}:cv`;
+            const scoped = (await chrome.storage.local.get(key))[key];
+            if (scoped?.base64 && scoped?.fileName) {
+                return { cv: { base64: scoped.base64, fileName: scoped.fileName, scope: 'session' }, driven: true };
+            }
+            return { cv: null, driven: true };
+        }
+        if (pendingAutoApply) {
+            // A DRIVEN flow whose session evaporated (worker recycle, sweep
+            // race) must NOT fall back to whatever blob is lying around —
+            // measured: a fixture PDF got uploaded and Workday parsed its fake
+            // employer into a real application. No session, no CV: the driven
+            // guard downstream refuses with cv_missing instead.
+            return { cv: null, driven: true };
+        }
+        const g = await chrome.storage.local.get(['cvFileBase64', 'cvFileName']);
+        if (g.cvFileBase64 && g.cvFileName) {
+            return { cv: { base64: g.cvFileBase64, fileName: g.cvFileName, scope: 'manual' }, driven: false };
+        }
+    } catch (e) {
+        console.warn('[Copo Apply] CV lookup failed:', e?.message);
+    }
+    return { cv: null, driven: false };
+}
+
+/**
+ * A page-level failure the ATS says to recover from by reloading — as opposed to
+ * a field that failed validation.
+ *
+ * "Page Error - Error Code: VPS|<guid>" was measured on a live Mondelez apply
+ * step: a Workday server error that leaves the step wedged with every field still
+ * filled. The recovery only knew the friendlier "Something went wrong / refresh
+ * the page" wording, so this variant read as a normal page and the agent kept
+ * planning against a form that could not advance.
+ */
+// Timing spans are for the tenant being tuned: on for a locked snapshot,
+// silent everywhere else, so no other tenant's trace changes shape.
+setSpanTracking(!!LOCKED_TENANT);
+
+/**
+ * Wait for the page to actually change, or for the budget to run out.
+ *
+ * The transition barrier used a fixed 700ms poll, so a step mid-transition
+ * burned ten empty iterations doing nothing but looking (19 of 31 iterations
+ * produced no progress on R-173784). A MutationObserver answers the moment
+ * Workday swaps the step in, and costs nothing while it does not.
+ */
+function waitForMutation(budgetMs = 4000, meaningful = null) {
+    return new Promise((resolve) => {
+        let done = false;
+        const finish = (why) => { if (done) return; done = true; try { obs.disconnect(); } catch { /* noop */ } clearTimeout(t); resolve(why); };
+        // A Workday page mutates constantly — spinners, analytics, focus rings.
+        // Waking on ANY of that would make this barrier a faster spin than the
+        // poll it replaced. So the observer is only a trigger: the wait ends
+        // when the caller's own condition says the page really moved.
+        const check = () => { try { if (!meaningful || meaningful()) finish('changed'); } catch { finish('changed'); } };
+        const obs = new MutationObserver(check);
+        try { obs.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-automation-id', 'aria-invalid', 'class'] }); } catch { /* noop */ }
+        const t = setTimeout(() => finish('timeout'), budgetMs);
+    });
+}
+
+// ── PLANNER DEDUP ──
+// The planner is the most expensive thing in the loop (11s on the measured
+// runs) and the loop re-enters it every iteration. Asking the same model the
+// same question about a page that has not changed cannot produce a different
+// answer — but a page that HAS changed (a new error, a value Workday wiped, a
+// row added, different options) must reach it immediately. So the gate is the
+// STATE, not a call budget: identical state waits, changed state asks. Bounded
+// so a genuinely stuck page still gets a fresh opinion eventually.
+let _lastPlanState = null;
+let _planSkips = 0;
+const PLAN_SKIP_MAX = 4;
+function _plannerStateHash(state, recipe) {
+    try {
+        const errs = (state?.errors || []).map(e => `${e.field || ''}:${String(e.message || '').slice(0, 40)}`).sort().join('|');
+        const unresolved = (state?.unfilledRequired || []).map(f => f.label || f.selector || '?').sort().join(',');
+        const committed = (state?.formFields || []).map(f => `${f.label || f.selector}=${String(f.value || '').slice(0, 12)}`).sort().join(';');
+        const actions = (state?.buttons || []).map(b => String(b.text || '').slice(0, 18)).sort().join(',');
+        return `${_stepFingerprint(state, recipe)}#${errs}#${unresolved}#${committed}#${actions}`;
+    } catch { return `hash-${Date.now()}`; }
+}
+
+// ── ADVANCE LOCK ──
+// A step is advanced ONCE. Measured on R-172088: three Save-and-Continue
+// clicks 1.5s apart on the same page, because the loop came round before
+// Workday had transitioned and read the still-complete step as ready to
+// advance again. Extra clicks on a transitioning wizard are how a page ends
+// up half-saved. The lock holds until the step's fingerprint actually
+// changes (or the wait expires, so a page that silently refuses can still be
+// retried).
+const ADVANCE_LOCK_MS = 6000;
+let _advLock = null;
+function _stepFingerprint(state, recipe) {
+    try {
+        const step = recipe ? ((recipe.steps || []).find(s => s.detect && document.querySelector(s.detect))?.name || '') : '';
+        const btn = (document.querySelector('[data-automation-id="pageFooterNextButton"]')?.textContent || '').trim().slice(0, 24);
+        const req = (state?.formFields || []).filter(f => f.required).length;
+        const ind = state?.stepIndicator ? `${state.stepIndicator.current}/${state.stepIndicator.total}` : '';
+        return `${location.pathname}|${step}|${ind}|${req}|${btn}`;
+    } catch { return `fp-${Date.now()}`; }
+}
+/** True when this step has already been advanced and has not moved yet. */
+function _advanceHeld(state, recipe) {
+    if (!LOCKED_TENANT) return false;
+    const fp = _stepFingerprint(state, recipe);
+    if (!_advLock) return false;
+    if (_advLock.fp !== fp) { _advLock = null; return false; }   // it moved → free
+    if (Date.now() - _advLock.at > ADVANCE_LOCK_MS) { _advLock = null; return false; }
+    trace('advance.held', { waitedMs: Date.now() - _advLock.at, fp: fp.slice(-40) });
+    return true;
+}
+function _advanceTaken(state, recipe) {
+    if (LOCKED_TENANT) _advLock = { fp: _stepFingerprint(state, recipe), at: Date.now() };
+}
+
+// The iteration currently being timed. Module scope so reportResult can close
+// it — a run that ends mid-iteration would otherwise lose its slowest one.
+let _openIter = null;
+function _iterOpen(n) { _openIter = { n, step: '?', t0: Date.now(), progress: false, phases: {} }; }
+function _iterClose() {
+    if (!_openIter) return;
+    spanIteration({ n: _openIter.n, step: _openIter.step, ms: Date.now() - _openIter.t0, progress: _openIter.progress, phases: _openIter.phases });
+    _openIter = null;
+}
+/** Time one phase of the loop (observe / recipe / planner / fill / advance). */
+async function _phase(name, fn) {
+    const t = Date.now();
+    try { return await fn(); }
+    finally { if (_openIter) _openIter.phases[name] = (_openIter.phases[name] || 0) + (Date.now() - t); }
+}
+function _progress() { if (_openIter) _openIter.progress = true; }
+
+const WORKDAY_ERROR_CARD_RE =
+    /something went wrong|refresh the page and (?:then )?try again|page error\s*-\s*error code|error code:\s*vps\b/i;
 
 /**
  * Main agentic loop: Observe → Plan → Act → Verify.
  */
-async function runAgentLoop(profile) {
+let _loopLive = false;
+
+async function runAgentLoop(rawProfile) {
+    // SINGLE-FLIGHT. Two concurrent loops in one page fight over observe/fill/
+    // advance and die together in silence — measured 2026-08-06 on a
+    // self-driven Mondelez run (⚡ fired twice: interleaved iter counters,
+    // doubled loop.enter, then 20 minutes of nothing on a clean page). A
+    // second start while one is live is a no-op that says so, not a race.
+    if (_loopLive) {
+        console.warn('[Copo Apply] run already live on this page — second start refused');
+        trace('loop.refused', { why: 'already-live' });
+        return;
+    }
+    _loopLive = true;
+    // Heartbeat on a CLOCK, not per iteration. One iteration legitimately runs
+    // 2–5 minutes on a live Workday form (My Information fill + list walks),
+    // and a heartbeat sent only at the top of the loop starved the background
+    // watchdog mid-iteration — which abandoned a healthy job and opened the
+    // next tab on top of it (measured 2026-08-07, PwC + Mondelez double-run).
+    const hb = setInterval(sendHeartbeat, 25000);
+    try {
+        return await _runAgentLoop(rawProfile);
+    } catch (e) {
+        // A loop that dies must SAY SO. The silent stall above was unfindable
+        // precisely because nothing recorded the death.
+        trace('loop.crash', { error: String(e && e.message || e).slice(0, 200) });
+        console.error('[Copo Apply] loop crashed:', e);
+        try { showToast('⚠️ Agent gặp lỗi và đã dừng — bấm ⚡ để chạy lại.', 9000); } catch { /* noop */ }
+    } finally {
+        clearInterval(hb);
+        _loopLive = false;
+    }
+}
+
+async function _runAgentLoop(rawProfile) {
+    // The name pair is re-derived from the profile's OWN fullName before
+    // anything reads it. A profile is only as correct as the web-app build
+    // that produced it, and a production still running the old split
+    // re-poisons it on every CV edit — three times on 2026-08-06, each sync
+    // putting the family name in the given box. This is the last layer before
+    // a real employer sees the name, so it verifies rather than trusts; a
+    // profile that already agrees with itself comes back untouched.
+    const profile = repairProfileNames(rawProfile);
+    if (profile !== rawProfile) {
+        trace('profile.repair', {
+            fullName: String(rawProfile?.fullName || '').slice(0, 40),
+            was: `${rawProfile?.firstName || ''} / ${rawProfile?.lastName || ''}`,
+            now: `${profile.firstName} / ${profile.lastName}`,
+        });
+    }
+    // Deliberately NOT a reset. The agent is re-injected on every navigation, so
+    // each page load re-enters here — and the steps worth reading are the ones
+    // from before the last navigation. The buffer is cleared when a job's result
+    // is reported, not when a page loads.
+    trace('loop.enter', { host: location.hostname, hasProfile: !!profile, vis: document.visibilityState });
+    // Visibility changes are load-bearing context for every verify below: a
+    // hidden tab's clicks commit ~1s+ late (throttled timers, delayed render),
+    // which without this line reads exactly like "the widget refused the value".
+    if (!window.__copoVisWatch) {
+        window.__copoVisWatch = true;
+        document.addEventListener('visibilitychange', () => {
+            trace('loop.visibility', { now: document.visibilityState });
+        });
+    }
     const history = [];
     let prevStateHash = '';
     let prevStepCurrent = null;
+    let prevRecipeStep = null;
     let prevUrl = window.location.href;
     const fillAttempts = new Map(); // selector → { count, lastValue }
     const persistentlyUnfilled = new Set();
+    // Deterministic-recovery budget per recipe field (validation error → recipe
+    // retries before the planner is asked). Reset when the wizard moves on.
+    const fieldRecovery = new Map(); // field label → retry count
+    // Needs-pass budget per selector: an instruction that "succeeds" without
+    // changing the page re-arms itself every iteration, and its `continue`
+    // starves everything downstream — measured: one mis-classified checkbox
+    // consumed 22 iterations while the recipe never ran again.
+    const needsAttempts = new Map(); // selector → attempts this page
+    // Error-persistence breaker: how many consecutive iterations each
+    // validation error has survived. A loop that cannot clear an error must
+    // SAY SO and stop — measured: "Postal code must be 5 digits" outlived 24
+    // rounds of refilling the same mis-formatted profile value.
+    const errorStreak = new Map(); // "field|message" → consecutive iterations
     // Completion signals present BEFORE we act. Job pages often contain static
     // marketing copy that matches the success regexes ("ứng tuyển thành công
     // trong 1 phút", "Cảm ơn bạn đã quan tâm..."), so only signals that APPEAR
     // after we actually did something count as a submitted application.
     let baselineSignals = null;
     let actionsTaken = 0;
-    let loginAttempts = 0;   // cap login-wall retries so a wrong password can't loop forever
+    // Transient planner failures tolerated before giving up on the job.
+    let planFailures = 0;
+    // Passes spent waiting for a wizard page to render before planning against it.
+    let emptyPageWaits = 0;
+    // Passes spent waiting for a step's own precondition (a CV attaching).
+    let preconditionWaits = 0;
+    // For the two-signal submitted check: a form we have actually seen, and where
+    // we started, so "the form is gone" and "we are on a confirmation URL" are
+    // statements about a change rather than about the first page we happened to load.
+    let sawForm = false;
+    const startUrl = window.location.href;
+    // Answer provenance, accumulated ACROSS steps — a Workday application spans
+    // four pages, and the user reviews it once at the end. Keyed by field so a
+    // re-fill on a later pass updates rather than duplicates.
+    const reviewAnswers = new Map();
+    // Fields this application asked for that no stored data could answer. Sent
+    // back with the result so the product can ask the user once rather than
+    // discovering the same hole at every company.
+    const fieldGaps = new Map();
     const gatewayClicks = new Map();   // recipe gateway label → click count (loop guard)
 
-    // Load CV data if available
-    const cvData = await new Promise(r => {
-        chrome.storage.local.get(['cvFileBase64', 'cvFileName'], d => {
-            if (d.cvFileBase64 && d.cvFileName) {
-                r({ base64: d.cvFileBase64, fileName: d.cvFileName });
-            } else {
-                r(null);
-            }
-        });
+    // The STRUCTURED CV. Already synced for Mode-1 tailoring and never read by
+    // the apply agent, which only ever saw the flattened 23-field profile — so
+    // every field the flat shape has no slot for (school, subject, grade,
+    // language level, a second education entry, employment rows) was unfillable
+    // no matter how correct the selector was.
+    const cvStructured = await new Promise(r => {
+        chrome.storage.local.get('jobfitCv', d => r(d.jobfitCv || null));
     });
+
+    // The slice of the structured CV the planner needs to INFER answers a CV
+    // never states outright — most of all which entry in a degree list a
+    // qualification corresponds to. That is derivable from the institution, the
+    // subject and the years; it is not a fact invented about the candidate, and
+    // it is the difference between an application that reaches review and one
+    // that stalls on a required dropdown. Kept small on purpose: education and
+    // languages only, never the whole CV.
+    const credentials = cvStructured ? {
+        education: (cvStructured.education || []).slice(0, 4),
+        languages: (cvStructured.languages || []).slice(0, 4),
+        // Certificates too (2026-08-05): "Do you hold the professional
+        // certifications and/or clearance outlined in the job description?" is a
+        // REQUIRED question on PwC, and it stalled the run for the plainest
+        // reason — the model was never shown the candidate's certificates, so it
+        // correctly refused to answer. It is the same kind of inference as the
+        // degree list: evidence the CV holds, not a fact invented here.
+        certifications: (cvStructured.certifications || []).slice(0, 8),
+    } : null;
+
+    // Load the CV FILE for THIS apply session (see loadSessionCv).
+    const { cv: cvData, driven } = await loadSessionCv();
     const hasCV = !!cvData;
-    const applyCreds = await getApplyCredentials();
+    if (cvData) console.log(`[Copo Apply] CV: ${cvData.fileName} (${cvData.scope})`);
+
+    // An apply we were SENT to do must carry the CV tailored for this job. If it
+    // does not, stop before touching the form.
+    //
+    // The alternative — apply "text-only" — was the old behaviour, and it is a
+    // worse outcome than not applying: an application is one-shot and cannot be
+    // withdrawn and re-sent with the right document, so a degraded submission
+    // spends the opportunity for good. Reporting it as blocked keeps the job
+    // actionable: the user re-renders the PDF and runs the batch again.
+    if (driven && !hasCV) {
+        console.warn('[Copo Apply] ✋ no tailored CV for this job — refusing to apply');
+        reportResult(false, 'Chưa có CV tinh chỉnh cho job này — hãy tối ưu lại rồi chạy lại.',
+            'blocked', { blockedReason: 'cv_missing' });
+        return;
+    }
+    // ATS credentials are NOT read from storage any more: the background fetches
+    // them from the backend just-in-time, per tenant, and hands them over only
+    // when we actually hit a wall (see requestAtsAuth). Nothing here holds a
+    // password until that moment, and nothing writes one back to storage.
+    let atsAuthDone = false;
 
     // Per-ATS recipe for THIS host (Workday…): exact verified selectors for the
     // standardized fields, so the reliable text inputs get filled deterministically
@@ -75,8 +398,23 @@ async function runAgentLoop(profile) {
         console.warn('[Copo Apply] recipe load failed (LLM-only):', e?.message);
     }
 
+    // What the action policy needs to know about where we are, recomputed per
+    // call because `atFinalStep` is a live DOM question. Declaring the source is
+    // the caller's one job; omitting it means the strictest treatment.
+    const policyCtx = (source, extra = {}) => ({
+        source,
+        atFinalStep: recipe ? atFinalStep(recipe) : false,
+        submitSelector: recipe?.submitSelector,
+        ...extra,
+    });
+
+    // NOTE: no credential state is logged (or even in scope) here — the password
+    // is fetched from the background per tenant, at the moment of use. An earlier
+    // `hasCreds: !!applyCreds?.password` survived that refactor as a dangling
+    // reference and threw a ReferenceError before the try block, killing the loop
+    // on its very first line.
     console.log('[Copo Apply] ▶ runAgentLoop start', {
-        url: location.href, host: location.hostname, hasCV, hasCreds: !!applyCreds?.password,
+        url: location.href, host: location.hostname, hasCV,
         recipe: recipe?.ats || null, profileFields: Object.keys(profile || {}).length,
     });
 
@@ -85,23 +423,27 @@ async function runAgentLoop(profile) {
         // On an application form (e.g. Trakstar's ?apply=true) hunting for "Apply"
         // matches a third-party shortcut ("Apply with Indeed") and hijacks the
         // flow into a redirect/reload loop — so when the form is here, fill it.
-        showProgress(0, AGENT_MAX_ITERATIONS, 'Kiểm tra trang...');
+        showProgress(0, null, 'Kiểm tra trang...');
         await sleep(1000);
 
         if (isApplicationFormPage()) {
             console.log('[Copo Apply] step0: already on an application form — filling directly (skip Apply hunt)', location.href);
-            showProgress(0, AGENT_MAX_ITERATIONS, 'Đã ở form ứng tuyển, bắt đầu điền...');
+            showProgress(0, null, 'Đã ở form ứng tuyển, bắt đầu điền...');
             await sleep(300);
         } else {
             const applyBtn = findApplyButton();
             if (applyBtn) {
                 console.log('[Copo Apply] step0: clicked Apply button:', (applyBtn.innerText || applyBtn.value || '').trim().slice(0, 40));
-                overlayClick(applyBtn);
-                showProgress(0, AGENT_MAX_ITERATIONS, 'Đã click nút Ứng tuyển, chờ form...');
+                // `openingApplication` is safe to assert here and ONLY here: this
+                // branch runs when isApplicationFormPage() said there is no form on
+                // screen, so a button reading "Nộp hồ sơ" opens one rather than
+                // sending one. (VN job boards use the same words for both.)
+                safeActivate(applyBtn, policyCtx('gateway', { openingApplication: true }), null);
+                showProgress(0, null, 'Đã click nút Ứng tuyển, chờ form...');
                 await sleep(2000);
             } else {
                 console.log('[Copo Apply] step0: no Apply button found — scanning current form');
-                showProgress(0, AGENT_MAX_ITERATIONS, 'Không tìm thấy nút Apply, scan form hiện tại...');
+                showProgress(0, null, 'Không tìm thấy nút Apply, scan form hiện tại...');
                 await sleep(500);
             }
         }
@@ -109,26 +451,81 @@ async function runAgentLoop(profile) {
         // Scroll to discover all fields
         await scrollAndCollect();
 
+        /** v2's own account of what it could not answer, for the stuck report. */
+
+        let _lastV2Gaps = [];
+        // A defer to v2 is progress only while v2 still has a move it CAN make.
+        // When v2 owns the page and has recorded a terminal blocker it cannot
+        // clear itself (a required field whose value is not on a closed
+        // catalogue — Field of Study "Computer Science", which is not a row),
+        // re-deferring just loops to the 15-minute cap (measured R-172558: 24+
+        // identical passes). Count those blocked defers and, past a small
+        // budget that rides out hydration, escalate by NAMING the gap instead.
+        let _v2BlockedDeferStreak = 0;
+        const V2_BLOCKED_DEFER_BUDGET = 3;
+
         let sameStateCount = 0;
         let emptyStreak = 0;   // consecutive empty/error observes → triggers a recovery reload
         let singlePageIdle = 0;     // single-page recipe: consecutive passes with nothing new to fill → hand off
         let singlePagePasses = 0;   // single-page recipe: total passes on the matched form → hard cap (never spin)
 
-        for (let i = 0; i < AGENT_MAX_ITERATIONS; i++) {
+        const loopDeadline = Date.now() + AGENT_MAX_RUNTIME_MS;
+        for (let i = 0; ; i++) {
+            _iterClose();
+            _iterOpen(i + 1);
+            // The background has ruled this job (watchdog, tab handover, batch
+            // moved on). Stop DRIVING, don't report — a result from an
+            // abandoned run would be refused as 'stale tab' anyway, and the
+            // orphan loop it replaces used to keep clicking for 11 minutes.
+            // ── WHO OWNS THIS PAGE — asked ONCE, before anything acts ──
+            // pageOwner() only answers after v2 has claimed the page, and v2
+            // claims it inside applyRecipeFields — which runs AFTER the needs
+            // engine. So on the first pass of every new page the needs engine
+            // ran on a page v2 was about to own, which is one of the three
+            // opinions this split exists to remove. The flag plus the host
+            // answers the same question before anyone has acted.
+            // OWNERSHIP OF THIS PAGE — not "is v2 switched on".
+            // Measured 2026-08-09 (R-172088): the flag defaults on and the host
+            // is mdlz, so this read TRUE on the job POSTING page — a page v2
+            // had just declined (page=UNKNOWN, owner=v1). needs and planner
+            // were both skipped, v1 was never asked to click Apply, and the
+            // stuck detector reported "v2 owns this page and recorded nothing"
+            // four iterations later. Being enabled on a host is not owning a
+            // page.
+            //
+            // Two ways to own it, both about THIS page: v2 has claimed it, or
+            // it is one of the steps v2 takes (which answers on the first pass,
+            // before the claim exists — the ordering problem the flag test was
+            // a wrong fix for).
+            const _v2Owns = pageOwner() === 'mdlz-v2'
+                || (isOwnedPage() && (await flagMode()) === MODE.ON && owns(observeStep()));
+            const stopped = stopRequested();
+            if (stopped) {
+                trace('loop.stopped', { why: stopped.why, iter: i + 1 });
+                removeProgress();
+                showToast('⏹️ Job này đã được hệ thống dừng.', 5000);
+                return;
+            }
+            if (Date.now() > loopDeadline) {
+                removeProgress();
+                showToast('⚠️ Một job chạy quá 15 phút — dừng lại. Kiểm tra form rồi chạy tiếp.', 6000);
+                reportResult(false, `Quá ${Math.round(AGENT_MAX_RUNTIME_MS / 60000)} phút cho một job — dừng để không treo phiên`);
+                return;
+            }
             // Keep the background watchdog alive — an iteration can legitimately
             // take minutes (LLM call + waits), the timer should only fire when
             // this page goes silent.
             sendHeartbeat();
 
             // ── 1. OBSERVE ──
-            showProgress(i + 1, AGENT_MAX_ITERATIONS, 'Đang phân tích trang...');
-            const state = await observePageState();
+            showProgress(i + 1, null, 'Đang phân tích trang...');
+            const state = await _phase('observe', () => observePageState());
 
             // ── TRACE: per-iteration snapshot of what the scanner sees — so it's
             // obvious whether the page has the fields and whether they're already
             // filled (recipe + LLM act on this). ──
             const _step = state.stepIndicator ? `${state.stepIndicator.current}/${state.stepIndicator.total}` : '?';
-            console.log(`[Copo Apply] ══ iter ${i + 1}/${AGENT_MAX_ITERATIONS} ══ …${location.pathname.slice(-42)} · step ${_step} · fields=${state.formFields.length} buttons=${state.buttons.length} errors=${state.errors.length} blockers=${state.blockers.length}`);
+            console.log(`[Copo Apply] ══ iter ${i + 1} ══ …${location.pathname.slice(-42)} · step ${_step} · fields=${state.formFields.length} buttons=${state.buttons.length} errors=${state.errors.length} blockers=${state.blockers.length}`);
             if (state.formFields.length) {
                 console.log('[Copo Apply]   fields:', state.formFields.map(f =>
                     `${(f.label || f.name || f.placeholder || f.ariaLabel || '?').trim().slice(0, 22)}[${f.componentType || f.type}${f.value ? '=✓' : ''}${f.required ? ',req' : ''}]`).join('   '));
@@ -137,6 +534,21 @@ async function runAgentLoop(profile) {
                 console.warn('[Copo Apply] ⚠ validation errors:',
                     state.errors.map(e => `${e.field || e.nearFieldSelector || '?'} — ${e.message}`.slice(0, 90)).join('   |   '));
             }
+            // The same snapshot into the trace. The console lines above scroll away
+            // with the document on every navigation, so a run that ends three page
+            // loads later leaves a dump that says what the agent DID and nothing
+            // about what it was looking at — which is the half that explains it.
+            if (_openIter) _openIter.step = state.stepIndicator ? `${state.stepIndicator.current}/${state.stepIndicator.total}` : (_openIter.step || '?');
+            trace('loop.iter', {
+                n: i + 1,
+                step: _step,
+                fields: state.formFields.length,
+                buttons: state.buttons.length,
+                errors: state.errors.length,
+                blockers: state.blockers.length,
+                labels: state.formFields.slice(0, 8).map(f =>
+                    `${(f.label || f.name || f.ariaLabel || '?').trim().slice(0, 18)}[${f.componentType || f.type}${f.value ? '=✓' : ''}${f.required ? ',req' : ''}]`).join(' '),
+            });
 
             // ── DIAG: surface WHY a recipe'd ATS breaks ("Something went wrong").
             // From the isolated world we can't read fetch bodies, but Resource Timing
@@ -148,7 +560,7 @@ async function runAgentLoop(profile) {
                 const _cxs = performance.getEntriesByType('resource').map(e => e.name)
                     .filter(u => /\/wday\/.*\/(jobapplication|package)\//.test(u));
                 const _undef = _cxs.filter(u => /\/undefined(\/|$|\?)/.test(u));
-                const _err = /something went wrong|refresh the page and (?:then )?try again/i.test(_bt);
+                const _err = WORKDAY_ERROR_CARD_RE.test(_bt);
                 if (_err || _undef.length) {
                     console.warn('[Copo Apply][DIAG]', _err ? 'ATS error card shown' : 'undefined-appId CXS call', {
                         url: location.href,
@@ -171,18 +583,83 @@ async function runAgentLoop(profile) {
             // that stays broken can't reload-loop forever.
             {
                 const bt = document.body?.innerText || '';
-                const errCard = /something went wrong|refresh the page and (?:then )?try again/i.test(bt);
-                const emptyShell = state.formFields.length === 0 && state.buttons.length === 0 && !state.blockers.length;
+                const errCard = WORKDAY_ERROR_CARD_RE.test(bt);
+                // "Empty apply shell" = the form area never rendered (e.g. Workday paints
+                // only its header + footer, blank body). The OLD check required
+                // buttons.length===0, but the persistent header/footer chrome (Sign In,
+                // Careers Page, social links) always leaves buttons > 0 — so a truly empty
+                // form never reloaded. Detect it by the absence of ANY fillable form
+                // content instead (and no recipe step on screen), ignoring nav buttons.
+                const hasFormContent = !!document.querySelector(
+                    'input:not([type="hidden"]):not([type="submit"]):not([type="button"]), textarea, select, '
+                    + '[data-automation-id^="formField-"], [data-automation-id*="applyFlow"], [data-test^="personal-info"]');
+                // A recipe STEP or a recipe GATEWAY on screen means this page is
+                // doing its job, whatever the field count says.
+                //
+                // Gateways were missing from this test, and Workday's "Start Your
+                // Application" modal is exactly the shape that trips the
+                // empty-shell heuristic: three buttons, no inputs, no formField
+                // wrappers. So the agent decided the page was broken and RELOADED
+                // it — closing the modal it was supposed to click, twice, before
+                // giving up with "Trang lỗi/rỗng".
+                const recipeTargets = [
+                    ...(recipe?.steps || []).map(s => s.detect),
+                    ...(recipe?.gateways || []).map(g => g.detect),
+                ].filter(Boolean);
+                const recipeStepPresent = recipeTargets.some((sel) => {
+                    try { return !!document.querySelector(sel); } catch { return false; }
+                });
+                // A JOB POSTING is not an empty shell. It legitimately has no form
+                // fields — the form is behind its Apply button — and treating it as
+                // a broken page made the agent RELOAD it: three page loads on one
+                // URL inside twenty seconds, each reporting "trang rỗng" about a
+                // page that was fine. The reload is for a genuinely blank or
+                // wedged ATS page, so anything the agent could still act on
+                // disqualifies it.
+                const somethingToClick = (() => {
+                    try { return !!findApplyButton(); } catch { return false; }
+                })();
+                const emptyShell = state.formFields.length === 0 && !hasFormContent
+                    && !recipeStepPresent && !state.blockers.length && !somethingToClick;
                 if (errCard || emptyShell) emptyStreak++; else emptyStreak = 0;
                 // Error card → reload now; a bare empty shell → wait 2 observes first
                 // (it may still be mid-bootstrap, not actually broken).
                 const wantReload = errCard || emptyStreak >= 2;
                 let reloads = 0;
                 try { reloads = parseInt(sessionStorage.getItem('copoApplyReloads') || '0', 10) || 0; } catch { /* ignore */ }
-                if (wantReload && reloads < 2) {
+                // Reload IS the recovery Workday itself prescribes for its error
+                // card, and it keeps the session: measured twice on Mondelez, a
+                // reload on "Something went wrong" came back signed in with the
+                // draft intact and the flow advanced to the next step. (An earlier
+                // run showed Create Account after a reload and looked like session
+                // loss; the same URL rendered the signed-in flow moments later, so
+                // that was a transient render, not a dropped session.)
+                //
+                // What must not happen is reloading INTO an auth wall and grinding
+                // there, so past the login wall we allow one attempt, not two, and
+                // the login-wall branch below stops the agent if we land on one.
+                const pastAuthWall = !!tenantRefFor(location.href) && atsAuthDone;
+                const reloadBudget = pastAuthWall ? 1 : 2;
+                if (wantReload && reloads >= reloadBudget && pastAuthWall) {
+                    console.warn('[Copo Apply] page error persists after reload — stopping '
+                        + 'rather than looping on a broken ATS page');
+                    removeProgress();
+                    showToast('⚠️ Trang ứng tuyển báo lỗi hệ thống sau khi tải lại. '
+                        + 'Hồ sơ đã điền vẫn còn — hãy thử lại trên tab này.', 9000);
+                    reportResult(false, 'ATS page error persists after reload',
+                        'blocked', { blockedReason: 'manual' });
+                    return;
+                }
+                if (wantReload && reloads < reloadBudget) {
                     try { sessionStorage.setItem('copoApplyReloads', String(reloads + 1)); } catch { /* ignore */ }
-                    console.warn(`[Copo Apply] recovery: ${errCard ? 'error card' : 'empty page'} → reload ${reloads + 1}/2`, location.href);
-                    showProgress(i + 1, AGENT_MAX_ITERATIONS, 'Trang lỗi/rỗng — tải lại…');
+                    // A MANUAL (⚡) run has no pendingAutoApply to resume off, so
+                    // this reload used to end it silently — the page came back
+                    // clean and the agent just stood there, which reads as "the
+                    // form died" (measured on Unilever: error card → reload →
+                    // silence). The flag survives exactly one same-tab reload.
+                    try { sessionStorage.setItem('copoManualResume', '1'); } catch { /* ignore */ }
+                    console.warn(`[Copo Apply] recovery: ${errCard ? 'error card' : 'empty page'} → reload ${reloads + 1}/${reloadBudget}`, location.href);
+                    showProgress(i + 1, null, 'Trang lỗi/rỗng — tải lại…');
                     await sleep(600);
                     location.reload();
                     return;   // the reload re-injects the agent on a fresh load
@@ -198,10 +675,44 @@ async function runAgentLoop(profile) {
             // a false positive (e.g. "Successfully uploaded" on the Autofill-with-Resume
             // step reading as the whole application being done). Trust atFinalStep there.
             const midRecipeFlow = !!recipe?.finalStepSelector && !atFinalStep(recipe);
-            if (newSignals.length > 0 && actionsTaken > 0 && !midRecipeFlow) {
-                showProgress(i + 1, AGENT_MAX_ITERATIONS, 'Phát hiện ứng tuyển thành công!');
+
+            // TWO independent signals are required before we claim an application
+            // was sent, because the agent does not send one — so `submitted` can
+            // only be the user submitting manually, or an ATS auto-submitting, and
+            // in both cases the page changes structurally.
+            //
+            // One signal is not enough: "Successfully uploaded", "Information
+            // saved" and "Profile updated" all match the success vocabulary and
+            // all appear mid-flow. Reporting those as submitted writes "đã nộp"
+            // into the user's history for an application still sitting half-filled
+            // in an open tab — a false success, which is the failure mode that
+            // costs the most to discover.
+            if (state.formFields.length >= 3) sawForm = true;
+            const formGone = sawForm && state.formFields.length === 0;
+            const confirmationUrl = state.url !== startUrl
+                && /thank|success|confirm|complete|submitted|hoan-?tat|thanh-?cong/i.test(state.url);
+            // A recipe'd multi-step ATS (Workday…) hands off at its REVIEW step and
+            // NEVER submits — so on that page formFields===0 is the read-only review
+            // SUMMARY, not a sent application. MEASURED Maersk R186339 (2026-08-14):
+            // a 4-step job's Review page (0 fields) plus a stale "Successfully
+            // Uploaded" signal left from the résumé step read as `submitted`, which
+            // would have written a false "đã nộp" for an application still sitting on
+            // Review, unsent — the exact false-success this block warns about. So
+            // `formGone` may only signal a send for a SINGLE-PAGE form; a multi-step
+            // ATS needs a real confirmation URL, which only a true submit produces.
+            const recipeMultiStep = !!recipe && !!recipe.finalStepSelector;
+            const structuralSignal = confirmationUrl || (formGone && !recipeMultiStep);
+
+            if (newSignals.length > 0 && actionsTaken > 0 && !midRecipeFlow && !structuralSignal) {
+                console.log('[Copo Apply] completion text seen but the form is still here — not calling this submitted:',
+                    newSignals[0]);
+            }
+            if (newSignals.length > 0 && actionsTaken > 0 && !midRecipeFlow && structuralSignal) {
+                showProgress(i + 1, null, 'Phát hiện ứng tuyển thành công!');
                 removeProgress();
-                reportResult(true, `Success detected: ${newSignals[0]}`, 'submitted');
+                reportResult(true,
+                    `Submitted: "${newSignals[0]}" + ${formGone ? 'form gone' : 'confirmation URL'}`,
+                    'submitted');
                 showConfirmation(state.totalFields, state.totalFields, true);
                 return;
             }
@@ -211,8 +722,21 @@ async function runAgentLoop(profile) {
             // Next click would otherwise send the application. Fill up to here only.
             if (recipe && atFinalStep(recipe)) {
                 removeProgress();
-                showToast('✅ Đã điền xong tới bước cuối — kiểm tra rồi bấm "Submit" để nộp.', 7000);
-                reportResult(true, 'Reached review step — filled, awaiting user submit', 'filled');
+                // What the REVIEW PAGE says, beside what we believe we filled.
+                // Read-only by construction: a row the page does not show is the
+                // last chance to notice that a step three pages back did not
+                // take, and reading it must never be able to break the handoff.
+                let pageReview = null;
+                try {
+                    if (isOwnedPage()) pageReview = await runReviewPage({ cv: cvStructured });
+                } catch (e) { console.warn('[Copo] review read failed (harmless):', e?.message || e); }
+                showToast(withTenantFlags('✅ Đã điền xong tới bước cuối — kiểm tra rồi bấm "Submit" để nộp.'), 7000);
+                reportResult(true, 'Reached review step — filled, awaiting user submit', 'filled', {
+                    review: summarizeAnswers(reviewAnswers),
+                    fieldGaps: [...fieldGaps.values()],
+                    pageReview: pageReview?.snapshot || null,
+                    pageReviewGaps: pageReview?.gaps || [],
+                });
                 showConfirmation(state.totalFields, state.totalFields, false);
                 return;
             }
@@ -221,11 +745,27 @@ async function runAgentLoop(profile) {
             // Your Application" modal, whose options are <a role="button"> the generic
             // scan misses) to reach the form. Before login/fill; capped so it can't loop.
             if (recipe) {
-                const gw = clickRecipeGateway(recipe, hasCV, gatewayClicks);
+                let gw = clickRecipeGateway(recipe, hasCV, gatewayClicks);
                 if (gw.clicked) {
                     actionsTaken++;
-                    showProgress(i + 1, AGENT_MAX_ITERATIONS, `Tiếp tục: ${gw.label}`);
-                    await sleep(1500);
+                    showProgress(i + 1, null, `Tiếp tục: ${gw.label}`);
+                    trace('gateway.click', { label: gw.label, chained: 0 });
+                    // A gateway usually OPENS the next gateway — "Apply" raises the
+                    // "Start Your Application" modal, whose own option is the thing
+                    // that actually reaches the form. Take it in the SAME pass while
+                    // it is on screen, instead of dropping out to a full re-observe
+                    // and hoping the modal survives the round trip. It often did not:
+                    // anything that pressed Escape in between dismissed it, and the
+                    // agent then reported a modal that was no longer there.
+                    for (let chain = 1; chain <= 2; chain++) {
+                        await sleep(900);
+                        gw = clickRecipeGateway(recipe, hasCV, gatewayClicks);
+                        if (!gw.clicked) break;
+                        actionsTaken++;
+                        trace('gateway.click', { label: gw.label, chained: chain });
+                        showProgress(i + 1, null, `Tiếp tục: ${gw.label}`);
+                    }
+                    await sleep(1200);
                     continue; // re-observe the screen the gateway led to
                 }
             }
@@ -236,44 +776,385 @@ async function runAgentLoop(profile) {
             // submit the page navigates and the redirect-resume re-injects us on
             // the real form. Guarded to a genuine login/signup page inside
             // handleLoginWall, so it no-ops on a normal application form.
-            if (applyCreds?.password && document.querySelector('input[type="password"]')) {
-                // Fill + submit the sign-in (handleLoginWall clicks the click_filter
-                // overlay over Workday's button — pure JS). Two auto passes.
-                if (loginAttempts < 2) {
-                    loginAttempts++;
-                    await handleLoginWall(applyCreds, recipe?.login);
-                    actionsTaken++;
-                    showProgress(i + 1, AGENT_MAX_ITERATIONS, 'Đăng nhập…');
-                    await sleep(3200);
-                    continue; // re-observe: a successful submit cleared the wall
+            //
+            // Gated on tenantRefFor: candidate accounts only exist for vendors we
+            // actually support (Workday today). detectLoginWall is deliberately
+            // vendor-agnostic — a password box + "sign in" wording matches iCIMS,
+            // Taleo, or an inline account step at the END of a normal form. Without
+            // this gate the agent asked the background for a credential it could
+            // never resolve and closed out the whole job as 'blocked' with the
+            // self-contradicting "Trang này không cần tài khoản". Anywhere else the
+            // wall stays a state.blockers entry and the planner keeps filling the
+            // fields it CAN reach, which is the documented policy.
+            // Why the auth branch is or is not entered, recorded either way. A run
+            // that never tried to log in left a trace with no auth step at all —
+            // indistinguishable from one where the branch was never reached, and
+            // that difference is the whole diagnosis. The checks are cheap; the
+            // ambiguity cost a round trip.
+            const _tenant = tenantRefFor(location.href);
+            const _wall = (_tenant && !atsAuthDone) ? detectLoginWall(recipe?.login) : null;
+            if (_tenant && !atsAuthDone && !_wall) {
+                const pw = [...document.querySelectorAll('input[type="password"]')];
+                // Once per page, not once per iteration: the loop re-asks every
+                // pass and the answer only changes on navigation.
+                traceOnce(`auth.skip:${location.pathname}`, 'auth.skip', {
+                    why: 'no login wall detected',
+                    tenant: _tenant.tenantKey,
+                    pwTotal: pw.length,
+                    pwVisible: pw.filter(e => e.offsetParent !== null).length,
+                    bodyHead: (document.body?.innerText || '').replace(/\s+/g, ' ').slice(0, 140),
+                });
+            } else if (_tenant && atsAuthDone) {
+                traceOnce(`auth.done:${location.pathname}`, 'auth.skip',
+                    { why: 'already authenticated this page-load', tenant: _tenant.tenantKey });
+            }
+
+            if (!atsAuthDone && _tenant && _wall) {
+                // Let the form finish rendering BEFORE asking for a credential.
+                // The grant spends the tenant's attempt, so asking for one we
+                // cannot use is how a tenant runs out of logins without the ATS
+                // ever seeing a submission.
+                trace('auth.wall', {
+                    tenant: tenantRefFor(location.href)?.tenantKey,
+                    passwordFields: document.querySelectorAll('input[type="password"]').length,
+                    iteration: i + 1,
+                });
+                const ready = await waitForLoginFormReady(recipe?.login);
+                if (!ready) {
+                    trace('auth.notReady', { waitedMs: 8000, action: 'retry next iteration' });
+                    await sleep(1000);
+                    continue;
                 }
-                // Still walled after two auto passes (wrong credentials, or an ATS we
-                // can't submit) → pre-fill so the user clicks "Sign In" once, then
-                // auto-resume when the wall clears. Waits up to 3 min; no burned iters.
-                await handleLoginWall(applyCreds, recipe?.login); // (re)fill + submit
-                showToast('🔐 Đã điền sẵn email + mật khẩu. Nếu chưa tự đăng nhập, hãy bấm nút "Sign In" — '
-                    + 'hệ thống sẽ tự động điền tiếp sau khi bạn đăng nhập.', 0);
-                const waitStart = Date.now();
-                let cleared = false;
-                while (Date.now() - waitStart < 180000) {
-                    sendHeartbeat();
-                    showProgress(i + 1, AGENT_MAX_ITERATIONS, '⏳ Chờ đăng nhập…');
-                    const pwNow = document.querySelector('input[type="password"]');
-                    if (!pwNow) { cleared = true; break; }          // signed in → wall gone
-                    if (!pwNow.value) await handleLoginWall(applyCreds, recipe?.login); // re-render cleared it
-                    await sleep(2000);
-                }
-                document.getElementById('jobfit-toast')?.remove();
-                if (!cleared) {
+
+                // Ask the background for this tenant's credential + which operation
+                // it's allowed to run (signup for a tenant we've never authenticated
+                // at, login for one we have). It owns the attempt budget, because a
+                // content script dies on every navigation and can't count.
+                const grant = await requestAtsAuth();
+                trace('auth.grant', {
+                    ok: !!grant?.ok,
+                    operation: grant?.operation,
+                    reason: grant?.reason,
+                    detail: grant?.detail,
+                    email: grant?.credentials?.email,
+                });
+
+                if (!grant?.ok) {
+                    // No credential we can use, or the budget is spent. Don't sit on
+                    // a wall for three minutes — hand the tenant back so the batch
+                    // moves on and the user gets one actionable row.
                     removeProgress();
-                    showToast('⚠️ Chưa đăng nhập sau 3 phút. Đăng nhập thủ công rồi bấm Auto Apply lại nhé.', 6000);
-                    reportResult(false, 'Manual login timeout');
+                    reportResult(false, grant?.detail || 'Cần tài khoản để ứng tuyển',
+                        'blocked', { blockedReason: grant?.reason || 'manual' });
                     return;
                 }
-                showToast('✅ Đã đăng nhập — tiếp tục điền hồ sơ...', 3000);
-                prevStateHash = ''; fillAttempts.clear(); persistentlyUnfilled.clear();
-                await sleep(1500);
-                continue; // resume on the post-login step
+
+                showProgress(i + 1, null,
+                    grant.operation === 'signup' ? 'Tạo tài khoản…' : 'Đăng nhập…');
+
+                // signup extras + profile: SuccessFactors' create-account form asks
+                // for name/phone/country too, and its data-privacy consent is a
+                // dialog the recipe describes (recipe.signup) — Workday recipes
+                // carry no signup block and the opts are inert there.
+                const authOpts = { signup: recipe?.signup, profile };
+                let result = await handleLoginWall(grant.credentials, recipe?.login, grant.operation, authOpts);
+                trace('auth.attempt', { pass: 1, outcome: result?.outcome, pending: result?.pending, result: result === null ? 'null' : undefined });
+                // A form switch (sign-in ⇄ create account) isn't an attempt; run the
+                // real one on the form we asked for.
+                if (result?.pending) {
+                    await sleep(1200);
+                    result = await handleLoginWall(grant.credentials, recipe?.login, grant.operation, authOpts);
+                    trace('auth.attempt', { pass: 2, outcome: result?.outcome, result: result === null ? 'null' : undefined });
+                }
+
+                // Null means handleLoginWall found no wall to act on — it went away
+                // between the check above and the fill, or was never really there.
+                // Nothing was typed and nothing was submitted, so this is NOT an
+                // attempt: give it back and let the loop look again. Treating it as
+                // a verdict is what used to end the job on a page that had simply
+                // not finished loading, and leave the tenant with no logins left.
+                if (!result) {
+                    await abandonAtsAuth(grant.operation, 'no login form to act on');
+                    trace('auth.refund', { operation: grant.operation, why: 'handleLoginWall returned null' });
+                    await sleep(1200);
+                    continue;
+                }
+                actionsTaken++;
+
+                // Report the verdict; the background persists it, so every remaining
+                // job on this tenant inherits it instead of re-probing.
+                const verdict = await reportAtsAuth(result);
+                trace('auth.verdict', {
+                    outcome: result.outcome, source: result.source, sourceCode: result.sourceCode,
+                    state: verdict?.state, blocked: verdict?.reason,
+                });
+                atsAuthDone = true;
+
+                if (result?.outcome === 'success') {
+                    showToast('✅ Đã đăng nhập — tiếp tục điền hồ sơ...', 3000);
+                    prevStateHash = ''; fillAttempts.clear(); persistentlyUnfilled.clear();
+                    await sleep(1500);
+                    continue;                       // resume on the post-login step
+                }
+                if (result?.outcome === 'account_exists') {
+                    // Expected on signup-first: the account is already there, so sign
+                    // in instead. This is the second (and last) allowed operation.
+                    atsAuthDone = false;
+                    await sleep(1000);
+                    continue;
+                }
+                // Anything else needs the user (verify an email, supply a different
+                // password, solve a challenge). Close out cleanly — the verify wall
+                // sits BEFORE the form, so there is no progress worth preserving and
+                // no reason to keep a tab parked.
+                removeProgress();
+                reportResult(false, ATS_BLOCK_DETAIL[verdict?.reason || 'manual'],
+                    'blocked', { blockedReason: verdict?.reason || 'manual' });
+                return;
+            }
+
+            // ── NEEDS PASS: scan the form FIRST, then decide what data to pull ──
+            //
+            // Runs ahead of the recipe on purpose. A recipe is a per-ATS list of
+            // selectors with requiredness baked in, and requiredness is per-TENANT:
+            // "How Did You Hear About Us?" is a button at 3M and a search box at
+            // Mondelez, My Experience wants one field at one company and six at the
+            // next. Anything derived from that list is wrong somewhere by
+            // construction.
+            //
+            // So the page decides what is needed, and the recipe that follows only
+            // contributes exact selectors for controls whose labels are ambiguous,
+            // plus the step/advance structure. Filling is idempotent, so whatever
+            // this pass already answered the recipe simply skips.
+            //
+            // One pass replaces what used to be three disconnected ones: the
+            // recipe bound selectors to values, a rule table answered screening
+            // questions, and nothing at all checked what the ATS had already
+            // filled. That last gap is the expensive one — the recipe treats any
+            // non-empty value as finished, so a parser that read the job title as
+            // "Consultant" when the CV says "Product Owner" was left standing.
+            // ONE VERDICT SOURCE. On a page mdlz-v2 owns, the needs engine does
+            // not get to decide anything: a live run had three verdicts for one
+            // pass — v2 saying Country OPTION_NOT_FOUND, the needs manifest
+            // saying one required field unfilled, and the stuck detector naming a
+            // third field — and none of them agreed about what was wrong. A
+            // specialized controller cannot have three opinions.
+            if (_v2Owns) {
+                trace('mdlz.outer.skipped', { engine: 'needs', why: 'v2 owns this page' });
+            } else {
+                const manifest = buildManifest(state.formFields, { profile, cv: cvStructured });
+
+                // The candidate's own data wins. A mismatch the pipeline can
+                // correct unambiguously IS corrected; one it cannot (a repeated
+                // concept, a committed dropdown) is reported instead, because
+                // there the risk is not our data but our aim.
+                const correctable = new Set(manifest.override.map(o => o.selector));
+                for (const v of manifest.verify) {
+                    if (v.verdict !== VERDICT.MISMATCH) continue;
+                    const willFix = correctable.has(v.selector);
+                    reviewAnswers.set(`mismatch::${v.label}`, {
+                        field: v.label, value: willFix ? v.expected : v.actual,
+                        source: willFix ? 'CORRECTED' : 'ATS_PARSED',
+                        expected: v.expected, wasParsedAs: v.actual, verdict: v.verdict,
+                    });
+                    console.warn(`[Copo Needs] ${willFix ? '✎ correcting' : '⚠ flagged'} ${v.label}: `
+                        + `form "${String(v.actual).slice(0, 28)}" vs CV "${String(v.expected).slice(0, 28)}"`);
+                }
+
+                if (manifest.gaps.length) {
+                    const g = summarizeGaps(manifest);
+                    console.log('[Copo Needs] gaps →', JSON.stringify({ userOnly: g.userOnly, inferable: g.inferable }));
+                }
+
+                // Corrections go out with the fills, in the same pass.
+                let todo = [...manifest.override, ...manifest.fill];
+                // Ownership: needs RESOLVES answers, but a field the active recipe
+                // step covers is the recipe's to EXECUTE — its widget knowledge is
+                // what commits a value (a generic fill typed free text into the
+                // "How Did You Hear" prompt: looked answered, committed nothing).
+                // Fields the recipe has RELEASED (FAIL/absent — stale selector,
+                // different tenant shape, exhausted strategies) fall through to
+                // needs, so the fallback flexibility is kept.
+                if (recipe && todo.length) {
+                    const owned = recipeOwnedWrappers(recipe);
+                    if (owned.size) {
+                        const deferred = [];
+                        todo = todo.filter(a => {
+                            const el = document.querySelector(a.selector);
+                            const wrap = el?.closest?.('[data-automation-id^="formField-"]');
+                            const label = wrap ? owned.get(wrap) : null;
+                            if (!label || recipeReleased(label)) return true;
+                            deferred.push(`${a.label}→${label}`);
+                            return false;
+                        });
+                        if (deferred.length) {
+                            console.log('[Copo Needs] recipe-owned, deferring to the recipe:', deferred.join(' · '));
+                        }
+                    }
+                    // Repeating sections are owned as SECTIONS, not just as the
+                    // first-row fields the recipe schema names. The recipe's row
+                    // machinery pairs languages to rows by content, dedupes and
+                    // grows — the needs layer sees one empty required "Language*"
+                    // box and stuffs it, blind to the section. Watched live
+                    // (Mondelez, 2026-08-06, self-driven run): needs filled the
+                    // free row the recipe was holding for English with a SECOND
+                    // Vietnamese. Every field inside these sections defers,
+                    // whatever selector it carries.
+                    if (recipe.ats === 'workday' && todo.length) {
+                        const REPEATING = ['work experience', 'education', 'languages'];
+                        const heads = [...document.querySelectorAll('h2, h3, h4')].filter(h => h.offsetParent !== null);
+                        const sectionOf = (el) => {
+                            let name = null;
+                            for (const h of heads) {
+                                if (h.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) {
+                                    const t = (h.textContent || '').trim().toLowerCase();
+                                    name = REPEATING.includes(t) ? t : null;
+                                } else break;
+                            }
+                            return name;
+                        };
+                        const deferredRows = [];
+                        todo = todo.filter(a => {
+                            const el = document.querySelector(a.selector);
+                            if (!el) return true;
+                            const sec = sectionOf(el);
+                            if (!sec) return true;
+                            deferredRows.push(`${a.label}→[${sec}]`);
+                            return false;
+                        });
+                        if (deferredRows.length) {
+                            console.log('[Copo Needs] row-section owned by recipe, deferring:', deferredRows.join(' · '));
+                        }
+                    }
+                }
+                // The starvation fuse: two tries per control per page. A fill
+                // that took would read as answered next pass and never re-arm;
+                // one that keeps re-arming is not going to work a third time,
+                // and its `continue` was costing every pass the recipe.
+                todo = todo.filter(a => (needsAttempts.get(a.selector) || 0) < 2);
+                if (todo.length) {
+                    for (const a of todo) needsAttempts.set(a.selector, (needsAttempts.get(a.selector) || 0) + 1);
+                    console.log('[Copo Needs] applying:', todo.map(a => `${a.label}=${String(a.value).slice(0, 20)}[${a.source}]`).join(' · '));
+                    showProgress(i + 1, null,
+                        manifest.override.length
+                            ? `Sửa ${manifest.override.length} trường lệch + điền ${manifest.fill.length}…`
+                            : `Điền ${manifest.fill.length} trường từ hồ sơ…`);
+                    // Workday prompts commit only through the recipe's widget
+                    // machinery. A RESOLVED answer routed at a custom-dropdown
+                    // used to take the generic handler — measured on Visa's
+                    // questionnaire: the rules held "No" for sponsorship, the
+                    // generic path painted it without committing, the fuse
+                    // blew, and the run ended NEED_HUMAN on a question whose
+                    // answer was in hand all along. Those go the strong way.
+                    const strongSelects = [];
+                    const strongDates = [];
+                    // A Workday date renders as 2–3 spinbutton SECTIONS the
+                    // observer reads as native inputs — the generic text fill
+                    // paints them without committing. Route by SHAPE.
+                    const isDateWrap = (sel) => !!document.querySelector(sel)
+                        ?.closest?.('[data-automation-id^="formField-"]')
+                        ?.querySelector('[data-automation-id^="dateSection"]');
+                    const instructions = todo.map(a => ({
+                        selector: a.selector,
+                        action: a.componentType === 'radio-group' ? 'radio'
+                            : a.componentType === 'checkbox' ? 'checkbox'
+                            : a.componentType === 'native-select' ? 'select'
+                            : (a.componentType && a.componentType !== 'native') ? 'custom-select' : 'fill',
+                        value: a.value, componentType: a.componentType, fieldLabel: a.label,
+                    })).filter(inst => {
+                        if (inst.action === 'custom-select') { strongSelects.push(inst); return false; }
+                        if (inst.action === 'fill' && isDateWrap(inst.selector)) { strongDates.push(inst); return false; }
+                        return true;
+                    });
+                    // A box the OBSERVER called text can still be a picker: PwC's
+                    // "City or Ward" is a combobox whose suggestions appear as you
+                    // type, and the generic handler typed into it without ever
+                    // committing — the field stayed empty, held the step, and the
+                    // run ended "Stuck" on it three times. The probe already
+                    // knows; now its verdict routes to the same widget machinery
+                    // every other prompt gets.
+                    for (let i = instructions.length - 1; i >= 0; i--) {
+                        const inst = instructions[i];
+                        if (inst.action !== 'fill') continue;
+                        const el = document.querySelector(inst.selector);
+                        if (!el || el.offsetParent === null) continue;
+                        if (isLegalNameLabel(inst.fieldLabel || inst.label)) continue;
+                        const shape = await probeFieldShape(el);
+                        if (!isPickerShape(shape.shape)) continue;
+                        trace('needs.reshape', { label: String(inst.fieldLabel || '').slice(0, 40), probed: shape.shape, evidence: shape.evidence });
+                        instructions.splice(i, 1);
+                        strongSelects.push(inst);
+                    }
+                    for (const a of manifest.fill) {
+                        reviewAnswers.set(`answer::${a.label}`, { field: a.label, value: a.value, source: a.source });
+                    }
+                    // Remember what this page asked for that stored data could not
+                    // answer, so the app can collect it ONCE instead of stalling at
+                    // every company that asks.
+                    for (const g of manifest.gaps) {
+                        fieldGaps.set(g.key || g.label, { key: g.key, label: g.label, userOnly: g.userOnly });
+                    }
+                    let n = await executeFillInstructions(instructions, cvData, policyCtx('recipe'));
+                    for (const inst of strongDates) {
+                        const r = await fillResolvedDate(inst.selector, inst.value);
+                        trace('needs.date', {
+                            label: String(inst.fieldLabel || '').slice(0, 50),
+                            value: String(inst.value).slice(0, 16),
+                            ok: !!r.ok, why: r.reason || null,
+                        });
+                        if (r.ok) n++;
+                    }
+                    for (const inst of strongSelects) {
+                        const r = await inferFillDynamicField(
+                            { label: inst.fieldLabel, selector: inst.selector, componentType: 'custom-dropdown' },
+                            profile, cvStructured, inst.value);
+                        trace('needs.select', {
+                            label: String(inst.fieldLabel || '').slice(0, 50),
+                            value: String(inst.value).slice(0, 30),
+                            ok: !!r.ok, matched: r.matched || null, why: r.reason || null,
+                        });
+                        if (r.ok) n++;
+                    }
+                    if (n > 0) {
+                        actionsTaken++;
+                        history.push({ iteration: i, plan: { action: 'NEEDS', reason: 'deterministic field resolution' }, result: { filled: n } });
+                        await sleep(600);
+                        continue;   // re-observe before spending an LLM call
+                    }
+                }
+
+                // ── FREE-ANSWER screening selects (user-approved 2026-08-02).
+                // A required dropdown nothing stored answers is no longer a user
+                // gap by default: the model reads the CV/profile and picks from
+                // the options the WIDGET actually offers — "years of experience
+                // in X?" has its answer in the CV, and stalling on it was pure
+                // friction. Selects only (a model may choose, never type);
+                // recipe-owned fields stay with the recipe until released;
+                // demographic/consent never reach the gap list at all.
+                const openSelects = (manifest.gaps || [])
+                    .filter(g => ['custom-dropdown', 'native-select', 'radio-group'].includes(g.componentType) && !g.userOnly);
+                if (openSelects.length) {
+                    const owned = recipe ? recipeOwnedWrappers(recipe) : new Map();
+                    let inferred = 0;
+                    for (const g of openSelects.slice(0, 4)) {
+                        const el = document.querySelector(g.selector);
+                        const wrap = el?.closest?.('[data-automation-id^="formField-"]');
+                        const ownerLabel = wrap ? owned.get(wrap) : null;
+                        if (ownerLabel && !recipeReleased(ownerLabel)) continue;
+                        const r = await inferFillDynamicField(g, profile, cvStructured);
+                        trace('gap.inferFill', { label: String(g.label || '').slice(0, 50), ok: !!r.ok, matched: r.matched || null, why: r.reason || null });
+                        if (r.ok) {
+                            inferred++;
+                            reviewAnswers.set(`answer::${g.label}`, { field: g.label, value: r.matched, source: 'AGENT_DEFAULT' });
+                        }
+                    }
+                    if (inferred > 0) {
+                        actionsTaken++;
+                        history.push({ iteration: i, plan: { action: 'NEEDS', reason: 'model picked from on-widget options' }, result: { filled: inferred } });
+                        await sleep(600);
+                        continue;   // re-observe with the new answers committed
+                    }
+                }
             }
 
             // ── RECIPE PRE-FILL: for a known ATS (Workday…), fill the standardized
@@ -282,7 +1163,27 @@ async function runAgentLoop(profile) {
             // step is done; when it fills something new we re-observe so the LLM
             // sees the pre-filled state and only handles the rest (dropdowns, Next).
             if (recipe) {
-                const rf = await applyRecipeFields(recipe, profile, cvData);
+                // Mid-transition, the OLD step's recipe must not run: the page
+                // being replaced still answers selectors, so a pass here fills
+                // widgets that are about to be discarded and reads their state
+                // as this step's truth. Wait for the page to become itself.
+                if (_advanceHeld(state, recipe)) { const fp0 = _stepFingerprint(state, recipe); await waitForMutation(2500, () => _stepFingerprint(state, recipe) !== fp0); continue; }
+                const rf = await _phase('recipe', () => applyRecipeFields(recipe, profile, cvData, cvStructured));
+                // v2's own account of what it could not answer — the only
+                // blocker list that matters on a page it owns.
+                if (rf?.v2) _lastV2Gaps = rf.blockers || rf.gaps || rf.fieldGaps || [];
+                // A page that ADVANCED is progress even when it filled nothing:
+                // an all-satisfied page moving forward is the run working, and
+                // counting it idle is how three healthy passes read as
+                // "no progress in 2" on a draft that was simply already filled.
+                if (rf?.filled || rf?.advancedTo) _progress();
+                // Real progress clears the blocked-defer budget: a page that
+                // moved or filled is not the field that could not be answered.
+                if (rf?.filled || rf?.advancedTo) _v2BlockedDeferStreak = 0;
+                if (_openIter && rf?.step) _openIter.step = rf.step;
+                for (const a of rf.answers || []) {
+                    reviewAnswers.set(`${rf.step || '?'}::${a.field}`, { ...a, step: rf.step });
+                }
                 console.log(`[Copo Apply] recipe(${recipe.ats} v${recipe.version}): ${rf.matched ? `step="${rf.step || '—'}" filled=${rf.filled}` : 'no step matched → LLM handles'}`);
                 // Single-page hard cap: even if a field won't stick and we keep
                 // re-filling it (rf.filled>0 every pass), never spin forever — hand off
@@ -292,8 +1193,8 @@ async function runAgentLoop(profile) {
                     if (singlePagePasses > 6) {
                         removeProgress();
                         const miss = (state.unfilledRequired || []).slice(0, 4).join(', ');
-                        showToast(`✅ Đã điền hồ sơ${miss ? ` — kiểm tra lại: ${miss}` : ''}. Tích ô đồng ý điều khoản rồi bấm "Submit" để nộp.`, 10000);
-                        reportResult(true, `${recipe.label} filled (pass cap) — awaiting user consent + submit`, 'filled');
+                        showToast(withTenantFlags(`✅ Đã điền hồ sơ${miss ? ` — kiểm tra lại: ${miss}` : ''}. Tích ô đồng ý điều khoản rồi bấm "Submit" để nộp.`), 10000);
+                        reportResult(true, `${recipe.label} filled (pass cap) — awaiting user consent + submit`, 'filled', { review: summarizeAnswers(reviewAnswers), fieldGaps: [...fieldGaps.values()] });
                         showConfirmation(state.totalFields, state.totalFields, false);
                         return;
                     }
@@ -306,7 +1207,7 @@ async function runAgentLoop(profile) {
                         result: { filled: rf.filled },
                     });
                     if (recipe.singlePage) singlePageIdle = 0;   // progress made → reset idle
-                    showProgress(i + 1, AGENT_MAX_ITERATIONS,
+                    showProgress(i + 1, null,
                         rf.uploadedParser ? '📄 Đã tải CV — chờ hệ thống tự điền hồ sơ…'
                             : `Điền tự động (${recipe.label}) — ${rf.filled} trường`);
                     // After uploading the CV to SR's parser, WAIT ~5s so it finishes
@@ -329,42 +1230,286 @@ async function runAgentLoop(profile) {
                     if (rf.matched) {
                         singlePageIdle++;
                         if (singlePageIdle < 2) {
-                            showProgress(i + 1, AGENT_MAX_ITERATIONS, 'Rà soát & điền các ô còn trống…');
+                            showProgress(i + 1, null, 'Rà soát & điền các ô còn trống…');
                             await sleep(1600);
                             continue;   // give the parser another pass, then re-scan
                         }
                         removeProgress();
                         const miss = (state.unfilledRequired || []).slice(0, 4).join(', ');
-                        showToast(`✅ Đã điền hồ sơ${miss ? ` — kiểm tra lại: ${miss}` : ''}. Tích ô đồng ý điều khoản rồi bấm "Submit" để nộp.`, 10000);
-                        reportResult(true, `${recipe.label} filled — awaiting user consent + submit`, 'filled');
+                        showToast(withTenantFlags(`✅ Đã điền hồ sơ${miss ? ` — kiểm tra lại: ${miss}` : ''}. Tích ô đồng ý điều khoản rồi bấm "Submit" để nộp.`), 10000);
+                        reportResult(true, `${recipe.label} filled — awaiting user consent + submit`, 'filled', { review: summarizeAnswers(reviewAnswers), fieldGaps: [...fieldGaps.values()] });
                         showConfirmation(state.totalFields, state.totalFields, false);
                         return;
                     }
                     // Host matches but the form isn't on screen yet — wait for it to
                     // render (or for the "I'm interested" gateway to land us on it)
                     // rather than handing the empty page to the LLM.
-                    showProgress(i + 1, AGENT_MAX_ITERATIONS, 'Chờ form ứng tuyển…');
+                    showProgress(i + 1, null, 'Chờ form ứng tuyển…');
                     await sleep(1500);
                     continue;
                 }
+                // A wizard page that has not rendered yet is not a page to plan
+                // against. The comment two branches up says exactly this — "rather
+                // than handing the empty page to the LLM" — but that guard sat
+                // inside `if (recipe.singlePage)`, so it only ever protected
+                // SmartRecruiters. On Workday an empty Create Account/Sign In step
+                // went straight to the planner, which correctly reported that there
+                // was nothing to fill and no credentials in the profile, and
+                // NEED_HUMAN ended the run. One iteration later the password fields
+                // exist and the login flow handles it — measured: pwTotal 0 on pass
+                // 1, five fields on pass 2.
+                if (!rf.matched && state.formFields.length === 0 && emptyPageWaits < 4) {
+                    emptyPageWaits++;
+                    trace('page.settling', {
+                        pass: emptyPageWaits,
+                        buttons: state.buttons.length,
+                        step: state.stepIndicator
+                            ? `${state.stepIndicator.current}/${state.stepIndicator.total}` : null,
+                    });
+                    showProgress(i + 1, null, 'Chờ form ứng tuyển…');
+                    await sleep(1500);
+                    continue;
+                }
+
                 // Recipe step fully filled (nothing new this pass) + nothing required
                 // left → ADVANCE deterministically instead of burning a slow/overloaded
                 // LLM call just to click "Save and Continue". Close a leftover dropdown
                 // popup first (it overlays the footer + eats the click).
-                if (rf.matched && state.unfilledRequired.length === 0 && state.errors.length === 0 && !atFinalStep(recipe)) {
-                    const stepNow = (recipe.steps || []).find(s => s.detect && document.querySelector(s.detect));
-                    const adv = stepNow?.advance ? document.querySelector(stepNow.advance) : null;
+                // Why the deterministic advance did or did not fire. Every term
+                // here has stalled a run at least once — an unmatched step means no
+                // `advance` selector, one unfilled required field withholds the
+                // click entirely, and a false-positive final step denies it. From
+                // outside all three look identical: the page simply does not move.
+                const _stepNow = (recipe.steps || []).find(s => s.detect && document.querySelector(s.detect));
+                const _adv = _stepNow?.advance ? document.querySelector(_stepNow.advance) : null;
+                // A step may name a precondition for leaving it. The résumé-upload
+                // page does: advancing before the file attaches skips the parse the
+                // step exists for. Only enforced when we actually have a CV — a
+                // text-only apply must not deadlock waiting for an upload that was
+                // never going to happen.
+                const _waitingFor = (_stepNow?.advanceWhen && hasCV
+                    && !document.querySelector(_stepNow.advanceWhen)) ? _stepNow.advanceWhen : null;
+                trace('advance.check', {
+                    recipeMatched: rf.matched,
+                    step: _stepNow?.name || _stepNow?.detect || null,
+                    unfilledRequired: state.unfilledRequired.length,
+                    // Full names + component type, not counts — "unfilledRequired=3"
+                    // cost a debug session that "Work To Month | …" answers, and
+                    // "? [file-upload]" names a phantom blocker instantly.
+                    unfilledLabels: state.unfilledRequired.slice(0, 6).map(f =>
+                        `${(f.label || f.placeholder || f.selector || '?').slice(0, 40)}${f.componentType ? ` [${f.componentType}]` : ''}`).join(' | '),
+                    errors: state.errors.length,
+                    errorDetail: state.errors.slice(0, 4).map(e => `${e.field || '?'}: ${String(e.message || '').slice(0, 40)}`).join(' | '),
+                    atFinalStep: atFinalStep(recipe),
+                    advSelector: _stepNow?.advance || null,
+                    advFound: !!_adv,
+                    advVisible: !!(_adv && _adv.offsetParent !== null),
+                    advLabel: _adv ? (_adv.textContent || '').trim().slice(0, 28) : null,
+                    waitingFor: _waitingFor,
+                });
+                // Waiting on a precondition is NOT a page to plan against. The
+                // résumé-upload step withholds its Continue until the file
+                // attaches, and execution then fell straight through to the
+                // planner — which sees a page with no fields, reports that it
+                // cannot proceed, and ends the run. The same empty-page failure as
+                // before, reached down a different branch.
+                if (_waitingFor && preconditionWaits < 8) {
+                    preconditionWaits++;
+                    trace('advance.waiting', {
+                        step: _stepNow?.name || null,
+                        pass: preconditionWaits,
+                        selector: _waitingFor,
+                        filledThisPass: rf.filled,
+                    });
+                    showProgress(i + 1, null, 'Chờ đính kèm CV…');
+                    await sleep(1500);
+                    continue;
+                }
+                // ── A FIELD THE RECIPE KNOWS IT DID NOT FILL HOLDS THE STEP ──
+                // The two conditions above only see what the PAGE admits: fields it
+                // marks required-and-empty, and errors it chose to render. Neither
+                // covers the case this loop kept producing — the recipe reports
+                // "Language — never committed", the widget still shows something, the
+                // tenant never marked it required, so the step looks complete and the
+                // agent clicks Continue over a field it had just told itself it
+                // failed. That is the "cứ bấm continue mãi" behaviour: not a missing
+                // retry (the recipe re-runs every pass) but a missing CONSUMER for
+                // the failure verdict.
+                //
+                // Holding is bounded by FIELD_FAIL_BUDGET, so a widget nobody can
+                // drive costs a few passes and then lets go rather than deadlocking
+                // the run — the failure reaches the user in the review instead.
+                const _blocking = recipeBlockingFields();
+                if (_blocking.length) {
+                    trace('advance.blocked', {
+                        step: _stepNow?.name || null,
+                        fields: _blocking.map(b => `${b.label}(${b.fails}/${FIELD_FAIL_BUDGET + 1}): ${String(b.why).slice(0, 50)}`).join(' | '),
+                    });
+                    console.warn('[Copo Apply] không bấm Continue — còn field recipe tự báo thất bại:',
+                        _blocking.map(b => `${b.label} (lần ${b.fails})`).join(', '));
+                }
+                if (rf.matched && !_waitingFor && state.unfilledRequired.length === 0
+                    && state.errors.length === 0 && !_blocking.length && !atFinalStep(recipe)) {
+                    const stepNow = _stepNow;
+                    const adv = _adv;
                     if (adv && adv.offsetParent !== null) {
-                        if (document.querySelector('[data-automation-id="promptOption"]')) {
-                            (document.activeElement || document.body)?.dispatchEvent?.(
-                                new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-                            await sleep(250);
+                        // ── v2 ADVANCES ITS OWN PAGES — this click is not ours to make ──
+                        // Re-checked LIVE, not from the iteration-start snapshot: v2's
+                        // navigation transaction advances the wizard MID-iteration, so
+                        // the page under this button is already the NEXT one by the
+                        // time we get here. Reaching the click anyway meant sweeping
+                        // manifest values onto a page v2 owns, aiming a Next click the
+                        // choke point rightly refuses — and the refusal handler below
+                        // reading that refusal as the Review terminal ("awaiting user
+                        // submit"), ending the run one page into the flow with nothing
+                        // filled. Measured three times on 2026-08-10: R-170139,
+                        // R-174262, R-173186 — identical tails, `mdlz.nav.advanced`
+                        // followed 500ms later by run.end. Defer instead: the next
+                        // iteration hands whatever page is on screen to v2's own
+                        // controller, which fills it and advances it itself.
+                        const _v2HoldsNow = pageOwner() === 'mdlz-v2'
+                            || (isOwnedPage() && (await flagMode()) === MODE.ON && owns(observeStep()));
+                        if (_v2HoldsNow) {
+                            // Deferring is only right while v2 has an unplayed
+                            // move. If v2 owns the page AND recorded a terminal
+                            // blocker it cannot clear itself, another defer is
+                            // not "let v2 finish" — it is the loop that ran 24
+                            // passes on a Field of Study the catalogue does not
+                            // hold. Budget it: ride out a few passes (hydration,
+                            // a slow list), then STOP and name the gap, the same
+                            // handoff the stuck detector gives — which this defer
+                            // used to `continue` past before it could fire.
+                            // Count EVERY no-progress defer, not only ones with a
+                            // recorded gap. A widget the extension cannot interact
+                            // with leaves NO gap and NO blocker — an exhausted
+                            // OPEN_TIMEOUT is neither "done" nor "blocking" — yet
+                            // the page is just as stuck, and gating the count on
+                            // gaps let that case loop to the runtime cap. Real
+                            // progress (fill/advance) resets the streak above.
+                            _v2BlockedDeferStreak++;
+                            if (_v2BlockedDeferStreak >= V2_BLOCKED_DEFER_BUDGET) {
+                                const gaps = _lastV2Gaps || [];
+                                // A CONTRACT_ERROR is the DEVELOPER'S bug (a chip-search
+                                // field the plan forgot to declare), not the candidate's
+                                // data — it must never surface as "cần bạn bổ sung".
+                                const devGaps = gaps.filter((g) => g.developer);
+                                trace('advance.v2BlockedEscalate', {
+                                    streak: _v2BlockedDeferStreak,
+                                    developer: devGaps.length,
+                                    gaps: gaps.length,
+                                    miss: gaps.slice(0, 6).map(gapLabelVi).join(', '),
+                                });
+                                removeProgress();
+                                if (devGaps.length) {
+                                    const fields = devGaps.slice(0, 6).map((g) => g.label || g.id || '?').join(', ');
+                                    showToast(`⚠️ Lỗi nội bộ: extension thiếu contract cho field (${fields}). Vui lòng báo đội phát triển.`, 12000);
+                                    reportResult(false, `Developer: v2 field contract missing — ${fields}`, 'failed',
+                                        { review: summarizeAnswers(reviewAnswers), fieldGaps: [...fieldGaps.values()] });
+                                } else if (gaps.length) {
+                                    const miss = gaps.slice(0, 6).map(gapLabelVi).join(', ');
+                                    showToast(`⚠️ Không qua được bước này — cần bạn bổ sung: ${miss}. Điền nốt rồi bấm tiếp.`, 10000);
+                                    reportResult(false, `Need human: v2 blocked — ${miss}`, 'blocked',
+                                        { blockedReason: 'manual', review: summarizeAnswers(reviewAnswers), fieldGaps: [...fieldGaps.values()] });
+                                } else {
+                                    // No gap of any kind, yet v2 still cannot move the page
+                                    // after the budget: a widget it could not interact with
+                                    // (a list that would not open, a popup that would not
+                                    // clear) that the scheduler already exhausted. Not the
+                                    // candidate's data, not a model's job.
+                                    showToast('⚠️ Extension không thao tác được với một ô trên trang này — vui lòng điền nốt thủ công rồi bấm tiếp.', 12000);
+                                    reportResult(false, 'Need human: v2 could not interact with a widget (no progress, no gap)', 'blocked',
+                                        { blockedReason: 'manual', review: summarizeAnswers(reviewAnswers), fieldGaps: [...fieldGaps.values()] });
+                                }
+                                return;
+                            }
+                            trace('advance.deferredToV2', { page: observeStep(), step: stepNow?.name || null, blockedStreak: _v2BlockedDeferStreak });
+                            await sleep(900);
+                            continue;
                         }
+                        // Only a real open listbox, and never when the modal is the
+                        // topmost layer — Escape would dismiss the step instead.
+                        if (closeOpenDropdown()) await sleep(250);
+                        // ── PRE-ADVANCE SWEEP: rewrite the text values Workday
+                        // wiped between fill-time and NOW. Every select commit
+                        // re-hydrates its section, and a text value not yet
+                        // synced server-side comes back empty — measured on
+                        // PwC: "City or Ward" was filled at pass start, wiped
+                        // by the source commit 25 seconds later, refilled,
+                        // wiped again, and Save then validated an empty box
+                        // while the needs fuse was already burned. This is the
+                        // one moment nothing will churn the section again, so
+                        // one rewrite here is worth two anywhere else. Text
+                        // inputs only, values the manifest already resolved.
+                        try {
+                            const m2 = buildManifest((await observePageState()).formFields, { profile, cv: cvStructured });
+                            for (const a of m2.fill) {
+                                if (a.componentType && a.componentType !== 'native') continue;
+                                const el2 = document.querySelector(a.selector);
+                                if (!el2 || el2.offsetParent === null) continue;
+                                if (el2.closest('[data-automation-id^="formField-"]')?.querySelector('[data-automation-id^="dateSection"]')) continue;
+                                if (String(el2.value ?? '').trim() !== '') continue;
+                                setNativeValue(el2, String(a.value));
+                                try { el2.dispatchEvent(new FocusEvent('focusout', { bubbles: true })); el2.blur?.(); } catch { /* noop */ }
+                                trace('advance.sweep', { label: String(a.label).slice(0, 40), value: String(a.value).slice(0, 24) });
+                                await sleep(150);
+                            }
+                        } catch { /* the sweep must never block the advance */ }
                         console.log(`[Copo Apply] recipe advance → ${stepNow.advance}`);
-                        overlayClick(adv);
+                        // The surrounding condition already excludes the review
+                        // step; the policy re-checks it anyway, because on Workday
+                        // this same selector IS the submit button there.
+                        // A refused advance is not progress. Incrementing
+                        // `actionsTaken` anyway told the completion check that we
+                        // had acted, and let the loop continue as if the step had
+                        // moved on.
+                        if (_advanceHeld(state, recipe)) { const fp0 = _stepFingerprint(state, recipe); await waitForMutation(2500, () => _stepFingerprint(state, recipe) !== fp0); continue; }
+                        const advanced = safeActivate(adv, policyCtx('recipe'), stepNow.advance);
+                        trace('advance.click', { selector: stepNow.advance, activated: advanced });
+                        if (advanced) { _progress(); _advanceTaken(state, recipe); }
+                        if (!advanced) {
+                            removeProgress();
+                            showToast(withTenantFlags('✅ Đã điền xong — kiểm tra rồi tự bấm nộp để hoàn tất.'), 8000);
+                            reportResult(true, 'Policy stopped the step advance — awaiting user submit', 'filled', { review: summarizeAnswers(reviewAnswers), fieldGaps: [...fieldGaps.values()] });
+                            showConfirmation(state.totalFields, state.totalFields, false);
+                            return;
+                        }
                         actionsTaken++;
                         await sleep(1500);
                         continue;
+                    }
+                }
+            }
+
+            // ── GENERIC ADVANCE (hybrid): tenants reshape Workday's steps, and a
+            // page no recipe step recognises still has to MOVE once complete —
+            // before this, only the planner could click Next there, so an
+            // unknown page shape on an unreachable planner ended the run.
+            // pageFooterNextButton is Workday PLATFORM chrome (tenant-neutral);
+            // the text scan covers other ATSes. The policy layer judges the
+            // click as always (submit labels refused), and a visible review
+            // page is never advanced generically.
+            {
+                const insideApply = !!state.stepIndicator || /\/apply(\/|$)/.test(location.pathname);
+                const stepMatched = !!(recipe && (recipe.steps || []).find(s => s.detect && document.querySelector(s.detect)));
+                const onReview = (recipe && atFinalStep(recipe))
+                    || !!document.querySelector('[data-automation-id="applyFlowReviewPage"]');
+                // Same gate as the recipe advance above: a page no step recognises
+                // can still hold recipe-owned widgets that just reported failure,
+                // and clicking a generic "Continue" over them loses the field
+                // exactly as clicking the recipe's own Next did.
+                if (insideApply && !stepMatched && !onReview
+                    && state.unfilledRequired.length === 0 && state.errors.length === 0
+                    && !recipeBlockingFields().length
+                    && state.formFields.length > 0) {
+                    const adv = document.querySelector('[data-automation-id="pageFooterNextButton"]')
+                        || [...document.querySelectorAll('button, [role="button"]')]
+                            .filter(b => b.offsetParent !== null)
+                            .find(b => /^(save and continue|continue|next|tiếp tục|lưu và tiếp tục)$/i.test((b.textContent || '').replace(/\s+/g, ' ').trim()));
+                    if (adv && adv.offsetParent !== null) {
+                        if (closeOpenDropdown()) await sleep(250);
+                        const okAdv = safeActivate(adv, policyCtx('recipe'), '[generic-advance]');
+                        trace('advance.generic', { label: (adv.textContent || '').trim().slice(0, 28), activated: okAdv });
+                        if (okAdv) { actionsTaken++; await sleep(1500); continue; }
                     }
                 }
             }
@@ -375,13 +1520,40 @@ async function runAgentLoop(profile) {
 
             // Step changed (multi-step wizard advanced) or URL changed → reset
             // stuck-detection state so a fresh page doesn't trip false positives.
+            //
+            // The RECIPE's matched step is a third change signal, and on Workday
+            // it is the only honest one: the tenant's own indicator read "1/5"
+            // for the entire Demand Planning Intern run (the progress nav lists
+            // every step and the parser sees the first), the URL never changes —
+            // so My Experience's "Languages(1/3)" verdict survived into
+            // Application Questions and held a CLEAN page's advance for seven
+            // passes until the run died "Stuck". A verdict about a page that no
+            // longer exists must not hold the page that replaced it.
             const curStep = state.stepIndicator?.current ?? null;
-            if (curStep !== prevStepCurrent || state.url !== prevUrl) {
+            const curRecipeStep = recipe
+                ? ((recipe.steps || []).find(s => s.detect && document.querySelector(s.detect))?.name ?? null)
+                : null;
+            if (curStep !== prevStepCurrent || state.url !== prevUrl
+                || curRecipeStep !== prevRecipeStep) {
                 prevStateHash = '';
                 fillAttempts.clear();
                 persistentlyUnfilled.clear();
+                fieldRecovery.clear();
+                needsAttempts.clear();
+                errorStreak.clear();
+                // A new step gets its own fail budget. Carrying the old step's
+                // verdicts forward would hold the NEXT step for a widget that is no
+                // longer on the page — and, once the budget ran out there, would
+                // also mean the new step's first real failure had no retries left.
+                resetFieldStatus();
                 prevStepCurrent = curStep;
+                prevRecipeStep = curRecipeStep;
                 prevUrl = state.url;
+                // A new page gets its own grace to render. Without this the budget
+                // is spent by whichever step happened to be slow first, and every
+                // later step is planned against before it exists.
+                emptyPageWaits = 0;
+                preconditionWaits = 0;
             }
 
             // Detect fields the LLM previously tried to fill but stayed empty.
@@ -414,9 +1586,30 @@ async function runAgentLoop(profile) {
             if (stateHash === prevStateHash) {
                 sameStateCount++;
                 if (sameStateCount >= 3) {
+                    // Don't just give up "stuck" — audit WHY the step won't advance
+                    // (which required fields are still empty / what validation errors
+                    // are shown) so the user (and the log) knows what to complete.
+                    // The blockers come from whoever OWNS the page. v2's report
+                    // names what its own plan could not answer; auditing the DOM
+                    // separately produced a third opinion that disagreed with
+                    // both of the other two.
+                    // OWNERSHIP decides, not the length of a list. Gating on
+                    // `v2Gaps.length` meant an owned page with nothing recorded
+                    // fell through to the DOM audit — the third opinion again,
+                    // and it fired every time, because the gaps were being
+                    // dropped in transit anyway.
+                    const v2Gaps = _v2Owns ? (_lastV2Gaps || []) : [];
+                    const blockers = _v2Owns ? [] : auditRequiredBlockers();
+                    const miss = _v2Owns
+                        ? (v2Gaps.slice(0, 6).map(g => `${g.label || g.id || g.field || g.section} (${g.why})`).join(', ')
+                            || 'v2 owns this page and recorded nothing — see the mdlz trace')
+                        : blockers.slice(0, 6).map(b => b.kind === 'error' ? b.label : `${b.label} (${b.kind})`).join(', ');
+                    console.warn('[Copo Apply] STUCK — required blockers:', blockers.length ? blockers : '(none detected — likely a captcha / login / unknown widget)');
                     removeProgress();
-                    showToast('⚠️ Agent bị stuck — dừng lại. Vui lòng điền thủ công.', 5000);
-                    reportResult(false, 'Agent stuck — same state 3 iterations');
+                    showToast(miss
+                        ? `⚠️ Không qua được bước này — còn thiếu: ${miss}. Điền nốt rồi bấm tiếp.`
+                        : '⚠️ Agent dừng — không xác định được ô còn thiếu. Vui lòng điền thủ công.', 9000);
+                    reportResult(false, `Stuck — blockers: ${miss || 'unknown'}`);
                     return;
                 }
             } else {
@@ -424,14 +1617,188 @@ async function runAgentLoop(profile) {
                 prevStateHash = stateHash;
             }
 
+            // ── ERROR-PERSISTENCE BREAKER: the loop must READ its errors, not
+            // outlast them. An error that survives four straight iterations of
+            // needs + recipe + recovery + planner is not going to yield to a
+            // fifth — the VALUE is wrong for this tenant's rule ("Postal code
+            // must be 5 digits" outlived 24 rounds), and the only useful move
+            // is to stop and name it for the user.
+            {
+                const keyOf = (e) => `${String(e.field || '').toLowerCase()}|${String(e.message || '').toLowerCase()}`.slice(0, 140);
+                const nowKeys = new Set(state.errors.map(keyOf));
+                for (const k of nowKeys) errorStreak.set(k, (errorStreak.get(k) || 0) + 1);
+                for (const k of [...errorStreak.keys()]) if (!nowKeys.has(k)) errorStreak.delete(k);
+                const stubborn = state.errors.find(e => (errorStreak.get(keyOf(e)) || 0) >= 4);
+                if (stubborn) {
+                    const msg = `${stubborn.field ? stubborn.field + ': ' : ''}${(stubborn.message || '').slice(0, 140)}`;
+                    trace('error.stubborn', { error: msg, iterations: errorStreak.get(keyOf(stubborn)) });
+                    removeProgress();
+                    showToast(`⚠️ Form từ chối giá trị hiện tại — cần bạn sửa dữ liệu: ${msg}`, 10000);
+                    reportResult(false, `Need human: form keeps rejecting the value — ${msg}`,
+                        'blocked', { blockedReason: 'manual', review: summarizeAnswers(reviewAnswers), fieldGaps: [...fieldGaps.values()] });
+                    return;
+                }
+            }
+
+            // ── Deterministic recovery: a validation error on a RECIPE-OWNED
+            // field is the recipe's to fix. Re-running its pass costs seconds; a
+            // planner call costs ~25s and resolves the same field with less
+            // widget knowledge (measured: ten planner calls against one stuck
+            // "How Did You Hear"). Per-field, the evidence decides:
+            //   no commit + error → FALSE_DONE — retry the recipe (its entry
+            //                       guards clear any uncommitted rubble first)
+            //   commit + error    → the error may simply be stale: settle the
+            //                       widget (close popup, blur), let the form
+            //                       revalidate, and only a SURVIVING error next
+            //                       pass counts as real
+            // Budget 2 retries per field; exhausted or unmapped errors fall
+            // through to the planner as before.
+            if (recipe && state.errors.length) {
+                const normL = (s) => String(s || '').toLowerCase().replace(/[*:]/g, ' ').replace(/\s+/g, ' ').trim();
+                const owned = recipeOwnedWrappers(recipe);
+                const entries = [...owned.entries()];
+                const mapped = state.errors.map(e => {
+                    // Field AND message: a summary entry arrives as field="Page
+                    // Error" with the real subject only in the text ("Enter a
+                    // postal code in the valid format…").
+                    const en = normL(`${e.field || ''} ${e.message || ''}`);
+                    const hit = entries.find(([w, label]) => {
+                        // The recipe's short name rarely matches the page's long
+                        // question ("Salary expectations" vs "What is your
+                        // expected monthly salary range?") — the wrapper's OWN
+                        // legend is the page's wording, so compare both.
+                        const ln = normL(label);
+                        const pageLbl = normL(w?.querySelector?.('legend, label')?.textContent);
+                        return (ln && en && (en.includes(ln) || ln.includes(en)))
+                            || (pageLbl && en && (en.includes(pageLbl) || pageLbl.includes(en)));
+                    });
+                    return hit ? { wrap: hit[0], label: hit[1] } : null;
+                }).filter(Boolean);
+                const retryable = mapped.filter(m => (fieldRecovery.get(m.label) || 0) < 2);
+                if (retryable.length) {
+                    for (const m of retryable) fieldRecovery.set(m.label, (fieldRecovery.get(m.label) || 0) + 1);
+                    const hasCommit = (wrap) => {
+                        const chipList = wrap?.querySelector?.('[data-automation-id="selectedItemList"]');
+                        if (chipList && chipList.children.length) return true;
+                        return !!(wrap?.querySelector?.('button')?.getAttribute('value') || '').trim();
+                    };
+                    const revalidate = retryable.filter(m => hasCommit(m.wrap));
+                    if (revalidate.length) {
+                        if (closeOpenDropdown()) await sleep(200);
+                        try { document.activeElement?.blur?.(); } catch { /* noop */ }
+                    }
+                    // Attempt #2 on a persisting error: the committed VALUE is
+                    // what the form rejects, and a summary-only error ("Page
+                    // Error: postal code…") never reaches the wrapper — so the
+                    // field's own value+no-error guard keeps reading it as
+                    // done. Clear it; the next recipe pass re-enters fresh.
+                    for (const m of retryable) {
+                        if ((fieldRecovery.get(m.label) || 0) >= 2) {
+                            // A COMPOSITE DATE is not one input. Clearing the
+                            // first one empties the MONTH and leaves the year —
+                            // measured on R-172088: "Work From was: 2" turned a
+                            // valid 02/2026 into a half date, Workday raised
+                            // "The field From is required", the error count went
+                            // 2 → 4 and the run died asking a human for months it
+                            // already had. Every segment goes, or none does.
+                            // (mdlz-first per the snapshot rule; the generic
+                            // keeps the old path until this is promoted.)
+                            // A field with an OWNER is never cleared by this
+                            // layer: the owner knows what the value should be
+                            // and how this widget commits, and a blind clear
+                            // is how a good date became half a date. Reset its
+                            // budget instead — the owner re-enters next pass.
+                            if (LOCKED_TENANT && recipeFieldStatus(m.label)) {
+                                trace('recover.delegated', { field: m.label, to: 'recipe owner', error: String(m.message || '').slice(0, 60) });
+                                fieldRecovery.set(m.label, 0);
+                                continue;
+                            }
+                            const dateSegs = LOCKED_TENANT
+                                ? [...(m.wrap?.querySelectorAll?.('[data-automation-id^="dateSection"] input, [data-automation-id^="dateSection"]') || [])]
+                                    .filter(el => el.tagName === 'INPUT' && el.offsetParent !== null)
+                                : [];
+                            const inp = m.wrap?.querySelector?.('input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]), textarea');
+                            const was = inp ? String(inp.value || '').trim() : '';
+                            if (dateSegs.length > 1) {
+                                const had = dateSegs.map(el => String(el.value || '').trim()).join('/');
+                                for (const el of dateSegs) setNativeValue(el, '', { quiet: true });
+                                trace('recover.clearedDate', { field: m.label, was: had.slice(0, 20), segments: dateSegs.length });
+                                fieldRecovery.set(m.label, 0);
+                                continue;
+                            }
+                            if (inp && was) {
+                                setNativeValue(inp, '', { quiet: true });
+                                trace('recover.cleared', { field: m.label, was: was.slice(0, 20) });
+                            }
+                        }
+                    }
+                    console.log(`[Copo Apply] recovery: ${retryable.length} error(s) on recipe fields — `
+                        + retryable.map(m => `${m.label}:${revalidate.includes(m) ? 'revalidate' : 'retry'}`).join(', ')
+                        + ' — skipping planner');
+                    trace('recover.recipe', {
+                        fields: retryable.map(m => `${m.label}#${fieldRecovery.get(m.label)}`).join(' | '),
+                        revalidating: revalidate.length,
+                        errors: state.errors.length,
+                    });
+                    await sleep(800);
+                    continue;
+                }
+            }
+
             // ── 3. PLAN: Ask LLM what to do next ──
-            showProgress(i + 1, AGENT_MAX_ITERATIONS, `AI đang lên kế hoạch (iteration ${i + 1})...`);
+            //
+            // One guard at the choke point, because guarding each branch has not
+            // held: a zero-field page has now reached the planner three separate
+            // ways — an unrendered wizard step, a step whose Continue was withheld
+            // pending the CV upload, and the original Create Account page. Every
+            // time, the planner correctly reports it cannot proceed, NEED_HUMAN
+            // ends the run, and the next branch to leak is found the same way.
+            //
+            // On a host with a recipe, no fields means the page is not ready, not
+            // that the application is unanswerable. Wait here rather than asking.
+            // Only INSIDE the apply flow. A job posting has no form fields by
+            // design and the planner's job there is to click through to the form,
+            // so waiting for fields that will never appear on that page just
+            // burns iterations. The wizard's step indicator is the discriminator:
+            // measured, a job page reports none and every apply step reports one.
+            const insideApplyFlow = !!state.stepIndicator || /\/apply(\/|$)/.test(location.pathname);
+            if (recipe && insideApplyFlow && state.formFields.length === 0 && emptyPageWaits < 6) {
+                emptyPageWaits++;
+                trace('plan.skipped', {
+                    reason: 'no form fields to plan against',
+                    pass: emptyPageWaits,
+                    buttons: state.buttons.length,
+                });
+                await sleep(1500);
+                continue;
+            }
+            // The planner may not act on a page v2 owns, so asking it costs ~25s
+            // and produces instructions the click choke point would refuse. Wait
+            // for v2's next pass instead.
+            if (_v2Owns) {
+                trace('mdlz.outer.skipped', { engine: 'planner', why: 'v2 owns this page' });
+                await sleep(1200);
+                continue;
+            }
+            showProgress(i + 1, null, `AI đang lên kế hoạch (iteration ${i + 1})...`);
 
             let plan;
             const _planT0 = Date.now();
             console.log(`[Copo Apply] → LLM plan request (fields=${state.formFields.length}, unfilledRequired=${state.unfilledRequired.length})…`);
             try {
-                plan = await callAgentPlan(state, profile, history.slice(-8), hasCV);
+                if (LOCKED_TENANT) {
+                    const h = _plannerStateHash(state, recipe);
+                    if (h === _lastPlanState && _planSkips < PLAN_SKIP_MAX) {
+                        _planSkips++;
+                        trace('plan.deduped', { skips: _planSkips, budget: PLAN_SKIP_MAX });
+                        showProgress(i + 1, null, 'Trang chưa đổi — chờ thay vì hỏi lại AI…');
+                        await sleep(1200);
+                        continue;
+                    }
+                    _lastPlanState = h;
+                    _planSkips = 0;
+                }
+                plan = await _phase('planner', () => callAgentPlan(state, profile, history.slice(-8), hasCV, credentials));
             } catch (err) {
                 console.warn(`[Copo Apply] ✖ LLM plan FAILED in ${Date.now() - _planT0}ms: ${err.message}`);
                 // Fallback: use simple map-form for the first iteration
@@ -451,6 +1818,32 @@ async function runAgentLoop(profile) {
                         reportResult(false, `LLM error: ${fallbackErr.message}`);
                         return;
                     }
+                } else if (/timed? ?out|network|failed to fetch|429|50\d/i.test(err.message || '')
+                    && ++planFailures < 3) {
+                    // A slow model is not a broken form. This used to end the job
+                    // outright on any iteration past the first, so one overloaded
+                    // LLM call threw away a completed login and a filled step — and
+                    // the recipe, which needs no planner at all, never got its next
+                    // pass. Let the loop come round again: the recipe re-runs every
+                    // iteration and is idempotent, so it keeps making progress while
+                    // the planner is unavailable.
+                    trace('plan.transient', { attempt: planFailures, error: err.message });
+                    showProgress(i + 1, null, 'AI phản hồi chậm — thử lại…');
+                    await sleep(1500);
+                    continue;
+                } else if (/phiên đăng nhập|hết hạn|unauthorized|\b401\b/i.test(err.message || '')) {
+                    // An expired Copo token is the USER's to fix (open copoai.net,
+                    // it refreshes itself) — not a broken form. Measured on run
+                    // smsieakac3jpijn: My Experience was complete and advancing
+                    // when one plan call came back auth-expired and the whole run
+                    // was written off as 'failed'. Blocked ≠ failed: the Workday
+                    // draft is saved server-side, re-running continues it.
+                    removeProgress();
+                    showToast('🔑 Phiên Copo hết hạn — mở copoai.net (đang đăng nhập) rồi chạy lại job này. '
+                        + 'Form đã điền được lưu nháp trên Workday.', 12000);
+                    reportResult(false, `Phiên Copo hết hạn giữa chừng — ${err.message}`,
+                        'blocked', { blockedReason: 'manual' });
+                    return;
                 } else {
                     removeProgress();
                     showToast(`❌ Lỗi AI: ${err.message}`, 5000);
@@ -474,7 +1867,7 @@ async function runAgentLoop(profile) {
                 // 'submitted') so the batch UI doesn't claim applications were
                 // sent. Report BEFORE the confirmation overlay: awaiting the
                 // user's click here would stall the whole batch queue.
-                reportResult(true, `Filled ~${filledCount} fields in ${i + 1} iterations — awaiting user submit`, 'filled');
+                reportResult(true, `Filled ~${filledCount} fields in ${i + 1} iterations — awaiting user submit`, 'filled', { review: summarizeAnswers(reviewAnswers), fieldGaps: [...fieldGaps.values()] });
                 showConfirmation(filledCount, state.totalFields, false);
                 return;
             }
@@ -488,7 +1881,7 @@ async function runAgentLoop(profile) {
 
             // ── 5. ACT ──
             let actionResult = {};
-            showProgress(i + 1, AGENT_MAX_ITERATIONS, plan.reason || 'Đang thực hiện...');
+            showProgress(i + 1, null, plan.reason || 'Đang thực hiện...');
 
             if (plan.action === 'FILL' && plan.instructions?.length > 0) {
                 // Track each fill attempt by selector so we can detect
@@ -501,7 +1894,8 @@ async function runAgentLoop(profile) {
                         lastValue: inst.value,
                     });
                 }
-                const filled = await executeFillInstructions(plan.instructions, cvData);
+                const filled = await _phase('fill', () => executeFillInstructions(plan.instructions, cvData, policyCtx('planner')));
+                if (filled) _progress();
                 actionResult = { filled, total: plan.instructions.length };
                 if (filled > 0) actionsTaken++;
             } else if (plan.action === 'CLICK' && plan.clickTarget) {
@@ -518,17 +1912,50 @@ async function runAgentLoop(profile) {
                         openDropdownOptions: document.querySelectorAll('[data-automation-id="promptOption"]').length,
                     };
                     console.log('[Copo Apply] CLICK →', info);
+                    // Judge the click BEFORE acting on it, so the refusal (and its
+                    // code) lands in history. safeActivate would refuse it anyway,
+                    // but silently — and a planner that can't see why its action
+                    // did nothing just proposes the same one again next iteration.
+                    const clickCtx = policyCtx('planner');
+                    const verdict = checkClick(target, clickCtx, plan.clickTarget);
+                    if (!verdict.allowed) {
+                        logDenial(verdict, target, clickCtx);
+                        actionResult = { blockedByPolicy: verdict.code, reason: verdict.reason, ...info };
+                        history.push({
+                            iteration: i,
+                            state: summarizeState(state),
+                            plan: { action: plan.action, reason: plan.reason },
+                            result: actionResult,
+                        });
+                        // A refused submit ends the run as SUCCESS only when there
+                        // is something to hand over. Reporting "✅ đã điền xong"
+                        // after filling nothing — which is what happened when the
+                        // policy refused the Apply button on a job-description page
+                        // — is a false success: the batch row said done, the user
+                        // believed it, and the application had not been started.
+                        if (verdict.code === 'submit_application' || verdict.code === 'final_review_step') {
+                            removeProgress();
+                            if (actionsTaken > 0) {
+                                showToast(withTenantFlags('✅ Đã điền xong — kiểm tra rồi tự bấm nộp để hoàn tất.'), 8000);
+                                reportResult(true, `Policy stop at ${verdict.code} — awaiting user submit`, 'filled', { review: summarizeAnswers(reviewAnswers), fieldGaps: [...fieldGaps.values()] });
+                                showConfirmation(state.totalFields, state.totalFields, false);
+                            } else {
+                                showToast('⚠️ Chưa mở được form ứng tuyển trên trang này — hãy bấm Apply thủ công.', 8000);
+                                reportResult(false, `Blocked before filling anything (${verdict.code})`, 'blocked',
+                                    { blockedReason: 'manual' });
+                            }
+                            return;
+                        }
+                        await sleep(plan.waitMs || POST_ACTION_WAIT_MS);
+                        continue;
+                    }
                     // A leftover open Workday dropdown popup overlays the page footer
                     // and eats the Next/Continue click — close it before clicking.
-                    if (info.openDropdownOptions > 0) {
-                        (document.activeElement || document.body)?.dispatchEvent?.(
-                            new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-                        await sleep(250);
-                    }
+                    if (info.openDropdownOptions > 0 && closeOpenDropdown()) await sleep(250);
                     // Overlay-aware: Workday covers Next/Continue/Submit buttons with
                     // a "click_filter" div that owns the handler — a plain .click() on
                     // the button is swallowed, so the agent could never advance a step.
-                    overlayClick(target);
+                    if (!safeActivate(target, clickCtx, plan.clickTarget)) { await sleep(POST_ACTION_WAIT_MS); continue; }
                     actionResult = { clicked: plan.clickTarget, ...info };
                     actionsTaken++;
                 } else {
@@ -557,11 +1984,6 @@ async function runAgentLoop(profile) {
             await sleep(plan.waitMs || POST_ACTION_WAIT_MS);
         }
 
-        // Max iterations reached
-        removeProgress();
-        showToast('⚠️ Đã chạy tối đa iterations. Kiểm tra lại form.', 5000);
-        reportResult(false, `Max iterations (${AGENT_MAX_ITERATIONS}) reached`);
-
     } catch (err) {
         removeProgress();
         showToast(`❌ Lỗi: ${err.message}`, 5000);
@@ -576,25 +1998,179 @@ async function runAgentLoop(profile) {
 // ─── Report result back to background ───
 // outcome: 'submitted' (new success signal seen after our actions)
 //        | 'filled'    (form filled, awaiting the user's review + submit)
+//        | 'blocked'   (waiting on the USER — verify an email, supply a password;
+//                       NOT a failure, and never shown as one)
 //        | 'failed'
-function reportResult(success, detail, outcome) {
+/** Tenant-specific "look HERE before you submit" notes for this hostname. */
+function tenantReviewFlags() {
+    try {
+        return TENANT_REVIEW_FLAGS.filter(t => t.host.test(location.hostname)).map(t => t.flag);
+    } catch { return []; }
+}
+
+/** The done-toast, with any tenant note appended so it is read BEFORE Submit. */
+function withTenantFlags(msg) {
+    const flags = tenantReviewFlags();
+    return flags.length ? `${msg}\n⚠️ ${flags.join(' · ')}` : msg;
+}
+
+function summarizeAnswers(reviewAnswers) {
+    const all = [...reviewAnswers.values()];
+    const defaults = all.filter(a => a.source === 'AGENT_DEFAULT');
+    // Values the ATS parsed that disagree with the candidate's own CV. They are
+    // reported, never silently corrected — and they are the single most useful
+    // thing on a review page, because they are the errors a person reading their
+    // own filled form is least likely to notice.
+    const mismatches = all.filter(a => a.verdict === 'MISMATCH');
+    return {
+        answered: all.length,
+        agentDefaults: defaults.length,
+        mismatches: mismatches.length,
+        mismatchFields: mismatches.map(a => ({ field: a.field, expected: a.expected, actual: a.value })).slice(0, 10),
+        // Named, not just counted: "4 giá trị mặc định" tells the user there is
+        // something to check but not what, which is the same as telling them to
+        // re-read the whole form.
+        agentDefaultFields: defaults.map(a => a.field).slice(0, 10),
+        corrected: all.filter(a => a.source === 'CORRECTED').length,
+        // Tenant-specific review notes (P&G: exact address) — carried in the
+        // result payload so the web app's history shows them too.
+        tenantFlags: tenantReviewFlags(),
+    };
+}
+
+/**
+ * True when this content script has been orphaned by an extension reload.
+ *
+ * `chrome.runtime.sendMessage(...).catch()` does NOT cover this: with the context
+ * gone `chrome.runtime` is undefined, so reading `.sendMessage` throws
+ * synchronously — before there is a promise to catch — and the throw escapes into
+ * whatever was driving the loop.
+ */
+function contextGone() {
+    try { return !(chrome && chrome.runtime && chrome.runtime.id); } catch { return true; }
+}
+
+/** A v2 gap/blocker in words the candidate can act on. Its `label` is an
+ *  internal id ("education[…].formField-fieldOfStudy"); pull the formField
+ *  token and name it in Vietnamese, falling back to the raw id. */
+const V2_GAP_LABEL_VI = {
+    fieldOfStudy: 'Ngành học',
+    gradeAverage: 'Điểm trung bình (GPA)',
+    schoolName: 'Tên trường',
+    degree: 'Bằng cấp',
+    language: 'Ngôn ngữ',
+    countryPhoneCode: 'Mã vùng điện thoại',
+};
+function gapLabelVi(g) {
+    const raw = String(g?.label || g?.id || g?.field || g?.section || '').trim();
+    const key = raw.match(/formField-([A-Za-z]+)/)?.[1];
+    return (key && V2_GAP_LABEL_VI[key]) || raw || 'trường bắt buộc';
+}
+
+function reportResult(success, detail, outcome, extra = {}) {
     const o = outcome || (success ? 'filled' : 'failed');
     console.log(`[Copo Apply] ■ result: ${success ? '✅' : '✖'} outcome=${o} | ${detail} | ${window.location.hostname}`);
+    // A run that did not finish is the one worth explaining, and the reason is
+    // usually several navigations back — where the console for it no longer
+    // exists. Print the whole trace here so a failure is one paste, not an
+    // archaeology exercise.
+    trace('run.end', { build: `${BUILD_SHA}${BUILD_DIRTY ? '-dirty' : ''}`, success, outcome: o, detail, ...extra });
+    // Where the time went — printed before the buffer is cleared.
+    try { _iterClose(); traceReport(); } catch { /* a report must never break a result */ }
+    if (!success) traceDump(`${o} — ${detail}`);
+    traceClear();   // this job is over; the next one starts from an empty buffer
+    traceSpansClear();
+    if (contextGone()) {
+        console.warn('[Copo Apply] extension was reloaded — this tab is orphaned, result not reported');
+        return;
+    }
     chrome.runtime.sendMessage({
         type: 'AUTO_APPLY_RESULT',
         result: {
             success,
-            outcome: outcome || (success ? 'filled' : 'failed'),
+            outcome: o,
             site: window.location.hostname,
             url: window.location.href,
             detail,
+            ...extra,
         },
     }).catch(() => { });
 }
 
+// ─── ATS auth (candidate accounts) ───
+// The background owns the credential and the per-tenant attempt budget; the
+// content script only drives the form. Keeping the decision there means a
+// navigation (which kills this script) can't reset the count.
+
+/** User-facing wording per block reason. Blocked ≠ failed. */
+const ATS_BLOCK_DETAIL = {
+    verification: 'Chờ bạn xác minh email của công ty này',
+    credential: 'Cần thông tin đăng nhập riêng cho công ty này',
+    manual: 'Cần bạn xử lý trực tiếp trên trang này',
+};
+
+/** Ask for this tenant's credential + the operation we're allowed to run. */
+async function requestAtsAuth() {
+    try {
+        return await chrome.runtime.sendMessage({
+            type: 'ATS_AUTH_REQUEST', url: window.location.href,
+        });
+    } catch {
+        return { ok: false, reason: 'manual', detail: 'Không liên lạc được với extension' };
+    }
+}
+
+/** Hand back a credential we never used, so the attempt is not counted. */
+async function abandonAtsAuth(operation, why) {
+    try {
+        await chrome.runtime.sendMessage({
+            type: 'ATS_AUTH_ABANDON', url: window.location.href, operation, why,
+        });
+    } catch { /* worker gone — the batch is over anyway */ }
+}
+
+/**
+ * Wait until the login form can actually be filled.
+ *
+ * `detectLoginWall` answers on a password box plus sign-in wording, and on
+ * Workday both appear a beat before the form is usable — so the agent asked for
+ * a credential, spent the tenant's attempt, and then found nothing to type into.
+ * Requesting the grant is the commitment point, so it has to happen after this,
+ * not before.
+ */
+async function waitForLoginFormReady(login, timeoutMs = 8000) {
+    const deadline = Date.now() + timeoutMs;
+    const vis = (e) => !!(e && e.offsetParent !== null);
+    while (Date.now() < deadline) {
+        const wall = detectLoginWall(login);
+        if (wall) {
+            const hasText = [...document.querySelectorAll('input[type="text"], input[type="email"], input:not([type])')]
+                .some(vis);
+            const hasSubmit = [...document.querySelectorAll('button, [role="button"], input[type="submit"]')]
+                .some(vis);
+            if (hasText && hasSubmit) return wall;
+        }
+        await sleep(300);
+    }
+    return null;
+}
+
+/** Hand the normalized verdict back so it's persisted for the whole tenant. */
+async function reportAtsAuth(result) {
+    if (!result) return null;
+    try {
+        return await chrome.runtime.sendMessage({
+            type: 'ATS_AUTH_RESULT', url: window.location.href, result,
+        });
+    } catch {
+        return null;
+    }
+}
+
 // ─── Heartbeat: tell background this job is still actively working ───
 function sendHeartbeat() {
-    chrome.runtime.sendMessage({ type: 'AUTO_APPLY_HEARTBEAT' }).catch(() => { });
+    if (contextGone()) return;
+    try { chrome.runtime.sendMessage({ type: 'AUTO_APPLY_HEARTBEAT' }).catch(() => { }); } catch { /* orphaned */ }
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -642,6 +2218,34 @@ async function init() {
             const sess = data.applySession || {};
             const fresh = sess.startedAt && (Date.now() - sess.startedAt < APPLY_SESSION_TTL_MS);
 
+            // ── CLAIM THE DOCUMENT BEFORE THE FIRST await, NOT AFTER ──
+            // This used to read the flag below, after the IS_APPLY_TAB round-trip.
+            // That is check-then-act across an await, and when a document holds two
+            // copies of this script (declarative content_scripts PLUS a programmatic
+            // re-inject after a redirect) BOTH copies reached the await, both came
+            // back with isApplyTab, both saw the flag still false, and both started a
+            // loop. Two loops, two module scopes — so `_fillInFlight` in recipe.js,
+            // which is module-scoped, guards neither against the other.
+            //
+            // What that looks like on a real form: two fill passes ~80ms apart on the
+            // same widgets. The second types into the Skills search box while the
+            // first's results are still settling, so a row belonging to the previous
+            // query gets picked (a skill nobody asked for), and a language commits
+            // twice (a duplicate row). It also produces two contradictory summaries
+            // for one step — one reporting Language FAIL, the next reporting it OK —
+            // because each pass sees the other's half-finished widget state.
+            //
+            // `window` is shared by every copy of the script in this document's
+            // isolated world, so claiming it synchronously is what makes the check
+            // atomic: the second copy cannot observe the gap, because there is none.
+            // Released again below if this turns out not to be a tab we should run in.
+            const claimed = !window.__copoAgentStarted;
+            if (claimed) window.__copoAgentStarted = true;
+            if (!claimed) {
+                console.log('[Copo Agent] this document already has an agent — not starting a second one');
+                return;
+            }
+
             // Tab-scope guard: only auto-run in the tab the user actually launched
             // auto-apply in (or one it redirected / spawned into). Otherwise a
             // still-live pendingAutoApply flag fires the agent on ANY known-host
@@ -656,18 +2260,16 @@ async function init() {
 
             if (!fresh) {
                 // Stale flag → clear and fall through to manual mode.
+                window.__copoAgentStarted = false;   // not running after all
                 chrome.storage.local.remove(['pendingAutoApply', 'autoApplyJobUrl', 'batchMode', 'applySession']);
             } else if (!isApplyTab) {
                 // Live apply session, but this is NOT its tab — do NOT auto-run.
                 // Leave the flag intact for the real apply tab; behave as manual mode here.
+                window.__copoAgentStarted = false;   // not running after all
                 console.log('[Copo Agent] pendingAutoApply is set but this is not the apply tab — skipping auto-run', location.hostname);
-            } else if (window.__copoAgentStarted) {
-                // This document already has an agent running (e.g. declarative +
-                // a programmatic re-inject after a redirect) — don't double-run.
-                return;
             } else {
-                window.__copoAgentStarted = true;
                 const isBatch = data.batchMode === true;
+                setRunMode(isBatch ? 'batch' : 'single');
 
                 // IMPORTANT: do NOT clear pendingAutoApply here. It must survive a
                 // full-page redirect (job page → "Apply" → the form on another ATS
@@ -677,13 +2279,25 @@ async function init() {
                 // chain exceeds its hop budget.
                 console.log(`[Copo Agent] Auto-apply triggered (batch: ${isBatch}, host: ${location.hostname})`);
 
+                // This run's identity, stamped into every trace dump — two runs
+                // in one evening produced two anonymous, interleavable pastes.
+                const runId = sess.runId || sess.sessionId;
+                if (runId) setTraceRun(runId);
+
+                // Fill from THIS run's profile snapshot, not the global slot: a
+                // later start overwrites jobfitProfile while this job is still
+                // mid-fill. Global stays as fallback for pre-runId sessions.
+                const runProfile = runId
+                    ? (await chrome.storage.local.get(`run:${runId}:profile`))[`run:${runId}:profile`]
+                    : null;
+
                 showToast(isBatch
                     ? '🚀 Batch Apply — Đang xử lý job này...'
                     : '🚀 Copo Agent đang xử lý...', 0);
                 await sleep(500);
                 document.getElementById('jobfit-toast')?.remove();
 
-                await runAgentLoop(data.jobfitProfile);
+                await runAgentLoop(runProfile || data.jobfitProfile);
                 return;
             }
         }
@@ -698,6 +2312,23 @@ async function init() {
         chrome.storage.local.get('jobfitProfile', d => r(d.jobfitProfile || null));
     });
     if (!profile) return;
+
+    // Resume a MANUAL run across a recovery reload. The driven flow resumes
+    // off pendingAutoApply; a ⚡-started run had nothing — the reload came
+    // back clean and the agent silently ended (measured on Unilever, where
+    // the second pass then went clean through the very step that crashed).
+    let manualResume = false;
+    try {
+        manualResume = sessionStorage.getItem('copoManualResume') === '1';
+        if (manualResume) sessionStorage.removeItem('copoManualResume');
+    } catch { /* ignore */ }
+    if (manualResume) {
+        trace('recovery.resume', { host: location.hostname, mode: 'manual' });
+        showToast('🔁 Trang đã tải lại sau lỗi — agent tiếp tục…', 4000);
+        await sleep(1500);   // let the fresh SPA hydrate before touching it
+        await runAgentLoop(profile);
+        return;
+    }
 
     const evaluateAndInject = async () => {
         const isJobPage = await waitForJobPageSignal();
@@ -809,10 +2440,107 @@ async function runMode1() {
     }
 }
 
+/**
+ * Run ONE pass on whatever page is already open, and report what happened.
+ *
+ * Debugging a single step through the full flow costs a login, a résumé upload
+ * and two or three wizard pages before the step under test is even reached — and
+ * every fix to that step pays the toll again. Worse, the toll is where most of
+ * the noise lives, so a failure on page 4 arrives wrapped in three pages of
+ * unrelated trace.
+ *
+ * So this deliberately does LESS than the agent: no login wall, no gateway click,
+ * no navigation, no iteration, and no advance unless asked for by name. It fills
+ * the recipe step for the current page once and describes the result. Nothing
+ * here can submit — `advance` goes through the same policy choke point as the
+ * agent's own click, which refuses the review step and the submit control.
+ *
+ * @param {{fill?: boolean, advance?: boolean}} opts
+ *   `fill:false` observes without touching the page (what does the agent SEE?).
+ *   `advance:true` clicks the step's Next once, after filling.
+ */
+async function runSingleStep(opts = {}) {
+    const { fill = true, advance = false } = opts;
+    try {
+        const [profile, cvStructured] = await Promise.all([
+            new Promise(r => chrome.storage.local.get('jobfitProfile', d => r(d.jobfitProfile || null))),
+            new Promise(r => chrome.storage.local.get('jobfitCv', d => r(d.jobfitCv || null))),
+        ]);
+        if (!profile) return { ok: false, error: 'no jobfitProfile in storage — sync from the web app first' };
+        const { cv: cvData } = await loadSessionCv();
+
+        const recipes = await loadRecipes();
+        const recipe = recipeForUrl(recipes, location.href);
+        if (!recipe) return { ok: false, error: `no recipe matches ${location.host}` };
+
+        const before = await observePageState();
+        const step = (recipe.steps || []).find(s => s.detect && document.querySelector(s.detect));
+        const manifest = buildManifest(before.formFields, { profile, cv: cvStructured });
+        const gaps = summarizeGaps(manifest);
+
+        let rf = null;
+        if (fill) rf = await applyRecipeFields(recipe, profile, cvData, cvStructured);
+        // Colliding with the live loop is the one failure that looks like a page
+        // bug but is ours: say so instead of reporting the other pass's numbers.
+        if (rf?.busy) {
+            return { ok: false, error: 'a fill is already running in this tab (Auto Apply loop?) — '
+                + 'stop it or wait for the pass to finish, then copoStep() again' };
+        }
+        const after = fill ? await observePageState() : before;
+
+        let advanced = null;
+        if (advance && step?.advance) {
+            const btn = document.querySelector(step.advance);
+            advanced = btn ? safeActivate(btn, policyCtxFor(recipe), step.advance) : false;
+        }
+
+        return {
+            ok: true,
+            url: location.pathname.slice(-60),
+            recipe: `${recipe.label} v${recipe.version}`,
+            step: step?.name || '(no recipe step matches this page)',
+            atFinalStep: atFinalStep(recipe),
+            filled: rf?.filled ?? null,
+            fields: after.formFields.length,
+            unfilledRequired: after.unfilledRequired,
+            errors: after.errors.map(e => `${e.field || '?'}: ${e.message}`.slice(0, 90)),
+            mismatches: gaps.mismatches.map(m => `${m.field}: ours="${m.expected}" page="${m.actual}"`),
+            gapsUserOnly: gaps.userOnly,
+            gapsInferable: gaps.inferable,
+            advanced,
+            hint: 'trace steps are in the console above; copoStep({advance:true}) to move on',
+        };
+    } catch (e) {
+        return { ok: false, error: (e && e.message) || String(e) };
+    }
+}
+
+/** Policy context for a manual single-step run — same rules, source declared. */
+function policyCtxFor(recipe) {
+    return {
+        source: 'recipe',
+        atFinalStep: recipe ? atFinalStep(recipe) : false,
+        submitSelector: recipe?.submitSelector,
+    };
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type === 'RUN_MODE1') {
         runMode1().then(sendResponse);
         return true; // async
+    }
+    if (message?.type === 'AGENT_TEST_STEP') {
+        runSingleStep(message.opts || {}).then(sendResponse);
+        return true; // async
+    }
+    // The background abandoned this run — halt at the next checkpoint. The flag
+    // (not an immediate teardown) lets whatever DOM touch is mid-flight finish,
+    // so we never leave a widget half-toggled.
+    if (message?.type === 'AGENT_STOP') {
+        requestStop(message.why || 'background');
+        trace('loop.stopSignal', { why: message.why || 'background' });
+        sendResponse({ ok: true });
+        return true;
     }
 });
 

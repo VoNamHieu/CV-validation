@@ -59,3 +59,38 @@ describe('generateCoverLetter (single, chosen language)', () => {
         expect(callAIJudge.mock.calls[0].length).toBe(3);   // schema-based call
     });
 });
+
+// The 'message' format exists because the text lands in an ATS's free-text box
+// (10 rows on SmartRecruiters), not in a PDF the candidate downloads. Getting
+// the format wrong is not cosmetic: a signed 400-word letter in a "message to
+// the hiring team" box is what a real application would carry.
+describe('generateCoverLetter (message format)', () => {
+    it('asks for the SHORT shape and forbids the letter furniture', async () => {
+        callAIJudge.mockResolvedValueOnce(reply('Xin chào đội tuyển dụng...'));
+        await generateCoverLetter(cv, jd, match, 'vi', 'message');
+        const [systemPrompt, userPrompt] = callAIJudge.mock.calls[0] as [string, string];
+        expect(systemPrompt).toContain('110–160');
+        expect(systemPrompt).toContain('KHÔNG ký tên');
+        expect(userPrompt).toContain('110–160');
+        expect(systemPrompt).not.toContain('300–400');
+    });
+
+    it('defaults to the long letter when no format is given', async () => {
+        callAIJudge.mockResolvedValueOnce(reply('letter'));
+        await generateCoverLetter(cv, jd, match, 'vi');
+        expect(callAIJudge.mock.calls[0][0] as string).toContain('300–400');
+    });
+
+    it('applies the same anti-fabrication rule and language choice', async () => {
+        callAIJudge.mockResolvedValueOnce(reply('Hello hiring team...'));
+        await generateCoverLetter(cv, jd, match, 'en', 'message');
+        const systemPrompt = callAIJudge.mock.calls[0][0] as string;
+        expect(systemPrompt).toContain('CHỈ dùng thông tin CÓ THẬT trong CV');
+        expect(systemPrompt).toContain('English');
+    });
+
+    it('still refuses an empty reply', async () => {
+        callAIJudge.mockResolvedValueOnce(reply('  '));
+        await expect(generateCoverLetter(cv, jd, match, 'vi', 'message')).rejects.toThrow();
+    });
+});

@@ -42,24 +42,40 @@
      * this tab stayed open) or the background errored. Without this, a dead
      * relay fails silently and the web app shows a fake "synced" state.
      */
+    // Actionable wording for the one failure the user can actually fix. Reloading
+    // the extension tears `chrome.runtime` out from under content scripts already
+    // running in open tabs, so the very next relay throws — and it threw the raw
+    // "Cannot read properties of undefined (reading 'sendMessage')" straight into
+    // the UI, which names the symptom and hides the one-key fix.
+    const RELOAD_HINT = 'Extension vừa được tải lại — hãy nhấn F5 để làm mới trang này rồi thử lại.';
+
+    /** True when this content script has been orphaned by an extension reload. */
+    function contextGone() {
+        try { return !(chrome && chrome.runtime && chrome.runtime.id); } catch { return true; }
+    }
+
     function relay(message, responseType, extra = {}) {
         const reply = (payload) => {
             window.postMessage({ type: responseType, ...extra, ...payload }, '*');
         };
+        if (contextGone()) { reply({ success: false, error: RELOAD_HINT, needsReload: true }); return; }
         try {
             chrome.runtime.sendMessage(message, (response) => {
                 if (chrome.runtime.lastError) {
-                    reply({ success: false, error: chrome.runtime.lastError.message });
+                    const msg = chrome.runtime.lastError.message || '';
+                    reply({
+                        success: false,
+                        error: /context invalidated|receiving end does not exist/i.test(msg) ? RELOAD_HINT : msg,
+                        needsReload: /context invalidated/i.test(msg) || undefined,
+                    });
                     return;
                 }
                 reply(response || { success: false, error: 'no response from background' });
             });
         } catch (e) {
-            // "Extension context invalidated" — extension reloaded, tab not refreshed.
-            reply({
-                success: false,
-                error: (e && e.message) || 'Extension context invalidated — hãy tải lại (F5) trang web app.',
-            });
+            // Thrown synchronously when the context died between the check above
+            // and the call — same fix, same wording.
+            reply({ success: false, error: RELOAD_HINT, needsReload: true });
         }
     }
 
@@ -106,13 +122,15 @@
             }, 'JOBFIT_SYNC_CV_FILE_RESPONSE');
         }
 
-        // ─── Sync login credentials for account-gated ATS (Workday…) ───
-        if (event.data?.type === 'JOBFIT_SYNC_CREDENTIALS') {
+        // ─── Refresh the auth token on its own ───
+        // ATS candidate-account credentials are fetched from the backend just in
+        // time, so the token has to be live for the whole batch — not just as
+        // fresh as the last profile sync (Supabase tokens expire ~hourly).
+        if (event.data?.type === 'JOBFIT_SYNC_TOKEN') {
             relay({
-                type: 'SAVE_CREDENTIALS',
-                email: event.data.email,
-                password: event.data.password,
-            }, 'JOBFIT_SYNC_CREDENTIALS_RESPONSE');
+                type: 'SAVE_TOKEN',
+                token: event.data.token,
+            }, 'JOBFIT_SYNC_TOKEN_RESPONSE');
         }
 
         // ─── Sync profile JSON into extension storage ───
@@ -136,6 +154,11 @@
         // ─── Get Progress ───
         if (event.data?.type === 'JOBFIT_GET_PROGRESS') {
             relay({ type: 'GET_APPLY_PROGRESS' }, 'JOBFIT_APPLY_PROGRESS');
+        }
+
+        // ─── Strip test artifacts (local-creds blob, dummy GPA) ───
+        if (event.data?.type === 'JOBFIT_CLEAR_TEST_DATA') {
+            relay({ type: 'CLEAR_TEST_DATA' }, 'JOBFIT_CLEAR_TEST_DATA_RESPONSE');
         }
 
         // ─── Mode 1: sync rich CV JSON (needed for tailoring) ───
@@ -182,6 +205,12 @@
 
     // ── Listen for pushed messages FROM background ──
     chrome.runtime.onMessage.addListener((message) => {
+        // Field gaps discovered while applying — forwarded to the page so the app
+        // can offer to collect them once. Data only; the page decides what to do.
+        if (message?.type === 'JOBFIT_FIELD_GAPS') {
+            window.postMessage({ type: 'JOBFIT_FIELD_GAPS', gaps: message.gaps || [] }, '*');
+            return;
+        }
         // Progress updates + Mode-1 tailored-CV results both forward to the page.
         if (message.type === 'JOBFIT_APPLY_PROGRESS' || message.type === 'JOBFIT_MODE1_RESULT') {
             window.postMessage(message, '*');

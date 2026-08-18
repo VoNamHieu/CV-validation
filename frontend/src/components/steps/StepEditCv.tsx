@@ -19,35 +19,91 @@ import { applyCvFieldEdit } from '@/lib/cv-inline-edit';
 import { diffCvChanges, type CvImprovement, type CvSuggestion } from '@/lib/cv-improvements';
 import CvTemplatePicker from '@/components/CvTemplatePicker';
 import ScoreRing from '@/components/ScoreRing';
-import { optimizeCvVariants, renderCvPdf, generateCoverLetter } from '@/lib/api';
+import { optimizeCvVariants, renderCvPdf, generateCoverLetter, generateApplyMessage } from '@/lib/api';
+import { recipeWantsApplyMessage } from '@/lib/applyRecipes';
+import { detectJdLang } from '@/lib/jd-lang';
 import type {
     CVData, JDData, MatchResult, CategoryScore, RequirementStatus,
-    ContactInfo, PersonalInfo, EmploymentInfo, JobPreferences,
+    ContactInfo, PersonalInfo, EmploymentInfo, JobPreferences, EducationDetail,
 } from '@/lib/types';
 import {
     EMPTY_CONTACT, EMPTY_PERSONAL, EMPTY_EMPLOYMENT, EMPTY_PREFERENCES, COVER_LETTER_LANGUAGES,
 } from '@/lib/types';
 import { promptInstallExtension, promptGrantPermission, isPermissionError } from '@/lib/extension-install';
 import { cvToExtensionProfile } from '@/lib/extension-profile';
-import { syncProfileToExtension, syncCvFileToExtension, syncCvDataToExtension, syncApplyCredentialsToExtension } from '@/lib/extension-sync';
+import { internApplyGaps, isInternJob, isStudentOrNewGrad } from '@/lib/intern-context';
+import { resolveCvFieldsOfStudy } from '@/lib/field-of-study';
+import { syncProfileToExtension, syncCvFileToExtension, syncCvDataToExtension, type SyncResult } from '@/lib/extension-sync';
 import { renderCvHtml, getTemplate, DEFAULT_TEMPLATE_ID } from '@/lib/cv-templates';
 import type { CvTemplateId } from '@/lib/cv-templates';
 import { resizeAvatarToDataUrl } from '@/lib/avatar';
-import LoginCredentialsBanner, { type ApplyCredentials } from '@/components/LoginCredentialsBanner';
-import { loginAtsSummary } from '@/lib/applyRecipes';
+import PendingActionsSection from '@/components/ats/PendingActionsSection';
+import { summarizeTenants } from '@/lib/atsTenant';
+import { useAtsCredentials } from '@/lib/ats-credentials-context';
+import { atsAccounts as atsAccountsApi, type AtsAccount } from '@/lib/db';
+
+/** A field an application asked for that the user's stored data could not
+ *  answer. Reported by the agent so the app can collect it once instead of
+ *  stalling at every company that asks the same question. */
+interface FieldGap {
+    key?: string;
+    label?: string;
+    /** True when no inference could ever supply it — only the candidate knows
+     *  (GPA, salary expectation, work authorization). */
+    userOnly?: boolean;
+}
 
 type AutoApplyStatus = 'idle' | 'checking' | 'sending' | 'opened' | 'error' | 'no-extension';
 type FullAutoStatus = 'idle' | 'rendering' | 'syncing' | 'launching' | 'error';
+
+/** Why a job is waiting on the user. Mirrors what the extension reports — a
+ *  value missing from BLOCKED_LABEL renders as an empty row, so the two must
+ *  stay in step. */
+type BlockedReason = 'verification' | 'credential' | 'cv_missing' | 'manual';
 
 interface BatchJobStatus {
     jobUrl: string;
     jobTitle: string;
     company: string;
-    status: 'pending' | 'processing' | 'done' | 'error';
+    // 'blocked' is NOT a failure: the job is waiting on the user (verify an
+    // email, supply a password for a pre-existing account) and must never be
+    // rendered in the language of an error.
+    status: 'pending' | 'processing' | 'done' | 'error' | 'blocked';
     // outcome: 'submitted' = success signal seen after the agent acted;
     // 'filled' = form filled, tab left open for the user to review & submit.
-    result?: { success: boolean; detail?: string; outcome?: 'submitted' | 'filled' | 'failed' };
+    result?: {
+        success: boolean;
+        detail?: string;
+        outcome?: 'submitted' | 'filled' | 'failed';
+        /** What the agent answered on the user's behalf, so the review can point
+         *  at the few fields worth checking instead of the whole form. */
+        review?: {
+            answered: number;
+            agentDefaults: number;
+            agentDefaultFields?: string[];
+            /** Values the ATS parsed that disagree with the CV — reported, never
+             *  silently corrected. The errors a person re-reading their own filled
+             *  form is least likely to catch. */
+            mismatches?: number;
+            mismatchFields?: { field: string; expected: string; actual: string }[];
+        };
+    };
+    /** Canonical host of the account-gated tenant, when the job is on one. */
+    tenantKey?: string;
+    /** Why it's waiting, when status === 'blocked'. */
+    blockedReason?: BlockedReason;
 }
+
+/** Blocked ≠ failed: the wording stays neutral and actionable. */
+const BLOCKED_LABEL: Record<BlockedReason, string> = {
+    verification: 'Chờ bạn xác minh email',
+    credential: 'Chờ bạn nhập mật khẩu',
+    // The agent refused to apply because this job had no tailored CV of its own.
+    // Named separately from `manual` so the row says what to DO about it — the
+    // fix is one click (re-optimise), not a trip to the company's site.
+    cv_missing: 'Chưa có file CV — hãy tối ưu lại',
+    manual: 'Chờ bạn xử lý',
+};
 
 interface BatchProgress {
     isProcessing: boolean;
@@ -58,6 +114,7 @@ interface BatchProgress {
     successful?: number;
     submitted?: number;
     filled?: number;
+    blocked?: number;
 }
 
 /**
@@ -107,6 +164,13 @@ export default function StepEditCv() {
     } = useAppStore();
     const gate = useAuthGate();
     const { ensureAgentConsent } = useConsent();
+    // One shared source for ATS account state (sidebar badge, this panel, the
+    // history board) so the three can't disagree about what's blocked.
+    const {
+        ensureApplyCredentials,
+        accounts: atsAccountsState,
+        refresh: refreshAtsAccounts,
+    } = useAtsCredentials();
     const fullAutoFiredRef = useRef(false);
     const baseApplyFiredRef = useRef(false);
 
@@ -117,15 +181,18 @@ export default function StepEditCv() {
             .sort((a, b) => (b.matchResult?.overall_score ?? 0) - (a.matchResult?.overall_score ?? 0));
     }, [jdEntries]);
 
-    // ATS in this job list that gate apply behind a login / account creation
-    // (Workday, SuccessFactors…) → collect credentials upfront. Email pre-fills
-    // from the CV; held in a ref (not persisted) until the agent path uses it.
+    // Tenants in this job list that gate apply behind a candidate account
+    // (Workday…). Grouped per TENANT, not per ATS: each company is its own
+    // account namespace, so this drives both the credentials modal's "will be
+    // used for" list and the batch-start /resolve call.
     const cvEmail = cvData?.contact?.email ?? '';
-    const loginAts = useMemo(
-        () => loginAtsSummary(sortedEntries.map(e => e.applyUrl || e.source)),
+    const loginTenants = useMemo(
+        () => summarizeTenants(sortedEntries.map(e => ({
+            jobUrl: e.applyUrl || e.source,
+            company: e.company || e.label,
+        }))),
         [sortedEntries],
     );
-    const applyCredsRef = useRef<ApplyCredentials>({ email: '', password: '' });
 
     // Jobs are still crawling/scoring/optimizing — the editor opens on the first
     // scored job before its CV is tailored, so `sortedEntries` is briefly empty
@@ -215,6 +282,7 @@ export default function StepEditCv() {
 
     // ── Batch Apply State ──
     const [batchProgress, setBatchProgress] = useState<BatchProgress | null>(null);
+    const [fieldGaps, setFieldGaps] = useState<FieldGap[]>([]);
     const [batchStarting, setBatchStarting] = useState(false);
 
     // ── Fully Autonomous Apply State ──
@@ -232,6 +300,10 @@ export default function StepEditCv() {
             if (event.data?.type === 'JOBFIT_EXTENSION_READY' && event.data?.extensionId) {
                 (window as JobfitWindow).__jobfitExtensionId = event.data.extensionId;
             }
+            // Fields the batch could not answer from stored data.
+            if (event.data?.type === 'JOBFIT_FIELD_GAPS') {
+                setFieldGaps(Array.isArray(event.data.gaps) ? event.data.gaps : []);
+            }
             // Real-time progress updates from extension
             if (event.data?.type === 'JOBFIT_APPLY_PROGRESS') {
                 setBatchProgress({
@@ -243,10 +315,14 @@ export default function StepEditCv() {
                     successful: event.data.successful ?? 0,
                     submitted: event.data.submitted ?? 0,
                     filled: event.data.filled ?? 0,
+                    blocked: event.data.blocked ?? 0,
                 });
                 if (!event.data.isProcessing) {
                     setBatchStarting(false);
                 }
+                // A tenant may have just become blocked (needs email verification
+                // / a different password) — pull the fresh verdicts.
+                if (event.data.blocked) void refreshAtsAccounts();
             }
             // Response to batch start
             if (event.data?.type === 'JOBFIT_AUTO_APPLY_ALL_RESPONSE') {
@@ -264,7 +340,21 @@ export default function StepEditCv() {
         };
         window.addEventListener('message', handler);
         return () => window.removeEventListener('message', handler);
-    }, []);
+    }, [refreshAtsAccounts]);
+
+    // Load the blocked-tenant list on mount so "Cần bạn xử lý" survives a reload
+    // — a user who verified their email hours later must still find the retry.
+    useEffect(() => { void refreshAtsAccounts(); }, [refreshAtsAccounts]);
+
+    // Jobs still waiting on each blocked tenant, for the per-row count.
+    const blockedCounts = useMemo(() => {
+        const counts: Record<string, number> = {};
+        for (const job of batchProgress?.queue ?? []) {
+            if (job.status !== 'blocked' || !job.tenantKey) continue;
+            counts[job.tenantKey] = (counts[job.tenantKey] || 0) + 1;
+        }
+        return counts;
+    }, [batchProgress]);
 
     const currentEntry = sortedEntries[selectedIdx];
 
@@ -420,6 +510,13 @@ export default function StepEditCv() {
             personal: cvData.personal ?? cv.personal,
             employment: cvData.employment ?? cv.employment,
             preferences: cvData.preferences ?? cv.preferences,
+            // Education carries the facts the info form owns — GPA and field of
+            // study — that the per-job optimize snapshot predates. Without this
+            // the GPA a user types after optimizing never reaches the profile
+            // sent to the extension, nor the intern gate that reads the same cv,
+            // so "điền GPA rồi chạy lại" did nothing. Base wins here exactly as it
+            // does for the other user-owned sub-objects above.
+            education: cvData.education ?? cv.education,
         } : cv
     ), [cvData]);
 
@@ -477,7 +574,7 @@ export default function StepEditCv() {
         }
     }, [setUserAvatar, updateJdEntry]);
 
-    /* ─── Build extension profile (23-field shape) from an optimized CV ───
+    /* ─── Build extension profile (flat profile shape) from an optimized CV ───
        The personal-info fields (contact/personal/employment/preferences) are
        authored by the user against the base cvData via the Personal Info
        section, but per-job optimized variants don't necessarily carry them.
@@ -486,8 +583,47 @@ export default function StepEditCv() {
     const buildProfile = useCallback(
         // coverLetter (per-job, on-demand) overrides the generic CV summary so
         // the auto-apply agent fills a letter tailored to THIS job.
-        (cv: CVData, coverLetter?: string) => cvToExtensionProfile(mergeProfile(cv), coverLetter),
+        // applyMessage is the short note for an ATS free-text box (see below).
+        (cv: CVData, coverLetter?: string, applyMessage?: string) =>
+            cvToExtensionProfile(mergeProfile(cv), coverLetter, applyMessage),
         [mergeProfile],
+    );
+
+    /* ─── The note for an ATS's "message to the hiring team" box ───
+       Written from the CV + THIS job's JD, automatically, at dispatch — there is
+       no button, because the box is on a form the user never sees before the
+       agent reaches it, and a manual step there is a step nobody would take.
+
+       Three guards keep it from being wasteful or wrong:
+       · only when the target's recipe actually HAS such a box (generation costs
+         a credit, and most forms have none);
+       · only once — cached on the entry, so a retry or a second apply is free;
+       · never blocking — a failure logs and the apply proceeds with the box
+         empty, which is what an OPTIONAL field should degrade to. Losing an
+         application over an optional note would be the worse bug.
+
+       Returns the message to use, or undefined. */
+    const ensureApplyMessage = useCallback(
+        async (entry: JDEntry | undefined | null): Promise<string | undefined> => {
+            if (!entry) return undefined;
+            if (entry.applyMessage?.trim()) return entry.applyMessage;
+            if (!entry.jdData) return undefined;
+            if (!recipeWantsApplyMessage(entry.applyUrl || entry.source)) return undefined;
+            const cv = entry.optimizedCv ?? cvData;
+            if (!cv) return undefined;
+            // The posting's own language, not the editor's letter picker — this
+            // text is read by whoever wrote the ad, and nobody is choosing for it.
+            const lang = detectJdLang(entry.jdData);
+            try {
+                const msg = await generateApplyMessage(cv, entry.jdData, entry.matchResult, lang);
+                updateJdEntry(entry.id, { applyMessage: msg, applyMessageLang: lang });
+                return msg;
+            } catch (err) {
+                console.warn('[Copo] ensureApplyMessage failed:', err);
+                return undefined;
+            }
+        },
+        [cvData, updateJdEntry],
     );
 
     /* ─── Ensure a job entry has a rendered CV PDF ───
@@ -538,6 +674,49 @@ export default function StepEditCv() {
         return () => clearTimeout(handle);
     }, [cvData]);
 
+    /* ─── Apply-time field-of-study resolution ───
+       The debounced auto-sync above only runs the CHEAP deterministic
+       field-of-study layer (it can't await an LLM on every keystroke). Right
+       before an apply is dispatched, resolve the long tail too — deterministic
+       first, LLM only for a major the rules can't place — and push that CV so
+       the value the intern agent fills is catalogue-valid. Fail-safe: on any
+       error the CV is synced with at least the deterministic resolution, and
+       the apply proceeds either way (an unresolved major is no worse than the
+       extension's own search + the review gap that exist today). */
+    /* Resolve a CV's field(s) of study (deterministic + LLM long tail) before an
+       apply, so the apply-time intern gate sees exactly what will be sent.
+       Fail-SAFE, not fail-open: on any resolver error the raw CV comes back, and
+       the catalogue gate that follows (internApplyGaps) then blocks a required
+       intern Field of Study that did not land on a real catalogue row — instead
+       of dispatching a value the closed dropdown can't match, which gaps My
+       Experience mid-run. `source` defaults to the base CV (education is shared
+       across a batch's jobs). */
+    const resolveCvForApply = useCallback(async (source?: CVData | null): Promise<CVData | null> => {
+        const base = source ?? cvData;
+        if (!base) return null;
+        try {
+            return await resolveCvFieldsOfStudy(base);
+        } catch (err) {
+            console.warn('[Copo] Field-of-study resolve before apply failed:', err);
+            return base;
+        }
+    }, [cvData]);
+
+    /* Push a (already field-of-study-resolved) CV to the extension so jobfitCv
+       carries a catalogue-valid Field of Study before the agent opens the tab.
+       Returns the SyncResult — syncProfileToExtension resolves { ok:false } on a
+       timeout instead of throwing, and the caller MUST NOT dispatch an intern
+       apply on top of an unconfirmed sync (the agent would read a stale jobfitCv
+       and gap on the required Field of Study). */
+    const syncResolvedCv = useCallback(async (cv: CVData): Promise<SyncResult> => {
+        try {
+            return await syncProfileToExtension(cvToExtensionProfile(cv), cv);
+        } catch (err) {
+            console.warn('[Copo] Field-of-study sync before apply failed:', err);
+            return { ok: false, error: err instanceof Error ? err.message : 'sync failed' };
+        }
+    }, []);
+
     /* ─── Single Auto Apply (legacy) ─── */
     const triggerAutoApply = async () => {
         // Layer-2 consent: first time the auto-apply agent runs.
@@ -551,11 +730,24 @@ export default function StepEditCv() {
             setAutoApplyMessage('Thiếu dữ liệu CV hoặc URL công việc.');
             return;
         }
-
-        const profile = buildProfile(cv, currentEntry?.coverLetter);
+        // Intern preflight on the RESOLVED cv (deterministic + LLM field-of-study
+        // long tail) so the gate sees exactly what will be sent: an intern
+        // posting whose required Field of Study does not land on the closed
+        // catalogue — or that is missing a GPA — must not be dispatched to stall
+        // mid-run. resolvedCv is reused for the pre-dispatch sync below.
+        const resolvedCv = await resolveCvForApply(mergeProfile(cv));
+        const internGaps = isInternJob(currentEntry) && resolvedCv ? internApplyGaps(resolvedCv) : [];
+        if (internGaps.length) {
+            setAutoApplyStatus('error');
+            setAutoApplyMessage(`Vị trí thực tập chưa đủ điều kiện (${internGaps.join(', ')}) — điền GPA + Ngành học ở "Thông tin cá nhân" rồi chạy lại.`);
+            return;
+        }
 
         setAutoApplyStatus('checking');
         setAutoApplyMessage('Đang kiểm tra Extension...');
+
+        const applyMessage = await ensureApplyMessage(currentEntry);
+        const profile = buildProfile(cv, currentEntry?.coverLetter, applyMessage);
 
         try {
             // No pre-flight liveness gate here: the job was already crawled +
@@ -572,6 +764,20 @@ export default function StepEditCv() {
 
             setAutoApplyStatus('sending');
             setAutoApplyMessage('Đang gửi lệnh tự động ứng tuyển...');
+
+            // Push the already-resolved CV (see the gate above) so jobfitCv
+            // carries a catalogue-valid Field of Study before the agent opens the
+            // tab. If the push does not ACK, the agent may read a STALE jobfitCv —
+            // for an intern posting that risks a mid-run gap, so block rather than
+            // dispatch on an unconfirmed sync.
+            if (resolvedCv) {
+                const sync = await syncResolvedCv(resolvedCv);
+                if (!sync.ok && isInternJob(currentEntry)) {
+                    setAutoApplyStatus('error');
+                    setAutoApplyMessage(`Chưa đồng bộ được CV với Extension (${sync.error || 'không phản hồi'}) — tải lại trang (F5) rồi thử lại.`);
+                    return;
+                }
+            }
 
             const responsePromise = new Promise<{ success?: boolean; error?: string; detail?: string }>((resolve, reject) => {
                 const handler = (event: MessageEvent) => {
@@ -632,6 +838,9 @@ export default function StepEditCv() {
        ═══════════════════════════════════════════════════════════════ */
     const triggerAutoApplyAll = useCallback(async () => {
         if (!(await ensureAgentConsent())) return;
+        // Account-gated tenants in this batch need a stored credential before the
+        // agent meets its first login wall. No-ops when one already exists.
+        if (!(await ensureApplyCredentials(loginTenants, cvEmail))) return;
         if (!isExtensionAvailable()) {
             setAutoApplyStatus('no-extension');
             setAutoApplyMessage('Extension chưa cài! Vui lòng cài Copo Extension trước.');
@@ -640,39 +849,96 @@ export default function StepEditCv() {
             return;
         }
 
-        // Hand the extension the login credentials for account-gated ATS (Workday…)
-        // so the agent can sign in / create an account when it hits a login wall.
-        const creds = applyCredsRef.current;
-        if (creds.email || creds.password) {
-            syncApplyCredentialsToExtension(creds.email, creds.password).catch(() => { });
-        }
-
+        // Credentials are NOT pushed to the extension here any more: it fetches
+        // them from the backend just-in-time, per tenant, right before it
+        // authenticates (so a password never sits in chrome.storage.local).
         // Build jobs array from all optimized entries that have a source URL.
         // Attach THIS job's cached PDF so file-upload fields get the right CV
         // (job A → CV A). The PDF is cached at Optimize time; if it's missing
         // (e.g. dropped after a reload) the job still applies text-only — use
         // "Fully Auto Apply All" to render missing PDFs on the fly.
-        const jobs = sortedEntries
-            .filter(e => e.optimizedCv && e.source)
-            .map(entry => ({
-                jobUrl: entry.applyUrl || entry.source!,
-                jobTitle: entry.jobTitle || 'Unknown',
-                company: entry.company || entry.label || '',
-                profile: buildProfile(entry.optimizedCv!, entry.coverLetter),
-                cvFileBase64: entry.optimizedCvPdfBase64,
-                cvFileName: entry.optimizedCvFileName,
-            }));
-
-        if (jobs.length === 0) {
+        // Every queued job must carry ITS OWN tailored CV. The PDF is cached at
+        // Optimize time; when it's missing (dropped from persistence after a
+        // reload) we render it now rather than queueing the job without one.
+        //
+        // The old path queued it anyway and warned that those jobs would "apply
+        // text-only". That is a worse outcome than not applying: an application
+        // cannot be withdrawn and re-sent with the right document, so a degraded
+        // submission spends the opportunity permanently. A job whose CV we cannot
+        // produce is therefore left OUT of the batch and named to the user.
+        const candidates = sortedEntries.filter(e => e.optimizedCv && e.source);
+        if (candidates.length === 0) {
             setAutoApplyMessage('Không có công việc nào có URL để ứng tuyển.');
             return;
         }
 
-        const withFile = jobs.filter(j => j.cvFileBase64).length;
-        if (withFile < jobs.length) {
+        const jobs: Array<{
+            jobUrl: string;
+            jobTitle: string;
+            company: string;
+            profile: ReturnType<typeof buildProfile>;
+            cvFileBase64: string;
+            cvFileName: string;
+        }> = [];
+        const missingCv: string[] = [];
+        // Only intern postings are gated, and only for what they actually need
+        // (GPA / field of study) — a manager role missing a GPA is never blocked.
+        // Sending an intern application that the agent will stall on mid-run is
+        // worse than not sending it: the opportunity cannot be re-spent.
+        const internBlocked: string[] = [];
+
+        // Resolve the shared field of study ONCE (education is the same across a
+        // batch's jobs) so the intern catalogue gate sees what will actually be
+        // sent; reused for the single pre-dispatch sync below.
+        const resolvedBase = await resolveCvForApply();
+        const internGaps = resolvedBase ? internApplyGaps(resolvedBase) : [];
+        // Whether any job that survives into the dispatch is an intern posting —
+        // decides whether a failed pre-dispatch sync must block (below).
+        let dispatchingIntern = false;
+
+        for (const entry of candidates) {
+            // Only intern postings are gated. GPA + a Field of Study that lands on
+            // the closed catalogue are required; a degree is not a major and an
+            // unresolved value gaps My Experience mid-run, so it is left OUT.
+            if (isInternJob(entry) && internGaps.length) {
+                internBlocked.push(`${entry.jobTitle || entry.company || entry.label || 'Job'} (${internGaps.join(', ')})`);
+                continue;
+            }
+            const pdf = await ensureEntryPdf(entry);
+            if (!pdf) {
+                missingCv.push(entry.jobTitle || entry.company || entry.label || 'Job');
+                continue;
+            }
+            // Per job, and only for the ones whose form has a message box —
+            // a batch of ten jobs on message-less forms generates nothing.
+            const applyMessage = await ensureApplyMessage(entry);
+            jobs.push({
+                jobUrl: entry.applyUrl || entry.source!,
+                jobTitle: entry.jobTitle || 'Unknown',
+                company: entry.company || entry.label || '',
+                profile: buildProfile(entry.optimizedCv!, entry.coverLetter, applyMessage),
+                cvFileBase64: pdf.base64,
+                cvFileName: pdf.fileName,
+            });
+            if (isInternJob(entry)) dispatchingIntern = true;
+        }
+
+        const internNote = internBlocked.length
+            ? `${internBlocked.length} vị trí thực tập còn thiếu thông tin bắt buộc (${internBlocked.slice(0, 2).join('; ')}${internBlocked.length > 2 ? '…' : ''}). `
+                + 'Điền GPA + Ngành học ở "Thông tin cá nhân" rồi chạy lại.'
+            : '';
+        if (jobs.length === 0) {
+            setAutoApplyMessage(internNote || 'Không tạo được file CV cho công việc nào — hãy bấm tối ưu lại rồi thử lại.');
+            return;
+        }
+        if (missingCv.length) {
             setAutoApplyMessage(
-                `${withFile}/${jobs.length} công việc có sẵn CV PDF. Các công việc thiếu file sẽ ứng tuyển chỉ với văn bản, dùng "Ứng tuyển tự động hoàn toàn" để tạo đủ PDF.`,
+                `Bỏ qua ${missingCv.length} công việc chưa tạo được file CV (${missingCv.slice(0, 3).join(', ')}${missingCv.length > 3 ? '…' : ''}). `
+                + 'Hãy bấm tối ưu lại cho những vị trí này rồi chạy lại.'
+                + (internNote ? ` ${internNote}` : ''),
             );
+        } else if (internNote) {
+            setAutoApplyMessage(internNote);
         }
 
         // No pre-flight liveness gate: every job here was already crawled +
@@ -682,12 +948,26 @@ export default function StepEditCv() {
         // headless-render pool and timed out (failing open) on SPA boards.
         setBatchStarting(true);
 
+        // Push the already-resolved CV once before the batch (education is shared
+        // across jobs) so jobfitCv carries a catalogue-valid Field of Study. If
+        // the push does not ACK and an intern job is in the batch, do NOT dispatch
+        // on a stale jobfitCv — it would gap the required Field of Study mid-run.
+        if (resolvedBase) {
+            const sync = await syncResolvedCv(resolvedBase);
+            if (!sync.ok && dispatchingIntern) {
+                setBatchStarting(false);
+                setAutoApplyMessage(`Chưa đồng bộ được CV với Extension (${sync.error || 'không phản hồi'}) — tải lại trang (F5) rồi thử lại.`);
+                return;
+            }
+        }
+
         // Send batch command to extension.
         window.postMessage({
             type: 'JOBFIT_AUTO_APPLY_ALL',
             jobs,
         }, '*');
-    }, [sortedEntries, buildProfile, ensureAgentConsent]);
+    }, [sortedEntries, buildProfile, mergeProfile, ensureEntryPdf, ensureAgentConsent, ensureApplyCredentials,
+        loginTenants, cvEmail, resolveCvForApply, syncResolvedCv]);
 
     /* ═══════════════════════════════════════════════════════════════
        FULLY AUTONOMOUS APPLY ALL — Generate PDFs + sync + launch batch
@@ -701,6 +981,7 @@ export default function StepEditCv() {
     // doesn't sweep up unrelated jobs already sitting in the list.
     const triggerFullyAutoApply = useCallback(async (onlyIds?: Set<string>) => {
         if (!(await ensureAgentConsent())) return;
+        if (!(await ensureApplyCredentials(loginTenants, cvEmail))) return;
         if (!isExtensionAvailable()) {
             setAutoApplyStatus('no-extension');
             setAutoApplyMessage('Extension chưa cài! Vui lòng cài Copo Extension trước.');
@@ -726,13 +1007,31 @@ export default function StepEditCv() {
             jobTitle: string;
             company: string;
             profile: ReturnType<typeof buildProfile>;
-            cvFileBase64?: string;
-            cvFileName?: string;
+            cvFileBase64: string;
+            cvFileName: string;
         }> = [];
+        const renderFailed: string[] = [];
+        // Same intern gate as triggerAutoApply — only intern postings, only for
+        // GPA / field of study, so an executive batch is untouched.
+        const internBlocked: string[] = [];
+
+        // Resolve the shared field of study once (education is the same across a
+        // batch's jobs), so the intern catalogue gate sees what will be sent.
+        const resolvedBase = await resolveCvForApply();
+        const internGaps = resolvedBase ? internApplyGaps(resolvedBase) : [];
+        // Whether any dispatched job is an intern posting — see the sync gate below.
+        let dispatchingIntern = false;
 
         for (let i = 0; i < candidates.length; i++) {
             const entry = candidates[i];
             const cv = entry.optimizedCv!;
+            // Only intern postings are gated; GPA + a Field of Study that lands on
+            // the closed catalogue are required (a degree is not a major).
+            if (isInternJob(entry) && internGaps.length) {
+                internBlocked.push(`${entry.jobTitle || entry.company || 'Job'} (${internGaps.join(', ')})`);
+                setFullAutoProgress({ done: i + 1, total: candidates.length });
+                continue;
+            }
             try {
                 // Use the PDF cached at Optimize time if available; only render on miss.
                 let base64 = entry.optimizedCvPdfBase64;
@@ -747,36 +1046,71 @@ export default function StepEditCv() {
                     base64 = data.base64;
                     outFilename = data.filename;
                 }
+                const applyMessage = await ensureApplyMessage(entry);
                 jobs.push({
                     jobUrl: entry.applyUrl || entry.source!,
                     jobTitle: entry.jobTitle || 'Unknown',
                     company: entry.company || entry.label || '',
-                    profile: buildProfile(cv, entry.coverLetter),
+                    profile: buildProfile(cv, entry.coverLetter, applyMessage),
                     cvFileBase64: base64,
                     cvFileName: outFilename,
                 });
+                if (isInternJob(entry)) dispatchingIntern = true;
             } catch (err) {
-                // Per-job render failure: include the job without a CV file
-                // so the agent can still try to fill text fields.
+                // Per-job render failure: LEAVE THE JOB OUT. It used to be queued
+                // without a CV file "so the agent can still try to fill text
+                // fields", but that sends a weaker application that cannot be
+                // withdrawn and re-sent once the PDF works — the opportunity is
+                // spent. Better to name the job and let the user retry it.
                 console.warn('[FullAuto] PDF render failed for', entry.jobTitle, err);
-                jobs.push({
-                    jobUrl: entry.applyUrl || entry.source!,
-                    jobTitle: entry.jobTitle || 'Unknown',
-                    company: entry.company || entry.label || '',
-                    profile: buildProfile(cv, entry.coverLetter),
-                });
+                renderFailed.push(entry.jobTitle || entry.company || 'Job');
             }
             setFullAutoProgress({ done: i + 1, total: candidates.length });
         }
 
+        const internNote = internBlocked.length
+            ? `${internBlocked.length} vị trí thực tập còn thiếu GPA / Ngành học `
+                + `(${internBlocked.slice(0, 2).join('; ')}${internBlocked.length > 2 ? '…' : ''}) — điền GPA + Ngành học ở "Thông tin cá nhân" rồi chạy lại.`
+            : '';
         // 2. Hand off to the extension's existing batch path with embedded CV files.
+        if (jobs.length === 0) {
+            setFullAutoStatus('idle');
+            setFullAutoError(internNote || 'Không tạo được file CV cho công việc nào — hãy thử lại.');
+            setTimeout(() => setFullAutoError(null), internNote ? 8000 : 5000);
+            return;
+        }
+        if (renderFailed.length || internNote) {
+            setFullAutoError(
+                (renderFailed.length
+                    ? `Bỏ qua ${renderFailed.length} công việc chưa tạo được file CV `
+                        + `(${renderFailed.slice(0, 3).join(', ')}${renderFailed.length > 3 ? '…' : ''}). `
+                    : '')
+                + internNote,
+            );
+            setTimeout(() => setFullAutoError(null), 8000);
+        }
         setFullAutoStatus('launching');
         setBatchStarting(true);
+        // Push the already-resolved CV once (education shared across jobs) so
+        // jobfitCv carries a catalogue-valid Field of Study. Block on an
+        // unconfirmed sync when an intern job is in the batch (a stale jobfitCv
+        // would gap the required Field of Study mid-run).
+        if (resolvedBase) {
+            const sync = await syncResolvedCv(resolvedBase);
+            if (!sync.ok && dispatchingIntern) {
+                setBatchStarting(false);
+                setFullAutoStatus('idle');
+                setFullAutoError(`Chưa đồng bộ được CV với Extension (${sync.error || 'không phản hồi'}) — tải lại trang (F5) rồi thử lại.`);
+                setTimeout(() => setFullAutoError(null), 8000);
+                return;
+            }
+        }
         window.postMessage({ type: 'JOBFIT_AUTO_APPLY_ALL', jobs }, '*');
 
         // Reset status after handoff — batch progress UI takes over from here.
         setTimeout(() => setFullAutoStatus('idle'), 1500);
-    }, [sortedEntries, buildProfile, mergeProfile, userAvatarBase64, ensureAgentConsent]);
+    }, [sortedEntries, buildProfile, mergeProfile, userAvatarBase64, ensureAgentConsent,
+        ensureApplyCredentials, loginTenants, cvEmail, resolveCvForApply, syncResolvedCv]);
 
     const cancelBatchApply = useCallback(() => {
         window.postMessage({ type: 'JOBFIT_AUTO_APPLY_CANCEL' }, '*');
@@ -831,6 +1165,8 @@ export default function StepEditCv() {
         j => j.status === 'done' && j.result?.outcome === 'submitted').length ?? 0;
     const batchFilled = batchProgress?.queue.filter(
         j => j.status === 'done' && j.result?.outcome !== 'submitted').length ?? 0;
+    // The third bucket: waiting on the user, not finished and not failed.
+    const batchBlocked = batchProgress?.queue.filter(j => j.status === 'blocked').length ?? 0;
     const isFullAutoBusy = fullAutoStatus !== 'idle';
 
     // Empty state (placed AFTER all hooks to satisfy rules-of-hooks).
@@ -988,7 +1324,10 @@ export default function StepEditCv() {
                             // base cvData so the extension still gets something.
                             const cv = currentEntry?.optimizedCv ?? cvData;
                             if (!cv) return;
-                            const profile = buildProfile(cv, currentEntry?.coverLetter);
+                            // Cached message only — a manual sync is not an apply,
+                            // and generating one here would spend a credit on a
+                            // button the user pressed to copy their profile.
+                            const profile = buildProfile(cv, currentEntry?.coverLetter, currentEntry?.applyMessage);
                             navigator.clipboard.writeText(JSON.stringify(profile, null, 2)).catch(() => { });
 
                             // Wait for the extension's real ACK — a fire-and-forget
@@ -1120,11 +1459,16 @@ export default function StepEditCv() {
                 </div>
             </div>
 
-            {/* ── Login-required ATS → collect credentials (email pre-filled from CV) ── */}
-            <LoginCredentialsBanner
-                atsSummary={loginAts}
-                defaultEmail={cvEmail}
-                onChange={(c) => { applyCredsRef.current = c; }}
+            {/* Account-gated ATS are handled at batch start now (ApplyCredentialsModal
+                via ensureApplyCredentials) rather than by an always-on form here —
+                one prompt, once per user, instead of a banner on every visit. */}
+
+            {/* ── Tenants the agent couldn't resolve on its own ── */}
+            <PendingActionsSection
+                accounts={atsAccountsState}
+                pendingCounts={blockedCounts}
+                onChanged={() => { void refreshAtsAccounts(); }}
+                compact
             />
 
             {/* ── Fully Auto error banner ── */}
@@ -1144,6 +1488,42 @@ export default function StepEditCv() {
             )}
 
             {/* ═══ Batch Apply Progress Panel ═══ */}
+            {fieldGaps.length > 0 && (
+                <section
+                    aria-label="Thông tin còn thiếu"
+                    style={{
+                        background: 'rgba(59,130,246,0.07)', border: '1px solid rgba(59,130,246,0.32)',
+                        borderRadius: 12, padding: '14px 18px', marginBottom: 16,
+                    }}
+                >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                        <Warning size={16} weight="fill" color="#3b82f6" />
+                        <h3 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                            Bổ sung để lần sau không bị kẹt
+                        </h3>
+                    </div>
+                    <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: '0 0 10px' }}>
+                        Các công ty vừa rồi hỏi những thông tin này mà hồ sơ chưa có. Điền một lần vào CV
+                        là những lần ứng tuyển sau tự động qua được.
+                    </p>
+                    <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                        {fieldGaps.map((g) => (
+                            <li
+                                key={g.key || g.label}
+                                title={g.userOnly ? 'Chỉ bạn mới trả lời được — Copo không suy đoán' : 'Copo có thể suy ra nếu CV đủ dữ kiện'}
+                                style={{
+                                    fontSize: '0.78rem', padding: '4px 10px', borderRadius: 999,
+                                    background: 'var(--bg-card)', border: '1px solid var(--border-subtle)',
+                                    color: 'var(--text-secondary)',
+                                }}
+                            >
+                                {g.label || g.key}{g.userOnly ? ' •' : ''}
+                            </li>
+                        ))}
+                    </ul>
+                </section>
+            )}
+
             {(isBatchActive || batchDone) && batchProgress && (
                 <div style={{
                     background: 'linear-gradient(135deg, rgba(196, 59, 46,0.06), rgba(226, 114, 99,0.04))',
@@ -1164,6 +1544,7 @@ export default function StepEditCv() {
                                 {batchProgress.isProcessing
                                     ? `⚡ Ứng tuyển hàng loạt: ${batchProgress.completed}/${batchProgress.total} công việc`
                                     : `✅ Hoàn tất: ${batchSubmitted} đã nộp · ${batchFilled} đã điền (chờ bạn nộp)`
+                                    + (batchBlocked ? ` · ${batchBlocked} chờ bạn xử lý` : '')
                                 }
                             </span>
                         </div>
@@ -1200,9 +1581,11 @@ export default function StepEditCv() {
                                     ? 'rgba(196, 59, 46,0.1)'
                                     : job.status === 'done'
                                         ? 'rgba(34,197,94,0.06)'
-                                        : job.status === 'error'
-                                            ? 'rgba(239,68,68,0.06)'
-                                            : 'rgba(255,255,255,0.02)',
+                                        : job.status === 'blocked'
+                                            ? 'rgba(245,158,11,0.08)'
+                                            : job.status === 'error'
+                                                ? 'rgba(239,68,68,0.06)'
+                                                : 'rgba(255,255,255,0.02)',
                                 borderRadius: 8,
                                 border: job.status === 'processing'
                                     ? '1px solid rgba(196, 59, 46,0.3)'
@@ -1214,6 +1597,7 @@ export default function StepEditCv() {
                                     {job.status === 'pending' && <span style={{ opacity: 0.3, fontSize: '0.75rem' }}>⏳</span>}
                                     {job.status === 'processing' && <CircleNotch size={14} className="spin" style={{ color: '#e27263' }} />}
                                     {job.status === 'done' && <CheckCircle size={14} weight="fill" style={{ color: '#22c55e' }} />}
+                                    {job.status === 'blocked' && <Warning size={14} weight="fill" style={{ color: '#f59e0b' }} />}
                                     {job.status === 'error' && <XCircle size={14} weight="fill" style={{ color: '#ef4444' }} />}
                                 </div>
 
@@ -1236,17 +1620,31 @@ export default function StepEditCv() {
                                     fontSize: '0.65rem', fontWeight: 600, flexShrink: 0,
                                     padding: '2px 8px', borderRadius: 6,
                                     background: job.status === 'done' ? 'rgba(34,197,94,0.15)'
-                                        : job.status === 'error' ? 'rgba(239,68,68,0.15)'
-                                            : job.status === 'processing' ? 'rgba(196, 59, 46,0.15)'
-                                                : 'rgba(255,255,255,0.05)',
+                                        : job.status === 'blocked' ? 'rgba(245,158,11,0.15)'
+                                            : job.status === 'error' ? 'rgba(239,68,68,0.15)'
+                                                : job.status === 'processing' ? 'rgba(196, 59, 46,0.15)'
+                                                    : 'rgba(255,255,255,0.05)',
                                     color: job.status === 'done' ? '#22c55e'
-                                        : job.status === 'error' ? '#ef4444'
-                                            : job.status === 'processing' ? '#e27263'
-                                                : 'var(--text-muted)',
+                                        : job.status === 'blocked' ? '#f59e0b'
+                                            : job.status === 'error' ? '#ef4444'
+                                                : job.status === 'processing' ? '#e27263'
+                                                    : 'var(--text-muted)',
                                 }}>
                                     {job.status === 'pending' && 'Chờ'}
                                     {job.status === 'processing' && 'Đang xử lý...'}
-                                    {job.status === 'done' && (job.result?.outcome === 'submitted' ? 'Đã nộp' : 'Đã điền, chờ nộp')}
+                                    {job.status === 'done' && (job.result?.outcome === 'submitted'
+                                        ? 'Đã nộp'
+                                        // Name what to check. "Đã điền, chờ nộp" tells the
+                                        // user to review without telling them what — which in
+                                        // practice means re-reading the whole form. A parse
+                                        // mismatch outranks a default: it is a wrong value
+                                        // already sitting in the form.
+                                        : job.result?.review?.mismatches
+                                            ? `Đã điền — ${job.result.review.mismatches} trường lệch với CV, cần kiểm tra`
+                                            : job.result?.review?.agentDefaults
+                                                ? `Đã điền — kiểm tra ${job.result.review.agentDefaults} giá trị mặc định`
+                                                : 'Đã điền, chờ nộp')}
+                                    {job.status === 'blocked' && BLOCKED_LABEL[job.blockedReason ?? 'manual']}
                                     {job.status === 'error' && (job.result?.detail || 'Lỗi')}
                                 </span>
                             </div>
@@ -2365,6 +2763,19 @@ export function PersonalInfoSection({
         onChange({ ...cv, employment: { ...employment, ...patch } });
     const patchPreferences = (patch: Partial<JobPreferences>) =>
         onChange({ ...cv, preferences: { ...preferences, ...patch } });
+    // GPA lives on the FIRST education entry, not a profile sub-object — the ATS
+    // reads "Overall Result (GPA)" from there. Edit it in place without
+    // disturbing the rest of the education array.
+    const patchEducation0 = (patch: Partial<EducationDetail>) => {
+        const edu = cv.education ?? [];
+        const base: EducationDetail = edu[0] ?? { degree: '', institution: '', year: '' };
+        const first: EducationDetail = { ...base, ...patch };
+        onChange({ ...cv, education: edu.length ? [first, ...edu.slice(1)] : [first] });
+    };
+    // Intern postings require the GPA that executive ones never ask for. Flag it
+    // required only when the CV reads as a student / new grad, so an experienced
+    // candidate is not nagged for a number their target forms do not want.
+    const internRelevant = isStudentOrNewGrad(cv);
 
     const fillCount = [
         contact.email, contact.phone, contact.address_province,
@@ -2423,13 +2834,19 @@ export function PersonalInfoSection({
                         onChange={(v) => patchContact({ address_street: v })} />
 
                     {/* ── Personal ── */}
-                    <ProfileInput label="Ngày sinh" value={personal.date_of_birth}
+                    <ProfileInput label="Ngày sinh" value={personal.date_of_birth} required
                         onChange={(v) => patchPersonal({ date_of_birth: v })} placeholder="YYYY-MM-DD" />
                     <ProfileInput label="Giới tính" value={personal.gender}
                         onChange={(v) => patchPersonal({ gender: v })} />
                     <ProfileInput label="Quốc tịch" value={personal.nationality}
                         onChange={(v) => patchPersonal({ nationality: v })} />
-                    <ProfileInput label="Tình trạng hôn nhân" value={personal.marital_status}
+                    <ProfileInput label="Dân tộc" value={personal.ethnicity}
+                        onChange={(v) => patchPersonal({ ethnicity: v })} placeholder="Kinh" />
+                    <ProfileInput label="Tên đệm" value={personal.middle_name}
+                        onChange={(v) => patchPersonal({ middle_name: v })} placeholder="Nam" />
+                    <ProfileInput label="Bằng lái xe" value={personal.drivers_license}
+                        onChange={(v) => patchPersonal({ drivers_license: v })} placeholder="Có / Không" />
+                    <ProfileInput label="Tình trạng hôn nhân" value={personal.marital_status} required
                         onChange={(v) => patchPersonal({ marital_status: v })} />
 
                     {/* ── Employment ── */}
@@ -2449,12 +2866,22 @@ export function PersonalInfoSection({
                         onChange={(v) => patchEmployment({ years_of_experience: parseInt(v, 10) || 0 })} />
                     <ProfileInput label="Bằng cấp cao nhất" value={employment.highest_degree}
                         onChange={(v) => patchEmployment({ highest_degree: v })} />
+                    <ProfileInput label="Điểm TB (GPA)" value={cv.education?.[0]?.gpa ?? ''}
+                        onChange={(v) => patchEducation0({ gpa: v })} required={internRelevant}
+                        placeholder="VD: 3.6 / 8.5 — form thực tập bắt buộc" />
+                    <ProfileInput label="Ngành học" value={cv.education?.[0]?.field_of_study ?? ''}
+                        onChange={(v) => patchEducation0({ field_of_study: v })} required={internRelevant}
+                        placeholder="VD: Marketing — ngành (khác bằng cấp), form thực tập bắt buộc" />
 
                     {/* ── Preferences ── */}
                     <ProfileInput label="Địa điểm mong muốn" value={preferences.desired_locations}
                         onChange={(v) => patchPreferences({ desired_locations: v })} />
                     <ProfileInput label="Mức lương mong muốn" value={preferences.desired_salary}
                         onChange={(v) => patchPreferences({ desired_salary: v })} />
+                    <ProfileInput label="Thời gian báo trước" value={preferences.notice_period ?? ''}
+                        onChange={(v) => patchPreferences({ notice_period: v })} placeholder="30 ngày" />
+                    <ProfileInput label="Ngày có thể bắt đầu" value={preferences.available_start_date ?? ''}
+                        onChange={(v) => patchPreferences({ available_start_date: v })} placeholder="YYYY-MM-DD (trống = tự tính từ thời gian báo trước)" />
                 </div>
             )}
         </div>
@@ -2462,17 +2889,26 @@ export function PersonalInfoSection({
 }
 
 function ProfileInput({
-    label, value, onChange, placeholder,
+    label, value, onChange, placeholder, required,
 }: {
     label: string;
     value: string;
     onChange: (v: string) => void;
     placeholder?: string;
+    /** ATS thường bắt buộc field này (Workday: Date of Birth ở Voluntary
+     *  Disclosures) — thiếu nó agent phải dừng NEED_HUMAN giữa run. Đánh dấu
+     *  để user điền TRƯỚC, thay vì bị chặn giữa chừng. */
+    required?: boolean;
 }) {
     return (
         <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                {label}
+                {label}{required && <span style={{ color: 'var(--accent-red, #dc2626)' }}> *</span>}
+                {required && !String(value || '').trim() && (
+                    <span style={{ color: 'var(--accent-red, #dc2626)', textTransform: 'none', letterSpacing: 0, marginLeft: 6 }}>
+                        — cần cho auto-apply
+                    </span>
+                )}
             </span>
             <input
                 type="text"

@@ -53,7 +53,69 @@ def _strip_html(s: str) -> str:
     return s
 
 
+_FULL_JD_CAP = 12000  # sanity bound; matches db.promoted._MAX_SNAPSHOT_DESC
+
+
+def _full_desc(raw: str | None, cap: int = _FULL_JD_CAP) -> str:
+    """Full-or-blank listing description: strip HTML and keep the text only
+    when it plausibly IS the whole posting. Teaser-by-nature fields
+    (descriptionTeaser, description_short, JobSummary, …) must not come
+    through here — write description="" at the call site instead. Over-cap
+    text also stores "" rather than a cut stump: a half-JD in the store reads
+    as complete and short-circuits every full-JD fallback downstream
+    (jd_resolver → Playwright / extension DOM)."""
+    txt = _strip_html(raw or "")
+    return txt if len(txt) <= cap else ""
+
+
 _HTML_HEADERS = {"User-Agent": _HEADERS["User-Agent"], "Accept": "text/html,*/*"}
+
+
+def _detail_desc(url: str, selector: str, keep_form: bool = False) -> str:
+    """Full JD from an SSR detail page: GET + the largest CSS `selector` match's
+    text, through _full_desc ("" on any miss). For adapters whose listing has no
+    JD but whose detail page is server-rendered with a stable container.
+    Largest-match (not first) so multi-block layouts (Elementor, repeated
+    wrappers) resolve to the content block, not a header stub. `keep_form` is
+    for apply-on-page sites (Honda, DOJI, FE Credit) that render the JD INSIDE
+    the application <form> — stripping it there strips the posting itself."""
+    from bs4 import BeautifulSoup
+    try:
+        r = requests.get(url, headers=_HTML_HEADERS, timeout=_TIMEOUT)
+        if r.status_code != 200:
+            return ""
+        soup = BeautifulSoup(r.text, "html.parser")
+        drop = ["script", "style", "nav", "header", "footer"]
+        for t in soup(drop if keep_form else drop + ["form"]):
+            t.decompose()
+        texts = [el.get_text("\n", strip=True) for el in soup.select(selector)]
+        return _full_desc(max(texts, key=len, default=""))
+    except Exception as e:
+        logger.info(f"[ats] detail {url[:60]} failed: {str(e)[:60]}")
+        return ""
+
+
+def _jsonld_desc(url: str) -> str:
+    """Full JD from a detail page's schema.org JobPosting JSON-LD ("" on miss)."""
+    import json as _json
+    try:
+        r = requests.get(url, headers=_HTML_HEADERS, timeout=_TIMEOUT)
+        if r.status_code != 200:
+            return ""
+        for m in re.finditer(r'<script[^>]*application/ld\+json[^>]*>(.*?)</script>',
+                             r.text, re.S):
+            try:
+                d = _json.loads(m.group(1).strip())
+            except Exception:
+                continue
+            for it in (d if isinstance(d, list) else [d]):
+                if isinstance(it, dict) and it.get("@type") in ("JobPosting", ["JobPosting"]):
+                    desc = _full_desc(it.get("description") or "")
+                    if desc:
+                        return desc
+    except Exception as e:
+        logger.info(f"[ats] jsonld {url[:60]} failed: {str(e)[:60]}")
+    return ""
 
 _JSON_POST = {"User-Agent": "Mozilla/5.0 Chrome/120", "Accept": "application/json",
               "Content-Type": "application/json"}
@@ -122,6 +184,11 @@ def _finalize(jobs: list[dict]) -> list[dict]:
         nt = _norm_title(title)
         if nt in _BAD_TITLES or nt.startswith(("tu ngay ", "from ")):  # date-range rows (Canon)
             continue
+        # A title carrying markup is never a job — it's page copy harvested as
+        # innerHTML (spa_sniff minted 6 fake "jobs" from Dentsu's Workday
+        # footer: "<p><b><span>Dream loud…"). Real titles never contain tags.
+        if re.search(r"<[a-zA-Z/!]", title):
+            continue
         # A fragment hung on a bare origin ("careers.lg.com#<blob>") is a crawl
         # artifact — an in-page anchor scraped as a link — never a job detail
         # page (produced 57 fake LG "jobs"). Real fragment-routed SPAs (mokahr
@@ -145,6 +212,7 @@ def _finalize(jobs: list[dict]) -> list[dict]:
 __all__ = [
     "logger", "_html", "os", "re", "requests", "urljoin", "urlparse", "parse_qsl",
     "_TIMEOUT", "_MAX_ATS_JOBS", "_HEADERS", "_get_json", "_strip_html",
+    "_FULL_JD_CAP", "_full_desc", "_detail_desc", "_jsonld_desc",
     "_HTML_HEADERS", "_JSON_POST", "_VN_MARKERS", "_WD_RX", "_is_vn_loc",
     "_BAD_TITLES", "_norm_title", "_finalize", "_clean_desc", "_MAX_DESC_CHARS",
 ]
