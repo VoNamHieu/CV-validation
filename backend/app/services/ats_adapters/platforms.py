@@ -508,6 +508,7 @@ def _phenom_services(career_url: str) -> list[dict]:
     country = os.getenv("DISCOVER_COUNTRY", "Vietnam")
     headers = {**_JSON_POST, "Referer": f"{origin}/search-results"}
     out = []
+    served = False   # did /services/jobs/search/ ever answer with a parseable jobList?
     # The feed is server-side location-filtered (locationsearch=Vietnam) but
     # returns only `recordsperpage` rows per call with NO total field — a single
     # page truncated big VN Phenom banks (Techcombank: 294 VN jobs → 100). Page
@@ -524,6 +525,7 @@ def _phenom_services(career_url: str) -> list[dict]:
         except Exception as e:
             logger.info(f"[ats] phenom-services {origin} failed: {str(e)[:80]}")
             break
+        served = True
         if not joblist:
             break
         for j in joblist:
@@ -537,8 +539,118 @@ def _phenom_services(career_url: str) -> list[dict]:
                         "description": ""})
         if len(joblist) < _PER or len(out) >= _MAX_ATS_JOBS:
             break
-    logger.info(f"[ats] phenom-services → {len(out)} VN jobs ({origin})")
+    if served:
+        logger.info(f"[ats] phenom-services → {len(out)} VN jobs ({origin})")
+        return out
+    # This tenant has no ph-services endpoint (it answers with the page's HTML
+    # shell) → newer Phenom generation, whose search runs on /widgets instead.
+    # Note `served` distinguishes "no such API" from "API works, no VN jobs" —
+    # only the first is worth a second round-trip.
+    return _phenom_widgets(origin, _phenom_locale(career_url), country)
+
+
+# ── Phenom /widgets (BCG, Mastercard, ABB, DHL) ─────────────────────────────
+# The newer Phenom generation drops /services/jobs/search/ (that path just
+# returns the SPA's HTML) and serves search from the refineSearch widget:
+#   POST {origin}/widgets  {ddoKey:"refineSearch", selected_fields:{country:[…]},
+#                           from:<n>, size:<n>, …}
+#   → {refineSearch:{totalHits, data:{jobs:[{title, jobId, city, country, …}]}}}
+# The server does not validate pageId/config, so a static body is enough — no
+# HTML pre-fetch. `selected_fields.country` is a SOFT filter (BCG returns 13 hits
+# for Vietnam, of which 5 are Malaysia/Singapore/Indonesia), so every row is
+# re-checked against the country/location it actually carries.
+# Detail = {origin}/{locale}/job/{jobId}/{slug}; the slug segment is cosmetic.
+# Descriptions stay empty on purpose: the list gives only a ~300-char teaser,
+# which is long enough to make `resolve_full_jd` keep it and skip the real JD —
+# the job page is SSR with a JSON-LD JobPosting the crawler already reads.
+
+def _phenom_locale(career_url: str) -> str:
+    """The site's locale path segment ("global/en", "us/en") — taken from the
+    career URL, since the detail path repeats it and it is not global."""
+    segs = [s for s in (urlparse(career_url or "").path or "").split("/") if s]
+    if len(segs) >= 2 and re.fullmatch(r"[a-z]{2,3}", segs[0], re.I) \
+            and re.fullmatch(r"[a-z]{2}(-[A-Za-z]{2})?", segs[1], re.I):
+        return f"{segs[0]}/{segs[1]}"
+    return "global/en"
+
+
+def _phenom_widgets(origin: str, locale: str, country: str) -> list[dict]:
+    headers = {**_JSON_POST, "Referer": f"{origin}/{locale}/search-results"}
+    out, seen = [], set()
+    _PER = 100
+
+    def _page(start: int, cval: str) -> dict | None:
+        try:
+            r = requests.post(f"{origin}/widgets", headers=headers, timeout=_TIMEOUT, json={
+                "lang": "en_global", "deviceType": "desktop", "country": "global",
+                "pageName": "search-results", "ddoKey": "refineSearch", "sortBy": "",
+                "subsearch": "", "from": start, "jobs": True, "counts": True,
+                "all_fields": ["country"], "size": _PER, "clearAll": False,
+                "jdsource": "facets", "isSliderEnable": False, "pageId": "",
+                "siteType": "external", "keywords": "", "global": True,
+                "selected_fields": {"country": [cval]}, "locationData": {},
+            })
+            if r.status_code != 200:
+                return None
+            return (r.json() or {}).get("refineSearch") or {}
+        except Exception as e:
+            logger.info(f"[ats] phenom-widgets {origin} failed: {str(e)[:80]}")
+            return None
+
+    rs = _page(0, country)
+    # Tenants spell the country facet differently — Kuehne+Nagel says
+    # "Viet Nam", so the strict "Vietnam" filter finds 0 while 15 jobs exist.
+    # The same response carries the country aggregation (counts:true); when
+    # page 1 is empty, retry once with the tenant's own VN spelling from it.
+    if rs is not None and not ((rs.get("data") or {}).get("jobs")):
+        for a in (rs.get("data") or {}).get("aggregations") or []:
+            if a.get("field") == "country":
+                vn = next((str(c) for c in (a.get("value") or {})
+                           if _is_vn_loc(str(c))), None)
+                if vn and vn != country:
+                    country, rs = vn, _page(0, vn)
+                break
+
+    start = 0
+    while rs is not None:
+        jobs = (rs.get("data") or {}).get("jobs") or []
+        total = int(rs.get("totalHits") or 0)
+        if not jobs:
+            break
+        for j in jobs:
+            title = (j.get("title") or "").strip()
+            jid = str(j.get("jobId") or "").strip()
+            # Tenants differ on which of these they populate: DHL/ABB fill
+            # cityState, BCG leaves it null and fills location/city.
+            loc = str(j.get("cityState") or j.get("location") or j.get("city")
+                      or j.get("country") or "").strip()
+            row_country = str(j.get("country") or "").strip()
+            if not title or not jid:
+                continue
+            # Drop the soft-filter leakage — a foreign country tag is decisive,
+            # otherwise fall back to reading the location string.
+            if row_country and not _is_vn_loc(row_country):
+                continue
+            if not row_country and loc and not _is_vn_loc(loc):
+                continue
+            url = f"{origin}/{locale}/job/{jid}/{_phenom_slug(title)}"
+            if url in seen:
+                continue
+            seen.add(url)
+            out.append({"title": title[:200], "url": url, "location": loc[:120],
+                        "description": ""})
+        start += _PER
+        if (total and start >= total) or len(jobs) < _PER \
+                or len(out) >= _MAX_ATS_JOBS or start >= _MAX_ATS_JOBS:
+            break
+        rs = _page(start, country)
+    logger.info(f"[ats] phenom-widgets → {len(out)} VN jobs ({origin})")
     return out
+
+
+def _phenom_slug(title: str) -> str:
+    s = re.sub(r"[^a-z0-9]+", "-", _norm_title(title)).strip("-")
+    return s or "job"
 
 
 # ── Oracle Cloud HCM / Fusion (Hilton, …) — public recruiting REST ──────────
@@ -560,28 +672,37 @@ def _oracle_hcm(career_url: str) -> list[dict]:
     site = m.group(1) if m else "CX_1"
     country = os.getenv("DISCOVER_COUNTRY", "Vietnam")
     ep = f"{origin}/hcmRestApi/resources/latest/recruitingCEJobRequisitions"
-    finder = f"findReqs;siteNumber={site},facetsList=LOCATIONS;limit=50,keyword={country}"
-    out = []
-    try:
-        r = requests.get(ep, headers=_JSON_POST, timeout=_TIMEOUT,
-                         params={"onlyData": "true",
-                                 "expand": "requisitionList.secondaryLocations", "finder": finder})
-        if r.status_code != 200 or "json" not in r.headers.get("content-type", ""):
-            return []
-        items = (r.json() or {}).get("items", [])
-        rl = items[0].get("requisitionList", []) if items else []
-        for it in rl:
-            title = (it.get("Title") or "").strip()
-            loc = it.get("PrimaryLocation") or ""
-            if not title or not _is_vn_loc(loc):
-                continue
-            jid = it.get("Id")
-            url = (f"{origin}/hcmUI/CandidateExperience/en/sites/{site}/job/{jid}"
-                   if jid else career_url)
-            out.append({"title": title[:200], "url": url, "location": str(loc)[:120],
-                        "description": _strip_html(it.get("ShortDescriptionStr", ""))})
-    except Exception as e:
-        logger.info(f"[ats] oracle-hcm {origin} failed: {str(e)[:80]}")
+
+    def _query(filt: str) -> list[dict]:
+        rows = []
+        try:
+            r = requests.get(ep, headers=_JSON_POST, timeout=_TIMEOUT,
+                             params={"onlyData": "true",
+                                     "expand": "requisitionList.secondaryLocations",
+                                     "finder": f"findReqs;siteNumber={site},"
+                                               f"facetsList=LOCATIONS;limit=50,{filt}"})
+            if r.status_code != 200 or "json" not in r.headers.get("content-type", ""):
+                return []
+            items = (r.json() or {}).get("items", [])
+            rl = items[0].get("requisitionList", []) if items else []
+            for it in rl:
+                title = (it.get("Title") or "").strip()
+                loc = it.get("PrimaryLocation") or ""
+                if not title or not _is_vn_loc(loc):
+                    continue
+                jid = it.get("Id")
+                url = (f"{origin}/hcmUI/CandidateExperience/en/sites/{site}/job/{jid}"
+                       if jid else career_url)
+                rows.append({"title": title[:200], "url": url, "location": str(loc)[:120],
+                             "description": _strip_html(it.get("ShortDescriptionStr", ""))})
+        except Exception as e:
+            logger.info(f"[ats] oracle-hcm {origin} failed: {str(e)[:80]}")
+        return rows
+
+    # keyword search first (works on the VN-heavy tenants), but some tenants
+    # spell-correct it away ("Vietnam" → "vienna" on Oracle's own board) — when
+    # it yields nothing VN, retry with the location filter, which can't drift.
+    out = _query(f"keyword={country}") or _query(f"location={country}")
     logger.info(f"[ats] oracle-hcm:{site} → {len(out)} VN jobs ({origin})")
     return out
 

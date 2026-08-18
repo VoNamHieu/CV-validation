@@ -1,8 +1,13 @@
 """Periodic store refresh — meant to run as a Railway Cron service.
 
-Five steps, in order — each wrapped in its own try/except (one step failing
-logs and moves on; it does NOT abort the rest, since with restartPolicyType =
-"NEVER" a hard-abort just means the whole refresh waits 8 hours):
+The numbered steps below run in order — each wrapped in its own try/except
+(one step failing logs and moves on; it does NOT abort the rest, since with
+restartPolicyType = "NEVER" a hard-abort just means the whole refresh waits 8
+hours). Interleaved with them are the career-page DRIFT DETECTORS (see
+app/services/ops_alert.py): feed_died + career_url_moved right after step 1,
+links_broken inside step 3's scan, url_scheme_changed inside step 1's upsert
+path — each Telegrams the operator (deduped) when a company's career site
+moves or changes its URL scheme:
 
   1. ``ingest_featured_ats`` — two-phase pull of every featured company's ATS
      feed into the store (see job_ingest.py's docstring for the phase split).
@@ -66,6 +71,93 @@ _TOTAL_TIMEOUT = 90 * 60  # hard ceiling for the whole run; cadence is 8h
 _DEAD_GRACE_HOURS = int(os.getenv("CRON_DEAD_GRACE_HOURS", "20"))
 
 
+_DRIFT_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+             "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+
+
+def _mostly_broken(checked: int, broken: int) -> bool:
+    """Per-company link-scan verdict: small samples need unanimity, bigger
+    ones a supermajority — either way it reads "the site's URL format died",
+    not "a few postings closed"."""
+    return (checked >= 3 and broken == checked) or (checked >= 5 and broken / checked >= 0.6)
+
+
+async def _diagnose_feed_death(career_url: str) -> str:
+    """One cheap probe → the root-cause class for a feed_died alert, from the
+    taxonomy every dead feed so far has fallen into: site unreachable,
+    anti-bot wall, whole-site migration (host redirect), dead endpoint, or
+    "page alive → API/adapter drift or genuinely 0 VN openings" (DSV/Ogilvy)."""
+    import httpx
+    from urllib.parse import urlparse
+
+    def _host(u: str) -> str:
+        return (urlparse(u).netloc or "").lower().removeprefix("www.")
+
+    try:
+        async with httpx.AsyncClient(timeout=10, follow_redirects=True,
+                                     headers={"User-Agent": _DRIFT_UA}) as client:
+            r = await client.get(career_url)
+    except Exception as e:  # noqa: BLE001
+        return (f"career_url không truy cập được ({type(e).__name__}) — "
+                f"site chết hoặc chặn IP tầng mạng")
+    low = (r.text or "")[:20000].lower()
+    if r.status_code in (403, 429) or "just a moment" in low or "cf-browser-verification" in low:
+        return (f"HTTP {r.status_code} + dấu hiệu anti-bot — chặn scanner/IP "
+                f"(link có thể vẫn sống với người dùng); thử /debug/fetch từ IP VN")
+    final = _host(str(r.url))
+    if final and final != _host(career_url):
+        return (f"career_url redirect sang host khác: {final} — site đã migrate, "
+                f"cần cập nhật career_url + adapter (bài Ahamove)")
+    if r.status_code >= 400:
+        return f"HTTP {r.status_code} — endpoint chết, site có thể đổi cấu trúc URL"
+    return ("trang career vẫn sống (200, cùng host) — hoặc API/adapter lệch "
+            "(đổi format, bài GHN) hoặc công ty hết job VN thật (bài DSV)")
+
+
+async def _career_url_drift() -> dict:
+    """Detect featured career_url pages that now redirect to a DIFFERENT host —
+    the "whole site migrated" class (Ahamove: ahamove.com/recruitment →
+    careers.ahamove.com). Only the redirect target is judged: fetch errors are
+    ignored here (feed_died's turf), and a 4xx final page still shows its host.
+    Same-host redirects (path moves, / → /careers) are normal and stay quiet."""
+    import httpx
+    from urllib.parse import urlparse
+
+    from app.data.featured_companies import FEATURED_COMPANIES
+    from app.services import ops_alert
+
+    def _host(u: str) -> str:
+        return (urlparse(u).netloc or "").lower().removeprefix("www.")
+
+    sem = asyncio.Semaphore(10)
+    moved: list[tuple] = []
+
+    async with httpx.AsyncClient(timeout=10, follow_redirects=True,
+                                 headers={"User-Agent": _DRIFT_UA}) as client:
+        async def probe(c) -> None:
+            async with sem:
+                try:
+                    r = await client.get(c.career_url)
+                except Exception:  # noqa: BLE001 — unreachable is not "moved"
+                    return
+            final = _host(str(r.url))
+            if final and final != _host(c.career_url):
+                moved.append((c, final))
+
+        await asyncio.gather(*[probe(c) for c in FEATURED_COMPANIES],
+                             return_exceptions=True)
+
+    for c, final in moved:
+        await ops_alert.alert(
+            "career_url_moved", c.name,
+            f"career_url giờ redirect sang host khác: {_host(c.career_url)} → {final}. "
+            f"Cập nhật career_url trong featured_companies + kiểm tra adapter còn đọc đúng nguồn.",
+            fingerprint=f"career_url_moved:{c.name}:{final}", ttl_days=30,
+            context={"career_url": c.career_url, "final_host": final},
+        )
+    return {"probed": len(FEATURED_COMPANIES), "moved": len(moved)}
+
+
 async def _link_scan() -> dict:
     """Validate a random sample of featured job URLs and log broken/suspect
     ones. Self-contained mirror of the /monitor/scan route (no admin dep).
@@ -111,6 +203,7 @@ async def _link_scan() -> dict:
     logged = {e.get("url") for e in await link_health.list_links()}
 
     broken = unknown = ok = failed = 0
+    by_company: dict[str, list[int]] = {}  # name → [checked, broken]
     for r in results:
         if isinstance(r, BaseException):
             # A systemic failure (Redis down, DNS broken in the container)
@@ -118,6 +211,10 @@ async def _link_scan() -> dict:
             failed += 1
             continue
         st = r.get("status")
+        tally = by_company.setdefault(r.get("company") or "?", [0, 0])
+        tally[0] += 1
+        if st == "broken":
+            tally[1] += 1
         if st == "ok":
             ok += 1
             if r["url"] not in logged:
@@ -141,6 +238,20 @@ async def _link_scan() -> dict:
             message=f"{failed}/{len(jobs)} link check(s) raised an exception",
             context={"failed": failed, "total": len(jobs)},
         )
+
+    # Drift detector: when most of a company's SAMPLED detail URLs are dead,
+    # that's not N coincidental closures — the site likely changed its URL
+    # format (the GHN class: old links 200 into an empty SPA shell). Small
+    # samples need unanimity; bigger ones a supermajority.
+    from app.services import ops_alert
+    for cname, (checked, broken_n) in sorted(by_company.items()):
+        if _mostly_broken(checked, broken_n):
+            await ops_alert.alert(
+                "links_broken", cname,
+                f"{broken_n}/{checked} URL job trong mẫu scan hỏng (shell rỗng/404/hết hạn) — "
+                f"khả năng site đổi format URL chi tiết. Xem log link monitor.",
+                context={"checked": checked, "broken": broken_n},
+            )
     return {"scanned": len(jobs), "broken": broken, "unknown": unknown, "ok": ok, "failed": failed}
 
 
@@ -149,6 +260,7 @@ async def _run() -> None:
     render_limit_env = os.getenv("CRON_RENDER_LIMIT")
     render_limit = int(render_limit_env) if render_limit_env else None
 
+    ingest: dict = {}
     try:
         from app.services.job_ingest import ingest_featured_ats
         logger.info("[cron] ingest_featured_ats starting… (render=%s, render_limit=%s)",
@@ -163,6 +275,48 @@ async def _run() -> None:
         )
 
     try:
+        # Drift detector (feed_died): a company whose feed USED to carry jobs
+        # (compat baseline) and has now come back empty for ≥2 consecutive
+        # cycles either migrated its site or — when the compat log says
+        # antibot — is IP-blocking us (say that, not "site moved": the
+        # TGDD/Chailease lesson). One cycle of quiet is just a transient.
+        empties = ingest.get("ats_feed_empty") or []
+        if empties:
+            from app.services import ops_alert
+            from app.services.job_ingest import _heal_eligibility
+            elig = await _heal_eligibility()
+            for e in empties:
+                s = elig.get(e.get("name")) or {}
+                if s.get("baseline", 0) < 3 or s.get("fail_streak", 0) < 2:
+                    continue
+                if s.get("antibot"):
+                    detail = (f"Feed rỗng {s['fail_streak']} chu kỳ (baseline {s['baseline']} job), "
+                              f"compat = needs_capture → nghi bị chặn IP từ Railway, "
+                              f"chưa chắc site đổi URL. Thử /debug/fetch từ IP VN trước.")
+                else:
+                    cause = await _diagnose_feed_death(e.get("career_url") or "")
+                    detail = (f"Feed rỗng {s['fail_streak']} chu kỳ liên tiếp "
+                              f"(baseline {s['baseline']} job).\n"
+                              f"Chẩn đoán: {cause}\n"
+                              f"career_url: {e.get('career_url')}")
+                await ops_alert.alert("feed_died", e.get("name") or "?", detail,
+                                      context={**e, **s})
+    except Exception as e:
+        logger.exception("[cron] feed-died detector failed — continuing")
+        await incidents_svc.report("cron_error", module="cron.feed_died_detector", error=e)
+
+    try:
+        # Drift detector (career_url_moved): career pages now redirecting to a
+        # different host — catches full site migrations even while the old
+        # adapter still limps along.
+        logger.info("[cron] career_url drift probe starting…")
+        drift = await _career_url_drift()
+        logger.info("[cron] career_url drift probe done: %s", drift)
+    except Exception as e:
+        logger.exception("[cron] career_url drift probe failed — continuing")
+        await incidents_svc.report("cron_error", module="cron.career_url_drift", error=e)
+
+    try:
         from app.services.embed_backfill import embed_backfill
         logger.info("[cron] embedding backfill starting…")
         embedded = await embed_backfill()
@@ -170,6 +324,15 @@ async def _run() -> None:
     except Exception as e:
         logger.exception("[cron] embedding backfill failed — continuing with remaining steps")
         await incidents_svc.report("cron_error", module="cron.embed_backfill", error=e)
+
+    try:
+        from app.services.jd_backfill import jd_backfill
+        logger.info("[cron] JD backfill starting…")
+        jd_filled = await jd_backfill()
+        logger.info("[cron] JD backfill done: %d job(s) got a stored JD", jd_filled)
+    except Exception as e:
+        logger.exception("[cron] JD backfill failed — continuing with remaining steps")
+        await incidents_svc.report("cron_error", module="cron.jd_backfill", error=e)
 
     try:
         from app.services.seniority_backfill import seniority_backfill

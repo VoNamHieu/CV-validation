@@ -99,8 +99,16 @@ def _mbbank(career_url: str) -> list[dict]:
             jid = it.get("id")
             if not name or not jid:
                 continue
+            # 2026-08: the SPA's detail route moved — /job/{id} on the
+            # tuyendung host now renders the HOMEPAGE (empty shell); the card
+            # click navigates to careers.<host>/list-of-posts/… with the SAME
+            # ids. external_id = the libra id, so the next route change swaps
+            # URLs in place instead of re-identifying 190 rows.
+            wg = it.get("workGroupId") or ""
             out.append({"title": name[:200],
-                        "url": f"https://tuyendung.mbbank.com.vn/job/{jid}",
+                        "url": ("https://careers.mbbank.com.vn/list-of-posts/"
+                                f"detail-list-of-posts?id={jid}&workGroupId={wg}"),
+                        "external_id": str(jid),
                         "location": str(it.get("province") or "")[:120], "description": ""})
         if page + 1 >= body.get("totalPages", page + 1) or len(out) >= _MAX_ATS_JOBS:
             break
@@ -166,6 +174,12 @@ def _iviec(career_url: str) -> list[dict]:
 # Cards render client-side (no anchors), but the jobs come from a reachable
 # public API: GET online-gateway.ghn.vn/.../recruit/search-recruit. Title lives
 # in selectedListRecruit.label, province in provinceNameText.label.
+# 2026-08: detail URLs moved from the Mongo ObjectId to the `key` slug
+# (/recruit/detail/sbda-1786635872) — ObjectId URLs render an EMPTY shell now,
+# so links MUST come from `key`. The server also caps pageSize at 6 regardless
+# of what we ask, and the list mixes in hidden drafts (status 3/5, duplicate
+# rows of the same posting) and expired postings — keep status 7 with a live
+# end_time and walk pages.
 _GHN_API = ("https://online-gateway.ghn.vn/integration/recruit-ghn/"
             "public-api/recruit/search-recruit")
 
@@ -176,22 +190,34 @@ def _is_ghn(career_url: str) -> bool:
 
 def _ghn(career_url: str) -> list[dict]:
     out, seen = [], set()
+    now = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
-        r = requests.get(_GHN_API, headers=_JSON_POST, timeout=_TIMEOUT,
-                         params={"search": "", "page": 1, "pageSize": 60})
-        if r.status_code != 200:
-            return []
-        for j in ((r.json() or {}).get("data", {}) or {}).get("list", []):
-            sel = j.get("selectedListRecruit") or {}
-            title = (sel.get("label") or "").strip()
-            rid = sel.get("value") or j.get("id")
-            if not title or rid in seen:
-                continue
-            seen.add(rid)
-            prov = (j.get("provinceNameText") or {}).get("label") or ""
-            url = f"https://tuyendung.ghn.vn/recruit/detail/{rid}" if rid else "https://tuyendung.ghn.vn/recruit/"
-            out.append({"title": title[:200], "url": url,
-                        "location": str(prov)[:120], "description": _strip_html(j.get("content", ""))})
+        for page in range(1, 13):
+            r = requests.get(_GHN_API, headers=_JSON_POST, timeout=_TIMEOUT,
+                             params={"search": "", "page": page, "pageSize": 6})
+            if r.status_code != 200:
+                break
+            batch = ((r.json() or {}).get("data", {}) or {}).get("list", [])
+            if not batch:
+                break
+            for j in batch:
+                sel = j.get("selectedListRecruit") or {}
+                title = (sel.get("label") or "").strip()
+                rid = sel.get("value") or j.get("id")
+                key = (j.get("key") or "").strip()
+                if not title or not key or rid in seen:
+                    continue
+                if j.get("status") != 7:
+                    continue
+                end = j.get("end_time") or ""
+                if end and end <= now:  # both Zulu ISO-8601 → lexical compare is safe
+                    continue
+                seen.add(rid)
+                prov = (j.get("provinceNameText") or {}).get("label") or ""
+                out.append({"title": title[:200],
+                            "url": f"https://tuyendung.ghn.vn/recruit/detail/{key}",
+                            "location": str(prov)[:120],
+                            "description": _strip_html(j.get("content", ""))})
             if len(out) >= 40:
                 break
     except Exception as e:
@@ -202,44 +228,51 @@ def _ghn(career_url: str) -> list[dict]:
 
 
 
-# ── Ahamove — Strapi CMS (cms.ahamove.com) ──────────────────────────────────
-# ahamove.com/job is a Next.js SPA, but jobs come from a public Strapi API that
-# already carries the full JD inline:
-#   GET cms.ahamove.com/api/jobs?populate=*
-#   → {data:[{title, slug, job_description, job_requirement, benefit, ...}]}
-_AHAMOVE_API = "https://cms.ahamove.com/api/jobs"
+# ── Ahamove — bespoke ATS (careers.ahamove.com / api-ats.ahamove.com) ───────
+# 2026-08: ahamove.com/recruitment now 302s to careers.ahamove.com (Vite SPA)
+# backed by a public JSON API with the full JD inline:
+#   GET api-ats.ahamove.com/api/v1/public/jobs?page=N&pageSize=50
+#   → {items:[{title, slug, location, descriptionHtml, requirementsHtml,
+#              benefitsHtml, ...}], total, page, pageSize}
+# Detail pages live at careers.ahamove.com/jobs/{slug}. The old Strapi
+# cms.ahamove.com/api/jobs collection is EMPTY, and its /api/posts sibling is
+# the marketing blog (a generic SPA-sniff of the dead page once ingested promo
+# posts as jobs) — never fall back to cms.ahamove.com here.
+_AHAMOVE_API = "https://api-ats.ahamove.com/api/v1/public/jobs"
 
 
 def _is_ahamove(career_url: str, html: str | None = None) -> bool:
     host = (urlparse(career_url or "").netloc or "").lower().removeprefix("www.")
-    if host == "ahamove.com":
+    if host in ("ahamove.com", "careers.ahamove.com"):
         return True
-    return bool(html) and "cms.ahamove.com" in html.lower()
+    return bool(html) and "api-ats.ahamove.com" in html.lower()
 
 
 def _ahamove(career_url: str) -> list[dict]:
-    out = []
+    out, seen = [], set()
     try:
-        r = requests.get(_AHAMOVE_API, headers=_JSON_POST, timeout=_TIMEOUT,
-                         params={"populate": "*", "pagination[pageSize]": 100})
-        if r.status_code != 200:
-            return []
-        for j in (r.json() or {}).get("data", []) or []:
-            a = j.get("attributes", j) if isinstance(j, dict) else {}
-            title = (a.get("title") or "").strip()
-            slug = a.get("slug") or a.get("id_job")
-            if not title or not slug:
-                continue
-            desc = "\n\n".join(_strip_html(a.get(k) or "") for k in
-                               ("job_description", "job_requirement", "benefit") if a.get(k))
-            loc = a.get("locations")
-            if isinstance(loc, dict):  # Strapi relation: {"data":[{"attributes":{"name":…}}]}
-                loc = ", ".join((x.get("attributes", {}) or {}).get("name", "")
-                                for x in (loc.get("data") or []) if isinstance(x, dict))
-            elif isinstance(loc, list):
-                loc = ", ".join(x.get("name", "") if isinstance(x, dict) else str(x) for x in loc)
-            out.append({"title": title[:200], "url": f"https://ahamove.com/job/{slug}",
-                        "location": str(loc or "")[:120], "description": desc.strip()})
+        for page in range(1, 9):
+            r = requests.get(_AHAMOVE_API, headers=_JSON_POST, timeout=_TIMEOUT,
+                             params={"page": page, "pageSize": 50})
+            if r.status_code != 200:
+                break
+            batch = (r.json() or {}).get("items", []) or []
+            for j in batch:
+                title = (j.get("title") or "").strip()
+                slug = j.get("slug")
+                if not title or not slug or slug in seen:
+                    continue
+                seen.add(slug)
+                desc = "\n\n".join(_strip_html(j.get(k) or "") for k in
+                                   ("descriptionHtml", "requirementsHtml", "benefitsHtml") if j.get(k))
+                loc = j.get("location") or j.get("locations")
+                if isinstance(loc, list):
+                    loc = ", ".join(str(x) for x in loc)
+                out.append({"title": title[:200],
+                            "url": f"https://careers.ahamove.com/jobs/{slug}",
+                            "location": str(loc or "")[:120], "description": desc.strip()})
+            if len(batch) < 50:
+                break
     except Exception as e:
         logger.info(f"[ats] ahamove failed: {str(e)[:80]}")
     logger.info(f"[ats] ahamove → {len(out)} jobs")

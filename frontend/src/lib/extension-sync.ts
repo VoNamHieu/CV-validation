@@ -123,6 +123,25 @@ export function pushTokenToExtension(token: string | null | undefined): Promise<
     );
 }
 
+/**
+ * Push an ALREADY-RESOLVED auth token to the extension.
+ *
+ * A Supabase access token lives ~1h, and the extension needs a live one to make
+ * its credit-metered / ATS-credential calls. Callers on the auth path (getSession
+ * resolve, onAuthStateChange) already hold the session, so they pass its
+ * access_token straight in — deliberately NOT reaching back into getSession(),
+ * which deadlocks on the supabase-js v2 auth lock when awaited inside
+ * onAuthStateChange (a silent hang that leaves the extension on a stale token
+ * across every reload). Best-effort: fails silently when the extension isn't there.
+ */
+export function pushTokenToExtension(token: string | null | undefined): Promise<SyncResult> {
+    if (!token) return Promise.resolve({ ok: false, error: "Chưa đăng nhập." });
+    return postAndAwait(
+        { type: "JOBFIT_SYNC_TOKEN", token },
+        "JOBFIT_SYNC_TOKEN_RESPONSE",
+    );
+}
+
 // ─────────────────────────────── Mode 1 ───────────────────────────────
 
 /**

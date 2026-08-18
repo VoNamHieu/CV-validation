@@ -23,6 +23,11 @@
 #   REDIS_URL        — reference the web service's value. The link-scan step reads
 #                      the featured-jobs cache from Redis; without it the scan
 #                      finds 0 URLs (ingest still works — it hits ATS directly).
+#   TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID — reference the web service's values.
+#                      Without them the career-page drift detectors
+#                      (career_url_moved / url_scheme_changed / links_broken /
+#                      feed_died — see app/services/ops_alert.py) still log and
+#                      write incident rows, but nothing reaches Telegram.
 #   CRON_RENDER=1    — turns on phase 2 of the ingest (render + SPA-sniff for
 #                      whatever phase 1's cheap pass left empty, ~100+
 #                      companies). Without it the cron only does the cheap

@@ -52,7 +52,10 @@ def _strip_html(s: str) -> str:
 # adapters, and SuccessFactors detail lives on the per-job page.
 
 def _mbbank_detail(jd_url: str) -> str | None:
-    m = re.search(r"mbbank\.com\.vn/job/([0-9a-f]{12,})", jd_url, re.I)
+    # Old route: tuyendung.mbbank.com.vn/job/{id}; new (2026-08): careers.
+    # mbbank.com.vn/list-of-posts/detail-list-of-posts?id={id}&workGroupId=…
+    # Same libra ids either way — accept both shapes.
+    m = re.search(r"mbbank\.com\.vn/(?:job/|[^#]*[?&]id=)([0-9a-f]{12,})", jd_url, re.I)
     if not m:
         return None
     try:
@@ -123,10 +126,280 @@ def _successfactors_detail(jd_url: str) -> str | None:
     return body or None
 
 
+def _smartrecruiters_detail(jd_url: str) -> str | None:
+    # jobs/careers.smartrecruiters.com/{slug}/{numeric-id} — the SmartRecruiters
+    # search adapter lists postings without a JD (description=""), and a generic
+    # crawl of the public posting page pulls in page chrome (browser-upgrade
+    # banner, "I'm interested" apply buttons, WeChat share widget, privacy/legal
+    # boilerplate). The public API returns the JD as clean sections, so assemble
+    # those instead.
+    m = re.search(r"smartrecruiters\.com/([A-Za-z0-9._-]+)/(\d{6,})", jd_url)
+    if not m:
+        return None
+    slug, jid = m.group(1), m.group(2)
+    try:
+        r = requests.get(
+            f"https://api.smartrecruiters.com/v1/companies/{slug}/postings/{jid}",
+            headers={"User-Agent": _UA, "Accept": "application/json"}, timeout=_TIMEOUT,
+        )
+        if r.status_code != 200:
+            return None
+        d = r.json()
+    except Exception:
+        return None
+    secs = ((d or {}).get("jobAd") or {}).get("sections") or {}
+    parts = []
+    for k in ("jobDescription", "qualifications", "companyDescription", "additionalInformation"):
+        t = _strip_html(((secs.get(k) or {}).get("text")) or "")
+        if t:
+            parts.append(t)
+    body = "\n\n".join(parts).strip()
+    if len(body) < _MIN_DESC:
+        return None
+    return f"Job Title: {d.get('name', '')}\n\n{body}".strip()
+
+
+def _workday_cxs_ref(jd_url: str) -> tuple[str, str, str, str] | None:
+    """``(origin, tenant, site, ext)`` for a Workday posting URL, else None.
+
+    Workday hands out the same posting under two host shapes, and the CXS API
+    path is identical for both — only where the TENANT lives differs:
+      • ``{tenant}.wdN.myworkdayjobs.com/[locale/]{site}/job/…``  → tenant in host
+      • ``wdN.myworkdaysite.com/[locale/]recruiting/{tenant}/{site}/job/…`` → in path
+    The second shape is what Phenom-fronted tenants publish as their applyUrl
+    (Mondelēz), so keying only on the first left those JDs to a generic crawl of
+    the SPA — i.e. page chrome, not the job.
+    """
+    m = re.match(
+        r"https?://([^.]+)\.(wd\d+)\.myworkdayjobs\.com/(?:[a-z]{2}-[A-Z]{2}/)?([^/]+)(/job/.+)$",
+        jd_url)
+    if m:
+        tenant, wd, site, ext = m.group(1), m.group(2), m.group(3), m.group(4)
+        return f"https://{tenant}.{wd}.myworkdayjobs.com", tenant, site, ext
+    m = re.match(
+        r"https?://(wd\d+)\.myworkdaysite\.com/(?:[a-z]{2}-[A-Z]{2}/)?recruiting/([^/]+)/([^/]+)(/job/.+)$",
+        jd_url)
+    if m:
+        wd, tenant, site, ext = m.group(1), m.group(2), m.group(3), m.group(4)
+        return f"https://{wd}.myworkdaysite.com", tenant, site, ext
+    return None
+
+
+def _workday_detail(jd_url: str) -> str | None:
+    # Like SmartRecruiters, the Workday search adapter lists postings with
+    # description="", and a generic crawl of the SPA posting page pulls in page
+    # chrome ("Welcome to our new career portal", Apply/Save-job, cookie banner,
+    # "© Workday, Inc." footer). The public CXS API returns the JD as clean HTML.
+    ref = _workday_cxs_ref(jd_url)
+    if not ref:
+        return None
+    base, tenant, site, ext = ref
+    try:
+        r = requests.get(
+            f"{base}/wday/cxs/{tenant}/{site}{ext}",
+            headers={"User-Agent": _UA, "Accept": "application/json"}, timeout=_TIMEOUT,
+        )
+        if r.status_code != 200:
+            return None
+        d = r.json()
+    except Exception:
+        return None
+    info = (d or {}).get("jobPostingInfo") or {}
+    body = _strip_html(info.get("jobDescription", ""))
+    if len(body) < _MIN_DESC:
+        return None
+    return f"Job Title: {info.get('title', '')}\n\n{body}".strip()
+
+
+def _oracle_hcm_detail(jd_url: str) -> str | None:
+    # {origin}/hcmUI/CandidateExperience/{locale}/sites/{site}/job/{jid}. The
+    # Oracle-HCM list adapter only carries ShortDescriptionStr (often empty); the
+    # full JD lives in the requisition-details REST API. A generic crawl of the
+    # SPA page instead pulls in portal chrome.
+    m = re.search(
+        r"(https?://[^/]+)/hcmUI/CandidateExperience/[^/]+/sites/([^/]+)/job/([^/?#]+)", jd_url)
+    if not m:
+        return None
+    origin, site, jid = m.group(1), m.group(2), m.group(3)
+    try:
+        r = requests.get(
+            f"{origin}/hcmRestApi/resources/latest/recruitingCEJobRequisitionDetails",
+            headers={"User-Agent": _UA, "Accept": "application/json"},
+            params={"onlyData": "true", "expand": "all",
+                    "finder": f'ById;Id="{jid}",siteNumber={site}'}, timeout=_TIMEOUT,
+        )
+        if r.status_code != 200:
+            return None
+        it = ((r.json() or {}).get("items") or [None])[0]
+    except Exception:
+        return None
+    if not it:
+        return None
+    parts = [_strip_html(it.get("ExternalDescriptionStr", "")),
+             _strip_html(it.get("ExternalQualificationsStr", "")),
+             _strip_html(it.get("ExternalResponsibilitiesStr", ""))]
+    body = "\n\n".join(p for p in parts if p).strip()
+    if len(body) < _MIN_DESC:
+        return None
+    return f"Job Title: {it.get('Title', '')}\n\n{body}".strip()
+
+
+def _eightfold_detail(jd_url: str) -> str | None:
+    # {origin}/careers/job/{id} (or ?pid={id}). The list adapter has no JD; the
+    # public apply API returns it cleanly.
+    m = re.search(r"(https?://[^/]+).*?(?:/job/|[?&]pid=)(\d{6,})", jd_url)
+    if not m:
+        return None
+    origin, jid = m.group(1), m.group(2)
+    try:
+        r = requests.get(f"{origin}/api/apply/v2/jobs/{jid}",
+                         headers={"User-Agent": _UA, "Accept": "application/json"}, timeout=_TIMEOUT)
+        if r.status_code != 200:
+            return None
+        d = r.json()
+    except Exception:
+        return None
+    job = d.get("job", d) if isinstance(d, dict) else {}
+    body = _strip_html(job.get("job_description") or job.get("description") or "")
+    if len(body) < _MIN_DESC:
+        return None
+    return f"Job Title: {job.get('name') or job.get('title', '')}\n\n{body}".strip()
+
+
+def _phenom_detail(jd_url: str) -> str | None:
+    # Phenom SSR job page: {origin}/job/{slug}/{numeric-id}/. The Phenom list
+    # adapter has no JD and a full-page crawl adds portal chrome, but the JD is
+    # server-rendered inside a schema.org itemprop="description" element — extract
+    # just that. Gated to the Phenom /job/{slug}/{id}/ URL shape (base.vn's bare
+    # /job/{id} has no slug segment and won't match).
+    if not re.search(r"/job/[^/]+/\d{5,}/?(?:[?#]|$)", jd_url):
+        return None
+    try:
+        r = requests.get(jd_url, headers={"User-Agent": _UA}, timeout=_TIMEOUT)
+        if r.status_code != 200:
+            return None
+        h = r.text
+    except Exception:
+        return None
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(h, "html.parser")
+    el = (soup.select_one('[itemprop="description"]')
+          or soup.select_one('[class*="job-description" i], [class*="jobdescription" i]'))
+    if not el:
+        return None
+    body = _strip_html(str(el))
+    if len(body) < _MIN_DESC:
+        return None
+    return body
+
+
+def _talentnet_detail(jd_url: str) -> str | None:
+    # Talentnet talent-network SaaS (shared by PNJ / SHB / VNDIRECT / Hoa Sen /
+    # Acecook / Viettel IDC / …): SSR detail page {origin}/viec-lam/{slug}.html.
+    # The list adapter ships description=""; the page carries a schema.org
+    # JSON-LD JobPosting (clean) and a `.job-body` content div.
+    if "/viec-lam/" not in jd_url or not jd_url.endswith(".html"):
+        return None
+    try:
+        r = requests.get(jd_url, headers={"User-Agent": _UA}, timeout=_TIMEOUT)
+        if r.status_code != 200:
+            return None
+        h = r.text
+    except Exception:
+        return None
+    import json
+    for blob in re.findall(r'<script[^>]+ld\+json[^>]*>(.*?)</script>', h, re.S):
+        try:
+            d = json.loads(blob)
+        except Exception:
+            continue
+        for it in (d if isinstance(d, list) else [d]):
+            if isinstance(it, dict) and "JobPosting" in str(it.get("@type", "")):
+                body = _strip_html(it.get("description", ""))
+                if len(body) >= _MIN_DESC:
+                    title = it.get("title", "")
+                    return (f"Job Title: {title}\n\n{body}").strip() if title else body
+    from bs4 import BeautifulSoup
+    el = BeautifulSoup(h, "html.parser").select_one(".job-body, [class*='job-detail']")
+    if el:
+        body = _strip_html(str(el))
+        if len(body) >= _MIN_DESC:
+            return body
+    return None
+
+
+def _aeon_detail(jd_url: str) -> str | None:
+    # tuyendung.aeon.com.vn/job-detail/{id} → the eHiring detail API returns the
+    # JD in clean fields (the list adapter ships description="").
+    m = re.search(r"tuyendung\.aeon\.com\.vn/job-detail/(\d+)", jd_url)
+    if not m:
+        return None
+    try:
+        r = requests.get(f"https://api-tuyendung.aeon.com.vn/api/hiring/{m.group(1)}",
+                         headers={"User-Agent": _UA, "Accept": "application/json"}, timeout=_TIMEOUT)
+        if r.status_code != 200:
+            return None
+        d = (r.json() or {}).get("data") or {}
+    except Exception:
+        return None
+    if not isinstance(d, dict):
+        return None
+    parts = [_strip_html(d.get(k) or "") for k in (
+        "description", "role_and_responsibilities", "key_activity",
+        "qualification_and_requirement", "preferred_skills", "benefit")]
+    body = "\n\n".join(p for p in parts if p).strip()
+    if len(body) < _MIN_DESC:
+        return None
+    return f"Job Title: {d.get('title', '')}\n\n{body}".strip()
+
+
+def _avature_detail(jd_url: str) -> str | None:
+    # Avature detail: {host}/{locale}/(externaljobs|jobs)/JobDetail/[{slug}/]{id}.
+    # The list adapter has no JD and a full-page crawl adds chrome. The JD lives in
+    # the Avature `.article__content__view` field(s) inside `.section--details`
+    # (the sibling `.article__content` sidebar holds only Job-ID/Posted-since
+    # metadata), so extract just those, skipping metadata-headed fields.
+    if "/JobDetail/" not in jd_url:
+        return None
+    try:
+        r = requests.get(jd_url, headers={"User-Agent": _UA}, timeout=_TIMEOUT)
+        if r.status_code != 200:
+            return None
+        h = r.text
+    except Exception:
+        return None
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(h, "html.parser")
+    sec = soup.select_one(".section--details") or soup
+    meta = re.compile(r"^\s*(job id|posted since|organization|company)\b", re.I)
+    parts, seen = [], set()
+    for el in sec.select(".article__content__view"):
+        t = _strip_html(str(el))
+        if len(t) > 250 and not meta.match(t) and t not in seen:
+            seen.add(t)
+            parts.append(t)
+    body = "\n\n".join(parts).strip()
+    if len(body) < _MIN_DESC:
+        return None
+    return body
+
+
 _DETAIL_ADAPTERS = (
     ("mbbank", _mbbank_detail),
     ("greenhouse", _greenhouse_detail),
+    # phenom before successfactors: the SF gate ("jobdescription"/"data-careersite"
+    # markers) also fires on a Phenom page and returns a TRUNCATED element, so it
+    # must not run first. phenom only matches /job/{slug}/{digits}/ — never the SF
+    # URL shape /job/{ut}/{jid}-{locale} — so this reorder is safe.
+    ("phenom", _phenom_detail),
     ("successfactors", _successfactors_detail),
+    ("smartrecruiters", _smartrecruiters_detail),
+    ("workday", _workday_detail),
+    ("oracle-hcm", _oracle_hcm_detail),
+    ("eightfold", _eightfold_detail),
+    ("avature", _avature_detail),
+    ("aeon", _aeon_detail),
+    ("talentnet", _talentnet_detail),
 )
 
 
@@ -159,6 +432,22 @@ def _urls_match(target: str, candidate: str) -> bool:
     if not candidate:
         return False
     return target == candidate or candidate.startswith(target) or target.startswith(candidate)
+
+
+def resolve_jd_detail_only(jd_url: str) -> str | None:
+    """Just the fast by-URL detail adapters (each gates on the URL first, so a
+    non-matching URL returns None with no HTTP). No list-fetch fallback — for the
+    JD backfill, where the fallback is useless (those list adapters ship
+    description="") and its pagination would make the backfill slow."""
+    for name, fn in _DETAIL_ADAPTERS:
+        try:
+            txt = fn(jd_url)
+        except Exception as e:  # never break the backfill
+            logger.info(f"[jd_resolver:{name}] {jd_url} → {str(e)[:80]}")
+            txt = None
+        if txt and len(txt) >= _MIN_DESC:
+            return txt
+    return None
 
 
 def resolve_jd_via_ats(jd_url: str) -> str | None:
@@ -233,6 +522,27 @@ async def resolve_full_jd(source_url: str, existing: str = "") -> str:
         return existing
 
     best = existing
+    # A stored description over the old 200-char bar is USUALLY the real JD — but
+    # some list adapters ship a marketing teaser (Phenom's `descriptionTeaser`,
+    # ~300 chars: "Join us and make an impact!") that clears that bar carrying
+    # none of the requirements. So up to _SUBSTANTIAL we still ask the by-URL
+    # detail adapters; each gates on the URL, so this is an instant no-op (zero
+    # HTTP) for a platform we have no adapter for.
+    try:
+        detail = await asyncio.wait_for(
+            asyncio.to_thread(resolve_jd_detail_only, source_url), timeout=12)
+        if detail and len(detail) > len(best):
+            best = detail
+    except asyncio.TimeoutError:
+        logger.info(f"[resolve_full_jd] detail timed out (12s) {source_url}")
+    except Exception as e:  # never break publish
+        logger.info(f"[resolve_full_jd] detail miss {source_url}: {str(e)[:80]}")
+
+    # Everything below is expensive (whole-board scan, then a browser). Keep the
+    # old bar for entering it: 200 chars of real JD is good enough.
+    if len(best) >= 200:
+        return best
+
     # The ATS list-scan paginates a whole board and often returns nothing for one
     # URL (e.g. thegioididong takes 20s+ → 0 chars). Cap it so a single slow site
     # can't hang the publish request — the crawl below usually gets the JD anyway.

@@ -100,24 +100,40 @@ export interface Application {
 // Supabase session JWT; falls back to the dev X-User-Id header. setUserId is
 // kept as the public name used elsewhere.
 import { getAuthHeaders, setDevUserId } from './auth-headers';
-import { reportIncident } from './incidents';
+import { isNetworkNoise, reportIncident } from './incidents';
 
 export const setUserId = setDevUserId;
+
+/** One dropped request is a blip; one that survives a retry is a fault. */
+const RETRY_MS = 800;
 
 async function req<T>(path: string, init?: RequestInit & { auth?: boolean }): Promise<T> {
     const headers: Record<string, string> = { ...(init?.headers as Record<string, string>) };
     if (init?.body) headers['Content-Type'] = 'application/json';
     if (init?.auth) Object.assign(headers, await getAuthHeaders());
-    let res: Response;
-    try {
-        res = await fetch(path, { ...init, headers });
-    } catch (netErr) {
-        // Network failure (offline, DNS, CORS) — log as an incident then rethrow.
-        reportIncident({
-            incident_type: 'api_error', module: 'db.req',
-            message: netErr instanceof Error ? netErr.message : 'network error',
-            context: { endpoint: path, kind: 'network' },
-        });
+
+    // Retry GETs only — replaying a write could double-apply it.
+    const retriable = !init?.method || init.method.toUpperCase() === 'GET';
+    let res: Response | null = null;
+    let netErr: unknown = null;
+    for (let attempt = 0; attempt < (retriable ? 2 : 1) && !res; attempt++) {
+        if (attempt) await new Promise((r) => setTimeout(r, RETRY_MS));
+        try {
+            res = await fetch(path, { ...init, headers });
+        } catch (e) {
+            netErr = e;
+        }
+    }
+    if (!res) {
+        // The fetch never completed. Report it only when the browser wasn't the
+        // cause (offline, tab hidden/unloading, aborted) — see isNetworkNoise.
+        if (!isNetworkNoise(netErr)) {
+            reportIncident({
+                incident_type: 'api_error', module: 'db.req', severity: 'warning',
+                message: netErr instanceof Error ? netErr.message : 'network error',
+                context: { endpoint: path, kind: 'network', retried: retriable },
+            });
+        }
         throw netErr;
     }
     if (!res.ok) {

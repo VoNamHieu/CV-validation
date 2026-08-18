@@ -58,7 +58,8 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         homepage="https://grab.com",
         # grab.careers is a JS shell; the real board is SmartRecruiters (company
         # "Grab") → existing generic SmartRecruiters adapter, VN-facet filtered.
-        career_url="https://jobs.smartrecruiters.com/Grab",
+        # jobs.smartrecruiters.com now 301s to careers.<same> — same SR gate
+        career_url="https://careers.smartrecruiters.com/Grab",
     ),
     FeaturedCompany(
         name="Be",
@@ -98,9 +99,15 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         # `navervietnam` (all postings are HCMC) → generic `greenhouse` fetcher.
         career_url="https://job-boards.greenhouse.io/navervietnam",
     ),
-    # Agoda dropped 2026-08-14 (with Rikkeisoft below): careersatagoda.com is
-    # anti-bot-walled (Cloudflare/PerimeterX class) — every compat rung fails,
-    # so the cron only produced perpetual failure rows; DB rows purged.
+    FeaturedCompany(
+        name="Agoda",
+        homepage="https://www.agoda.com",
+        # careersatagoda.com is Cloudflare-walled for scanners (fine for real
+        # users); the Greenhouse tenant behind it serves the same VN jobs on
+        # scanner-friendly job-boards.greenhouse.io URLs — key the gate on it.
+        # (Was dropped 2026-08-14 as unfetchable — the tenant re-key fixed it.)
+        career_url="https://boards.greenhouse.io/agoda",
+    ),
     FeaturedCompany(
         name="Traveloka",
         homepage="https://www.traveloka.com",
@@ -203,6 +210,9 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Ogilvy",
         homepage="https://www.ogilvy.com",
+        # The vanity board page 302s to ogilvy.com/work-with-us, but the
+        # Greenhouse tenant is ALIVE — the adapter reads boards-api directly
+        # (verified 2026-08-17: 133 jobs, 0 VN). Don't "fix" this URL.
         career_url="https://boards.greenhouse.io/ogilvy",
     ),
     FeaturedCompany(
@@ -279,7 +289,8 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         name="NielsenIQ",
         homepage="https://nielseniq.com",
         # SmartRecruiters company "NielsenIQ" → existing generic adapter.
-        career_url="https://jobs.smartrecruiters.com/NielsenIQ",
+        # jobs.smartrecruiters.com now 301s to careers.<same> — same SR gate
+        career_url="https://careers.smartrecruiters.com/NielsenIQ",
     ),
     FeaturedCompany(
         name="Thiên Long Group",
@@ -313,11 +324,9 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         homepage="https://nashtechglobal.com",
         career_url="https://careers.nashtechglobal.com",
     ),
-    FeaturedCompany(
-        name="KMS Technology",
-        homepage="https://kms-technology.com",
-        career_url="https://kms-technology.com/careers",
-    ),
+    # KMS Technology removed 2026-08-17: kms-technology.com is Cloudflare-walled
+    # server-side (403 on every path incl. wp-json) — no fetchable feed; the
+    # crawl only ever produced junk. Re-add if an extension-capture path lands.
     FeaturedCompany(
         name="Cốc Cốc",
         homepage="https://coccoc.com",
@@ -336,8 +345,10 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         homepage="https://www.tmasolutions.com",
         career_url="https://www.tma.vn/tuyen-dung",
     ),
-    # Rikkeisoft dropped 2026-08-14: tuyendung.rikkeisoft.com is anti-bot-walled
-    # (see Agoda note above); DB rows purged.
+    # Rikkeisoft removed 2026-08-17: tuyendung.rikkeisoft.com WAF 403s every
+    # path AND its /api/front/recruitment even from inside a rendered page
+    # (headless fingerprint) — the DOM never fills, no fetchable feed, zero
+    # rows ever ingested. Re-add if an extension-capture path lands.
     FeaturedCompany(
         name="CMC Global",
         homepage="https://cmcglobal.com.vn",
@@ -686,7 +697,9 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Kuehne+Nagel",
         homepage="https://kuehne-nagel.com",
-        career_url="https://careers.kuehne-nagel.com",
+        # careers.<host> is a landing shell; the Phenom board (job search +
+        # /widgets API) lives on jobs.<host> — /search-results keys the gate
+        career_url="https://jobs.kuehne-nagel.com/global/en/search-results",
     ),
     FeaturedCompany(
         name="FedEx",
@@ -696,7 +709,9 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="UPS",
         homepage="https://ups.com",
-        career_url="https://www.jobs-ups.com/apac/vi/c/vi%E1%BB%87c-b%C3%A1n-h%C3%A0ng-jobs",
+        # jobs-ups.com is Phenom (/widgets) — the old category-page URL fed the
+        # crawl nav labels ("Lợi ích") as jobs; /search-results keys the gate
+        career_url="https://www.jobs-ups.com/global/en/search-results",
     ),
     FeaturedCompany(
         name="GHTK",
@@ -726,7 +741,8 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Ahamove",
         homepage="https://ahamove.com",
-        career_url="https://ahamove.com/recruitment",
+        # 2026-08: /recruitment on the main domain 302s to the new careers SPA
+        career_url="https://careers.ahamove.com/jobs",
     ),
     FeaturedCompany(
         name="Avina Logistics",
@@ -841,11 +857,9 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         # (SEVT/SEV/SRV) and zero JD — useless for facet/embedding/tailoring.
         career_url="https://sec.wd3.myworkdayjobs.com/Samsung_Careers",
     ),
-    FeaturedCompany(
-        name="LG",
-        homepage="https://lg.com",
-        career_url="https://careers.lg.com",
-    ),
+    # LG removed 2026-08-17: careers.lg.com is LG's Korea-domestic portal (no
+    # Vietnam facet in api.careers.lg.com/rmk), and no LG Vietnam careers page
+    # exists — the crawl produced 57 fake Korean "jobs" and can never do better.
     FeaturedCompany(
         name="Canon",
         homepage="https://canon.com",
@@ -929,6 +943,14 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         homepage="https://3m.com",
         career_url="https://3m.wd1.myworkdayjobs.com/en-US/Search",
     ),
+    FeaturedCompany(
+        name="LEGO",
+        homepage="https://www.lego.com",
+        # Workday tenant with no `locationsText` in its listing → dedicated `lego`
+        # adapter (facet-filtered to Vietnam). The VN board is the LEGO
+        # Manufacturing Vietnam factory in Tân Uyên, Bình Dương.
+        career_url="https://lego.wd103.myworkdayjobs.com/LEGO_External?Location=db69e8c8446c11de98360015c5e6daf6",
+    ),
 
     # ── Tobacco ───────────────────────────────────────────────────────
     FeaturedCompany(
@@ -983,7 +1005,10 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="Oracle",
         homepage="https://oracle.com",
-        career_url="https://careers.oracle.com",
+        # careers.oracle.com fronts this ORC tenant; the adapter gate needs the
+        # oraclecloud host + /sites/ path. 0 VN reqs as of 2026-08 — wired so
+        # the cron catches it when they hire again.
+        career_url="https://eeho.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_45001/jobs",
     ),
     FeaturedCompany(
         name="Microsoft",
@@ -1007,17 +1032,24 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
         # facet returns the real Vietnam postings.
         career_url="https://jobs.sap.com/search/?q=&locationsearch=Vietnam",
     ),
-    FeaturedCompany(
-        name="ServiceNow",
-        homepage="https://servicenow.com",
-        career_url="https://careers.servicenow.com",
-    ),
+    # Salesforce dropped 2026-08 (vanity page redirects away, no VN feed).
+    # ServiceNow removed 2026-08-17: careers.servicenow.com is Cloudflare-walled
+    # server-side (403 even on the Phenom API paths, no jobdetails.* bypass
+    # host) — no fetchable feed, only junk ever came out of the crawl.
 
     # ── Consulting / Professional Services ───────────────────────────
     FeaturedCompany(
         name="McKinsey",
         homepage="https://www.mckinsey.com",
         career_url="https://www.mckinsey.com/careers/search-jobs?countries=Vietnam",
+    ),
+    FeaturedCompany(
+        name="BCG",
+        homepage="https://www.bcg.com",
+        # Newer-generation Phenom: no /services/jobs/search/, search runs on the
+        # /widgets refineSearch API (`phenom` adapter's fallback). Apply itself
+        # leaves Phenom for studenttalent/experiencedtalent.bcg.com.
+        career_url="https://careers.bcg.com/global/en/search-results",
     ),
     FeaturedCompany(
         name="Deloitte",
@@ -1047,7 +1079,10 @@ FEATURED_COMPANIES: tuple[FeaturedCompany, ...] = (
     FeaturedCompany(
         name="VCBS",
         homepage="https://www.vcbs.com.vn",
-        career_url="https://www.vcbs.com.vn/co-hoi-nghe-nghiep",
+        # Real board = the Talentnetwork portal (SSR /viec-lam/*.html links the
+        # _talentnet adapter scrapes); the old main-site page fed the sniff
+        # /job/{1..n} routes that render the corporate homepage.
+        career_url="https://tuyendung.vcbs.com.vn/tim-viec-lam/tat-ca-viec-lam/vi",
     ),
     FeaturedCompany(
         name="VPBank Securities",

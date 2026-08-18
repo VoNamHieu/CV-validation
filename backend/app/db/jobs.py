@@ -305,6 +305,31 @@ async def list_unembedded(*, limit: int = 1000) -> list[dict]:
     return rows_to_dicts(rows)
 
 
+async def list_missing_jd(*, limit: int = 500, max_chars: int = 800) -> list[dict]:
+    """Active jobs whose stored description is empty, thin, or teaser-sized (the
+    JD backfill queue).
+
+    The bar is teaser-sized rather than empty because a Phenom-style list adapter
+    used to store a ~300-char marketing blurb, which looked like a JD to every
+    consumer. ``desc_len`` rides along so the backfill only overwrites when what
+    it resolved is actually longer than what is already there."""
+    pool = await get_pool()
+    rows = await pool.fetch(
+        "SELECT id, source_url, length(coalesce(description, '')) AS desc_len FROM jobs "
+        "WHERE is_active AND length(coalesce(description, '')) < $2 "
+        "AND coalesce(source_url, '') <> '' ORDER BY created_at DESC LIMIT $1",
+        limit, max_chars,
+    )
+    return rows_to_dicts(rows)
+
+
+async def set_description(job_id: str, description: str) -> None:
+    pool = await get_pool()
+    await pool.execute(
+        "UPDATE jobs SET description = $2 WHERE id = $1", job_id, description,
+    )
+
+
 async def set_embedding(job_id: str, embedding: Sequence[float]) -> None:
     pool = await get_pool()
     await pool.execute(
@@ -382,6 +407,18 @@ async def list_for_facet(*, limit: int = 500) -> list[dict]:
         limit,
     )
     return rows_to_dicts(rows)
+
+
+async def active_external_ids(company_id: str) -> list[str]:
+    """The company's currently-active job identities — read BEFORE an ingest
+    upserts, so the caller can diff the incoming feed against what stood and
+    spot a wholesale identity turnover (site changed its detail-URL scheme)."""
+    if not company_id:
+        return []
+    pool = await get_pool()
+    rows = await pool.fetch(
+        "SELECT external_id FROM jobs WHERE company_id = $1 AND is_active", company_id)
+    return [r["external_id"] for r in rows]
 
 
 async def deactivate_missing(company_id: str, live_external_ids: Sequence[str]) -> int:
