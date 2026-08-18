@@ -20,12 +20,17 @@ from __future__ import annotations
 from app.services.ats_adapters._shared import *  # noqa: F401,F403
 
 _HOST = "tuyendung.vingroup.net"
-_API = "https://api-myvingroup.vingroup.net/prod/v1/app/ehiring/api/JobPosting/searchVGC"
+# 2026-08: the eHiring backend moved hosts — the old api-myvingroup gateway
+# 504s (even from inside a rendered page); the SPA now calls
+# ehiring-api.vinsmartfuture.tech with the SAME searchVGC/detailVGC shapes.
+# While the old host was down, the SPA-sniff fallback ingested 85 fake rows
+# keyed on orgLv2Id (8-digit) at /job/{id} — a route that renders the LIST.
+_API = "https://ehiring-api.vinsmartfuture.tech/api/JobPosting/searchVGC"
 # Per-job deep-link is /jobs/{id} (the numeric job id is globally unique across
 # subsidiaries). The portal is a SPA so the route renders a shell to plain HTTP,
 # but it's the real deep-link the site itself uses.
 _JOB_URL = "https://tuyendung.vingroup.net/jobs/{jid}"
-_DETAIL_API = "https://api-myvingroup.vingroup.net/prod/v1/app/ehiring/api/JobPosting/detailVGC"
+_DETAIL_API = "https://ehiring-api.vinsmartfuture.tech/api/JobPosting/detailVGC"
 _API_HEADERS = {"User-Agent": _HEADERS["User-Agent"], "Accept": "application/json",
                 "Origin": "https://tuyendung.vingroup.net",
                 "Referer": "https://tuyendung.vingroup.net/"}
