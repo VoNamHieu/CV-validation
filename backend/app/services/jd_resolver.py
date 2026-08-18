@@ -538,11 +538,9 @@ async def resolve_full_jd(source_url: str, existing: str = "") -> str:
     except Exception as e:  # never break publish
         logger.info(f"[resolve_full_jd] detail miss {source_url}: {str(e)[:80]}")
 
-    # Everything below is expensive (whole-board scan, then a browser). Keep the
-    # old bar for entering it: 200 chars of real JD is good enough.
-    if len(best) >= 200:
-        return best
-
+    # No early return between here and the list-scan: anything under
+    # _SUBSTANTIAL may still be a stored teaser, and the board scan is what
+    # upgrades it (test_stored_teaser_still_tries_ats pins this).
     # The ATS list-scan paginates a whole board and often returns nothing for one
     # URL (e.g. thegioididong takes 20s+ → 0 chars). Cap it so a single slow site
     # can't hang the publish request — the crawl below usually gets the JD anyway.
